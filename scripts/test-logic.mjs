@@ -65,6 +65,9 @@ import {
   shiftDate,
   dowIndex,
   sortMealSlots,
+  sortMealGenres,
+  toggleMealGenre,
+  MEAL_GENRES,
   excludeYesterdayPlanRecipes,
   normalizeDateRange,
   rangeDayCount,
@@ -2297,6 +2300,103 @@ eq('news: 未記録(起動直後の一瞬)は抑制', isNewsSuppressed(undefined
     eq('ペア提案: ジャンル指定時は主菜も指定ジャンルが優先される', results.every((r) => r.main?.id === 2), true)
     eq('ペア提案: ジャンル指定時は副菜も指定ジャンルが優先される', results.every((r) => r.side?.id === 4), true)
   }
+
+  // ---- IY: 料理のジャンルを複数選べるようにする(2026-08-22 便IY) ----
+  // オーナー原文「週献立は、「料理のジャンル」は複数選択のほうがいいかも。１つしか選べないと、
+  // １週間中華だけ、という献立しか組めない。全てを選ぶと、中華は入れたくないけど和洋食は
+  // 混在させたい、ができない。」
+  // 測るのは「利用者が確かめたいこと」＝選んだジャンルの中から出るか・1つだけ選んだときは
+  // これまでと同じか・0件で終わらないか・1食の中は主菜に寄るか。
+  {
+    const genreRecipes = [
+      mkRecipe(1, { tags: ['和食'] }),
+      mkRecipe(2, { tags: ['洋食'] }),
+      mkRecipe(3, { tags: ['中華'] }),
+      mkRecipe(4, { tags: [] }), // ジャンルタグの無い品(どのジャンルにも合う万能枠)
+    ]
+    const idsOf = (list) => list.map((r) => r.id).sort((a, b) => a - b).join(',')
+    eq(
+      'IY-1 ジャンルを2つ選ぶと、その2つのジャンルの品だけが候補になる',
+      idsOf(suggestCandidates(genreRecipes, opts({ genres: ['和食', '洋食'] }))),
+      '1,2',
+    )
+    eq(
+      'IY-2 ジャンルを1つだけ選んだときは、これまでの単一指定(genre)と同じ候補になる',
+      idsOf(suggestCandidates(genreRecipes, opts({ genres: ['中華'] }))),
+      idsOf(suggestCandidates(genreRecipes, opts({ genre: '中華' }))),
+    )
+    eq(
+      'IY-3 ジャンルを全部選んだ状態は「指定なし」と同じ(ジャンルタグの無い品も候補に残る)',
+      idsOf(suggestCandidates(genreRecipes, opts({ genres: ['和食', '洋食', '中華'] }))),
+      idsOf(suggestCandidates(genreRecipes, opts())),
+    )
+    eq(
+      'IY-4 選んだジャンルの品が1つも無ければ絞り込みを解く(0件で終わらせない)',
+      suggestCandidates([mkRecipe(1, { tags: ['洋食'] })], opts({ genres: ['和食', '中華'] })).length,
+      1,
+    )
+    eq(
+      'IY-5 選んだジャンルが1つも読み取れない値でも候補は消えない(0件で終わらせない)',
+      suggestCandidates(genreRecipes, opts({ genres: [] })).length,
+      genreRecipes.length,
+    )
+  }
+  // 1食の中は主菜のジャンルに寄せる(司令部の裁定③: 週の中の混在は止めないが、
+  // 主菜と副菜は揃うほうを先に試す。揃わなければ混ざり、「主菜と別ジャンル」の印が知らせる)
+  {
+    const pairRecipes = [
+      mkRecipe(1, { tags: ['和食'] }), // 和食の主菜候補
+      mkRecipe(2, { tags: ['和食', '汁物'] }), // 和食の副菜候補
+      mkRecipe(3, { tags: ['洋食', 'サラダ'] }), // 洋食の副菜候補
+      mkRecipe(4, { tags: ['中華'] }), // 選んでいないジャンルの主菜候補(出てはいけない)
+    ]
+    // 主菜の候補そのものを見る(抽選の運に左右されない形で「絞り込みが効いたか」を測る)
+    eq(
+      'IY-6 複数選択でも、主菜の候補は選んだジャンルだけになる(選ばなかった中華は出ない)',
+      suggestCandidates(pairRecipes, opts({ genres: ['和食', '洋食'], role: 'main' }))
+        .map((r) => r.id)
+        .sort((a, b) => a - b)
+        .join(','),
+      '1',
+    )
+    const results = Array.from({ length: 10 }, () =>
+      suggestPairForSlot(pairRecipes, opts({ genres: ['和食', '洋食'] })),
+    )
+    eq('IY-6 複数選択でも、主菜は選んだジャンルから出る', results.every((r) => r.main?.id === 1), true)
+    eq(
+      'IY-6 複数選択でも、1食の中の副菜は主菜と同じジャンルが優先される',
+      results.every((r) => r.side?.id === 2),
+      true,
+    )
+  }
+  // 主菜のジャンルの副菜が無ければ、選んだ別ジャンルの副菜で埋める(混ぜてでも埋める＝
+  // 「主菜と別ジャンル」の印が出る側に倒す。detectGenreMix はこれまでどおり)
+  {
+    const mixRecipes = [
+      mkRecipe(1, { tags: ['和食'] }),
+      mkRecipe(2, { tags: ['洋食', 'サラダ'] }),
+    ]
+    const pair = suggestPairForSlot(mixRecipes, opts({ genres: ['和食', '洋食'] }))
+    eq('IY-7 主菜と同じジャンルの副菜が無ければ、選んだ別ジャンルの副菜で埋める', pair.side?.id, 2)
+    eq(
+      'IY-7 その枠は「主菜と別ジャンル」と判定される(印はこれまでどおり出る)',
+      detectGenreMix(pair.main, pair.side ? [pair.side] : []),
+      true,
+    )
+  }
+  // ジャンルの選び方そのもの(画面が使う純関数)。「最後の1つは外せない」はここで守る
+  eq('IY-8 ジャンルの並びは押した順ではなく、選べる並び(和食→洋食→中華)にそろう',
+    sortMealGenres(['中華', '和食']).join(','), '和食,中華')
+  eq('IY-8 同じジャンルが重なっても1つに数える',
+    sortMealGenres(['洋食', '洋食']).join(','), '洋食')
+  eq('IY-9 選んでいないジャンルを押すと足される',
+    toggleMealGenre(['和食'], '中華').join(','), '和食,中華')
+  eq('IY-9 選んでいるジャンルを押すと外れる',
+    toggleMealGenre([...MEAL_GENRES], '中華').join(','), '和食,洋食')
+  eq('IY-9 最後の1つを押しても外れない(1つも選んでいない状態を作らせない)',
+    toggleMealGenre(['和食'], '和食').join(','), '和食')
+  eq('IY-9 足したあとも並びは選べる並びのまま(押した順に散らからない)',
+    toggleMealGenre(['中華'], '和食').join(','), '和食,中華')
 
   // ---- 便BH-2: 一品もの・副菜純化・たんぱく源分散・ジャンル混在(docs/56) ----
 

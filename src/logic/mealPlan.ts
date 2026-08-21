@@ -153,6 +153,32 @@ export const MEAL_GENRES = ['和食', '洋食', '中華'] as const
 export type MealGenre = (typeof MEAL_GENRES)[number]
 
 /**
+ * 選んだ料理のジャンルを、選べる並び（MEAL_GENRES）の順にそろえる（2026-08-22 便IY）。
+ *
+ * sortMealSlots と同じ理由で要る: 押した順に配列へ足すと「洋食・和食」のように並びが入れ替わり、
+ * 「現在の条件」のボタンに出る字が**押した順によって変わって**しまう。
+ * 重複も落とす（同じジャンルが2回入っていても1つとして数える）。
+ */
+export function sortMealGenres(genres: MealGenre[]): MealGenre[] {
+  return [...new Set(genres)].sort((a, b) => MEAL_GENRES.indexOf(a) - MEAL_GENRES.indexOf(b))
+}
+
+/**
+ * 料理のジャンルを1つ選ぶ／外す（2026-08-22 便IY・オーナー原文「週献立は、「料理のジャンル」は
+ * 複数選択のほうがいいかも。１つしか選べないと、１週間中華だけ、という献立しか組めない。
+ * 全てを選ぶと、中華は入れたくないけど和洋食は混在させたい、ができない。」）。
+ *
+ * **最後の1つは外せない**＝1つも選んでいない状態を作らない。
+ * 0件にすると候補が無くなり「提案できません」で終わるだけで、誰の役にも立たないため。
+ * 全部から選び直したいときは「条件をクリア」で3つとも選んだ状態（＝指定なし）に戻す。
+ */
+export function toggleMealGenre(selected: MealGenre[], genre: MealGenre): MealGenre[] {
+  const has = selected.includes(genre)
+  if (has && selected.length <= 1) return sortMealGenres(selected)
+  return sortMealGenres(has ? selected.filter((g) => g !== genre) : [...selected, genre])
+}
+
+/**
  * 「調理時間◯分以内を優先」で選べる分数（2026-08-19 便HT・オーナー指示
  * 「調理時間15分いないを優先は、時間だけプルダウンで変更できるようにしたい」）。
  *
@@ -461,9 +487,24 @@ export interface SuggestOptions {
   role?: MealRole
   /**
    * ジャンル（和食/洋食/中華）の優先指定（任意）。一致するレシピを優先するが、
-   * 無ければ他ジャンルも許可する（絞り込みすぎて提案0件にしないため）
+   * 無ければ他ジャンルも許可する（絞り込みすぎて提案0件にしないため）。
+   *
+   * 下の genres とは役割が違う: こちらは**1食の中で主菜に揃えたい1つ**
+   * （suggestPairForSlot が主菜のジャンルを副菜に渡すのに使う）で、genres は
+   * **利用者が選んだ枠**。両方あるときは、枠（genres）で絞ってからこの1つを優先する。
    */
   genre?: MealGenre
+  /**
+   * 利用者が選んだ料理のジャンルの枠（任意・2026-08-22 便IY・オーナー原文
+   * 「週献立は、「料理のジャンル」は複数選択のほうがいいかも。１つしか選べないと、
+   * １週間中華だけ、という献立しか組めない。」）。**選んだジャンルの品だけを候補にする**。
+   *
+   * ・全ジャンルを選んだ状態・空・読み取れない値は「指定なし」と同じ＝絞り込まない
+   *   （全ジャンルで絞ると、ジャンルタグを持たない品が候補から落ちてしまうため）
+   * ・選んだジャンルの品が1品も無ければ絞り込みを解く＝提案0件にはしない
+   *   （この関数の他の絞り込みと同じ作法）
+   */
+  genres?: MealGenre[]
   /**
    * この役割で優先したいdishType（任意・2026-07-23 便BH-2）。副菜スロットを純粋な副菜
    * （dishType:'side'）に寄せるために使う。一致0件なら緩和する（汁物しか無い日は汁物を
@@ -819,11 +860,26 @@ export function suggestCandidates(recipes: Recipe[], options: SuggestOptions): R
     rolePool = mains.length > 0 ? mains : withoutDessert()
   }
 
-  // ジャンル（和食/洋食/中華）の優先指定
-  let genrePool = rolePool
+  // 利用者が選んだ料理のジャンルの枠（2026-08-22 便IY）。選んだジャンルの品だけに絞る。
+  // 全ジャンルを選んだ状態・空・読み取れない値は絞り込まない＝「指定なし」と同じ
+  // （ジャンルタグを持たない品を候補から落とさないため）。
+  // 選んだジャンルの品が0件なら絞り込みを解く＝提案0件にはしない
+  const pickedGenres = [...new Set(options.genres ?? [])].filter((g) =>
+    (MEAL_GENRES as readonly string[]).includes(g),
+  )
+  let allowedGenrePool = rolePool
+  if (pickedGenres.length > 0 && pickedGenres.length < MEAL_GENRES.length) {
+    const matched = rolePool.filter((r) => pickedGenres.some((g) => r.tags.includes(g)))
+    if (matched.length > 0) allowedGenrePool = matched
+  }
+
+  // ジャンル（和食/洋食/中華）の優先指定。枠（genres）で絞ったあと、その中で1つに寄せる
+  // ＝1食の中は主菜のジャンルに揃え、揃わなければ枠の中の別ジャンルで埋める
+  // （その枠には「主菜と別ジャンル」の印が出る＝detectGenreMix）
+  let genrePool = allowedGenrePool
   if (options.genre) {
     const genre = options.genre
-    const matched = rolePool.filter((r) => r.tags.includes(genre))
+    const matched = allowedGenrePool.filter((r) => r.tags.includes(genre))
     if (matched.length > 0) genrePool = matched
   }
 

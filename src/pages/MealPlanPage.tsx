@@ -76,6 +76,7 @@ import {
 import {
   MEAL_SLOTS,
   MEAL_GENRES,
+  toggleMealGenre,
   weekDates,
   dowIndex,
   sortMealSlots,
@@ -2838,7 +2839,25 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
   // 自動提案の条件UI(2026-07-13追加): ジャンル優先(指定なしも含め単一選択)
   // 2026-08-09 便EO(オーナー指示): 「高たんぱく優先」の絞り込みは削除した
   // 2026-08-19 便HT(オーナー指示): チップの並び → プルダウン1つ
-  const [genreFilter, setGenreFilter] = useState<MealGenre | undefined>(undefined)
+  /**
+   * 選んでいる料理のジャンル(2026-08-22 便IY・オーナー原文
+   * 「週献立は、「料理のジャンル」は複数選択のほうがいいかも。１つしか選べないと、
+   *   １週間中華だけ、という献立しか組めない。全てを選ぶと、中華は入れたくないけど和洋食は
+   *   混在させたい、ができない。」)。
+   *
+   * 1つだけ選ぶプルダウンをやめ、**選べるジャンルのぶんだけ並べて選ぶ/外す**形にした。
+   * 既定は3つとも選んだ状態＝「指定なし」(全部から選ぶ＝直す前と同じ振る舞い)。
+   * 3つとも選んでいるあいだは提案に何も渡さない(planGenresOption)＝
+   * ジャンルタグを持たない品まで候補から落とさない。
+   * 最後の1つは外せない(toggleMealGenre)＝候補が無くなる状態を作らせない。
+   */
+  const [genreFilters, setGenreFilters] = useState<MealGenre[]>([...MEAL_GENRES])
+  /** ジャンルで絞っているか(3つとも選んでいる＝絞っていない) */
+  const genreFiltered = genreFilters.length < MEAL_GENRES.length
+  /** 提案エンジンへ渡す枠。絞っていなければ渡さない＝「指定なし」と同じ扱いにする */
+  const planGenresOption = genreFiltered ? genreFilters : undefined
+  const toggleGenreFilter = (genre: MealGenre) =>
+    setGenreFilters((prev) => toggleMealGenre(prev, genre))
   /**
    * 目的モード（2026-08-02 便CP-2・docs/62 決定②。Pro機能）。
    * 時短・ジャンルと違って設定に保存するのは、この指定が「1か月続ける」ためのものだから
@@ -2862,7 +2881,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
    * （日タブの「条件をしぼる」の窓と同じ判断の仕方）。
    * 分数（planQuickMinutes）は「調理時間◯分以内を優先」がOFFなら効いていないので数えない。
    */
-  const anyPlanConditionActive = quickOnly || genreFilter != null || planPurpose != null
+  const anyPlanConditionActive = quickOnly || genreFiltered || planPurpose != null
   /**
    * 「条件をクリア」（2026-08-19 便IF・③。オーナー原文「献立を提案の提案の条件に、
    * リセット機能がない」）。日タブと同じで、**選んだ条件だけ**を開いた直後の状態に戻す。
@@ -2871,7 +2890,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
    */
   const clearSuggestConditions = () => {
     setQuickOnly(false)
-    setGenreFilter(undefined)
+    setGenreFilters([...MEAL_GENRES])
     if (planPurpose != null) changePurpose(undefined)
   }
   /**
@@ -3436,7 +3455,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
       ngIngredients: settings?.ngIngredients ?? [],
       usedRecipeIds: [],
       slot,
-      genre: genreFilter,
+      genres: planGenresOption,
       yesterdayRecipeIds,
       role: 'main',
     }).length
@@ -3492,7 +3511,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
         ngIngredients: settings?.ngIngredients ?? [],
         usedRecipeIds: excludeIds,
         slot,
-        genre: genreFilter,
+        genres: planGenresOption,
         yesterdayRecipeIds,
       },
       restrictToAllowed(visibleRecipes, allowedRecipeIds),
@@ -3947,7 +3966,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
       ngIngredients: settings?.ngIngredients ?? [],
       usedRecipeIds,
       slot,
-      genre: genreFilter,
+      genres: planGenresOption,
       yesterdayRecipeIds,
     }
     // 枠が丸ごと空のときのペア提案は主菜・副菜の行から押したときだけ（2026-08-02 便DE-4）。
@@ -4010,7 +4029,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
             ...baseOptions,
             role,
             preferDishType: role === 'soup' ? ('soup' as const) : ('side' as const),
-            genre: genreFilter ?? (slotMainRecipe ? recipeGenre(slotMainRecipe) : undefined),
+            genre: slotMainRecipe ? recipeGenre(slotMainRecipe) : undefined,
             avoidKeys: slotMainRecipe ? dishAvoidKeys(slotMainRecipe) : undefined,
             excludeRecipeIds: slotMainRecipe?.id != null ? [slotMainRecipe.id] : undefined,
           }
@@ -4115,7 +4134,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
       quickMinutes,
       excludeNg: true,
       ngIngredients: settings?.ngIngredients ?? [],
-      genre: genreFilter,
+      genres: planGenresOption,
       yesterdayRecipeIds,
     }
 
@@ -4171,7 +4190,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
           role: 'side',
           preferDishType: 'side',
           usedRecipeIds,
-          genre: genreFilter ?? (mainRecipe ? recipeGenre(mainRecipe) : undefined),
+          genre: mainRecipe ? recipeGenre(mainRecipe) : undefined,
           // 手動で入れた主菜とも食材・食感を重ねない(2026-07-29 便CD/MP-04)
           avoidKeys: mainRecipe ? dishAvoidKeys(mainRecipe) : undefined,
           excludeRecipeIds: mainRecipe?.id != null ? [mainRecipe.id] : undefined,
@@ -5964,7 +5983,8 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
   // (2026-07-16 UI総点検A-3: 「提案の条件: 和食」のように)
   const activeConditionSummaries: (string | undefined)[] = [
     quickOnly ? ja.mealPlan.quickOnlySummary.replace('{n}', String(quickMinutes)) : undefined,
-    genreFilter,
+    // ジャンルは選んだぶんだけ並べる(2026-08-22 便IY)。3つとも選んでいる＝絞っていないので出さない
+    genreFiltered ? genreFilters.join('・') : undefined,
     // 目的は「まとめて献立」の結果を最も大きく変える条件なので、畳んだラベルにも必ず出す
     planPurpose ? purposeLabelOf(planPurpose) : undefined,
   ]
@@ -6150,26 +6170,58 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
           >
             {ja.mealPlan.quickOnlyHint.replace('{n}', String(quickMinutes))}
           </p>
-          {/* 料理のジャンル（2026-08-19 便HT・オーナー原文「和洋中選択も同様にプルダウン」）。
-              チップ4つ（指定なし/和食/洋食/中華）を1つのプルダウンにまとめた。
-              チップは「どれが選ばれているか」を地色で言っていたので、まとめると
-              何の欄なのかが読めなくなる。欄の名前（料理のジャンル）を添えて補う */}
-          <label className="mt-[var(--space-md)] block">
+          {/* 料理のジャンル（2026-08-22 便IY・オーナー原文「週献立は、「料理のジャンル」は
+              複数選択のほうがいいかも。１つしか選べないと、１週間中華だけ、という献立しか
+              組めない。全てを選ぶと、中華は入れたくないけど和洋食は混在させたい、ができない。」）。
+
+              2026-08-19 便HTでプルダウン1つにまとめたが、**複数選ぶにはプルダウンでは足りない**
+              （<select multiple> はスマホで一覧がそのまま縦に伸びて窓の中が動き、指で複数を
+              選ぶ操作にもならない）。390×844の実測で3つのジャンルは横1行に収まるので、
+              **選べるジャンルを並べて選ぶ/外す**形にした＝窓の高さは1行ぶんしか増えず、
+              便ID・便IAの「窓の中も動かない」を保てる。
+              見た目は日タブの「条件をしぼる」の並びと同じ（選んでいるものは塗る）。
+              押せる高さは --tap-min（44px）＝直す前のプルダウンと同じだけの当たり判定を持たせる。
+
+              **最後の1つは外せない**（logic/mealPlan.ts の toggleMealGenre）。1つも選んでいない
+              状態にすると候補が無くなり「提案できません」で終わるだけなので作らせない。
+              全部から選び直すのは見出しの行の「条件をクリア」。
+              最後の1つに aria-disabled は付けない——見た目は他の選んだジャンルと同じままなので、
+              読み上げだけ「使えない」と言うと食い違う。外せないことは下の1行で言う */}
+          <div className="mt-[var(--space-md)]">
             <span className="block text-sm font-bold text-ink-muted">{ja.mealPlan.genreLabel}</span>
-            <select
+            <div
+              role="group"
+              aria-label={ja.mealPlan.genreLabel}
               data-testid="plan-genre"
-              value={genreFilter ?? ''}
-              onChange={(e) => setGenreFilter((e.target.value || undefined) as MealGenre | undefined)}
-              className="select-control mt-1 w-full"
+              className="mt-1 flex flex-wrap gap-[var(--space-sm)]"
             >
-              <option value="">{ja.mealPlan.genreAny}</option>
-              {MEAL_GENRES.map((genre) => (
-                <option key={genre} value={genre}>
-                  {genre}
-                </option>
-              ))}
-            </select>
-          </label>
+              {MEAL_GENRES.map((genre) => {
+                const picked = genreFilters.includes(genre)
+                return (
+                  <button
+                    key={genre}
+                    type="button"
+                    data-testid="plan-genre-chip"
+                    data-genre={genre}
+                    aria-pressed={picked}
+                    onClick={() => toggleGenreFilter(genre)}
+                    className={`inline-flex min-h-[var(--tap-min)] items-center rounded-sm border px-3 text-sm font-bold ${
+                      picked
+                        ? 'border-accent bg-accent text-on-accent'
+                        : 'border-edge bg-surface text-ink-muted'
+                    }`}
+                  >
+                    {genre}
+                  </button>
+                )
+              })}
+            </div>
+            {/* この並びが「1つだけ選ぶもの」ではないことと、最後の1つは外せないことを1行で言う。
+                出したり消したりしない＝窓の中身が伸び縮みして下のものが動くことがない */}
+            <p data-testid="plan-genre-hint" className="mt-1 text-xs text-ink-muted">
+              {ja.mealPlan.genreHint}
+            </p>
+          </div>
 
           {/* 栄養から組む（Pro機能）。解錠済みのときだけ、この窓の中で選べる */}
           {isPro && (

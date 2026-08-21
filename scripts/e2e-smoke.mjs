@@ -443,6 +443,8 @@ import { NUTRITION_DISPLAY_KEYS, nutritionLabelFor } from '../src/logic/nutritio
 import { pickDisplayIngredientChips } from '../src/logic/mainIngredients.ts'
 // 無料の登録上限（2026-08-21 便IR）。お知らせに出る数字は、この1か所から読む（書き写さない）
 import { FREE_LIMIT } from '../src/logic/freeLimit.ts'
+// 便IY: 選べる料理のジャンル（画面の字を書き写さず、実装と同じ一覧から引く）
+import { MEAL_GENRES } from '../src/logic/mealPlan.ts'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const appRoot = path.join(__dirname, '..')
@@ -10142,23 +10144,35 @@ try {
       await mp3Page.locator('[data-testid="plan-conditions-open"]').click()
       await mp3Page.waitForTimeout(400)
 
-      // 料理のジャンル(指定なし/和食/洋食/中華)は1つだけ選ぶ。
-      // 2026-08-19 便HT(オーナー指示「和洋中選択も同様にプルダウン」): チップ4つ → プルダウン1つ
-      const mp3Genre = mp3Page.locator('[data-testid="plan-genre"]')
-      check('MEALPLAN-03 料理のジャンルはプルダウン1つにまとまっている', (await mp3Genre.count()) === 1)
+      // 料理のジャンル。2026-08-19 便HT(オーナー指示「和洋中選択も同様にプルダウン」)で
+      // チップ4つ → プルダウン1つにしたが、2026-08-22 便IY(オーナー原文「複数選択のほうが
+      // いいかも」)で**選べるジャンルを並べて選ぶ/外す**形に戻した。既定は3つとも選んだ状態
+      const mp3Chips = mp3Page.locator('[data-testid="plan-genre-chip"]')
+      const mp3Picked = async () =>
+        mp3Chips.evaluateAll((els) =>
+          els
+            .filter((el) => el.getAttribute('aria-pressed') === 'true')
+            .map((el) => el.getAttribute('data-genre')),
+        )
       check(
-        'MEALPLAN-03 料理のジャンルは既定で「指定なし」',
-        (await mp3Genre.inputValue()) === '',
-        `value=${await mp3Genre.inputValue()}`,
+        'MEALPLAN-03 料理のジャンルは選べるジャンルのぶんだけ並ぶ',
+        (await mp3Chips.count()) === MEAL_GENRES.length,
+        `並び=${await mp3Chips.count()}件`,
       )
-      await mp3Genre.selectOption('和食')
+      check(
+        'MEALPLAN-03 料理のジャンルは既定で全部選ばれている(＝指定なし)',
+        JSON.stringify(await mp3Picked()) === JSON.stringify([...MEAL_GENRES]),
+        `選ばれている=${JSON.stringify(await mp3Picked())}`,
+      )
+      await mp3Page.locator('[data-testid="plan-genre-chip"][data-genre="中華"]').click()
       await mp3Page.waitForTimeout(300)
       check(
-        'MEALPLAN-03 料理のジャンルで「和食」を選ぶとその値になる',
-        (await mp3Genre.inputValue()) === '和食',
-        `value=${await mp3Genre.inputValue()}`,
+        'MEALPLAN-03 料理のジャンルは1つ外しても残りが選ばれたまま(複数選べる)',
+        JSON.stringify(await mp3Picked()) === JSON.stringify(['和食', '洋食']),
+        `選ばれている=${JSON.stringify(await mp3Picked())}`,
       )
-      await mp3Genre.selectOption('') // 以降の提案テストに影響しないよう「指定なし」に戻す
+      // 以降の提案テストに影響しないよう「指定なし」(3つとも選んだ状態)へ戻す
+      await mp3Page.locator('[data-testid="plan-genre-chip"][data-genre="中華"]').click()
       await mp3Page.waitForTimeout(300)
       // 「高たんぱく優先」トグルは削除済み(2026-08-09 便EO・オーナー指示)
       check(
@@ -25674,13 +25688,22 @@ try {
         wsAt10 != null && wsAt30 != null && wsAt30 > wsAt10,
         `10分=${wsAt10 ?? '読めず'} 30分=${wsAt30 ?? '読めず'}`,
       )
-      // ④ 料理のジャンルのプルダウンで絞ると候補が減る
+      // ④ 料理のジャンルで絞ると候補が減る
+      //    2026-08-22 便IY: プルダウン1つ → 選べるジャンルの並び(複数選択)。既定は3つとも選んだ
+      //    状態なので、「和食だけ」にするには残り2つを外す
       await wsOpenConditions()
-      const wsGenre = wsPage.locator('[data-testid="plan-genre"]')
-      check('WEEKSELECT-01 料理のジャンルはプルダウン1つ', (await wsGenre.count()) === 1)
-      if ((await wsGenre.count()) === 1) {
-        await wsGenre.selectOption('和食')
-        await wsPage.waitForTimeout(700)
+      const wsChips = wsPage.locator('[data-testid="plan-genre-chip"]')
+      check(
+        'WEEKSELECT-01 料理のジャンルは選べるジャンルのぶんだけ並ぶ',
+        (await wsChips.count()) === MEAL_GENRES.length,
+        `並び=${await wsChips.count()}件`,
+      )
+      for (const off of ['洋食', '中華']) {
+        const chip = wsPage.locator(`[data-testid="plan-genre-chip"][data-genre="${off}"]`)
+        if ((await chip.count()) === 1) {
+          await chip.click()
+          await wsPage.waitForTimeout(500)
+        }
       }
       await wsCloseConditions()
       const wsWashoku = await wsMainCandidates()
@@ -29621,23 +29644,30 @@ try {
         await eoQuick.selectOption('')
         await eoPage.waitForTimeout(300)
       }
-      // ジャンルも同じ（2026-08-19 便HTでプルダウンになった）
+      // ジャンルも同じ（2026-08-19 便HTでプルダウン→2026-08-22 便IYで複数選べる並びに戻した）。
+      // 測るのは「選んでも並びの大きさが変わらないこと」＝窓の中が伸び縮みしない
       {
         const eoGenre = eoPage.locator('[data-testid="plan-genre"]')
         const before = await eoGenre.boundingBox()
-        await eoGenre.selectOption('和食')
-        await eoPage.waitForTimeout(300)
+        const eoChuka = eoPage.locator('[data-testid="plan-genre-chip"][data-genre="中華"]')
+        check('EO-02 前提: ジャンルの並びを掴めた', (await eoChuka.count()) === 1)
+        if ((await eoChuka.count()) === 1) {
+          await eoChuka.click()
+          await eoPage.waitForTimeout(300)
+        }
         const after = await eoGenre.boundingBox()
         check(
-          'EO-02 料理のジャンルのプルダウンは、選んでも大きさが変わらない',
+          'EO-02 料理のジャンルの並びは、選んでも大きさが変わらない',
           before != null &&
             after != null &&
             Math.round(before.width) === Math.round(after.width) &&
             Math.round(before.height) === Math.round(after.height),
           `前=${JSON.stringify(before)} 後=${JSON.stringify(after)}`,
         )
-        await eoGenre.selectOption('')
-        await eoPage.waitForTimeout(300)
+        if ((await eoChuka.count()) === 1) {
+          await eoChuka.click() // 指定なし(3つとも選んだ状態)へ戻す
+          await eoPage.waitForTimeout(300)
+        }
       }
 
       // 現在値のサマリーが付く「現在の条件」も、窓を開け閉めして寸法が変わらない
@@ -43005,7 +43035,7 @@ try {
       const wcScope = (await wcModal.count()) === 1 ? wcModal : wcPage
       const wcInside = {
         窓の見出し: wcPage.getByRole('heading', { name: ja.mealPlan.suggestConditionsTitle }),
-        'ジャンルのプルダウン': wcPage.locator('[data-testid="plan-genre"]'),
+        'ジャンルの並び': wcPage.locator('[data-testid="plan-genre"]'),
         '窓の「閉じる」': wcPage.locator('[data-testid="plan-conditions-close"]'),
       }
       const wcInsideSnap = async () => {
@@ -43048,18 +43078,20 @@ try {
           await wcCompareInside(`${label}にした後`)
         }
       }
-      const wcGenre = wcPage.locator('[data-testid="plan-genre"]')
-      if ((await wcGenre.count()) > 0) {
-        const wcGenreValues = await wcGenre.locator('option').evaluateAll((els) =>
-          els.map((el) => el.value),
-        )
-        for (const value of wcGenreValues) {
-          await wcGenre.selectOption(value)
-          await wcPage.waitForTimeout(400)
-          wcTouched.push(`ジャンル=${value || '指定なし'}`)
-          await wcCompare(`ジャンルを${value || '指定なし'}にした後`)
-          await wcCompareInside(`ジャンルを${value || '指定なし'}にした後`)
-        }
+      // ジャンルは2026-08-22 便IYで複数選べる並びになった。並んでいるものを1つずつ押して、
+      // 押すたびに後ろの画面も窓の中も動かないことを見る（押す回数は並びの数から取る＝決め打ちしない）
+      const wcGenreChips = wcScope.locator('[data-testid="plan-genre-chip"]')
+      const wcGenreNames = await wcGenreChips.evaluateAll((els) =>
+        els.map((el) => el.getAttribute('data-genre')),
+      )
+      for (const name of wcGenreNames) {
+        const chip = wcPage.locator(`[data-testid="plan-genre-chip"][data-genre="${name}"]`)
+        if ((await chip.count()) === 0) continue
+        await chip.click()
+        await wcPage.waitForTimeout(400)
+        wcTouched.push(`ジャンル=${name}`)
+        await wcCompare(`ジャンルの${name}を押した後`)
+        await wcCompareInside(`ジャンルの${name}を押した後`)
       }
       check(
         'WEEKCOND-01 前提: 窓の中の条件を2つ以上触れた（触れていなければ測れていない）',
@@ -43746,13 +43778,22 @@ try {
         wmClearName != null && wmClearName === ja.search.clear,
         `週=${wmClearName} 日=${ja.search.clear}`,
       )
-      const wmGenre = wmPage.locator('[data-testid="plan-genre"]')
-      await wmGenre.selectOption('和食')
+      // 2026-08-22 便IY: ジャンルは複数選べる並びになった。既定は3つとも選んだ状態(＝指定なし)
+      // なので、1つ外して「絞っている」状態を作る
+      const wmPicked = async () =>
+        wmPage
+          .locator('[data-testid="plan-genre-chip"]')
+          .evaluateAll((els) =>
+            els
+              .filter((el) => el.getAttribute('aria-pressed') === 'true')
+              .map((el) => el.getAttribute('data-genre')),
+          )
+      await wmPage.locator('[data-testid="plan-genre-chip"][data-genre="中華"]').click()
       await wmPage.waitForTimeout(400)
       check(
         'WEEKFMT-01(③) 前提: 条件を1つ選べた（選べていなければクリアの効きは測れていない）',
-        (await wmGenre.inputValue()) === '和食',
-        await wmGenre.inputValue(),
+        JSON.stringify(await wmPicked()) === JSON.stringify(['和食', '洋食']),
+        JSON.stringify(await wmPicked()),
       )
       check(
         'WEEKFMT-01(③) 条件を選ぶと「条件をクリア」が押せる形で出る',
@@ -43762,8 +43803,8 @@ try {
       await wmPage.waitForTimeout(400)
       check(
         'WEEKFMT-01(③) 「条件をクリア」を押すと、選んだ条件が外れる',
-        (await wmGenre.inputValue()) === '',
-        await wmGenre.inputValue(),
+        JSON.stringify(await wmPicked()) === JSON.stringify([...MEAL_GENRES]),
+        JSON.stringify(await wmPicked()),
       )
       await wmPage.locator('[data-testid="plan-conditions-close"]').click()
       await wmPage.waitForTimeout(500)
@@ -45409,6 +45450,254 @@ try {
       )
     } finally {
       await iwBrowser.close()
+    }
+  }
+
+
+  // --- IYGENRE-01: 料理のジャンルを複数選べる（2026-08-22 便IY） ---
+  // オーナー原文「週献立は、「料理のジャンル」は複数選択のほうがいいかも。１つしか選べないと、
+  // １週間中華だけ、という献立しか組めない。全てを選ぶと、中華は入れたくないけど和洋食は
+  // 混在させたい、ができない。」
+  //
+  // 測るのは「利用者が確かめたいこと」:
+  //   ① ジャンルは3つとも選べる／外せる（既定は3つとも選んだ状態＝指定なし）
+  //   ② 2つ選んだときの主菜の候補が、1つだけのときより**多く**、指定なしより**少ない**
+  //      ＝「1週間中華だけ」しか組めなかった困りごとが、本当に解けている
+  //   ③ 最後の1つは外せない（1つも選んでいない＝候補が無くなる状態を作らせない）
+  //   ④ 「条件をクリア」で3つとも選んだ状態に戻り、条件のボタンは「指定なし」に戻る
+  //   ⑤ 週タブと月タブで同じ窓・同じ状態（条件を共有している）
+  //   ⑥ 390×844で1行に収まり、押せる大きさは44px以上
+  // 禁じ手よけ: 候補の数を決め打ちしない（多い・少ないの向きだけを見る）／曜日・月替わりの
+  // 前提を置かない／画面の字を書き写さず ja.ts と MEAL_GENRES から引く／数が読めなければ
+  // null のまま比較して必ず不合格になる形にする
+  currentCheck = 'IYGENRE-01'
+  {
+    const iyBrowser = await chromium.launch()
+    const iyContext = await iyBrowser.newContext({ viewport: { width: 390, height: 844 } })
+    const iyPage = await iyContext.newPage()
+    iyPage.on('console', (msg) => {
+      if (msg.type() !== 'error') return
+      const text = msg.text()
+      if (text.includes('cloudflareinsights') || text.includes('ERR_FAILED')) return
+      errors.push(`[console@IYGENRE-01] ${text}`)
+    })
+    iyPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin'))
+        return
+      errors.push(`[pageerror@IYGENRE-01] ${err.message}`)
+    })
+    const iyChips = () => iyPage.locator('[data-testid="plan-genre-chip"]')
+    const iyChip = (genre) =>
+      iyPage.locator(`[data-testid="plan-genre-chip"][data-genre="${genre}"]`)
+    /** いま選ばれているジャンル（画面の並び順のまま）。読めなければ null */
+    const iySelected = async () => {
+      if ((await iyChips().count()) === 0) return null
+      return iyChips().evaluateAll((els) =>
+        els
+          .filter((el) => el.getAttribute('aria-pressed') === 'true')
+          .map((el) => el.getAttribute('data-genre')),
+      )
+    }
+    /** ジャンルのチップを押す。無ければ何もしない（無いことは別の検査が受け持つ） */
+    const iyTap = async (genre) => {
+      if ((await iyChip(genre).count()) === 0) return
+      await iyChip(genre).click()
+      await iyPage.waitForTimeout(500)
+    }
+    /** 週タブの「現在の条件」の窓を開いた状態にする */
+    const iyOpenConditions = async (tabName = '週') => {
+      const tab = iyPage.getByRole('button', { name: tabName, exact: true })
+      if ((await tab.getAttribute('aria-pressed')) !== 'true') {
+        await tab.click()
+        await iyPage.waitForTimeout(900)
+      }
+      await openWeekGroup(iyPage, '献立を提案')
+      if ((await iyPage.locator('[data-testid="plan-conditions-modal"]').count()) === 0) {
+        await iyPage.locator('[data-testid="plan-conditions-open"]').click()
+        await iyPage.waitForTimeout(600)
+      }
+    }
+    const iyCloseConditions = async () => {
+      const close = iyPage.locator('[data-testid="plan-conditions-close"]')
+      if ((await close.count()) > 0) {
+        await close.click()
+        await iyPage.waitForTimeout(500)
+      }
+    }
+    /** 「現在の条件」のボタンに出ている字（ゼロ幅スペースを外す）。読めなければ null */
+    const iyCondLabel = async () => {
+      const btn = iyPage.locator('[data-testid="plan-conditions-open"]')
+      if ((await btn.count()) === 0) return null
+      return ((await btn.first().textContent()) ?? '').replaceAll('​', '')
+    }
+    /** 「今日なに作る？」の献立側に出る主菜の候補数。読めなければ null（＝必ず不合格になる） */
+    const iyMainCandidates = async () => {
+      await iyPage.getByRole('button', { name: '日', exact: true }).click()
+      await iyPage.waitForTimeout(1300)
+      const body = ((await iyPage.textContent('body')) ?? '').replaceAll('​', '')
+      const m = body.match(/主菜の候補\s*(\d+)\s*[品件]/)
+      return m ? Number(m[1]) : null
+    }
+    try {
+      await iyPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await iyPage.waitForTimeout(2400) // 初回シード完了待ち
+      // 月タブはPro版の機能なので、週と月で同じ窓かを見るために解錠しておく
+      // （コードはWEEKLOCK-MONTHと同じ検証用の1本）
+      await iyPage.goto(`${BASE}/#/settings`, { waitUntil: 'networkidle' })
+      await iyPage.waitForTimeout(1600)
+      await iyPage.getByPlaceholder('解錠コード (例: UR-XXXX-XXXX)').fill('UR-96QS-2VSZ')
+      await iyPage.getByRole('button', { name: '解錠する', exact: true }).click()
+      await iyPage.waitForTimeout(900)
+      check(
+        'IYGENRE-01 前提: Pro版を解錠した（月タブの窓を見るため）',
+        ((await iyPage.textContent('body')) ?? '').includes('Pro版をご利用いただきありがとうございます'),
+      )
+      await iyPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+      await iyPage.reload({ waitUntil: 'networkidle' })
+      await iyPage.waitForTimeout(1800)
+
+      // ===== ① 3つのジャンルが並び、既定は3つとも選ばれている =====
+      await iyOpenConditions()
+      check(
+        'IYGENRE-01 料理のジャンルは、選べるジャンルのぶんだけ並ぶ（1つだけ選ぶプルダウンではない）',
+        (await iyChips().count()) === MEAL_GENRES.length,
+        `並び=${await iyChips().count()}件 / 選べるジャンル=${MEAL_GENRES.length}件`,
+      )
+      check(
+        'IYGENRE-01 並んでいるのは和食・洋食・中華（MEAL_GENRESと同じ並び）',
+        (await iyChips().evaluateAll((els) => els.map((el) => el.getAttribute('data-genre')))).join(',') ===
+          MEAL_GENRES.join(','),
+        `画面=${(await iyChips().evaluateAll((els) => els.map((el) => el.getAttribute('data-genre')))).join(',')}`,
+      )
+      check(
+        'IYGENRE-01 既定は3つとも選ばれている（＝指定なし。いまと同じ振る舞い）',
+        JSON.stringify(await iySelected()) === JSON.stringify([...MEAL_GENRES]),
+        `選ばれている=${JSON.stringify(await iySelected())}`,
+      )
+      check(
+        'IYGENRE-01 既定では「現在の条件」にジャンルを出さない（指定なしのため）',
+        (await iyCondLabel())?.includes(ja.mealPlan.suggestConditionsNone) === true,
+        `条件のボタン=${await iyCondLabel()}`,
+      )
+      // ⑥ 390px幅での見え方（1行に収まる・押せる大きさ44px以上・右端がはみ出さない）
+      const iyBoxes = await iyChips().evaluateAll((els) =>
+        els.map((el) => {
+          const r = el.getBoundingClientRect()
+          return { genre: el.getAttribute('data-genre'), x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height), right: Math.round(r.right) }
+        }),
+      )
+      check(
+        'IYGENRE-01 前提: ジャンルのチップの大きさを実測できた',
+        iyBoxes.length === MEAL_GENRES.length,
+        JSON.stringify(iyBoxes),
+      )
+      check(
+        'IYGENRE-01 390px幅でジャンルは1行に収まる（横に並ぶ）',
+        iyBoxes.length === MEAL_GENRES.length && iyBoxes.every((b) => Math.abs(b.y - iyBoxes[0].y) < 2),
+        JSON.stringify(iyBoxes),
+      )
+      check(
+        'IYGENRE-01 ジャンルは指で押せる大きさ（44px以上）',
+        iyBoxes.length === MEAL_GENRES.length && iyBoxes.every((b) => b.h >= 44),
+        JSON.stringify(iyBoxes),
+      )
+      check(
+        'IYGENRE-01 390px幅で画面の外へはみ出さない',
+        iyBoxes.length === MEAL_GENRES.length && iyBoxes.every((b) => b.right <= 390),
+        JSON.stringify(iyBoxes),
+      )
+
+      // ===== ② 複数選択が本当に効く（候補の数の向きで見る） =====
+      await iyCloseConditions()
+      const iyAny = await iyMainCandidates()
+      await iyOpenConditions()
+      await iyTap('中華') // 「中華は入れたくないけど和洋食は混在させたい」
+      check(
+        'IYGENRE-01 1つ外すと、残りは選ばれたまま（複数選べる）',
+        JSON.stringify(await iySelected()) === JSON.stringify(['和食', '洋食']),
+        `選ばれている=${JSON.stringify(await iySelected())}`,
+      )
+      check(
+        'IYGENRE-01 選んだジャンルは「現在の条件」のボタンにも出る',
+        (await iyCondLabel())?.includes('和食') === true && (await iyCondLabel())?.includes('洋食') === true,
+        `条件のボタン=${await iyCondLabel()}`,
+      )
+      await iyCloseConditions()
+      const iyTwo = await iyMainCandidates()
+      await iyOpenConditions()
+      await iyTap('洋食')
+      check(
+        'IYGENRE-01 さらに1つ外すと、1つだけ選んだ状態になる（これまでと同じ形も作れる）',
+        JSON.stringify(await iySelected()) === JSON.stringify(['和食']),
+        `選ばれている=${JSON.stringify(await iySelected())}`,
+      )
+      await iyCloseConditions()
+      const iyOne = await iyMainCandidates()
+      check(
+        'IYGENRE-01 2つ選ぶと、1つだけのときより主菜の候補が増える（複数選択が効いている）',
+        iyOne != null && iyTwo != null && iyOne > 0 && iyTwo > iyOne,
+        `1つ=${iyOne ?? '読めず'} 2つ=${iyTwo ?? '読めず'}`,
+      )
+      check(
+        'IYGENRE-01 2つ選んでも、指定なしよりは候補が少ない（絞り込みが効いている）',
+        iyTwo != null && iyAny != null && iyTwo < iyAny,
+        `2つ=${iyTwo ?? '読めず'} 指定なし=${iyAny ?? '読めず'}`,
+      )
+
+      // ===== ③ 最後の1つは外せない（候補が無くなる状態を作らせない） =====
+      await iyOpenConditions()
+      await iyTap('和食')
+      check(
+        'IYGENRE-01 最後の1つは外せない（1つも選んでいない状態を作らせない）',
+        JSON.stringify(await iySelected()) === JSON.stringify(['和食']),
+        `選ばれている=${JSON.stringify(await iySelected())}`,
+      )
+      await iyCloseConditions()
+      const iyStillOne = await iyMainCandidates()
+      check(
+        'IYGENRE-01 最後の1つを押しても、候補は無くならない',
+        iyStillOne != null && iyStillOne > 0 && iyStillOne === iyOne,
+        `押す前=${iyOne ?? '読めず'} 押した後=${iyStillOne ?? '読めず'}`,
+      )
+
+      // ===== ⑤ 月タブでも同じ窓・同じ状態（条件を共有している） =====
+      await iyPage.getByRole('button', { name: '月', exact: true }).click()
+      await iyPage.waitForTimeout(1200)
+      if ((await iyPage.locator('[data-testid="plan-conditions-modal"]').count()) === 0) {
+        await iyPage.locator('[data-testid="plan-conditions-open"]').first().click()
+        await iyPage.waitForTimeout(600)
+      }
+      check(
+        'IYGENRE-01 月タブの「現在の条件」にも同じジャンルの並びが出る',
+        (await iyChips().count()) === MEAL_GENRES.length,
+        `並び=${await iyChips().count()}件`,
+      )
+      check(
+        'IYGENRE-01 月タブでも、週タブで選んだジャンルがそのまま出る（条件を共有している）',
+        JSON.stringify(await iySelected()) === JSON.stringify(['和食']),
+        `選ばれている=${JSON.stringify(await iySelected())}`,
+      )
+
+      // ===== ④ 「条件をクリア」で3つとも選んだ状態（＝指定なし）に戻る =====
+      const iyClear = iyPage.locator('[data-testid="plan-conditions-clear"]')
+      check('IYGENRE-01 前提: 「条件をクリア」を掴めた', (await iyClear.count()) === 1)
+      if ((await iyClear.count()) === 1) {
+        await iyClear.first().click()
+        await iyPage.waitForTimeout(600)
+      }
+      check(
+        'IYGENRE-01 「条件をクリア」で3つとも選んだ状態（指定なし）に戻る',
+        JSON.stringify(await iySelected()) === JSON.stringify([...MEAL_GENRES]),
+        `選ばれている=${JSON.stringify(await iySelected())}`,
+      )
+      await iyCloseConditions()
+      check(
+        'IYGENRE-01 クリアしたあと、条件のボタンは「指定なし」に戻る',
+        (await iyCondLabel())?.includes(ja.mealPlan.suggestConditionsNone) === true,
+        `条件のボタン=${await iyCondLabel()}`,
+      )
+    } finally {
+      await iyBrowser.close()
     }
   }
 
