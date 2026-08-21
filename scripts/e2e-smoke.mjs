@@ -29952,9 +29952,16 @@ try {
           // 規約F: 「消えるもの」と「残るもの」を両方書いているか
           const evText = await evPage.textContent('main')
           check('MULTIDEV-01(b) 上書きで消えるものと残るものを両方書いている', evText.includes('消えるもの') && evText.includes('残るもの'))
+          // 2026-08-22 司令部: ここは**1文をそのまま書き写していた**ため、長文を短くした瞬間に
+          // 落ちた（禁じ手②）。実際には見出しが同じことを言っており、事実は消えていない。
+          // 「iPhone・iPad」「ブラウザ」「ホーム画面」「分かれる/別々」の4つがそろっているか、
+          // という**意図**で測る。言い回しを変えても、事実が残っていれば通る
+          const evSplitWords = ['iPhone', 'iPad', 'ブラウザ', 'ホーム画面']
           check(
             'MULTIDEV-01(b) iPhone・iPadでブラウザとホーム画面のデータが分かれることに触れている',
-            evText.includes('ホーム画面のアイコンから開いたうちレシピでは、保存されるデータが別々になります'),
+            evSplitWords.every((w) => evText.includes(w)) &&
+              (evText.includes('分かれ') || evText.includes('別々')),
+            `そろっていない語=${evSplitWords.filter((w) => !evText.includes(w)).join('・') || '（分かれる/別々が無い）'}`,
           )
 
           // (g-2) 「追加」と「上書き」の違いを見くらべの表で出す(2026-08-10 便FH)。
@@ -30008,7 +30015,10 @@ try {
             ['規約F・消えるもの', '消えるもの'],
             ['規約F・残るもの', '残るもの'],
             ['上書き前の控えと「元に戻す」', '設定の画面を開いている間は「元に戻す」で戻せます'],
-            ['iPhone・iPadでブラウザとホーム画面のデータが分かれる', 'ホーム画面のアイコンから開いたうちレシピでは、保存されるデータが別々になります'],
+            // 2026-08-22 司令部: ここだけ**語の組み合わせ**で書いてある（下の evaluate は配列も受ける）。
+            // 1文の書き写しは、長文を短くした瞬間に落ちる（禁じ手②で実発）。
+            // 他の項目も、文言を直すときはこの形に移すこと
+            ['iPhone・iPadでブラウザとホーム画面のデータが分かれる', ['iPhone', 'ホーム画面', '分かれ']],
             ['クラウドに置いても同期ではない', 'クラウドに置いても、同期にはなりません'],
             ['クラウドのファイルを自動で読み書きしない', '自動で読み書きすることはありません'],
             ['「今のデータに追加」では同じ料理名のレシピが変わらない', '同じ料理名のレシピは今の内容のまま'],
@@ -30022,8 +30032,12 @@ try {
             const norm = (s) => s.replace(/\s+/g, '')
             const els = [...document.querySelectorAll('main *')]
             return phrases.map(([label, text]) => {
-              const needle = norm(text)
-              const hits = els.filter((el) => norm(el.textContent).includes(needle))
+              // text は1つの文でも、語の配列でもよい（配列なら**全部そろっている要素**を探す）
+              const needles = (Array.isArray(text) ? text : [text]).map(norm)
+              const hits = els.filter((el) => {
+                const t = norm(el.textContent)
+                return needles.every((n) => t.includes(n))
+              })
               return {
                 label,
                 found: hits.length > 0,
