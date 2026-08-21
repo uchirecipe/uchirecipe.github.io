@@ -10384,6 +10384,17 @@ try {
       )
       check('MEALPLAN-05 前提: 今日の週プラン(夕食2件+朝食1件)を直接投入できる', seeded.ok)
 
+      // 投入したら**必ずページを読み込み直す**(2026-08-22 司令部・禁じ手⑤の親戚)。
+      // ここは mealPlans を Dexie を通さず生のIndexedDBへ書いている。Dexieのライブ購読は
+      // 「Dexie経由の書き込み」しか見ていないので、**その画面がすでに mealPlans を読んでいると、
+      // 生書き込みは届かないまま空の結果が使い回される**。/#/recipes → /#/meal-plan は
+      // ハッシュが変わるだけ＝同じドキュメントなので、購読は張り直されない。
+      // 2026-08-21 便IU・⑦でレシピ一覧が「今日の予定」を読むようになった結果、この節の
+      // 6件が丸ごと落ちた（アプリの不具合ではなく、この手順の脆さ）。実利用ではDexie経由で
+      // 書くので同じことは起きない。読み込み直せば購読が張り直され、投入済みのデータを読む。
+      await mp5Page.reload({ waitUntil: 'networkidle' })
+      await mp5Page.waitForTimeout(600)
+
       // todayListの実データを直接読むヘルパー(重複の有無を黒箱の見た目でなくDBで断定する)
       const todayListRecipeIds = () =>
         mp5Page.evaluate(
