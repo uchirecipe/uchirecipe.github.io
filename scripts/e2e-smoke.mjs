@@ -530,18 +530,66 @@ const check = (label, cond, detail = '') => (cond ? ok(label) : ng(label, detail
  * 掴み方は data-testid と aria-expanded だけ（並び順・入れ子の段数・クラス名に依らない）。
  * 押す回数は決め打ちせず「畳んでいるカードが無くなるまで」＝日数が変わっても届く
  * （上限12回は保険。7日分より多く押すことは無い）。週タブ以外では何も見つからず素通りする。
+ *
+ * 2026-08-21 便IO: **畳み方が落ち着くのを待ってから掴む**ようにした（下の settleFold）。
+ * 曜日カードの既定は献立がDBから届いてから決まるので、届く前に掴むと掴んだ要素が
+ * アプリ自身の手で消え、30秒待って中断していた。あわせて、**終わったときに畳んだカードが
+ * 1枚も残っていないことをこの道具自身が確かめる**（開けていないのに黙って戻らない）。
  */
 const openAllWeekDays = async (page) => {
   // 押すと Playwright がその要素を画面へ入れるので縦位置が動く。開き終えたら元の位置へ戻す
   // （縦位置そのものを測る検査＝FD-07/FD-09 を、この道具のせいで落とさないため）
   const before = await page.evaluate(() => window.scrollY)
+  /** いまの7日の畳み方（'日付:true,日付:false,…'）。週タブ以外では空文字 */
+  const readFold = () =>
+    page
+      .locator('[data-testid="week-day-toggle"]')
+      .evaluateAll((els) =>
+        els
+          .map((el) => `${el.getAttribute('data-date')}:${el.getAttribute('aria-expanded')}`)
+          .join(','),
+      )
+  /**
+   * 畳み方が落ち着く（2回続けて同じになる）まで待って、そのときの状態を返す。
+   *
+   * 2026-08-21 便IO・実測で見つけた道具側の欠陥への手当て:
+   * 曜日カードの既定（便ID: 過ぎた日は畳む／今日は開く／献立のある先の日は開く）は
+   * **献立がDBから届いてから**決まる。届く前は全部が畳んで見えるので、
+   * その瞬間に「畳んでいるカード」を掴むと、直後にアプリが自分でそれを開き、
+   * 掴んでいた要素が消えて**30秒待ちで中断**する（`await folded.first().click()` が
+   * 「waiting for locator(...)」のまま返ってこない）。
+   * SHOPRANGE-EA は「次の週を献立で埋めてから、その週へ戻る」ので7日とも
+   * 「開く」条件に当たり、この窓を毎回踏んでいた（実行のたびに中断する場所が変わっていた。
+   * dev=75de4b1 の時点でも同じ確率で起きることを実測済み＝アプリの後戻りではない）。
+   * 落ち着いてから掴めば、掴んだ要素が消えることが無い。
+   */
+  const settleFold = async () => {
+    let prev = await readFold()
+    for (let i = 0; i < 20; i++) {
+      await page.waitForTimeout(150)
+      const now = await readFold()
+      if (now === prev) return now
+      prev = now
+    }
+    return prev
+  }
   let opened = false
-  for (let i = 0; i < 12; i++) {
+  let fold = await settleFold()
+  for (let i = 0; i < 12 && fold.includes(':false'); i++) {
     const folded = page.locator('[data-testid="week-day-toggle"][aria-expanded="false"]')
-    if ((await folded.count()) === 0) break
-    await folded.first().click()
-    await page.waitForTimeout(150)
-    opened = true
+    try {
+      // 1枚あたりは短く待つ。落ち着いてから掴んでいるので普通は待たずに押せる
+      await folded.first().click({ timeout: 3000 })
+      opened = true
+    } catch {
+      // 押す前にアプリ側が開いた＝押す必要が無くなっただけ。状態を読み直して続ける
+    }
+    fold = await settleFold()
+  }
+  // この道具の目的は「7日とも開いた状態にする」こと。開けないまま黙って戻らない
+  // （旧版は上限12回で素通りしていたので、開けていないことが呼び出し側の別の赤に化けていた）
+  if (fold.includes(':false')) {
+    throw new Error(`openAllWeekDays: 開けなかった曜日カードが残っています fold=${fold}`)
   }
   if (opened) {
     await page.evaluate((y) => window.scrollTo(0, y), before)
