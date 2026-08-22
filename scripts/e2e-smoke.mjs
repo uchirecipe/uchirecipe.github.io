@@ -555,6 +555,15 @@ const ok = (label) => results.push({ label, pass: true })
 const ng = (label, detail) => results.push({ label, pass: false, detail })
 const check = (label, cond, detail = '') => (cond ? ok(label) : ng(label, detail))
 /**
+ * 画面から読んだ文字を照合する前の下ごしらえ（禁じ手②・2026-08-23 便JM）。
+ *
+ * BudouX（logic/jaWrap.ts）が折返しのためにゼロ幅スペース(U+200B)を文の途中へ差し込むので、
+ * 素の `includes` は**同じ文なのに外れる**。しかも「出ていないこと」を測る向きでは
+ * 外れたまま素通りで合格になる（間違いに気づけない）。読んだ側を必ずここに通す。
+ * null が返る textContent() をそのまま渡せるよう、null は空文字にする。
+ */
+const stripZwspText = (s) => (s ?? '').replaceAll('\u200b', '')
+/**
  * 週タブの曜日カードを全部開く（2026-08-19 便ID・⑦）。
  *
  * 便IDでオーナー指示により曜日カードの既定が変わった（過ぎた日・献立の無い未来の日は畳む）。
@@ -666,7 +675,7 @@ const selectWeekLayout = async (page, label) => {
   await select.first().selectOption({ label })
   await page.waitForTimeout(600)
   // 本当にその値になったかまで見る（選べていないのに true を返さない）
-  const wanted = label === '今日から7日間' ? 'rolling' : 'calendar'
+  const wanted = label === ja.mealPlan.weekLayoutRolling ? 'rolling' : 'calendar'
   return (await select.first().inputValue()) === wanted
 }
 const openDayOrganize = async (page) => {
@@ -849,7 +858,7 @@ const readConfirms = (targetPage) => targetPage.evaluate(() => window.__confirmD
 const clickReplaceImport = async (targetPage) => {
   await setConfirmAnswer(targetPage, 'off')
   const chooser = targetPage.waitForEvent('filechooser')
-  await targetPage.getByRole('button', { name: 'データを上書き' }).click()
+  await targetPage.getByRole('button', { name: ja.settings.backupImportReplace }).click()
   // 自動押しを止めているぶん、**1回目の確認文が貯め口に入らない**。手で押す前に自分で渡す
   // （でないと「2回とも件数が入っているか」を測れない。2026-08-15）
   await targetPage.evaluate(() => {
@@ -994,7 +1003,7 @@ try {
   currentCheck = 'QF-01'
   await page.locator('button[aria-label="絞り込み"]').click()
   await page.waitForTimeout(300)
-  await page.getByRole('button', { name: '時短レシピのみに絞る', exact: true }).click()
+  await page.getByRole('button', { name: ja.search.quickOnly, exact: true }).click()
   await page.waitForTimeout(400)
   const quickCardCount = await page.locator('div.grid.grid-cols-2 a[href^="#/recipes/"]').count()
   check(
@@ -1009,7 +1018,7 @@ try {
     `見出し=${JSON.stringify(quickCountLabel)} 結果=${quickCardCount} 全体=${allCardCount}`,
   )
   // 絞り込みを解除して以降のチェックに影響しないようにする
-  await page.getByRole('button', { name: '時短レシピのみに絞る', exact: true }).click()
+  await page.getByRole('button', { name: ja.search.quickOnly, exact: true }).click()
   await page.waitForTimeout(300)
   await page.locator('[data-testid="filter-panel-close"]').click()
   await page.waitForTimeout(300)
@@ -1109,7 +1118,7 @@ try {
     'SORTDIR-01(2026-08-02改定) 並べ替えパネルを開くと昇順/降順ボタンが中に出る',
     (await dirButtonCount()) === 2,
   )
-  await page.getByRole('button', { name: '五十音順', exact: true }).click()
+  await page.getByRole('button', { name: ja.search.sortKana, exact: true }).click()
   await page.waitForTimeout(300)
   const ascActive = await page.evaluate(() => {
     const buttons = Array.from(document.querySelectorAll('button'))
@@ -1118,7 +1127,7 @@ try {
   })
   check('SORTDIR-01 「五十音順」を選ぶと既定で昇順が選択される', ascActive)
   const ascTitles = await cardTitles()
-  await page.getByRole('button', { name: '降順', exact: true }).click()
+  await page.getByRole('button', { name: ja.search.sortDesc, exact: true }).click()
   await page.waitForTimeout(300)
   const descTitles = await cardTitles()
   check(
@@ -1127,7 +1136,7 @@ try {
     `昇順=${JSON.stringify(ascTitles)} 降順=${JSON.stringify(descTitles)}`,
   )
   // 既定(更新順・降順)に戻して以降のチェックに影響しないようにする
-  await page.getByRole('button', { name: '更新順', exact: true }).click()
+  await page.getByRole('button', { name: ja.search.sortUpdated, exact: true }).click()
   await page.waitForTimeout(200)
   await page.locator('[data-testid="sort-panel-close"]').click()
   await page.waitForTimeout(300)
@@ -1163,7 +1172,7 @@ try {
     !detailText.includes('塩分'),
     '無料の要約行に「塩分」が残っている',
   )
-  await page.getByRole('button', { name: '栄養価の概算を詳しく見る' }).click()
+  await page.getByRole('button', { name: ja.nutrition.toggleExpand }).click()
   await page.waitForTimeout(300)
   const nutExpandedText = await page.textContent('body')
   check('NUT-01 展開すると断定しない「概算」表記の注記が出る', nutExpandedText.includes('概算'))
@@ -1219,7 +1228,7 @@ try {
     /\d+人分で作るときの1食あたり/.test(nutExpandedText),
     `本文に「◯人分で作るときの1食あたり」が無い`,
   )
-  await page.getByRole('button', { name: '栄養価の概算を閉じる' }).click()
+  await page.getByRole('button', { name: ja.nutrition.toggleCollapse }).click()
   await page.waitForTimeout(200)
 
   // --- ZENKAKU-01: 全角入力の自動正規化(2026-07-21 オーナー実機報告:「アサリ 300ｇ」の全角ｇだと
@@ -1230,10 +1239,10 @@ try {
   currentCheck = 'ZENKAKU-01'
   await page.goto(`${BASE}/#/recipes/new`, { waitUntil: 'networkidle' })
   await page.waitForTimeout(500)
-  await page.getByPlaceholder('例: 肉じゃが').fill('E2E全角正規化確認レシピ')
-  await page.getByPlaceholder('例: じゃがいも').first().fill('アサリ')
-  const zenkakuAmountInput = page.getByPlaceholder('例: 3', { exact: true }).first()
-  const zenkakuUnitInput = page.getByPlaceholder('例: 個', { exact: true }).first()
+  await page.getByPlaceholder(ja.form.namePlaceholder).fill('E2E全角正規化確認レシピ')
+  await page.getByPlaceholder(ja.form.ingredientNamePlaceholder).first().fill('アサリ')
+  const zenkakuAmountInput = page.getByPlaceholder(ja.form.ingredientAmountPlaceholder, { exact: true }).first()
+  const zenkakuUnitInput = page.getByPlaceholder(ja.form.ingredientUnitPlaceholder, { exact: true }).first()
   await zenkakuAmountInput.fill('３００') // 全角数字
   await zenkakuUnitInput.fill('ｇ') // 全角英字(半角gの全角形)
   // Tabでフォーカスを外し、実際のblurイベントを発火させる(IME確定後のblurと同じ経路。
@@ -1250,13 +1259,13 @@ try {
     (await zenkakuUnitInput.inputValue()) === 'g',
     `実際の値=${await zenkakuUnitInput.inputValue()}`,
   )
-  await page.getByPlaceholder('例: じゃがいもを一口大に切る').first().fill('アサリを砂抜きする')
+  await page.getByPlaceholder(ja.form.stepTextPlaceholder).first().fill('アサリを砂抜きする')
   await page.getByRole('button', { name: '保存する' }).click()
   await page.waitForTimeout(800)
   check('ZENKAKU-01 保存後にレシピ詳細へ遷移する', page.url().includes('#/recipes/'))
   const zenkakuDetailText = await page.textContent('body')
   check('ZENKAKU-01 栄養価の概算 見出しが見える', zenkakuDetailText.includes('栄養価の概算'))
-  await page.getByRole('button', { name: '栄養価の概算を詳しく見る' }).click()
+  await page.getByRole('button', { name: ja.nutrition.toggleExpand }).click()
   await page.waitForTimeout(300)
   const zenkakuNutritionText = await page.textContent('body')
   check(
@@ -1264,7 +1273,7 @@ try {
     // ラベルは2026-07-28 便BY/NUT-02で「計算対象外 n件」→「計算に含めていない材料 n件」に変更
     !zenkakuNutritionText.includes('計算に含めていない材料'),
   )
-  await page.getByRole('button', { name: '栄養価の概算を閉じる' }).click()
+  await page.getByRole('button', { name: ja.nutrition.toggleCollapse }).click()
   await page.waitForTimeout(200)
 
   // 以降のTERM-01が「肉じゃが」の詳細を開いたままである前提のため、その状態に戻す
@@ -1289,14 +1298,14 @@ try {
 
   // --- SMK-08(簡易): 調理中モードを開いて手順送り・閉じる ---
   currentCheck = 'SMK-08'
-  await page.getByText('調理中モードで見る').click()
+  await page.getByText(ja.focus.open).click()
   await page.waitForTimeout(500)
   const focusText = await page.textContent('body')
   check('SMK-08 調理中モードが開く', focusText.includes('手順 1/'))
-  await page.getByRole('button', { name: '次へ' }).click()
+  await page.getByRole('button', { name: ja.focus.next }).click()
   await page.waitForTimeout(300)
   check('SMK-08 手順送り', (await page.textContent('body')).includes('手順 2/'))
-  await page.getByRole('button', { name: '閉じる' }).click()
+  await page.getByRole('button', { name: ja.common.close }).click()
   await page.waitForTimeout(300)
 
   // --- FOCUS-MEMO-01: 調理中モードの▽折りたたみメモをタップすると詳細画面と同じ小窓(ポップオーバー)で
@@ -1309,19 +1318,19 @@ try {
   currentCheck = 'FOCUS-MEMO-01'
   await page.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
   await page.waitForTimeout(500)
-  await page.getByPlaceholder('料理名・材料・タグ').fill('回鍋肉')
+  await page.getByPlaceholder(ja.search.placeholder).fill('回鍋肉')
   await page.waitForTimeout(300)
   await page.getByText('回鍋肉(ホイコーロー)', { exact: true }).first().click()
   await page.waitForTimeout(500)
-  await page.getByText('調理中モードで見る').click()
+  await page.getByText(ja.focus.open).click()
   await page.waitForTimeout(500)
-  await page.getByRole('button', { name: '次へ' }).click() // 手順2へ
+  await page.getByRole('button', { name: ja.focus.next }).click() // 手順2へ
   await page.waitForTimeout(300)
-  await page.getByRole('button', { name: '次へ' }).click() // 手順3へ
+  await page.getByRole('button', { name: ja.focus.next }).click() // 手順3へ
   await page.waitForTimeout(300)
-  await page.getByRole('button', { name: '次へ' }).click() // 手順4へ
+  await page.getByRole('button', { name: ja.focus.next }).click() // 手順4へ
   await page.waitForTimeout(300)
-  await page.getByRole('button', { name: '次へ' }).click() // 手順5(▽を含む手順)へ
+  await page.getByRole('button', { name: ja.focus.next }).click() // 手順5(▽を含む手順)へ
   await page.waitForTimeout(300)
   const focusMemoFoldedText = await page.textContent('body')
   check(
@@ -1349,7 +1358,7 @@ try {
     'FOCUS-MEMO-01 外タップで小窓が閉じる',
     !focusMemoClosedText.includes('一度に炒められるのはフライパン'),
   )
-  await page.getByRole('button', { name: '閉じる' }).click()
+  await page.getByRole('button', { name: ja.common.close }).click()
   await page.waitForTimeout(300)
   // この検索語が一覧の状態(sessionStorage)に残ったままだと、以降のテスト(戻る動線・スクロール系)が
   // 「鶏の照り焼き」だけの絞り込み一覧を前提に動いてしまい無関係な失敗を招くため、必ず消しておく
@@ -1388,7 +1397,7 @@ try {
     `現在URL: ${page.url()}`,
   )
   const det01DetailUrl = page.url()
-  await page.getByRole('button', { name: '戻る' }).click()
+  await page.getByRole('button', { name: ja.common.back }).click()
   await page.waitForTimeout(600)
   check(
     'DET-01(2026-08-02追補) 候補カード発の戻るは献立へ帰る(例外復元)',
@@ -1399,7 +1408,7 @@ try {
   // (b) 戻り先の保全: 直接URL(ブラウザ履歴なし・state無し)で詳細を開いた場合も一覧へ
   await page.goto(det01DetailUrl, { waitUntil: 'networkidle' })
   await page.waitForTimeout(500)
-  await page.getByRole('button', { name: '戻る' }).click()
+  await page.getByRole('button', { name: ja.common.back }).click()
   await page.waitForTimeout(400)
   check(
     'DET-01(戻り先の保全) 直接URLで開いた詳細の戻るは従来どおり一覧へ',
@@ -1422,7 +1431,7 @@ try {
     const envFile = readFileSync(path.join(appRoot, '.env.production'), 'utf8')
     const m = envFile.match(/^VITE_RECIPE_IMPORT_ENDPOINT=(.*)$/m)
     const endpointConfigured = !!(m && m[1].trim())
-    const btnVisible = await page.getByText('URLから取り込む').isVisible().catch(() => false)
+    const btnVisible = await page.getByText(ja.urlImport.open).isVisible().catch(() => false)
     check(
       endpointConfigured
         ? 'URLIMPORT-00 エンドポイント設定済みビルドでは「URLから取り込む」ボタンが出る'
@@ -1435,19 +1444,19 @@ try {
   currentCheck = 'SMK-04'
   await page.goto(`${BASE}/#/recipes/new`, { waitUntil: 'networkidle' })
   await page.waitForTimeout(500)
-  await page.getByText('テキスト貼り付けで自動入力').click()
+  await page.getByText(ja.paste.open).click()
   await page.waitForTimeout(300)
   await page.locator(`textarea[placeholder="${ja.paste.placeholder}"]`).fill(
     'E2Eスモーク試験用レシピ\n\n材料（2人分）\n・にんじん　1本\n・しょうゆ　大さじ2\n\n作り方\n1. にんじんを切る\n2. 炒める',
   )
-  await page.getByRole('button', { name: '自動で振り分ける' }).click()
+  await page.getByRole('button', { name: ja.paste.apply }).click()
   await page.waitForTimeout(300)
   const formText = await page.textContent('body')
   check('SMK-04 貼り付け整形の読み取り結果', formText.includes('材料2件・手順2件を読み取りました'))
   // 2026-08-02 オーナー指示(便DF→司令部差し替え): 取り込めたときだけ合わせ調味料の案内1行を出す
   check(
     'SMK-04(司令部差替) 貼り付け成功時に合わせ調味料の案内1行が出る',
-    formText.includes('合わせ調味料は、材料の丸ボタンで色分けしておくと、調理中モードでまとめて表示されます'),
+    formText.includes(ja.form.importSeasoningGuide),
   )
   check(
     'SMK-04(2026-08-03改定) レシピ登録・編集画面に「食材と価格」への案内・リンクを置かない',
@@ -1466,7 +1475,7 @@ try {
   currentCheck = 'SMK-03'
   await page.locator('a[href*="/edit"]').first().click()
   await page.waitForTimeout(500)
-  await page.getByRole('button', { name: 'このレシピを削除' }).click()
+  await page.getByRole('button', { name: ja.form.deleteRecipe }).click()
   await page.waitForTimeout(800)
   await page.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
   await page.waitForTimeout(500)
@@ -1492,12 +1501,12 @@ try {
     currentCheck = 'GF-B'
     await page.goto(`${BASE}/#/recipes/new`, { waitUntil: 'networkidle' })
     await page.waitForTimeout(500)
-    await page.getByText('テキスト貼り付けで自動入力').click()
+    await page.getByText(ja.paste.open).click()
     await page.waitForTimeout(300)
     await page.locator(`textarea[placeholder="${ja.paste.placeholder}"]`).fill(
       'GF記号テスト\n\n材料（2人分）\n☆みそ　大さじ2\n☆マヨネーズ　大さじ1\n◎すりごま　大さじ2\n◎しょうゆ　小さじ1\nにんじん　1本\n\n作り方\n1. その間に☆を全部混ぜ合わせておく。\n2. ボウルで◎を混ぜ、にんじんを和える。',
     )
-    await page.getByRole('button', { name: '自動で振り分ける' }).click()
+    await page.getByRole('button', { name: ja.paste.apply }).click()
     await page.waitForTimeout(500)
     // 組の色は材料行の丸ボタンに出る。aria-label に組番号が入るので、**どの行にあっても**
     // 同じ判定になる形で数える（並びを決め打ちしない）
@@ -1564,7 +1573,7 @@ try {
     // 後続の検査に影響しないよう、確認用のレシピはここで片付ける（確認ダイアログは自動承諾）
     await page.locator('a[href*="/edit"]').first().click()
     await page.waitForTimeout(500)
-    await page.getByRole('button', { name: 'このレシピを削除' }).click()
+    await page.getByRole('button', { name: ja.form.deleteRecipe }).click()
     await page.waitForTimeout(800)
   }
 
@@ -1574,13 +1583,13 @@ try {
   currentCheck = 'KW-01'
   await page.goto(`${BASE}/#/recipes/new`, { waitUntil: 'networkidle' })
   await page.waitForTimeout(500)
-  await page.getByPlaceholder('例: 肉じゃが').fill('E2Eキーワード確認レシピ')
-  await page.getByPlaceholder('例: じゃがいも').first().fill('テスト材料')
-  await page.getByPlaceholder('例: じゃがいもを一口大に切る').first().fill('テスト手順')
+  await page.getByPlaceholder(ja.form.namePlaceholder).fill('E2Eキーワード確認レシピ')
+  await page.getByPlaceholder(ja.form.ingredientNamePlaceholder).first().fill('テスト材料')
+  await page.getByPlaceholder(ja.form.stepTextPlaceholder).first().fill('テスト手順')
   // 検索キーワード欄は「くわしく」タブの中(2026-07-16 かんたん/くわしくタブ分け)
-  await page.getByRole('tab', { name: 'くわしく' }).click()
+  await page.getByRole('tab', { name: ja.form.formTabDetail }).click()
   await page.waitForTimeout(200)
-  const kwInput = page.getByPlaceholder('例: チンジャオロース、おつまみ など')
+  const kwInput = page.getByPlaceholder(ja.form.keywordPlaceholder)
   await kwInput.fill('ずっきーにのひみつご')
   await kwInput.press('Enter') // タグと同じくEnterでチップ化(addKeyword)
   await page.waitForTimeout(200)
@@ -1624,7 +1633,7 @@ try {
   await page.waitForTimeout(500)
   await page.locator('a[href*="/edit"]').first().click()
   await page.waitForTimeout(500)
-  await page.getByRole('button', { name: 'このレシピを削除' }).click()
+  await page.getByRole('button', { name: ja.form.deleteRecipe }).click()
   await page.waitForTimeout(800)
 
   // --- INTRO-01: ひとこと説明(intro・任意。2026-07-13)。料理名だけでは中身が想像しにくい
@@ -1632,17 +1641,17 @@ try {
   currentCheck = 'INTRO-01'
   await page.goto(`${BASE}/#/recipes/new`, { waitUntil: 'networkidle' })
   await page.waitForTimeout(500)
-  await page.getByPlaceholder('例: 肉じゃが').fill('E2Eひとこと説明確認レシピ')
+  await page.getByPlaceholder(ja.form.namePlaceholder).fill('E2Eひとこと説明確認レシピ')
   // ひとこと説明欄は「くわしく」タブの中(2026-07-16 かんたん/くわしくタブ分け)
-  await page.getByRole('tab', { name: 'くわしく' }).click()
+  await page.getByRole('tab', { name: ja.form.formTabDetail }).click()
   await page.waitForTimeout(200)
   await page
-    .getByPlaceholder('例: ヨーグルトに二種類のソースをかけた見た目も楽しいデザートです')
+    .getByPlaceholder(ja.form.introPlaceholder)
     .fill('E2E確認用のひとこと説明テキスト')
-  await page.getByRole('tab', { name: 'かんたん' }).click()
+  await page.getByRole('tab', { name: ja.form.formTabSimple }).click()
   await page.waitForTimeout(200)
-  await page.getByPlaceholder('例: じゃがいも').first().fill('テスト材料')
-  await page.getByPlaceholder('例: じゃがいもを一口大に切る').first().fill('テスト手順')
+  await page.getByPlaceholder(ja.form.ingredientNamePlaceholder).first().fill('テスト材料')
+  await page.getByPlaceholder(ja.form.stepTextPlaceholder).first().fill('テスト手順')
   await page.getByRole('button', { name: '保存する' }).click()
   await page.waitForTimeout(800)
   // 2026-07-16 UI総点検A-8: introもwrapJaPhrases経由(ja-phrase)の描画になり、文節境界にZWSPが
@@ -1671,7 +1680,7 @@ try {
   // 後始末: 検証用に作成したレシピを削除
   await page.locator('a[href*="/edit"]').first().click()
   await page.waitForTimeout(500)
-  await page.getByRole('button', { name: 'このレシピを削除' }).click()
+  await page.getByRole('button', { name: ja.form.deleteRecipe }).click()
   await page.waitForTimeout(800)
 
   // --- ONEPOINT-01: メモ2区画化(2026-07。オーナー承認済み設計)。「ワンポイント」
@@ -1681,16 +1690,16 @@ try {
   currentCheck = 'ONEPOINT-01'
   await page.goto(`${BASE}/#/recipes/new`, { waitUntil: 'networkidle' })
   await page.waitForTimeout(500)
-  await page.getByPlaceholder('例: 肉じゃが').fill('E2Eワンポイントメモ確認レシピ')
-  await page.getByPlaceholder('例: じゃがいも').first().fill('テスト材料')
-  await page.getByPlaceholder('例: じゃがいもを一口大に切る').first().fill('テスト手順')
+  await page.getByPlaceholder(ja.form.namePlaceholder).fill('E2Eワンポイントメモ確認レシピ')
+  await page.getByPlaceholder(ja.form.ingredientNamePlaceholder).first().fill('テスト材料')
+  await page.getByPlaceholder(ja.form.stepTextPlaceholder).first().fill('テスト手順')
   // ワンポイント・メモ欄は「くわしく」タブの中(2026-07-16 かんたん/くわしくタブ分け)
-  await page.getByRole('tab', { name: 'くわしく' }).click()
+  await page.getByRole('tab', { name: ja.form.formTabDetail }).click()
   await page.waitForTimeout(200)
   await page
-    .getByPlaceholder('例: 味噌は煮立てると香りが飛ぶので最後に')
+    .getByPlaceholder(ja.form.onePointPlaceholder)
     .fill('E2E確認用のワンポイント本文')
-  await page.getByPlaceholder('例: 冷蔵で3日。温め直すときはしっかり沸騰させる').fill('E2E確認用のメモ本文')
+  await page.getByPlaceholder(ja.form.memoPlaceholder).fill('E2E確認用のメモ本文')
   await page.getByRole('button', { name: '保存する' }).click()
   await page.waitForTimeout(800)
   // 本文はMemoText(改行エンジン)経由でZWSPが挿入されるため、素のincludesでは一致しない。stripZwspで除去してから照合する
@@ -1718,12 +1727,12 @@ try {
   // 常に「かんたん」タブのため、ワンポイント・メモを確認するには「くわしく」への切替が必要
   await page.locator('a[href*="/edit"]').first().click()
   await page.waitForTimeout(500)
-  await page.getByRole('tab', { name: 'くわしく' }).click()
+  await page.getByRole('tab', { name: ja.form.formTabDetail }).click()
   await page.waitForTimeout(200)
   const onePointEditValue = await page
-    .getByPlaceholder('例: 味噌は煮立てると香りが飛ぶので最後に')
+    .getByPlaceholder(ja.form.onePointPlaceholder)
     .inputValue()
-  const memoEditValue = await page.getByPlaceholder('例: 冷蔵で3日。温め直すときはしっかり沸騰させる').inputValue()
+  const memoEditValue = await page.getByPlaceholder(ja.form.memoPlaceholder).inputValue()
   check(
     'ONEPOINT-01 編集画面のワンポイント欄に保存内容が復元される',
     onePointEditValue === 'E2E確認用のワンポイント本文',
@@ -1736,7 +1745,7 @@ try {
   )
 
   // 後始末: 検証用に作成したレシピを削除
-  await page.getByRole('button', { name: 'このレシピを削除' }).click()
+  await page.getByRole('button', { name: ja.form.deleteRecipe }).click()
   await page.waitForTimeout(800)
 
   // --- DISHTYPE-01: レシピ種別チップ(主菜/副菜/汁物/デザート・任意選択。2026-07-13
@@ -1746,11 +1755,11 @@ try {
   const isChipActive = (locator) => locator.evaluate((el) => el.className.includes('border-accent'))
   await page.goto(`${BASE}/#/recipes/new`, { waitUntil: 'networkidle' })
   await page.waitForTimeout(500)
-  await page.getByPlaceholder('例: 肉じゃが').fill('E2E種別チップ確認レシピ')
-  await page.getByPlaceholder('例: じゃがいも').first().fill('テスト材料')
-  await page.getByPlaceholder('例: じゃがいもを一口大に切る').first().fill('テスト手順')
+  await page.getByPlaceholder(ja.form.namePlaceholder).fill('E2E種別チップ確認レシピ')
+  await page.getByPlaceholder(ja.form.ingredientNamePlaceholder).first().fill('テスト材料')
+  await page.getByPlaceholder(ja.form.stepTextPlaceholder).first().fill('テスト手順')
   // 種別チップは「くわしく」タブの中(2026-07-16 かんたん/くわしくタブ分け)
-  await page.getByRole('tab', { name: 'くわしく' }).click()
+  await page.getByRole('tab', { name: ja.form.formTabDetail }).click()
   await page.waitForTimeout(200)
   const sideChip = page.getByRole('button', { name: '副菜', exact: true })
   check('DISHTYPE-01 保存前は「副菜」チップが未選択', !(await isChipActive(sideChip)))
@@ -1765,7 +1774,7 @@ try {
   )
   await page.locator('a[href*="/edit"]').first().click()
   await page.waitForTimeout(500)
-  await page.getByRole('tab', { name: 'くわしく' }).click()
+  await page.getByRole('tab', { name: ja.form.formTabDetail }).click()
   await page.waitForTimeout(200)
   const sideChipEdit = page.getByRole('button', { name: '副菜', exact: true })
   check('DISHTYPE-01 編集画面を開き直しても選択状態が保持される(DB保存の確認)', await isChipActive(sideChipEdit))
@@ -1774,7 +1783,7 @@ try {
   check('DISHTYPE-01 もう一度押すと選択が解除される', !(await isChipActive(sideChipEdit)))
 
   // 後始末: 検証用に作成したレシピを削除
-  await page.getByRole('button', { name: 'このレシピを削除' }).click()
+  await page.getByRole('button', { name: ja.form.deleteRecipe }).click()
   await page.waitForTimeout(800)
 
   // --- STEP0-01: 手順0件のレシピ(バグ修正2026-07)。手順欄を空のまま保存すると
@@ -1783,8 +1792,8 @@ try {
   currentCheck = 'STEP0-01'
   await page.goto(`${BASE}/#/recipes/new`, { waitUntil: 'networkidle' })
   await page.waitForTimeout(500)
-  await page.getByPlaceholder('例: 肉じゃが').fill('E2E手順0件確認レシピ')
-  await page.getByPlaceholder('例: じゃがいも').first().fill('テスト材料')
+  await page.getByPlaceholder(ja.form.namePlaceholder).fill('E2E手順0件確認レシピ')
+  await page.getByPlaceholder(ja.form.ingredientNamePlaceholder).first().fill('テスト材料')
   // 手順本文は空のまま保存する(このレシピが手順0件になる)
   await page.getByRole('button', { name: '保存する' }).click()
   await page.waitForTimeout(800)
@@ -1801,7 +1810,7 @@ try {
   // 後始末: 検証用に作成したレシピを削除
   await page.locator('a[href*="/edit"]').first().click()
   await page.waitForTimeout(500)
-  await page.getByRole('button', { name: 'このレシピを削除' }).click()
+  await page.getByRole('button', { name: ja.form.deleteRecipe }).click()
   await page.waitForTimeout(800)
 
   // --- NUTSORT-01: 栄養並び替えの無料側(2026-07-13 Fable設計→2026-07-16 便T-4で5項目まとめて
@@ -1822,7 +1831,7 @@ try {
   )
   check(
     "NUTSORT-01(B'・便HU⑯) 無料のティーザーはPro側7項目の案内になっている",
-    nutSortPanelText.includes('エネルギー以外の7項目で並び替え（Pro機能）'),
+    nutSortPanelText.includes(ja.search.sortNutritionGate),
   )
   check(
     'NUTSORT-01(便HU⑯) ティーザーにPro側の項目名が並ぶ',
@@ -1925,7 +1934,7 @@ try {
           scrollWidth: document.documentElement.scrollWidth,
           clientWidth: document.documentElement.clientWidth,
         }))
-        const box = await w390Page.getByRole('button', { name: '人数を増やす' }).boundingBox()
+        const box = await w390Page.getByRole('button', { name: ja.detail.servingsUp }).boundingBox()
         const toggleBox = await costToggle.boundingBox()
         const headBox = await w390Page
           .getByRole('heading', { name: '材料', level: 2 })
@@ -1963,7 +1972,7 @@ try {
         view.togglePos === before.togglePos && view.plusPos === before.plusPos,
         `OFF=${JSON.stringify(before)} ON=${JSON.stringify(view)}`,
       )
-      await w390Page.getByRole('button', { name: '原価を編集' }).click()
+      await w390Page.getByRole('button', { name: ja.detail.priceEditShow }).click()
       await w390Page.waitForTimeout(400)
       const edit = await measure()
       check(
@@ -1985,7 +1994,7 @@ try {
       currentCheck = 'UI-390-02'
       await w390Page.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
       await w390Page.waitForTimeout(800)
-      await w390Page.getByPlaceholder('料理名・材料・タグ').fill('冷やしトマト')
+      await w390Page.getByPlaceholder(ja.search.placeholder).fill('冷やしトマト')
       await w390Page.waitForTimeout(600)
       await w390Page.getByText('冷やしトマトの浅漬け', { exact: true }).first().click()
       await w390Page.waitForTimeout(800)
@@ -2012,7 +2021,7 @@ try {
   {
     // 調理中モードの✕(左上)を押して閉じる
     const fsFocusClose = async (p) => {
-      await p.locator('.fixed.inset-0.z-50').getByRole('button', { name: '閉じる' }).first().click()
+      await p.locator('.fixed.inset-0.z-50').getByRole('button', { name: ja.common.close }).first().click()
       await p.waitForTimeout(400)
     }
     const fsBrowser = await chromium.launch()
@@ -2025,15 +2034,15 @@ try {
       const fsPage = await fsContext.newPage()
       await fsPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
       await fsPage.waitForTimeout(1200)
-      await fsPage.getByPlaceholder('料理名・材料・タグ').fill('冷やし茶碗蒸し')
+      await fsPage.getByPlaceholder(ja.search.placeholder).fill('冷やし茶碗蒸し')
       await fsPage.waitForTimeout(600)
       await fsPage.getByText('冷やし茶碗蒸し', { exact: true }).first().click()
       await fsPage.waitForTimeout(800)
-      await fsPage.getByText('調理中モードで見る').click()
+      await fsPage.getByText(ja.focus.open).click()
       await fsPage.waitForTimeout(500)
       // 診断で最大(101px)の欠落が出ていた手順4/8まで送る
       for (let i = 0; i < 3; i++) {
-        await fsPage.getByRole('button', { name: '次へ' }).click()
+        await fsPage.getByRole('button', { name: ja.focus.next }).click()
         await fsPage.waitForTimeout(250)
       }
       const reach = await fsPage.evaluate(() => {
@@ -2195,7 +2204,7 @@ try {
       )
       await fsPage
         .getByTestId('cook-text-size-modal')
-        .getByRole('button', { name: '閉じる' })
+        .getByRole('button', { name: ja.common.close })
         .click()
       await fsPage.waitForTimeout(300)
       const nestedClosed = await fsPage.evaluate(() => ({
@@ -2232,9 +2241,9 @@ try {
       const detailBody = await fsPage.textContent('body')
       check(
         'FOCUS-COPY-01 入口の説明で読み上げ・声の操作・タイマーまで伝わる',
-        detailBody.includes('大きな文字で1手順ずつ。読み上げ・声での操作・タイマーも使えます'),
+        detailBody.includes(ja.focus.openHint),
       )
-      await fsPage.getByText('調理中モードで見る').click()
+      await fsPage.getByText(ja.focus.open).click()
       await fsPage.waitForTimeout(500)
       const focusBody = await fsPage.textContent('body')
       // 2026-08-15 便GS（オーナー承認「ナビ側に揃えて」）で、声で使える言葉の案内は
@@ -2256,7 +2265,7 @@ try {
         'FOCUS-COPY-01 押す前は、いま効かない言葉を並べない',
         !focusBody.includes('「次へ」「戻って」で手順の移動'),
       )
-      const fsMic = fsPage.getByRole('button', { name: '声で操作' })
+      const fsMic = fsPage.getByRole('button', { name: ja.focus.micLabel })
       if (await fsMic.count()) {
         await fsMic.first().click()
         await fsPage.waitForTimeout(500)
@@ -2265,7 +2274,7 @@ try {
       check(
         'FOCUS-COPY-01 声のコマンドに「何が起きるか」が添えられている（押している間）',
         focusListeningBody.includes('「次へ」「戻って」で手順の移動') &&
-          focusListeningBody.includes('「タイマー」「ストップ」「再開」でタイマー操作'),
+          focusListeningBody.includes(ja.focus.micHintTimer),
       )
       const iconLabels = await fsPage.evaluate(() =>
         Array.from(document.querySelector('.fixed.inset-0.z-50').querySelectorAll('button span'))
@@ -2279,7 +2288,7 @@ try {
       )
       await fsPage
         .locator('.fixed.inset-0.z-50')
-        .getByRole('button', { name: 'タイマーを開く' })
+        .getByRole('button', { name: ja.timer.customOpenAria })
         .click()
       await fsPage.waitForTimeout(400)
       check(
@@ -2371,7 +2380,7 @@ try {
       // 汎用の「レシピセットを読み込む」欄(バックアップ形式の追加読み込み)は配布互換として存続する
       check(
         'SMK-14 汎用の「レシピセットを読み込む」欄は存続する',
-        settingsBody.includes('レシピセットを読み込む'),
+        settingsBody.includes(ja.settings.recipeSetTitle),
       )
 
       // (4) 旧 ?set= 付きURLで来ても、エラーにならず設定へ無害に着地する(取り込みは起きない)
@@ -2382,7 +2391,7 @@ try {
         'SMK-14 ?set=付きURLは無害に設定へ着地する(取り込みは起きない・エラーも出ない)',
         !/\d+[品件]追加しました/.test(afterSetBody) &&
           !afterSetBody.includes('見つかりませんでした') &&
-          afterSetBody.includes('NG食材（アレルギー・苦手）'),
+          afterSetBody.includes(ja.settings.ngTitle),
       )
       check(
         'SMK-14 ?set=付きURLの set パラメータは静かに取り除かれる',
@@ -2408,19 +2417,19 @@ try {
     const body = await page.textContent('body')
     check(
       'SETTINGS-TAB-01 1本スクロール: 個人設定(NG食材)/レシピ(セット読み込み)/バックアップ(書き出し)/Pro(Pro版)の4節が同時に存在する',
-      body.includes('NG食材（アレルギー・苦手）') &&
-        body.includes('レシピセットを読み込む') &&
+      body.includes(ja.settings.ngTitle) &&
+        body.includes(ja.settings.recipeSetTitle) &&
         body.includes('ファイルに書き出す') &&
         body.includes('Pro版'),
     )
   }
   check(
     'SETTINGS-TAB-01(便DH) 目次チップ(個人設定/レシピ/バックアップ/Pro/アプリ)が5つとも存在する',
-    (await page.getByRole('button', { name: '個人設定', exact: true }).count()) === 1 &&
+    (await page.getByRole('button', { name: ja.settings.tabBasic, exact: true }).count()) === 1 &&
       (await page.getByRole('button', { name: 'レシピ', exact: true }).count()) === 1 &&
-      (await page.getByRole('button', { name: 'バックアップ', exact: true }).count()) === 1 &&
+      (await page.getByRole('button', { name: ja.settings.tabBackup, exact: true }).count()) === 1 &&
       (await page.getByRole('button', { name: 'Pro', exact: true }).count()) === 1 &&
-      (await page.getByRole('button', { name: 'アプリ', exact: true }).count()) === 1,
+      (await page.getByRole('button', { name: ja.settings.tocAbout, exact: true }).count()) === 1,
   )
   // 2026-08-02: 目次チップは5列。390px幅で1行に収まり、文字が折り返して高さが揃わなくならないこと
   {
@@ -2476,7 +2485,7 @@ try {
     `proTopBefore=${proTopBefore} proTopAfter=${proTopAfter} atBottom=${proAtBottom}`,
   )
   // 「バックアップ」チップ: バックアップ節の先頭が上端付近へ来る
-  await page.getByRole('button', { name: 'バックアップ', exact: true }).click()
+  await page.getByRole('button', { name: ja.settings.tabBackup, exact: true }).click()
   await waitScrollSettled()
   const backupChipTop = await settingsSectionTop('section-backup')
   check(
@@ -2549,9 +2558,9 @@ try {
   await page.waitForTimeout(200)
   check(
     'BANNER-01 全節共通のバックアップ状態バナーが見える(未実施表示)',
-    (await page.textContent('body')).includes('まだバックアップしていません'),
+    stripZwspText(await page.textContent('body')).includes(ja.settings.backupNever),
   )
-  await page.getByRole('button', { name: '書き出しへ', exact: true }).click()
+  await page.getByRole('button', { name: ja.settings.bannerSaveNow, exact: true }).click()
   await waitScrollSettled()
   check(
     'BANNER-01 「書き出しへ」でバックアップの①書き出しカードへスクロールする(ボタンがDOMにある)',
@@ -2610,13 +2619,13 @@ try {
   ]
   check(
     'MOVEGUIDE-01 「機種変更するときは」の折りたたみ見出しが見える',
-    (await page.textContent('body')).includes(ja.settings.moveGuideToggle),
+    stripZwspText(await page.textContent('body')).includes(ja.settings.moveGuideToggle),
   )
   check(
     'MOVEGUIDE-01 既定は畳まれていて手順は見えない',
     !(await page.textContent('body')).replaceAll('​', '').includes(ja.settings.moveGuideStep1),
   )
-  await page.getByRole('button', { name: '機種変更するときは', exact: true }).click()
+  await page.getByRole('button', { name: ja.settings.moveGuideToggle, exact: true }).click()
   await page.waitForTimeout(300)
   {
     const guideText = (await page.textContent('body')).replaceAll('​', '')
@@ -2683,7 +2692,7 @@ try {
     )
   }
   // 畳んで元に戻す(以降のチェックに影響しないように)
-  await page.getByRole('button', { name: '機種変更するときは', exact: true }).click()
+  await page.getByRole('button', { name: ja.settings.moveGuideToggle, exact: true }).click()
   await page.waitForTimeout(200)
 
   currentCheck = 'BACKUPCARDS-01'
@@ -2692,7 +2701,7 @@ try {
   // (2026-08-02 オーナー指示で②の見出し・ボタン文言を短くした)
   check(
     'BACKUPCARDS-01 「バックアップを読み込む」の見出しが見える(カード②)',
-    (await page.textContent('body')).includes('バックアップを読み込む'),
+    stripZwspText(await page.textContent('body')).includes(ja.settings.backupRestoreTitle),
   )
   check(
     'BACKUPCARDS-01 「今のデータに追加」「データを上書き」の両ボタンが同時に見える(並べて配置)',
@@ -2709,14 +2718,14 @@ try {
   // 存在確認までとし、クリックはしない(refreshApp()自体はscripts/test-logic.mjsのモックテストで検証済み)。
   check(
     'REFRESH-APP-01 「アプリの表示を修復する」ボタンが見える(2026-07-17文言変更)',
-    (await page.textContent('body')).includes('アプリの表示を修復する'),
+    stripZwspText(await page.textContent('body')).includes(ja.settings.refreshAppButton),
   )
   // 2026-08-22 便JJ: 文言はオーナー指示で書き換わる（「だけです」「はそのまま残ります」を外した）ので、
   // 書き写さずに ja.ts から読む（禁じ手②の文字列べた書きを避ける）
   check(
     'REFRESH-APP-01 説明文に「消えるもの」「残るもの」の内訳がある(修正4)',
-    (await page.textContent('body')).includes(ja.settings.refreshAppWhatIsCleared) &&
-      (await page.textContent('body')).includes(ja.settings.refreshAppWhatRemains),
+    stripZwspText(await page.textContent('body')).includes(ja.settings.refreshAppWhatIsCleared) &&
+      stripZwspText(await page.textContent('body')).includes(ja.settings.refreshAppWhatRemains),
   )
   {
     // 2026-08-20 便IJ: 153字の1文を3行に分けたので、文言を書き写した判定は落ちた（禁じ手②）。
@@ -2760,7 +2769,7 @@ try {
     const recipeSecTop = await settingsSectionTop('section-recipe')
     check(
       'SETTINGS-TAB-01 ?section=recipeはレシピ節へ自動スクロールする(見出しがDOMにあり上端付近)',
-      (await page.textContent('body')).includes('レシピセットを読み込む') &&
+      stripZwspText(await page.textContent('body')).includes(ja.settings.recipeSetTitle) &&
         recipeSecTop !== null &&
         recipeSecTop >= -5 &&
         recipeSecTop < 220,
@@ -2786,16 +2795,16 @@ try {
   }
   check(
     'SETTINGS-TAB-01 1本スクロールなので?section=proでも個人設定節(NG食材)は同じページに存在する',
-    (await page.textContent('body')).includes('NG食材（アレルギー・苦手）'),
+    stripZwspText(await page.textContent('body')).includes(ja.settings.ngTitle),
   )
 
   // --- TOAST-01: 設定操作の結果メッセージがトーストで表示され、数秒で自動的に消える
   // (2026-07-12オーナー実機フィードバック。以前はページ最上部固定でスクロールしないと見えなかった。
   // 自動非表示は2026-07-13 UIペルソナQAで4.5秒→6秒に延長) ---
   currentCheck = 'TOAST-01'
-  await page.getByRole('button', { name: '個人設定', exact: true }).click()
+  await page.getByRole('button', { name: ja.settings.tabBasic, exact: true }).click()
   await page.waitForTimeout(200)
-  await page.getByPlaceholder('例: えび').fill('E2Eトースト確認食材')
+  await page.getByPlaceholder(ja.settings.ngPlaceholder).fill('E2Eトースト確認食材')
   await page.getByRole('button', { name: '追加', exact: true }).click()
   await page.waitForTimeout(300)
   check(
@@ -2821,20 +2830,20 @@ try {
   await page.waitForTimeout(500)
   await page.getByText('肉じゃが', { exact: true }).first().click()
   await page.waitForTimeout(500)
-  await page.getByRole('button', { name: 'お気に入りに追加' }).click()
+  await page.getByRole('button', { name: ja.detail.favoriteOn }).click()
   await page.waitForTimeout(300)
   check(
     'STARTER-RELOAD-01 肉じゃがをお気に入りに追加できる',
-    await page.getByRole('button', { name: 'お気に入りを解除' }).isVisible(),
+    await page.getByRole('button', { name: ja.detail.favoriteOff }).isVisible(),
   )
 
   await page.goto(`${BASE}/#/settings?section=recipe`, { waitUntil: 'networkidle' })
   await page.waitForTimeout(300)
-  await page.getByRole('button', { name: '基本レシピを入れ直す', exact: true }).click()
+  await page.getByRole('button', { name: ja.settings.starterReload, exact: true }).click()
   await page.waitForTimeout(500)
   check(
     'STARTER-RELOAD-01 入れ直し完了のトーストが表示される',
-    (await page.textContent('body')).includes('基本レシピを入れ直しました'),
+    stripZwspText(await page.textContent('body')).includes(ja.settings.starterReloadDone),
   )
 
   await page.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
@@ -2843,7 +2852,7 @@ try {
   await page.waitForTimeout(500)
   check(
     'STARTER-RELOAD-01 入れ直し後もお気に入りのまま(ユーザーデータ保持)',
-    await page.getByRole('button', { name: 'お気に入りを解除' }).isVisible(),
+    await page.getByRole('button', { name: ja.detail.favoriteOff }).isVisible(),
   )
 
   // --- SCROLL-01: 一覧のスクロール位置復元(iPhone SE2実機フィードバック 2026-07-11)。
@@ -2880,7 +2889,7 @@ try {
       })
       await wkPage.waitForTimeout(600)
       check('SCROLL-01 詳細へ遷移', /#\/recipes\/\d+/.test(wkPage.url()), `現在URL: ${wkPage.url()}`)
-      await wkPage.getByRole('button', { name: '戻る' }).click()
+      await wkPage.getByRole('button', { name: ja.common.back }).click()
       await wkPage.waitForTimeout(800)
       const scrollAfter = await wkPage.evaluate(() => window.scrollY)
       check(
@@ -2908,7 +2917,7 @@ try {
         `現在URL: ${wkPage.url()}`,
       )
       await wkPage.waitForTimeout(60000) // 詳細画面に実際に60秒滞在する
-      await wkPage.getByRole('button', { name: '戻る' }).click()
+      await wkPage.getByRole('button', { name: ja.common.back }).click()
       await wkPage.waitForTimeout(800)
       const longScrollAfter = await wkPage.evaluate(() => window.scrollY)
       check(
@@ -3028,7 +3037,7 @@ try {
         `x=${dateBox?.x} width=${dateBox?.width}`,
       )
       // 窓(モーダル)の保存ボタンは「記録する」(過去記録を後から編集するときの「保存する」とは別物)
-      await wkPage2.getByRole('button', { name: '記録する', exact: true }).click()
+      await wkPage2.getByRole('button', { name: ja.detail.cookedSave, exact: true }).click()
       await wkPage2.waitForTimeout(500)
       const savedText = await wkPage2.textContent('body')
       check('LOG-01 保存すると「作った記録」に反映される', savedText.includes('作った記録'))
@@ -3331,7 +3340,7 @@ try {
         .catch(() => false)
       check('LOG-PHOTO-01 写真を選ぶと窓内にプレビューが出る', previewVisible)
 
-      await photoPage.getByRole('button', { name: '記録する', exact: true }).click()
+      await photoPage.getByRole('button', { name: ja.detail.cookedSave, exact: true }).click()
       await photoPage.waitForTimeout(500)
       const thumbButton = photoPage.locator('button[aria-label="写真を拡大表示"]').first()
       check('LOG-PHOTO-01 保存すると記録一覧にサムネイルが出る', await thumbButton.isVisible())
@@ -3394,7 +3403,7 @@ try {
       // サムネ再出現、の一往復を確認する ---
       await photoPage.locator('button[aria-label="この記録を編集"]').first().click()
       await photoPage.waitForTimeout(300)
-      const removePhotoBtn = photoPage.getByRole('button', { name: 'この記録の写真を削除' })
+      const removePhotoBtn = photoPage.getByRole('button', { name: ja.detail.cookedLogPhotoRemove })
       check('LOG-EDIT-PHOTO-01 編集を開くと既存の写真の削除ボタンが出る', await removePhotoBtn.isVisible())
       await removePhotoBtn.click()
       await photoPage.waitForTimeout(200)
@@ -3417,7 +3426,7 @@ try {
         .setInputFiles({ name: 'test2.png', mimeType: 'image/png', buffer: tinyPng })
       // 画像はresizePhoto(canvas圧縮)を経由して非同期にstateへ入るため、固定500msでは
       // スイート負荷時に間に合わないことがある(単体では動作確認済み)。出現をポーリング待ちにする
-      const reAddRemoveBtn = photoPage.getByRole('button', { name: 'この記録の写真を削除' })
+      const reAddRemoveBtn = photoPage.getByRole('button', { name: ja.detail.cookedLogPhotoRemove })
       await reAddRemoveBtn.waitFor({ state: 'visible', timeout: 8000 }).catch(() => {})
       check(
         'LOG-EDIT-PHOTO-01 編集中に写真を選ぶとプレビューが出る',
@@ -3505,7 +3514,7 @@ try {
       await nutPage.waitForTimeout(800)
       await nutPage.getByText('肉じゃが', { exact: true }).first().click()
       await nutPage.waitForTimeout(600)
-      await nutPage.getByRole('button', { name: '栄養価の概算を詳しく見る' }).click()
+      await nutPage.getByRole('button', { name: ja.nutrition.toggleExpand }).click()
       await nutPage.waitForTimeout(300)
       const unlockedText = await nutPage.textContent('body')
       check('NUT-02 Pro解錠済みでたんぱく質が表示される', unlockedText.includes('たんぱく質'))
@@ -3556,7 +3565,7 @@ try {
         await nutPage.waitForTimeout(600)
         await nutPage.getByText('肉じゃが', { exact: true }).first().click()
         await nutPage.waitForTimeout(600)
-        await nutPage.getByRole('button', { name: '栄養価の概算を詳しく見る' }).click()
+        await nutPage.getByRole('button', { name: ja.nutrition.toggleExpand }).click()
         await nutPage.waitForTimeout(300)
       }
       check('NUT-02 Pro解錠済みで脂質が表示される', unlockedText.includes('脂質'))
@@ -3608,10 +3617,10 @@ try {
       // 算出不能なレシピを1件作る(材料名が成分表のどの食品にも名寄せできない)
       await nutPage.goto(`${BASE}/#/recipes/new`, { waitUntil: 'networkidle' })
       await nutPage.waitForTimeout(500)
-      await nutPage.getByPlaceholder('例: 肉じゃが').fill('E2E栄養並び替え確認レシピ')
-      await nutPage.getByPlaceholder('例: じゃがいも').first().fill('謎のたべもの')
+      await nutPage.getByPlaceholder(ja.form.namePlaceholder).fill('E2E栄養並び替え確認レシピ')
+      await nutPage.getByPlaceholder(ja.form.ingredientNamePlaceholder).first().fill('謎のたべもの')
       await nutPage
-        .getByPlaceholder('例: じゃがいもを一口大に切る')
+        .getByPlaceholder(ja.form.stepTextPlaceholder)
         .first()
         .fill('謎のたべものを盛り付ける')
       await nutPage.getByRole('button', { name: '保存する' }).click()
@@ -3708,7 +3717,7 @@ try {
         kcalBadgeInfo.unknownHasBadge === false && kcalBadgeInfo.withBadge > 0,
         `unknownHasBadge=${kcalBadgeInfo.unknownHasBadge} バッジ付き=${kcalBadgeInfo.withBadge}/${kcalBadgeInfo.total}`,
       )
-      await nutPage.getByRole('button', { name: '降順', exact: true }).click()
+      await nutPage.getByRole('button', { name: ja.search.sortDesc, exact: true }).click()
       await nutPage.waitForTimeout(500)
       const kcalDescTitles = await nutCardTitles()
       check(
@@ -3875,8 +3884,8 @@ try {
         }),
       )
 
-      const unlockInput = ulPage.getByPlaceholder('解錠コード (例: UR-XXXX-XXXX)')
-      const unlockButton = ulPage.getByRole('button', { name: '解錠する', exact: true })
+      const unlockInput = ulPage.getByPlaceholder(ja.settings.unlockCodePlaceholder)
+      const unlockButton = ulPage.getByRole('button', { name: ja.settings.unlockActivate, exact: true })
 
       // UR-以外のprefixはコード形式エラー
       await unlockInput.fill('XX-0000-0000')
@@ -3908,7 +3917,7 @@ try {
       const afterProText = await ulPage.textContent('body')
       check(
         'UNLOCK-01(a) UR-コードでPro版が解錠される',
-        afterProText.includes('Pro版をご利用いただきありがとうございます'),
+        afterProText.includes(ja.settings.proActivatedTitle),
       )
       check(
         'UNLOCK-01(a) 解錠済みコードはマスク表示される(末尾4文字のみ・UR-****2VSZ)',
@@ -3920,7 +3929,7 @@ try {
       )
 
       // コピーボタンで生のコードがクリップボードへ入ること
-      await ulPage.getByRole('button', { name: 'コピー', exact: true }).first().click()
+      await ulPage.getByRole('button', { name: ja.settings.unlockCodeCopy, exact: true }).first().click()
       await ulPage.waitForTimeout(300)
       const copiedText = await ulPage.evaluate(() => navigator.clipboard.readText())
       check(
@@ -3978,11 +3987,11 @@ try {
       const proSectionText = await ulbPage.textContent('body')
       check(
         'UNLOCK-01(b) Pro解錠済み時は入力欄自体が表示されない(旧: disabled入力の後継)',
-        !(await ulbPage.getByPlaceholder('解錠コード (例: UR-XXXX-XXXX)').isVisible()),
+        !(await ulbPage.getByPlaceholder(ja.settings.unlockCodePlaceholder).isVisible()),
       )
       check(
         'UNLOCK-01(b) Pro版の機能一覧が解錠中ずっと表示される(2026-07-13 UI改善: 一時表示から常設化)',
-        proSectionText.includes('使えるようになった機能') && proSectionText.includes('並行調理ナビ'),
+        proSectionText.includes(ja.settings.proActivatedFeaturesTitle) && proSectionText.includes('並行調理ナビ'),
       )
     } finally {
       await ulbBrowser.close()
@@ -4141,10 +4150,10 @@ try {
       await obPage.getByText('肉じゃが', { exact: true }).first().click()
       await obPage.waitForTimeout(500)
       const targetRecipeId = Number(obPage.url().match(/#\/recipes\/(\d+)/)?.[1])
-      await obPage.getByRole('button', { name: '今日の献立に追加' }).click()
+      await obPage.getByRole('button', { name: ja.detail.todayAdd }).click()
       await obPage.waitForTimeout(300)
       // 2026-07-17 便Z-1: ボタン押下でスロット振り分け窓が開く。従来どおりの直接追加(枠なし)は「決めない」
-      await obPage.getByRole('button', { name: '朝食・昼食・夕食を決めずに今日の献立に追加' }).click()
+      await obPage.getByRole('button', { name: ja.detail.todaySlotUndecided }).click()
       await obPage.waitForTimeout(300)
 
       // 2) 同じレシピを週間献立にも登録する(IndexedDB直接書き込み。理由は上のコメント参照)
@@ -4194,7 +4203,7 @@ try {
       // 3) 対象レシピを編集画面の「このレシピを削除」で削除する(確認ダイアログは自動承諾)
       await obPage.goto(`${BASE}/#/recipes/${targetRecipeId}/edit`, { waitUntil: 'networkidle' })
       await obPage.waitForTimeout(600)
-      await obPage.getByRole('button', { name: 'このレシピを削除' }).click()
+      await obPage.getByRole('button', { name: ja.form.deleteRecipe }).click()
       await obPage.waitForTimeout(800)
 
       // 4) 孤児が残っていない: 週間献立・今日の献立のどちらにも対象レシピの行が無い
@@ -4250,17 +4259,17 @@ try {
       // 従来どおりの直接追加=「決めない」を選ぶ1手が増えた)
       await taPage.getByText('肉じゃが', { exact: true }).first().click()
       await taPage.waitForTimeout(500)
-      await taPage.getByRole('button', { name: '今日の献立に追加' }).click()
+      await taPage.getByRole('button', { name: ja.detail.todayAdd }).click()
       await taPage.waitForTimeout(300)
-      await taPage.getByRole('button', { name: '朝食・昼食・夕食を決めずに今日の献立に追加' }).click()
+      await taPage.getByRole('button', { name: ja.detail.todaySlotUndecided }).click()
       await taPage.waitForTimeout(300)
       await taPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
       await taPage.waitForTimeout(500)
       await taPage.getByText('カレーライス', { exact: true }).first().click()
       await taPage.waitForTimeout(500)
-      await taPage.getByRole('button', { name: '今日の献立に追加' }).click()
+      await taPage.getByRole('button', { name: ja.detail.todayAdd }).click()
       await taPage.waitForTimeout(300)
-      await taPage.getByRole('button', { name: '朝食・昼食・夕食を決めずに今日の献立に追加' }).click()
+      await taPage.getByRole('button', { name: ja.detail.todaySlotUndecided }).click()
       await taPage.waitForTimeout(300)
 
       await taPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
@@ -4273,7 +4282,7 @@ try {
 
       // 2026-08-20 便II・⑥: 「全て作った！」は整理モードの中に移った
       await openDayOrganize(taPage)
-      await taPage.getByRole('button', { name: '全て作った！' }).click()
+      await taPage.getByRole('button', { name: ja.mealPlan.todayMarkAllCooked }).click()
       await taPage.waitForTimeout(800)
       // 便DP-1: 押す前の確認文が規約F(何件・何が消える・何が残る)を満たす
       check(
@@ -4294,7 +4303,7 @@ try {
       check(
         'TODAYALL-01 「全て作った！」の後、今日の献立が空になる(clearが実行される)',
         // 料理名は「最近作ったもの」にも出るので、本文の有無では測らない(禁じ手②)
-        (await taPage.getByRole('heading', { name: '今日の献立' }).count()) === 0,
+        (await taPage.getByRole('heading', { name: ja.mealPlan.todayTitle }).count()) === 0,
       )
       // 便DP-1: 記録したあとは件数つきのトーストと「元に戻す」を出す
       check(
@@ -4378,9 +4387,9 @@ try {
       await tuPage.waitForTimeout(1800) // 初回シード完了待ち
       await tuPage.getByText('肉じゃが', { exact: true }).first().click()
       await tuPage.waitForTimeout(500)
-      await tuPage.getByRole('button', { name: '今日の献立に追加' }).click()
+      await tuPage.getByRole('button', { name: ja.detail.todayAdd }).click()
       await tuPage.waitForTimeout(300)
-      await tuPage.getByRole('button', { name: '朝食・昼食・夕食を決めずに今日の献立に追加' }).click()
+      await tuPage.getByRole('button', { name: ja.detail.todaySlotUndecided }).click()
       await tuPage.waitForTimeout(300)
 
       await tuPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
@@ -4462,7 +4471,7 @@ try {
       )
       check(
         'TODAYUNDO-01 取り消したことを結果メッセージで伝える',
-        ((await tuPage.textContent('body')) ?? '').includes('作った記録を取り消して、今日の献立に戻しました'),
+        stripZwspText(await tuPage.textContent('body')).includes(ja.mealPlan.todayCookedUndone),
       )
     } finally {
       await tuBrowser.close()
@@ -4512,9 +4521,9 @@ try {
       await puPage.waitForTimeout(1800) // 初回シード完了待ち
       await puPage.getByText('肉じゃが', { exact: true }).first().click()
       await puPage.waitForTimeout(500)
-      await puPage.getByRole('button', { name: '今日の献立に追加' }).click()
+      await puPage.getByRole('button', { name: ja.detail.todayAdd }).click()
       await puPage.waitForTimeout(300)
-      await puPage.getByRole('button', { name: '夕食', exact: true }).click()
+      await puPage.getByRole('button', { name: ja.mealPlan.slot.dinner, exact: true }).click()
       await puPage.waitForTimeout(500)
       await puPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
       await puPage.waitForTimeout(1200)
@@ -4572,7 +4581,7 @@ try {
       }
 
       // (2) 週タブの行の×(旧: 無言で消えていた)
-      await puPage.getByRole('button', { name: '週', exact: true }).click()
+      await puPage.getByRole('button', { name: ja.mealPlan.viewWeek, exact: true }).click()
       await openAllWeekDays(puPage) // 便ID・⑦: 畳む既定になったので、カードの中を触る前に開く
       await puPage.waitForTimeout(800)
       // 2026-08-22 便IV: ×（献立から外す）は編集モードの中にしか出さない
@@ -4678,18 +4687,18 @@ try {
       // ①今週の献立の予定に入る品(夕食) ②レシピ一覧から選択中に入る品(食事を決めずに追加)
       await doPage.getByText('肉じゃが', { exact: true }).first().click()
       await doPage.waitForTimeout(500)
-      await doPage.getByRole('button', { name: '今日の献立に追加' }).click()
+      await doPage.getByRole('button', { name: ja.detail.todayAdd }).click()
       await doPage.waitForTimeout(300)
-      await doPage.getByRole('button', { name: '夕食', exact: true }).click()
+      await doPage.getByRole('button', { name: ja.mealPlan.slot.dinner, exact: true }).click()
       await doPage.waitForTimeout(600)
       await doPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
       await doPage.waitForTimeout(900)
       await doPage.getByText('ほうれん草のおひたし', { exact: true }).first().click()
       await doPage.waitForTimeout(500)
-      await doPage.getByRole('button', { name: '今日の献立に追加' }).click()
+      await doPage.getByRole('button', { name: ja.detail.todayAdd }).click()
       await doPage.waitForTimeout(300)
       await doPage
-        .getByRole('button', { name: '朝食・昼食・夕食を決めずに今日の献立に追加' })
+        .getByRole('button', { name: ja.detail.todaySlotUndecided })
         .click()
       await doPage.waitForTimeout(600)
 
@@ -5022,18 +5031,18 @@ try {
       await dsPage.waitForTimeout(1800) // 初回シード完了待ち
       await dsPage.getByText(dsPlanned, { exact: true }).first().click()
       await dsPage.waitForTimeout(500)
-      await dsPage.getByRole('button', { name: '今日の献立に追加' }).click()
+      await dsPage.getByRole('button', { name: ja.detail.todayAdd }).click()
       await dsPage.waitForTimeout(300)
-      await dsPage.getByRole('button', { name: '夕食', exact: true }).click()
+      await dsPage.getByRole('button', { name: ja.mealPlan.slot.dinner, exact: true }).click()
       await dsPage.waitForTimeout(600)
       await dsPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
       await dsPage.waitForTimeout(900)
       await dsPage.getByText(dsPicked, { exact: true }).first().click()
       await dsPage.waitForTimeout(500)
-      await dsPage.getByRole('button', { name: '今日の献立に追加' }).click()
+      await dsPage.getByRole('button', { name: ja.detail.todayAdd }).click()
       await dsPage.waitForTimeout(300)
       await dsPage
-        .getByRole('button', { name: '朝食・昼食・夕食を決めずに今日の献立に追加' })
+        .getByRole('button', { name: ja.detail.todaySlotUndecided })
         .click()
       await dsPage.waitForTimeout(600)
 
@@ -5464,12 +5473,12 @@ try {
       await csPage.waitForTimeout(500)
 
       // ---------- (b) 週タブ: 過ぎた日のカード(同じ「小」のカードを使う場所) ----------
-      await csPage.getByRole('button', { name: '週', exact: true }).click()
+      await csPage.getByRole('button', { name: ja.mealPlan.viewWeek, exact: true }).click()
       await csPage.waitForTimeout(700)
       // 昨日のカードが出る週まで送る(前へも後ろへも送れる形。曜日・月替わりに依らない)
       for (let i = 0; i < 3; i++) {
         if ((await csPage.locator(`section[data-date="${csPast}"]`).count()) > 0) break
-        await csPage.getByRole('button', { name: '前の週', exact: true }).click()
+        await csPage.getByRole('button', { name: ja.mealPlan.prevWeek, exact: true }).click()
         await csPage.waitForTimeout(600)
       }
       const csPastSection = csPage.locator(`section[data-date="${csPast}"]`)
@@ -5552,7 +5561,7 @@ try {
       await woPage.waitForTimeout(900)
       for (let i = 0; i < 2; i++) {
         if ((await woPage.locator(`button[data-date="${woTarget}"]`).count()) > 0) break
-        await woPage.getByRole('button', { name: '前の月', exact: true }).click()
+        await woPage.getByRole('button', { name: ja.mealPlan.prevMonth, exact: true }).click()
         await woPage.waitForTimeout(700)
       }
       const woCell = woPage.locator(`button[data-date="${woTarget}"]`)
@@ -5570,7 +5579,7 @@ try {
         check(
           'WEEKOPEN-01 「この週を開く」で週タブに移る',
           (await woPage
-            .getByRole('button', { name: '週', exact: true })
+            .getByRole('button', { name: ja.mealPlan.viewWeek, exact: true })
             .getAttribute('aria-pressed')) === 'true',
         )
         const woSection = woPage.locator(`section[data-date="${woTarget}"]`)
@@ -5754,17 +5763,17 @@ try {
       const bcDetailUrl = bcPage.url()
 
       // (1) 朝食・昼食・夕食のどれに入れますか？
-      await bcPage.getByRole('button', { name: '今日の献立に追加' }).click()
+      await bcPage.getByRole('button', { name: ja.detail.todayAdd }).click()
       await bcPage.waitForTimeout(400)
       check(
         'BACKCLOSE-01 前提: 「朝食・昼食・夕食のどれに入れますか？」が開く',
-        ((await bcPage.textContent('body')) ?? '').includes('朝食・昼食・夕食のどれに入れますか？'),
+        stripZwspText(await bcPage.textContent('body')).includes(ja.detail.todaySlotDialogTitle),
       )
       await bcPage.goBack()
       await bcPage.waitForTimeout(700)
       check(
         'BACKCLOSE-01 「戻る」で「朝食・昼食・夕食のどれに入れますか？」の窓が閉じる',
-        !((await bcPage.textContent('body')) ?? '').includes('朝食・昼食・夕食のどれに入れますか？'),
+        !((await bcPage.textContent('body')) ?? '').includes(ja.detail.todaySlotDialogTitle),
       )
       check(
         'BACKCLOSE-01 「戻る」で画面は動かない(レシピ詳細のまま)',
@@ -5871,15 +5880,15 @@ try {
       // ×とチェックの丸が画面に出るところまで仕込む
       await tpPage.getByText('肉じゃが', { exact: true }).first().click()
       await tpPage.waitForTimeout(500)
-      await tpPage.getByRole('button', { name: '今日の献立に追加' }).click()
+      await tpPage.getByRole('button', { name: ja.detail.todayAdd }).click()
       await tpPage.waitForTimeout(300)
-      await tpPage.getByRole('button', { name: '夕食', exact: true }).click()
+      await tpPage.getByRole('button', { name: ja.mealPlan.slot.dinner, exact: true }).click()
       await tpPage.waitForTimeout(500)
       await tpPage.goto(`${BASE}/#/shopping`, { waitUntil: 'networkidle' })
       await tpPage.waitForTimeout(900)
       await tpPage.getByRole('button', { name: '買い物メモ', exact: true }).first().click()
       await tpPage.waitForTimeout(500)
-      await tpPage.getByPlaceholder('食材を入力').fill('じゃがいも')
+      await tpPage.getByPlaceholder(ja.shopping.manualPlaceholder).fill('じゃがいも')
       await tpPage.getByRole('button', { name: '追加', exact: true }).click()
       await tpPage.waitForTimeout(600)
       await tapCheck('買い物メモ')
@@ -5892,7 +5901,7 @@ try {
       await openDayOrganize(tpPage)
       await tpPage.waitForTimeout(400)
       await tapCheck('献立(日)')
-      await tpPage.getByRole('button', { name: '週', exact: true }).click()
+      await tpPage.getByRole('button', { name: ja.mealPlan.viewWeek, exact: true }).click()
       await openAllWeekDays(tpPage) // 便ID・⑦: 畳む既定になったので、カードの中を触る前に開く
       await tpPage.waitForTimeout(800)
       // 2026-08-22 便IV: 週の×も「編集」の中へ移った（日タブの「整理」と同じ扱い）。
@@ -5914,7 +5923,7 @@ try {
       await tpPage.waitForTimeout(1000)
       await tpPage.getByText('カレーライス', { exact: true }).first().click()
       await tpPage.waitForTimeout(600)
-      await tpPage.getByRole('button', { name: '今日の献立に追加' }).click()
+      await tpPage.getByRole('button', { name: ja.detail.todayAdd }).click()
       await tpPage.waitForTimeout(500)
       await tapCheck('窓(朝食・昼食・夕食のどれに入れますか？)')
     } finally {
@@ -5959,7 +5968,7 @@ try {
       await tsPage.waitForTimeout(1800) // 初回シード完了待ち
 
       // ①週タブへ切り替え、今日のカードの空き枠に「肉じゃが」を割り当てる
-      await tsPage.getByRole('button', { name: '週', exact: true }).click()
+      await tsPage.getByRole('button', { name: ja.mealPlan.viewWeek, exact: true }).click()
       await openAllWeekDays(tsPage) // 便ID・⑦: 畳む既定になったので、カードの中を触る前に開く
       await tsPage.waitForTimeout(500)
       const tsTodayCard = tsPage.locator(`section[data-date="${tsToday}"]`)
@@ -5968,9 +5977,9 @@ try {
         'TODAYSYNC-01 前提: 今日のカードを編集モードにできた（便IV）',
         (await openWeekDayEdit(tsPage, tsToday)) === true,
       )
-      await tsTodayCard.getByRole('button', { name: 'レシピを選ぶ', exact: true }).first().click()
+      await tsTodayCard.getByRole('button', { name: ja.mealPlan.emptyAssign, exact: true }).first().click()
       await tsPage.waitForTimeout(400)
-      await tsPage.getByPlaceholder('レシピ名で絞り込み').fill('肉じゃが')
+      await tsPage.getByPlaceholder(ja.mealPlan.pickSearchPlaceholder).fill('肉じゃが')
       await tsPage.waitForTimeout(300)
       await tsPage.getByText('肉じゃが', { exact: true }).first().click()
       await tsPage.waitForTimeout(500)
@@ -5995,11 +6004,11 @@ try {
       )
 
       // ③週タブへ戻り、その割り当てを外す
-      await tsPage.getByRole('button', { name: '週', exact: true }).click()
+      await tsPage.getByRole('button', { name: ja.mealPlan.viewWeek, exact: true }).click()
       await openAllWeekDays(tsPage) // 便ID・⑦: 畳む既定になったので、カードの中を触る前に開く
       await tsPage.waitForTimeout(600)
       await openWeekDayEdit(tsPage, tsToday) // 便IV: ×は編集モードの中
-      await tsTodayCard.getByRole('button', { name: 'この割り当てを外す' }).first().click()
+      await tsTodayCard.getByRole('button', { name: ja.mealPlan.clear }).first().click()
       await tsPage.waitForTimeout(900)
 
       // ④今日の献立から写しも片付いている(バグの本体)
@@ -6015,8 +6024,8 @@ try {
       check(
         'TODAYSYNC-01(便DP-4) 日タブに「レシピ一覧から選択中」として取り残されない',
         // 2026-08-17 便HI: 空の日は「今日の献立」の見出しごと出さないので、そちらで測る
-        !tsDayText.includes('レシピ一覧から選択中') &&
-          (await tsPage.getByRole('heading', { name: '今日の献立' }).count()) === 0,
+        !tsDayText.includes(ja.mealPlan.todayPickedLabel) &&
+          (await tsPage.getByRole('heading', { name: ja.mealPlan.todayTitle }).count()) === 0,
       )
 
       // 自分でレシピ一覧から足した品は巻き込まない(印が無いものは消さない)
@@ -6024,9 +6033,9 @@ try {
       await tsPage.waitForTimeout(600)
       await tsPage.getByText('カレーライス', { exact: true }).first().click()
       await tsPage.waitForTimeout(500)
-      await tsPage.getByRole('button', { name: '今日の献立に追加' }).click()
+      await tsPage.getByRole('button', { name: ja.detail.todayAdd }).click()
       await tsPage.waitForTimeout(300)
-      await tsPage.getByRole('button', { name: '朝食・昼食・夕食を決めずに今日の献立に追加' }).click()
+      await tsPage.getByRole('button', { name: ja.detail.todaySlotUndecided }).click()
       await tsPage.waitForTimeout(300)
       await tsPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
       await tsPage.waitForTimeout(900)
@@ -6064,12 +6073,12 @@ try {
     try {
       await wuPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
       await wuPage.waitForTimeout(1800) // 初回シード完了待ち
-      await wuPage.getByRole('button', { name: '週', exact: true }).click()
+      await wuPage.getByRole('button', { name: ja.mealPlan.viewWeek, exact: true }).click()
       await openAllWeekDays(wuPage) // 便ID・⑦: 畳む既定になったので、カードの中を触る前に開く
       await wuPage.waitForTimeout(600)
 
       // DP-6: 既定は「表示のしかた」が畳まれた状態。見出しの文字は出さず、食事ボタンだけ残す
-      const wuSlotGroup = wuPage.getByRole('group', { name: '表示する食事' })
+      const wuSlotGroup = wuPage.getByRole('group', { name: ja.mealPlan.slotFilterTitle })
       check(
         'WEEKUI-01(便DP-6) 畳んでいるときは「表示する食事」の見出し文字を出さない',
         !((await wuPage.textContent('body')) ?? '').includes('表示する食事'),
@@ -6101,7 +6110,7 @@ try {
       await wuPage.waitForTimeout(400)
       check(
         'WEEKUI-01(便DT-6) 開いても食事のボタン群は見出しの横のまま(1組だけ)',
-        (await wuPage.getByRole('group', { name: '表示する食事' }).count()) === 1,
+        (await wuPage.getByRole('group', { name: ja.mealPlan.slotFilterTitle }).count()) === 1,
       )
       const wuOrder = await wuPage.evaluate(() => {
         const sec = [...document.querySelectorAll('section')].find(
@@ -6147,9 +6156,9 @@ try {
         (await openWeekDayEdit(wuPage, wuToday)) === true,
       )
       for (const title of ['肉じゃが', 'カレーライス']) {
-        await wuCard.getByRole('button', { name: 'レシピを選ぶ', exact: true }).first().click()
+        await wuCard.getByRole('button', { name: ja.mealPlan.emptyAssign, exact: true }).first().click()
         await wuPage.waitForTimeout(400)
-        await wuPage.getByPlaceholder('レシピ名で絞り込み').fill(title)
+        await wuPage.getByPlaceholder(ja.mealPlan.pickSearchPlaceholder).fill(title)
         await wuPage.waitForTimeout(300)
         await wuPage.getByText(title, { exact: true }).first().click()
         await wuPage.waitForTimeout(500)
@@ -6164,7 +6173,7 @@ try {
         b?.click()
       })
       await wuPage.waitForTimeout(900)
-      await wuPage.getByRole('button', { name: '週', exact: true }).click()
+      await wuPage.getByRole('button', { name: ja.mealPlan.viewWeek, exact: true }).click()
       await openAllWeekDays(wuPage) // 便ID・⑦: 畳む既定になったので、カードの中を触る前に開く
       await wuPage.waitForTimeout(700)
       const wuRows = await wuPage.evaluate((d) => {
@@ -6211,13 +6220,15 @@ try {
       await wuPage.waitForTimeout(500)
       check(
         'WEEKUI-01(便DP-5) 記録済みの枠を押すとレシピ選択の窓が開く',
-        !!(await wuPage.getByPlaceholder('レシピ名で絞り込み').count()),
+        !!(await wuPage.getByPlaceholder(ja.mealPlan.pickSearchPlaceholder).count()),
       )
       await wuPage.keyboard.press('Escape')
       await wuPage.waitForTimeout(400)
 
       // DP-8: まとめ3つ(栄養価・概算食費・献立表)は7日分と区切り線+広い間隔で分かれ、面を塗らない
-      const wuSummary = await wuPage.evaluate(() => {
+      // 文言は ja.ts から読むが、evaluate の中は**ブラウザ側**で走るので引数で渡す
+      // （中に ja.xxx と書くと ja is not defined になり、そこで実行が中断する）
+      const wuSummary = await wuPage.evaluate((costTitle) => {
         const wrap = [...document.querySelectorAll('div')].find(
           (d) =>
             d.className.includes('border-t') &&
@@ -6226,7 +6237,7 @@ try {
         )
         if (!wrap) return null
         const costSec = [...wrap.querySelectorAll('section')].find((s) =>
-          (s.textContent ?? '').includes('表示している週の概算食費'),
+          (s.textContent ?? '').includes(costTitle),
         )
         const sheetSec = [...wrap.querySelectorAll('section')].find((s) =>
           (s.textContent ?? '').includes('献立表'),
@@ -6236,7 +6247,7 @@ try {
           costCls: costSec?.className ?? '',
           sheetCls: sheetSec?.className ?? '',
         }
-      })
+      }, ja.mealPlan.weekCostTitle)
       check(
         'WEEKUI-01(便DP-8) まとめ3つは7日分の下に区切り線+広い間隔で分かれている',
         !!wuSummary &&
@@ -6305,7 +6316,7 @@ try {
       await dtPage.waitForTimeout(800)
       await dtPage.locator('[data-testid="day-suggest-apply"]').click()
       await dtPage.waitForTimeout(400)
-      await dtPage.getByRole('button', { name: '朝食・昼食・夕食を決めずに今日の献立に追加' }).click()
+      await dtPage.getByRole('button', { name: ja.detail.todaySlotUndecided }).click()
       await dtPage.waitForTimeout(1200)
       // 2026-08-20 便IG・①: ×は「整理」モードの中にしか出さなくなった。ここで測りたいのは
       // 「作った！」と×が押し間違えない距離にあることなので、×が出ている状態＝整理モードで測る
@@ -6364,7 +6375,7 @@ try {
       )
 
       // ---------- 週タブへ ----------
-      await dtPage.getByRole('button', { name: '週', exact: true }).click()
+      await dtPage.getByRole('button', { name: ja.mealPlan.viewWeek, exact: true }).click()
       await openAllWeekDays(dtPage) // 便ID・⑦: 畳む既定になったので、カードの中を触る前に開く
       await dtPage.waitForTimeout(700)
 
@@ -6516,7 +6527,7 @@ try {
       )
       await dtPage.reload({ waitUntil: 'networkidle' })
       await dtPage.waitForTimeout(1200)
-      await dtPage.getByRole('button', { name: '週', exact: true }).click()
+      await dtPage.getByRole('button', { name: ja.mealPlan.viewWeek, exact: true }).click()
       await openAllWeekDays(dtPage) // 便ID・⑦: 畳む既定になったので、カードの中を触る前に開く
       await dtPage.waitForTimeout(900)
       // 週タブは月曜始まりなので、今日が月曜だと「昨日」=日曜は前の週に入り、仕込んだ記録カードが出ない
@@ -6563,7 +6574,7 @@ try {
         `url=${dtPage.url()}`,
       )
       // 詳細の「戻る」で週タブへ帰る(従来はレシピ一覧へ飛んでいた)
-      await dtPage.getByRole('button', { name: '戻る' }).first().click()
+      await dtPage.getByRole('button', { name: ja.common.back }).first().click()
       await dtPage.waitForTimeout(1500)
       check(
         'WEEKUI-DT(便DT-2) 詳細の「戻る」で献立タブへ戻る(レシピ一覧へ飛ばない)',
@@ -6636,10 +6647,10 @@ try {
       // 曜日によって未来日の数が変わると検証の中身が変わってしまうため、日曜でも土曜でも
       // 同じ条件で回るようにここで固定する
       const lkOpenWeekTab = async () => {
-        await lkPage.getByRole('button', { name: '週', exact: true }).click()
+        await lkPage.getByRole('button', { name: ja.mealPlan.viewWeek, exact: true }).click()
         await openAllWeekDays(lkPage) // 便ID・⑦: 畳む既定になったので、カードの中を触る前に開く
         await lkPage.waitForTimeout(700)
-        await lkPage.getByRole('button', { name: '次の週' }).click()
+        await lkPage.getByRole('button', { name: ja.mealPlan.nextWeek }).click()
         await openAllWeekDays(lkPage) // 便ID・⑦: 畳む既定になったので、カードの中を触る前に開く
         await lkPage.waitForTimeout(800)
         return await lkPage.evaluate(() =>
@@ -6728,7 +6739,7 @@ try {
       const lkDate = lkWeekDates[lkWeekDates.length - 1]
       const lkFreeDate = lkWeekDates[0]
       // 先に献立を入れておく(ロックが「今ある献立を守る」ことを確かめるため)
-      const lkFillBtn = lkPage.getByRole('button', { name: 'まとめて献立を入力' })
+      const lkFillBtn = lkPage.getByRole('button', { name: ja.mealPlan.fillWeek })
       await lkFillBtn.click()
       await lkPage.waitForTimeout(3000) // 7日ぶん書き込むので長めに待つ
       const lkSlotState = () =>
@@ -6915,7 +6926,8 @@ try {
       const lkEditForCtl = await openWeekDayEdit(lkPage, lkDate)
       check('WEEKLOCK(便EA) 前提: 操作を測る日を編集モードにできた（便IV）', lkEditForCtl === true)
       const lkControls = () =>
-        lkPage.evaluate((date) => {
+        // 文言は ja.ts から読むが、evaluate の中はブラウザ側なので引数で渡す（便JM）
+        lkPage.evaluate(({ date, suggestAria }) => {
           const section = document.querySelector(`section[data-date="${date}"]`)
           const block = section?.querySelector('[data-testid="slot-block"]')
           if (!block) return null
@@ -6930,9 +6942,7 @@ try {
           const servings = buttons.find((b) =>
             (b.getAttribute('aria-label') ?? '').includes('この行の食数を変える'),
           )
-          const dice = buttons.find(
-            (b) => b.getAttribute('aria-label') === 'この行にレシピを自動提案する',
-          )
+          const dice = buttons.find((b) => b.getAttribute('aria-label') === suggestAria)
           return {
             removeDisabled: remove ? remove.disabled : null,
             // ボタンでなくなっていたら(押せなくする口が無い形に変わっていたら) null＝不合格に倒す
@@ -6944,7 +6954,7 @@ try {
               (b) => b.textContent?.trim() === '＋料理を追加',
             ),
           }
-        }, lkDate)
+        }, { date: lkDate, suggestAria: ja.mealPlan.suggestAria })
       const lkLockedCtl = await lkControls()
       check(
         'WEEKLOCK(便EA) ロック中は ×(削除)・料理名(差し替え)・食数 が押せない',
@@ -7044,7 +7054,7 @@ try {
       if (lkPickerOpened) {
         await lkPage
           .locator('[data-testid="recipe-picker"]')
-          .getByRole('button', { name: '閉じる' })
+          .getByRole('button', { name: ja.common.close })
           .first()
           .click()
         await lkPage.waitForTimeout(500)
@@ -7113,7 +7123,7 @@ try {
       await lkPage.reload({ waitUntil: 'networkidle' })
       await lkPage.waitForTimeout(1500)
       // 今日の夕食に鍵を掛ける(週タブは再読み込みで当週へ戻っているのでそのまま使う)
-      await lkPage.getByRole('button', { name: '週', exact: true }).click()
+      await lkPage.getByRole('button', { name: ja.mealPlan.viewWeek, exact: true }).click()
       await openAllWeekDays(lkPage) // 便ID・⑦: 畳む既定になったので、カードの中を触る前に開く
       await lkPage.waitForTimeout(700)
       // 便IV: 時間帯ごとの鍵は編集モードの中
@@ -7142,10 +7152,10 @@ try {
       )
       check(
         'WEEKLOCK(便EA) 止めたことを黙らず案内する(ロック中です。鍵を外すと変更できます)',
-        ((await lkPage.textContent('body')) ?? '').includes('ロック中です。鍵を外すと変更できます'),
+        stripZwspText(await lkPage.textContent('body')).includes(ja.mealPlan.lockedEditBlocked),
       )
       // 鍵を外すと同じ操作が通る＝「この経路はもともと動かない」ではないことの証明
-      await lkPage.getByRole('button', { name: '週', exact: true }).click()
+      await lkPage.getByRole('button', { name: ja.mealPlan.viewWeek, exact: true }).click()
       await openAllWeekDays(lkPage) // 便ID・⑦: 畳む既定になったので、カードの中を触る前に開く
       await lkPage.waitForTimeout(700)
       await openWeekDayEdit(lkPage, lkTodayIso) // 便IV: 時間帯ごとの鍵は編集モードの中
@@ -7232,18 +7242,18 @@ try {
       const bkDayLock = (date) => bkPage.locator(`[data-testid="day-lock"][data-date="${date}"]`)
       const bkLockedState = (date) => bkDayLock(date).getAttribute('aria-pressed')
       const bkNextWeek = async () => {
-        await bkPage.getByRole('button', { name: '次の週' }).click()
+        await bkPage.getByRole('button', { name: ja.mealPlan.nextWeek }).click()
         await openAllWeekDays(bkPage) // 便ID・⑦: 畳む既定になったので、カードの中を触る前に開く
         await bkPage.waitForTimeout(900)
       }
 
       await bkPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
       await bkPage.waitForTimeout(1800) // 初回シード完了待ち
-      await bkPage.getByRole('button', { name: '週', exact: true }).click()
+      await bkPage.getByRole('button', { name: ja.mealPlan.viewWeek, exact: true }).click()
       await openAllWeekDays(bkPage) // 便ID・⑦: 畳む既定になったので、カードの中を触る前に開く
       await bkPage.waitForTimeout(700)
-      await bkOpenGroup('表示のしかた')
-      await selectWeekLayout(bkPage, '今日から7日間')
+      await bkOpenGroup(ja.mealPlan.weekGroupDisplayTitle)
+      await selectWeekLayout(bkPage, ja.mealPlan.weekLayoutRolling)
       await bkPage.waitForTimeout(900)
       const bkWeekA = await bkWeekDates()
       check(
@@ -7254,13 +7264,13 @@ try {
 
       // 土台: 今日から7日間を埋め、その週を献立テンプレートとして保存する
       // (テンプレート適用と先週コピーの「入れる中身」をここで作る)
-      const bkFill = bkPage.getByRole('button', { name: 'まとめて献立を入力' })
+      const bkFill = bkPage.getByRole('button', { name: ja.mealPlan.fillWeek })
       await bkFill.click()
       await bkPage.waitForTimeout(3500) // 7日ぶん書き込むので長めに待つ
       await bkOpenGroup(ja.mealPlan.weekGroupTemplateTitle)
-      await bkPage.getByRole('button', { name: '表示している週をテンプレートとして保存' }).click()
+      await bkPage.getByRole('button', { name: ja.mealPlan.templateSave }).click()
       await bkPage.waitForTimeout(500)
-      await bkPage.getByPlaceholder('平日の定番 など').fill('EK検証用')
+      await bkPage.getByPlaceholder(ja.mealPlan.templateNamePlaceholder).fill('EK検証用')
       await bkPage.getByRole('button', { name: '保存する', exact: true }).click()
       await bkPage.waitForTimeout(800)
       check(
@@ -7406,9 +7416,9 @@ try {
         bkLockedCBefore.length > 0 && bkFreeCBefore.length > 0,
         `locked=${JSON.stringify(bkLockedCBefore)} / free=${JSON.stringify(bkFreeCBefore)}`,
       )
-      await bkOpenGroup('表示のしかた')
+      await bkOpenGroup(ja.mealPlan.weekGroupDisplayTitle)
       bkDialogs.length = 0
-      await bkPage.getByRole('button', { name: '空にする', exact: true }).click()
+      await bkPage.getByRole('button', { name: ja.mealPlan.clearWeekSlotButton, exact: true }).click()
       await bkPage.waitForTimeout(1500)
       check(
         'WEEKLOCK-BULK(まとめて空) 鍵の無い日の予定は実際に消えた(素通り防止)',
@@ -7428,7 +7438,7 @@ try {
       // 対の確認: 鍵を外すと同じ操作で消える
       await bkDayLock(bkLockedC).click()
       await bkPage.waitForTimeout(700)
-      await bkPage.getByRole('button', { name: '空にする', exact: true }).click()
+      await bkPage.getByRole('button', { name: ja.mealPlan.clearWeekSlotButton, exact: true }).click()
       await bkPage.waitForTimeout(1500)
       check(
         'WEEKLOCK-BULK(まとめて空) 鍵を外すと同じ操作で消える(対の確認)',
@@ -7480,18 +7490,18 @@ try {
       // Pro解錠(月タブはPro版の機能)。コードはUNLOCK-01と同じ検証用の1本を使う
       await bmPage.goto(`${BASE}/#/settings`, { waitUntil: 'networkidle' })
       await bmPage.waitForTimeout(1800)
-      await bmPage.getByPlaceholder('解錠コード (例: UR-XXXX-XXXX)').fill('UR-96QS-2VSZ')
-      await bmPage.getByRole('button', { name: '解錠する', exact: true }).click()
+      await bmPage.getByPlaceholder(ja.settings.unlockCodePlaceholder).fill('UR-96QS-2VSZ')
+      await bmPage.getByRole('button', { name: ja.settings.unlockActivate, exact: true }).click()
       await bmPage.waitForTimeout(900)
       check(
         'WEEKLOCK-MONTH 前提: Pro版を解錠した(月タブが使える)',
-        ((await bmPage.textContent('body')) ?? '').includes('Pro版をご利用いただきありがとうございます'),
+        stripZwspText(await bmPage.textContent('body')).includes(ja.settings.proActivatedTitle),
       )
 
       // 週タブで「次の月」の連続2日を探し、その最初の日に鍵を掛ける
       await bmPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
       await bmPage.waitForTimeout(1800)
-      await bmPage.getByRole('button', { name: '週', exact: true }).click()
+      await bmPage.getByRole('button', { name: ja.mealPlan.viewWeek, exact: true }).click()
       await openAllWeekDays(bmPage) // 便ID・⑦: 畳む既定になったので、カードの中を触る前に開く
       await bmPage.waitForTimeout(700)
       const bmNextMonth = await bmPage.evaluate(() => {
@@ -7512,7 +7522,7 @@ try {
           }
         }
         if (bmPair == null) {
-          await bmPage.getByRole('button', { name: '次の週' }).click()
+          await bmPage.getByRole('button', { name: ja.mealPlan.nextWeek }).click()
           await openAllWeekDays(bmPage) // 便ID・⑦: 畳む既定になったので、カードの中を触る前に開く
           await bmPage.waitForTimeout(800)
         }
@@ -7544,12 +7554,12 @@ try {
       const bmOpenNextMonth = async () => {
         await bmPage.getByRole('button', { name: '月', exact: true }).click()
         await bmPage.waitForTimeout(1000)
-        const backToThisMonth = bmPage.getByRole('button', { name: '今月へ戻る' })
+        const backToThisMonth = bmPage.getByRole('button', { name: ja.mealPlan.thisMonth })
         if ((await backToThisMonth.count()) > 0) {
           await backToThisMonth.first().click()
           await bmPage.waitForTimeout(900)
         }
-        await bmPage.getByRole('button', { name: '次の月' }).click()
+        await bmPage.getByRole('button', { name: ja.mealPlan.nextMonth }).click()
         await bmPage.waitForTimeout(1200)
       }
       await bmOpenNextMonth()
@@ -7559,7 +7569,7 @@ try {
           (await bmPage.locator(`[data-date="${bmFree}"]`).count()) > 0,
         `locked=${bmLocked} free=${bmFree}`,
       )
-      const bmFillMonth = bmPage.getByRole('button', { name: '献立をまとめて提案' })
+      const bmFillMonth = bmPage.getByRole('button', { name: ja.mealPlan.fillMonth })
       bmDialogs.length = 0
       await bmFillMonth.click()
       await bmPage.waitForTimeout(9000) // 1か月ぶん書き込むので長めに待つ
@@ -7579,12 +7589,12 @@ try {
         `dialogs=${JSON.stringify(bmDialogs)}`,
       )
       // 対の確認: 鍵を外すと同じ操作で入る
-      await bmPage.getByRole('button', { name: '週', exact: true }).click()
+      await bmPage.getByRole('button', { name: ja.mealPlan.viewWeek, exact: true }).click()
       await openAllWeekDays(bmPage) // 便ID・⑦: 畳む既定になったので、カードの中を触る前に開く
       await bmPage.waitForTimeout(900)
       for (let i = 0; i < 8; i++) {
         if ((await bmPage.locator(`[data-testid="day-lock"][data-date="${bmLocked}"]`).count()) > 0) break
-        await bmPage.getByRole('button', { name: '次の週' }).click()
+        await bmPage.getByRole('button', { name: ja.mealPlan.nextWeek }).click()
         await openAllWeekDays(bmPage) // 便ID・⑦: 畳む既定になったので、カードの中を触る前に開く
         await bmPage.waitForTimeout(800)
       }
@@ -7642,7 +7652,7 @@ try {
       // 「週」タブへ切り替えてから離脱する(実アプリの戻り操作は別ルートを経由してMealPlanPageが
       // 再マウントされるため、タブ状態はリセットされる。それでも?focus=todayが「日」を
       // 強制することを確認するため、あえて別タブに切り替えた状態を経由する)
-      await bnPage.getByRole('button', { name: '週', exact: true }).click()
+      await bnPage.getByRole('button', { name: ja.mealPlan.viewWeek, exact: true }).click()
       await openAllWeekDays(bnPage) // 便ID・⑦: 畳む既定になったので、カードの中を触る前に開く
       await bnPage.waitForTimeout(300)
 
@@ -7683,7 +7693,7 @@ try {
   await page.waitForTimeout(200)
   // 並べ替えを既定の「更新順」から変える(URLに載らない条件なので、これが復元できれば
   // filtersKey全体が保存・復元されていることの証明になる。文言は便T-5で「あいうえお順」→「五十音順」)
-  await page.getByRole('button', { name: '五十音順' }).click()
+  await page.getByRole('button', { name: ja.search.sortKana }).click()
   await page.waitForTimeout(200)
   await page.getByRole('button', { name: '並び替え' }).click() // パネルを閉じる
   await page.waitForTimeout(200)
@@ -7696,7 +7706,7 @@ try {
   })
   await page.waitForTimeout(600)
   check('SCROLL-02 詳細へ遷移', /#\/recipes\/\d+/.test(page.url()), `現在URL: ${page.url()}`)
-  await page.getByRole('button', { name: '戻る' }).click()
+  await page.getByRole('button', { name: ja.common.back }).click()
   await page.waitForTimeout(800)
   const s2ScrollAfter = await page.evaluate(() => window.scrollY)
   check(
@@ -7746,15 +7756,15 @@ try {
   )
   check(
     'TIMER-ADJ-01 「+1分」ミニボタンを押しても調整窓は開かない(行タップと独立)',
-    !(await page.getByRole('dialog', { name: 'タイマーを調整' }).isVisible().catch(() => false)),
+    !(await page.getByRole('dialog', { name: ja.timer.adjustDialogTitle }).isVisible().catch(() => false)),
   )
 
   await adjustOpenBtn.click()
   await page.waitForTimeout(300)
-  const adjustDialog = page.getByRole('dialog', { name: 'タイマーを調整' })
+  const adjustDialog = page.getByRole('dialog', { name: ja.timer.adjustDialogTitle })
   check('TIMER-ADJ-01 タイマー調整の窓が開く(「作った！」と同じ様式)', await adjustDialog.isVisible())
   const adjBeforeSec = parseRemainingSeconds(await adjustDialog.textContent())
-  await adjustDialog.getByRole('button', { name: '+1分' }).click()
+  await adjustDialog.getByRole('button', { name: ja.timer.plusOneMinute }).click()
   await page.waitForTimeout(200)
   const adjAfterPlusSec = parseRemainingSeconds(await adjustDialog.textContent())
   check(
@@ -7762,7 +7772,7 @@ try {
     adjBeforeSec !== null && adjAfterPlusSec !== null && adjAfterPlusSec - adjBeforeSec >= 50,
     `押す前=${adjBeforeSec}s 押した後=${adjAfterPlusSec}s`,
   )
-  await adjustDialog.getByRole('button', { name: '−30秒' }).click()
+  await adjustDialog.getByRole('button', { name: ja.timer.minusThirtySeconds }).click()
   await page.waitForTimeout(200)
   const adjAfterMinusSec = parseRemainingSeconds(await adjustDialog.textContent())
   check(
@@ -7778,7 +7788,7 @@ try {
   // 残さないための後片付けも兼ねる。文言は2026-08-10 便FCで「停止」から言い換えた)
   await adjustOpenBtn.click()
   await page.waitForTimeout(300)
-  await adjustDialog.getByRole('button', { name: 'タイマーを消す' }).click()
+  await adjustDialog.getByRole('button', { name: ja.timer.stopTimer }).click()
   await page.waitForTimeout(300)
   check(
     'TIMER-ADJ-01 「タイマーを消す」でタイマーが常駐バーから消える',
@@ -7789,7 +7799,7 @@ try {
   // レシピ詳細のBackHeaderにあるタイマーアイコン(入口A)から開き、既定3分→1分まで減らして起動する。
   // 続けて同じ調整窓で「−30秒」を重ねても残りが0未満にならない(即完了扱いにしない)ことも確認する ---
   currentCheck = 'TIMER-CUSTOM-01'
-  await page.getByRole('button', { name: 'タイマーを開く' }).click()
+  await page.getByRole('button', { name: ja.timer.customOpenAria }).click()
   await page.waitForTimeout(300)
   const customDialog = page.getByRole('dialog', { name: 'タイマー', exact: true })
   // 残り時間の表示だけを拾うロケータ(ボタン文言「−30秒」等と紛れないよう、表示専用のspanをクラスで狙う)
@@ -7798,8 +7808,8 @@ try {
     'TIMER-CUSTOM-01 タイマーの窓が開く(初回既定3分)',
     (await customDialog.textContent()).includes('3分'),
   )
-  await customDialog.getByRole('button', { name: 'タイマーの分数を減らす' }).click()
-  await customDialog.getByRole('button', { name: 'タイマーの分数を減らす' }).click()
+  await customDialog.getByRole('button', { name: ja.timer.customMinutesDown }).click()
+  await customDialog.getByRole('button', { name: ja.timer.customMinutesDown }).click()
   await page.waitForTimeout(150)
   check(
     'TIMER-CUSTOM-01 分数ステッパー(±1分)で1分まで減らせる',
@@ -7807,31 +7817,31 @@ try {
   )
   // --- 秒刻み(2026-07-12オーナー実機フィードバック追加分)。±30秒・±10秒で分+秒表示になり、
   // 一往復(+30+10-30-10=±0)で1分ちょうどに戻ることを確認する(以降の起動値を60秒に保つため) ---
-  await customDialog.getByRole('button', { name: '+30秒' }).click()
+  await customDialog.getByRole('button', { name: ja.timer.plusThirtySeconds }).click()
   await page.waitForTimeout(150)
   check('TIMER-CUSTOM-01 秒刻み「+30秒」で1分→1分30秒', (await customCounter.textContent()) === '1分30秒')
-  await customDialog.getByRole('button', { name: '+10秒' }).click()
+  await customDialog.getByRole('button', { name: ja.timer.plusTenSeconds }).click()
   await page.waitForTimeout(150)
   check('TIMER-CUSTOM-01 秒刻み「+10秒」で1分30秒→1分40秒', (await customCounter.textContent()) === '1分40秒')
-  await customDialog.getByRole('button', { name: '−30秒' }).click()
+  await customDialog.getByRole('button', { name: ja.timer.minusThirtySeconds }).click()
   await page.waitForTimeout(150)
   check('TIMER-CUSTOM-01 秒刻み「−30秒」で1分40秒→1分10秒', (await customCounter.textContent()) === '1分10秒')
-  await customDialog.getByRole('button', { name: '−10秒' }).click()
+  await customDialog.getByRole('button', { name: ja.timer.minusTenSeconds }).click()
   await page.waitForTimeout(150)
   check('TIMER-CUSTOM-01 秒刻み「−10秒」で1分10秒→1分ちょうどに戻る', (await customCounter.textContent()) === '1分')
   // 開始前の秒数も10秒未満にならない(floor挙動)。−1分→10秒未満は10秒で止まる。その後+30+10+10=+50秒で1分に戻す
-  await customDialog.getByRole('button', { name: 'タイマーの分数を減らす' }).click()
+  await customDialog.getByRole('button', { name: ja.timer.customMinutesDown }).click()
   await page.waitForTimeout(150)
   check('TIMER-CUSTOM-01 開始前の秒数も10秒未満にならない(1分→10秒で床止め)', (await customCounter.textContent()) === '10秒')
-  await customDialog.getByRole('button', { name: '−10秒' }).click()
+  await customDialog.getByRole('button', { name: ja.timer.minusTenSeconds }).click()
   await page.waitForTimeout(150)
   check('TIMER-CUSTOM-01 10秒からさらに「−10秒」しても10秒のまま', (await customCounter.textContent()) === '10秒')
-  await customDialog.getByRole('button', { name: '+30秒' }).click()
-  await customDialog.getByRole('button', { name: '+10秒' }).click()
-  await customDialog.getByRole('button', { name: '+10秒' }).click()
+  await customDialog.getByRole('button', { name: ja.timer.plusThirtySeconds }).click()
+  await customDialog.getByRole('button', { name: ja.timer.plusTenSeconds }).click()
+  await customDialog.getByRole('button', { name: ja.timer.plusTenSeconds }).click()
   await page.waitForTimeout(150)
   check('TIMER-CUSTOM-01 1分まで戻して開始する', (await customCounter.textContent()) === '1分')
-  await customDialog.getByRole('button', { name: '開始' }).click()
+  await customDialog.getByRole('button', { name: ja.timer.customStart }).click()
   await page.waitForTimeout(400)
   // 「タイマー」への改名(2026-08-02)後は body 全文の includes だと「タイマー開始」等に当たって
   // 常に真になるため、常駐バーの行(=調整を開くボタン)のテキストに限定して確かめる
@@ -7844,10 +7854,10 @@ try {
   )
   await page.getByRole('button', { name: /タイマーを調整/ }).click()
   await page.waitForTimeout(300)
-  const customAdjustDialog = page.getByRole('dialog', { name: 'タイマーを調整' })
-  await customAdjustDialog.getByRole('button', { name: '−30秒' }).click()
+  const customAdjustDialog = page.getByRole('dialog', { name: ja.timer.adjustDialogTitle })
+  await customAdjustDialog.getByRole('button', { name: ja.timer.minusThirtySeconds }).click()
   await page.waitForTimeout(150)
-  await customAdjustDialog.getByRole('button', { name: '−30秒' }).click() // 1分-30秒-30秒=0
+  await customAdjustDialog.getByRole('button', { name: ja.timer.minusThirtySeconds }).click() // 1分-30秒-30秒=0
   await page.waitForTimeout(150)
   const atFloorText = await customAdjustDialog.textContent()
   // 残りがマイナスにならないこと。0ちょうどになると通常の完了フローに乗るので、
@@ -7879,7 +7889,7 @@ try {
     floorButtons.stop === false && floorButtons.hasReason,
     JSON.stringify(floorButtons),
   )
-  await customAdjustDialog.getByRole('button', { name: 'タイマーを消す' }).click()
+  await customAdjustDialog.getByRole('button', { name: ja.timer.stopTimer }).click()
   await page.waitForTimeout(300)
 
   // --- TIMER-KEEP-01 / TIMER-ORDER-01 / FOCUS-TIMER-01 / TIMER-ADJ-02:
@@ -7900,7 +7910,7 @@ try {
       const openNikujaga = async () => {
         await tkPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
         await tkPage.waitForTimeout(1200)
-        await tkPage.getByPlaceholder('料理名・材料・タグ').fill('肉じゃが')
+        await tkPage.getByPlaceholder(ja.search.placeholder).fill('肉じゃが')
         await tkPage.waitForTimeout(500)
         await tkPage.getByText('肉じゃが', { exact: true }).first().click()
         await tkPage.waitForTimeout(700)
@@ -7932,14 +7942,14 @@ try {
 
       // (3) C6 並び順。15分の後に「タイマー1分」を足すと、後から起動した1分が上に来る
       currentCheck = 'TIMER-ORDER-01'
-      await tkPage.getByRole('button', { name: 'タイマーを開く' }).first().click()
+      await tkPage.getByRole('button', { name: ja.timer.customOpenAria }).first().click()
       await tkPage.waitForTimeout(300)
       {
         const dlg = tkPage.getByRole('dialog', { name: 'タイマー', exact: true })
-        await dlg.getByRole('button', { name: 'タイマーの分数を減らす' }).click()
-        await dlg.getByRole('button', { name: 'タイマーの分数を減らす' }).click()
+        await dlg.getByRole('button', { name: ja.timer.customMinutesDown }).click()
+        await dlg.getByRole('button', { name: ja.timer.customMinutesDown }).click()
         await tkPage.waitForTimeout(150)
-        await dlg.getByRole('button', { name: '開始' }).click()
+        await dlg.getByRole('button', { name: ja.timer.customStart }).click()
       }
       await tkPage.waitForTimeout(500)
       const orderLabels = await tkPage.evaluate(() =>
@@ -7960,11 +7970,11 @@ try {
 
       // (4)(5) 調理中モード内のタイマー表示
       currentCheck = 'FOCUS-TIMER-01'
-      await tkPage.getByText('調理中モードで見る').click()
+      await tkPage.getByText(ja.focus.open).click()
       await tkPage.waitForTimeout(500)
       const focus = tkPage.locator('.fixed.inset-0.z-50')
       for (let i = 0; i < 2; i++) {
-        await focus.getByRole('button', { name: '次へ' }).click()
+        await focus.getByRole('button', { name: ja.focus.next }).click()
         await tkPage.waitForTimeout(250)
       }
       // 同じ「15分」を押す = 既に動いているタイマーの重複起動 → 点滅で知らせる
@@ -7979,14 +7989,14 @@ try {
         `点滅要素=${flashInFocus}`,
       )
       // 自由な時間のタイマー10秒 → 終了バッジのベル+点滅
-      await focus.getByRole('button', { name: 'タイマーを開く' }).click()
+      await focus.getByRole('button', { name: ja.timer.customOpenAria }).click()
       await tkPage.waitForTimeout(300)
       {
         const dlg = tkPage.getByRole('dialog', { name: 'タイマー', exact: true })
         for (let i = 0; i < 3; i++)
-          await dlg.getByRole('button', { name: 'タイマーの分数を減らす' }).click()
+          await dlg.getByRole('button', { name: ja.timer.customMinutesDown }).click()
         await tkPage.waitForTimeout(150)
-        await dlg.getByRole('button', { name: '開始' }).click()
+        await dlg.getByRole('button', { name: ja.timer.customStart }).click()
       }
       await tkPage.waitForTimeout(11500)
       const donePill = await tkPage.evaluate(() => {
@@ -8023,19 +8033,19 @@ try {
 
       // (6) C10 ±調整の窓を開いたままタイマーが終わる
       currentCheck = 'TIMER-ADJ-02'
-      await focus.getByRole('button', { name: 'タイマーを開く' }).click()
+      await focus.getByRole('button', { name: ja.timer.customOpenAria }).click()
       await tkPage.waitForTimeout(300)
       {
         const dlg = tkPage.getByRole('dialog', { name: 'タイマー', exact: true })
         for (let i = 0; i < 3; i++)
-          await dlg.getByRole('button', { name: 'タイマーの分数を減らす' }).click()
+          await dlg.getByRole('button', { name: ja.timer.customMinutesDown }).click()
         await tkPage.waitForTimeout(150)
-        await dlg.getByRole('button', { name: '開始' }).click()
+        await dlg.getByRole('button', { name: ja.timer.customStart }).click()
       }
       await tkPage.waitForTimeout(500)
       await focus.getByRole('button', { name: /タイマーを調整/ }).first().click()
       await tkPage.waitForTimeout(300)
-      const zeroDialog = tkPage.getByRole('dialog', { name: 'タイマーを調整' })
+      const zeroDialog = tkPage.getByRole('dialog', { name: ja.timer.adjustDialogTitle })
       check('TIMER-ADJ-02 調整の窓が開く', await zeroDialog.isVisible())
       await tkPage.waitForTimeout(11000)
       const zeroState = await tkPage.evaluate(() => {
@@ -8085,22 +8095,22 @@ try {
       const fkOpen = async (name) => {
         await fkPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
         await fkPage.waitForTimeout(1200)
-        await fkPage.getByPlaceholder('料理名・材料・タグ').fill(name)
+        await fkPage.getByPlaceholder(ja.search.placeholder).fill(name)
         await fkPage.waitForTimeout(500)
         await fkPage.getByText(name, { exact: true }).first().click()
         await fkPage.waitForTimeout(700)
       }
       await fkOpen('肉じゃが')
-      await fkPage.getByText('調理中モードで見る').click()
+      await fkPage.getByText(ja.focus.open).click()
       await fkPage.waitForTimeout(500)
       for (let i = 0; i < 2; i++) {
-        await fkFocus.getByRole('button', { name: '次へ' }).click()
+        await fkFocus.getByRole('button', { name: ja.focus.next }).click()
         await fkPage.waitForTimeout(250)
       }
       const beforeClose = await fkStep()
-      await fkFocus.getByRole('button', { name: '閉じる' }).first().click()
+      await fkFocus.getByRole('button', { name: ja.common.close }).first().click()
       await fkPage.waitForTimeout(500)
-      await fkPage.getByText('調理中モードで見る').click()
+      await fkPage.getByText(ja.focus.open).click()
       await fkPage.waitForTimeout(500)
       const afterReopen = await fkStep()
       check(
@@ -8134,7 +8144,7 @@ try {
       // (1続き) 「完成！」のあとは手順1に戻る
       currentCheck = 'FOCUS-KEEP-01'
       await fkOpen('肉じゃが')
-      await fkPage.getByText('調理中モードで見る').click()
+      await fkPage.getByText(ja.focus.open).click()
       await fkPage.waitForTimeout(500)
       check(
         'FOCUS-KEEP-01 別のレシピを経由して開き直した場合は手順1から',
@@ -8142,27 +8152,27 @@ try {
         await fkStep(),
       )
       for (let i = 0; i < 5; i++) {
-        const next = fkFocus.getByRole('button', { name: '次へ' })
+        const next = fkFocus.getByRole('button', { name: ja.focus.next })
         if (!(await next.isVisible().catch(() => false))) break
         await next.click()
         await fkPage.waitForTimeout(200)
       }
-      await fkFocus.getByRole('button', { name: '完成！' }).click()
+      await fkFocus.getByRole('button', { name: ja.focus.complete }).click()
       await fkPage.waitForTimeout(700)
       await fkPage
-        .getByRole('dialog', { name: '作った記録をつける' })
-        .getByRole('button', { name: '閉じる' })
+        .getByRole('dialog', { name: ja.detail.cookedDialogTitle })
+        .getByRole('button', { name: ja.common.close })
         .first()
         .click()
       await fkPage.waitForTimeout(400)
-      await fkPage.getByText('調理中モードで見る').click()
+      await fkPage.getByText(ja.focus.open).click()
       await fkPage.waitForTimeout(500)
       check(
         'FOCUS-KEEP-01 「完成！」のあとに開き直すと手順1から始まる',
         (await fkStep()) === '手順 1/4',
         await fkStep(),
       )
-      await fkFocus.getByRole('button', { name: '閉じる' }).first().click()
+      await fkFocus.getByRole('button', { name: ja.common.close }).first().click()
       await fkPage.waitForTimeout(400)
 
       // (3) C4/C8 他レシピのタイマー
@@ -8171,7 +8181,7 @@ try {
       await fkPage.getByRole('button', { name: '15分 タイマー開始' }).click()
       await fkPage.waitForTimeout(500)
       await fkOpen('カレーライス')
-      await fkPage.getByText('調理中モードで見る').click()
+      await fkPage.getByText(ja.focus.open).click()
       await fkPage.waitForTimeout(700)
       const otherPills = await fkPage.evaluate(() =>
         Array.from(
@@ -8190,13 +8200,13 @@ try {
       )
       await fkFocus.getByRole('button', { name: /タイマーを調整/ }).first().click()
       await fkPage.waitForTimeout(400)
-      const otherDialog = fkPage.getByRole('dialog', { name: 'タイマーを調整' })
+      const otherDialog = fkPage.getByRole('dialog', { name: ja.timer.adjustDialogTitle })
       check(
         'FOCUS-OTHER-01 別の料理のタイマーをタップすると調整の窓が開く(手順の誤ジャンプをしない)',
         (await otherDialog.isVisible()) && (await otherDialog.textContent()).includes('肉じゃが'),
         await otherDialog.textContent().catch(() => 'なし'),
       )
-      await otherDialog.getByRole('button', { name: 'タイマーを消す' }).click()
+      await otherDialog.getByRole('button', { name: ja.timer.stopTimer }).click()
       await fkPage.waitForTimeout(400)
       check(
         'FOCUS-OTHER-01 調理中モードから出ずに別の料理のタイマーを停止できる',
@@ -8218,15 +8228,15 @@ try {
       const fnPage = await fnContext.newPage()
       await fnPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
       await fnPage.waitForTimeout(1200)
-      await fnPage.getByPlaceholder('料理名・材料・タグ').fill('肉じゃが')
+      await fnPage.getByPlaceholder(ja.search.placeholder).fill('肉じゃが')
       await fnPage.waitForTimeout(500)
       await fnPage.getByText('肉じゃが', { exact: true }).first().click()
       await fnPage.waitForTimeout(700)
-      await fnPage.getByText('調理中モードで見る').click()
+      await fnPage.getByText(ja.focus.open).click()
       await fnPage.waitForTimeout(500)
       const fnFocus = fnPage.locator('.fixed.inset-0.z-50')
       for (let i = 0; i < 2; i++) {
-        await fnFocus.getByRole('button', { name: '次へ' }).click()
+        await fnFocus.getByRole('button', { name: ja.focus.next }).click()
         await fnPage.waitForTimeout(250)
       }
       await fnFocus.getByRole('button', { name: '15分 タイマー開始' }).click()
@@ -8278,18 +8288,18 @@ try {
       const ftTitle = '鶏むね肉としめじの香味だれかけ蒸し（作り置きにも）'
       await ftPage.goto(`${BASE}/#/recipes/new`, { waitUntil: 'networkidle' })
       await ftPage.waitForTimeout(1000)
-      await ftPage.getByText('テキスト貼り付けで自動入力').click()
+      await ftPage.getByText(ja.paste.open).click()
       await ftPage.waitForTimeout(300)
       await ftPage
         .locator(`textarea[placeholder="${ja.paste.placeholder}"]`)
         .fill(
           `${ftTitle}\n\n材料（2人分）\n・鶏むね肉　1枚\n・しめじ　1袋\n\n作り方\n1. 鶏むね肉をそぎ切りにする\n2. しめじをほぐして耐熱皿に広げる\n3. 蒸し上げる`,
         )
-      await ftPage.getByRole('button', { name: '自動で振り分ける' }).click()
+      await ftPage.getByRole('button', { name: ja.paste.apply }).click()
       await ftPage.waitForTimeout(400)
       await ftPage.getByRole('button', { name: '保存する' }).click()
       await ftPage.waitForTimeout(1200)
-      await ftPage.getByText('調理中モードで見る').click()
+      await ftPage.getByText(ja.focus.open).click()
       await ftPage.waitForTimeout(700)
 
       /**
@@ -8368,11 +8378,11 @@ try {
       )
 
       // タイマーを1本動かしても、料理名は隠れずボタンも押せるまま(動作中の見え方を壊さない)
-      await ftPage.locator('.fixed.inset-0.z-50').getByRole('button', { name: 'タイマーを開く' }).click()
+      await ftPage.locator('.fixed.inset-0.z-50').getByRole('button', { name: ja.timer.customOpenAria }).click()
       await ftPage.waitForTimeout(400)
       await ftPage
         .getByRole('dialog', { name: 'タイマー', exact: true })
-        .getByRole('button', { name: '開始' })
+        .getByRole('button', { name: ja.timer.customStart })
         .click()
       await ftPage.waitForTimeout(700)
       const ftRunning = await ftMeasure()
@@ -8453,7 +8463,7 @@ try {
       await ntPage.goto(`${BASE}/#/cook-navi`)
       await ntPage.reload({ waitUntil: 'networkidle' })
       await ntPage.waitForTimeout(1200)
-      await ntPage.getByRole('button', { name: '段取りを作る' }).click()
+      await ntPage.getByRole('button', { name: ja.cookNavi.build }).click()
       await ntPage.waitForTimeout(700)
       await ntPage.locator('[data-testid="cook-session-start"]').click()
       await ntPage.waitForTimeout(700)
@@ -8544,12 +8554,12 @@ try {
       // 押した先は3画面と同じ窓。開始まで通して、この画面に残り時間が出ることを見る
       await ntPage
         .locator('[data-testid="cook-session"]')
-        .getByRole('button', { name: 'タイマーを開く' })
+        .getByRole('button', { name: ja.timer.customOpenAria })
         .click()
       await ntPage.waitForTimeout(400)
       const ntDialog = ntPage.getByRole('dialog', { name: 'タイマー', exact: true })
       check('NAVITIMER-01 押すと自由な時間のタイマーの窓が開く', await ntDialog.isVisible())
-      await ntDialog.getByRole('button', { name: '開始' }).click()
+      await ntDialog.getByRole('button', { name: ja.timer.customStart }).click()
       await ntPage.waitForTimeout(800)
       const ntSessionText = await ntPage.locator('[data-testid="cook-session"]').innerText()
       check(
@@ -8624,11 +8634,11 @@ try {
       const openFocus = async (p, name) => {
         await p.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
         await p.waitForTimeout(1400)
-        await p.getByPlaceholder('料理名・材料・タグ').fill(name)
+        await p.getByPlaceholder(ja.search.placeholder).fill(name)
         await p.waitForTimeout(500)
         await p.getByText(name, { exact: true }).first().click()
         await p.waitForTimeout(700)
-        await p.getByText('調理中モードで見る').click()
+        await p.getByText(ja.focus.open).click()
         await p.waitForTimeout(500)
       }
 
@@ -8640,12 +8650,12 @@ try {
         const p = await ctx.newPage()
         await openFocus(p, '肉じゃが')
         const focus = p.locator('.fixed.inset-0.z-50')
-        await focus.getByRole('button', { name: '声で操作する' }).click()
+        await focus.getByRole('button', { name: ja.focus.micStart }).click()
         await p.waitForTimeout(600)
         const guide = await focus.textContent()
         check(
           'DS-MIC-01 断られている状態で押すと、原因と直し方の案内が出る(無反応にしない)',
-          guide.includes('マイクの使用がブラウザで断られています') &&
+          guide.includes(ja.focus.micDeniedTitle) &&
             guide.includes('ブラウザの設定でマイクの使用を許可すると'),
         )
         check(
@@ -8660,20 +8670,20 @@ try {
         await p.waitForTimeout(4000)
         check(
           'DS-MIC-01 案内は数秒で消えない(閉じるまで残る)',
-          (await focus.textContent()).includes('マイクの使用がブラウザで断られています'),
+          stripZwspText(await focus.textContent()).includes(ja.focus.micDeniedTitle),
         )
         // 2回目に押しても同じ案内が出る(押しても何も起きないボタンにしない)
-        await focus.locator('div.border-warning').getByRole('button', { name: '閉じる' }).click()
+        await focus.locator('div.border-warning').getByRole('button', { name: ja.common.close }).click()
         await p.waitForTimeout(300)
         check(
           'DS-MIC-01 案内は閉じられる(閉じたら消える)',
-          !(await focus.textContent()).includes('マイクの使用がブラウザで断られています'),
+          !(await focus.textContent()).includes(ja.focus.micDeniedTitle),
         )
-        await focus.getByRole('button', { name: '声で操作する' }).click()
+        await focus.getByRole('button', { name: ja.focus.micStart }).click()
         await p.waitForTimeout(600)
         check(
           'DS-MIC-01 2回目に押しても同じ案内が出る(黙って失敗しない)',
-          (await focus.textContent()).includes('マイクの使用がブラウザで断られています'),
+          stripZwspText(await focus.textContent()).includes(ja.focus.micDeniedTitle),
         )
         await ctx.close()
       }
@@ -8685,7 +8695,7 @@ try {
         const p = await ctx.newPage()
         await openFocus(p, '肉じゃが')
         const focus = p.locator('.fixed.inset-0.z-50')
-        await focus.getByRole('button', { name: '声で操作する' }).click()
+        await focus.getByRole('button', { name: ja.focus.micStart }).click()
         await p.waitForTimeout(500)
         // ブラウザが「許可されていません」を返した想定
         const restarts = await p.evaluate(() => {
@@ -8697,7 +8707,7 @@ try {
         await p.waitForTimeout(500)
         check(
           'DS-MIC-01 許可の状態を調べられない環境でも、失敗を受けて案内が出る',
-          (await focus.textContent()).includes('マイクの使用がブラウザで断られています'),
+          stripZwspText(await focus.textContent()).includes(ja.focus.micDeniedTitle),
         )
         check(
           'DS-MIC-01 断られた後は自動再開を止める(開始→即失敗の繰り返しにしない)',
@@ -8717,7 +8727,7 @@ try {
 
         // ⑤ 時間の書かれていない手順(手順1)で「タイマー」とだけ言う → 言い方の案内
         currentCheck = 'DS-VOICE-01'
-        await focus.getByRole('button', { name: '声で操作する' }).click()
+        await focus.getByRole('button', { name: ja.focus.micStart }).click()
         await p.waitForTimeout(600)
         const say = async (text) => {
           await p.evaluate((t) => {
@@ -8728,7 +8738,7 @@ try {
         await say('タイマー')
         check(
           'DS-VOICE-01 時間の手掛かりが無い手順で「タイマー」と言うと言い方の案内が出る(無反応にしない)',
-          (await focus.textContent()).includes('「3分タイマー」のように言うと設定できます'),
+          stripZwspText(await focus.textContent()).includes(ja.focus.micTimerHint),
           await focus.textContent(),
         )
         check(
@@ -8757,26 +8767,26 @@ try {
 
         // ④ 調理中モードから消音できる(チップの切り替え・調整の窓の切り替えの両方)
         currentCheck = 'DS-MUTE-01'
-        const muteBtn = focus.getByRole('button', { name: 'このタイマーを消音' })
+        const muteBtn = focus.getByRole('button', { name: ja.timer.mute })
         check('DS-MUTE-01 調理中モードのタイマーに消音の切り替えがある', await muteBtn.isVisible())
         await muteBtn.click()
         await p.waitForTimeout(300)
         check(
           'DS-MUTE-01 押すと「音を戻す」に変わる(消音できている)',
-          await focus.getByRole('button', { name: 'このタイマーの音を戻す' }).isVisible(),
+          await focus.getByRole('button', { name: ja.timer.unmute }).isVisible(),
         )
         await focus.getByRole('button', { name: /タイマーを調整/ }).click()
         await p.waitForTimeout(400)
-        const dsDialog = p.getByRole('dialog', { name: 'タイマーを調整' })
+        const dsDialog = p.getByRole('dialog', { name: ja.timer.adjustDialogTitle })
         check(
           'DS-MUTE-01 調整の窓からも消音を切り替えられる(常駐バーと同じ働き)',
-          await dsDialog.getByRole('button', { name: 'このタイマーの音を戻す' }).isVisible(),
+          await dsDialog.getByRole('button', { name: ja.timer.unmute }).isVisible(),
         )
-        await dsDialog.getByRole('button', { name: 'このタイマーの音を戻す' }).click()
+        await dsDialog.getByRole('button', { name: ja.timer.unmute }).click()
         await p.waitForTimeout(300)
         check(
           'DS-MUTE-01 窓の中で音を戻すと表示も戻る',
-          await dsDialog.getByRole('button', { name: 'このタイマーを消音' }).isVisible(),
+          await dsDialog.getByRole('button', { name: ja.timer.mute }).isVisible(),
         )
 
         // ③ 調整の窓から手順へ戻る(調理中モードの中では手順が移動する)
@@ -8797,7 +8807,7 @@ try {
         const p = await ctx.newPage()
         await openFocus(p, '肉じゃが')
         const focus = p.locator('.fixed.inset-0.z-50')
-        const customBtn = focus.getByRole('button', { name: 'タイマーを開く' })
+        const customBtn = focus.getByRole('button', { name: ja.timer.customOpenAria })
         check(
           'DS-CUSTOMBTN-01 調理中モードの「タイマー」ボタンはアイコンのみ(文字を出さない)',
           (await customBtn.textContent()).trim() === '',
@@ -8808,7 +8818,7 @@ try {
         await p.waitForTimeout(400)
         await p
           .getByRole('dialog', { name: 'タイマー', exact: true })
-          .getByRole('button', { name: '開始' })
+          .getByRole('button', { name: ja.timer.customStart })
           .click()
         await p.waitForTimeout(600)
         const after = await customBtn.boundingBox()
@@ -8855,7 +8865,7 @@ try {
         const p = await ctx.newPage()
         await p.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
         await p.waitForTimeout(1400)
-        await p.getByPlaceholder('料理名・材料・タグ').fill('肉じゃが')
+        await p.getByPlaceholder(ja.search.placeholder).fill('肉じゃが')
         await p.waitForTimeout(500)
         await p.getByText('肉じゃが', { exact: true }).first().click()
         await p.waitForTimeout(700)
@@ -8868,7 +8878,7 @@ try {
         await p.waitForTimeout(900)
         await p.getByRole('button', { name: /タイマーを調整/ }).first().click()
         await p.waitForTimeout(400)
-        const barDialog = p.getByRole('dialog', { name: 'タイマーを調整' })
+        const barDialog = p.getByRole('dialog', { name: ja.timer.adjustDialogTitle })
         const goBtn = barDialog.getByRole('button', { name: /手順\d+を開く/ })
         check(
           'DS-BACK-01 他の画面でも動作中タイマーから「手順◯を開く」が出る(2026-07-12の退行の復活)',
@@ -8956,7 +8966,7 @@ try {
         await p.goto(`${BASE}/#/recipes/1`, { waitUntil: 'networkidle' })
         await p.reload({ waitUntil: 'networkidle' })
         await p.waitForTimeout(1500)
-        await p.getByText('調理中モードで見る').click()
+        await p.getByText(ja.focus.open).click()
         await p.waitForTimeout(700)
         const layout = await p.evaluate(() => {
           const overlay = document.querySelector('.fixed.inset-0.z-50')
@@ -9039,11 +9049,11 @@ try {
   // テスト用レシピ: 材料に価格を入力せず、マスタ初期値がある「玉ねぎ」だけを使う
   await page.goto(`${BASE}/#/recipes/new`, { waitUntil: 'networkidle' })
   await page.waitForTimeout(500)
-  await page.getByPlaceholder('例: 肉じゃが').fill('E2E価格マスタ確認レシピ')
-  await page.getByPlaceholder('例: じゃがいも').first().fill('玉ねぎ')
-  await page.getByPlaceholder('例: 3').first().fill('1')
-  await page.getByPlaceholder('例: 個').first().fill('個')
-  await page.getByPlaceholder('例: じゃがいもを一口大に切る').first().fill('切る')
+  await page.getByPlaceholder(ja.form.namePlaceholder).fill('E2E価格マスタ確認レシピ')
+  await page.getByPlaceholder(ja.form.ingredientNamePlaceholder).first().fill('玉ねぎ')
+  await page.getByPlaceholder(ja.form.ingredientAmountPlaceholder).first().fill('1')
+  await page.getByPlaceholder(ja.form.ingredientUnitPlaceholder).first().fill('個')
+  await page.getByPlaceholder(ja.form.stepTextPlaceholder).first().fill('切る')
   await page.getByRole('button', { name: '保存する' }).click()
   await page.waitForTimeout(800)
   const priceDetailBefore = await page.textContent('body')
@@ -9130,9 +9140,9 @@ try {
   // exact:trueが必須(部分一致だと検索欄「食材名で絞り込む」や各行の「{name}の価格（円）」等と衝突する)
   // 2026-07-15 UI改修で単位欄が「数量(数字)＋単位(選択)」に分離されたため、addUnitInputは
   // 数量欄(addQtyInput)＋単位選択(addUnitSelect)の2つに置き換えた(PRICEUNIT-01参照)
-  const addNameInput = page.getByLabel('食材名', { exact: true })
-  const addPriceInput = page.getByLabel('価格（円）', { exact: true })
-  const addQtyInput = page.getByLabel('数量', { exact: true })
+  const addNameInput = page.getByLabel(ja.priceMaster.nameLabel, { exact: true })
+  const addPriceInput = page.getByLabel(ja.priceMaster.priceLabel, { exact: true })
+  const addQtyInput = page.getByLabel(ja.priceMaster.quantityLabel, { exact: true })
   const addUnitSelect = page.getByLabel('単位', { exact: true })
   await addNameInput.fill('玉ねぎ')
   await addPriceInput.fill('80')
@@ -9188,14 +9198,14 @@ try {
   )
 
   // 検索/絞り込み: 存在しない食材名で0件表示になることを確認してから解除する
-  const searchInput = page.getByPlaceholder('食材名で絞り込む')
+  const searchInput = page.getByPlaceholder(ja.priceMaster.searchPlaceholder)
   await searchInput.fill('ぜったいにないよみとうしょくざい')
   await page.waitForTimeout(300)
   check(
     'INLINE-01 検索で該当なしのメッセージが出る',
     // 文言は ja.ts の1か所から読む（2026-08-18 便HS で空の言い回しを型にそろえた際、
     // ここに書き写してあった旧文言だけが取り残されて赤くなった＝禁じ手②）
-    (await page.textContent('body')).includes(ja.priceMaster.searchEmpty),
+    stripZwspText(await page.textContent('body')).includes(ja.priceMaster.searchEmpty),
   )
   await searchInput.fill('')
   await page.waitForTimeout(300)
@@ -9258,7 +9268,7 @@ try {
   await page.waitForTimeout(500)
   await page.locator('a[href*="/edit"]').first().click()
   await page.waitForTimeout(500)
-  await page.getByRole('button', { name: 'このレシピを削除' }).click()
+  await page.getByRole('button', { name: ja.form.deleteRecipe }).click()
   await page.waitForTimeout(800)
 
   // --- MEALPLAN-01: 献立タブ・週プランナー(第4波ペルソナPDCA Fix1/3/4/5/6。まっさらプロファイル
@@ -9298,7 +9308,7 @@ try {
       // 便U-1: 既定は「日」タブ。以降の検証は週タブの内容が対象なので明示的に切り替える
       const dayTabBtn = mpPage.getByRole('button', { name: '日', exact: true })
       check('MEALPLAN-01(便U-1) 献立タブを開くと既定で「日」タブが選択されている', (await dayTabBtn.getAttribute('aria-pressed')) === 'true')
-      await mpPage.getByRole('button', { name: '週', exact: true }).click()
+      await mpPage.getByRole('button', { name: ja.mealPlan.viewWeek, exact: true }).click()
       await openAllWeekDays(mpPage) // 便ID・⑦: 畳む既定になったので、カードの中を触る前に開く
       await mpPage.waitForTimeout(300)
 
@@ -9306,7 +9316,7 @@ try {
       const mpEmptyText = await mpPage.textContent('body')
       check(
         'MEALPLAN-01(Fix3) 未割当時は概算食費セクションが無い',
-        !mpEmptyText.includes('表示している週の概算食費'),
+        !mpEmptyText.includes(ja.mealPlan.weekCostTitle),
       )
 
       // Fix1: 週移動の中央チップ。まず当週表示中はaria-labelが無いことを確認
@@ -9347,19 +9357,19 @@ try {
         'MEALPLAN-01(便IV) 前提: 今日のカードを編集モードにできた',
         (await openWeekDayEdit(mpPage, mpToday)) === true,
       )
-      await mpPage.getByRole('button', { name: 'レシピを選ぶ', exact: true }).first().click()
+      await mpPage.getByRole('button', { name: ja.mealPlan.emptyAssign, exact: true }).first().click()
       await mpPage.waitForTimeout(400)
       check('MEALPLAN-01(Fix4) ピッカーが開く', (await mpPage.textContent('body')).includes('レシピを選ぶ'))
-      await mpPage.getByPlaceholder('レシピ名で絞り込み').fill('肉じゃが')
+      await mpPage.getByPlaceholder(ja.mealPlan.pickSearchPlaceholder).fill('肉じゃが')
       await mpPage.waitForTimeout(300)
       await mpPage.getByText('肉じゃが', { exact: true }).first().click()
       await mpPage.waitForTimeout(400)
       const mpAssignedText = await mpPage.textContent('body')
       // 2026-07-24 便BH-3・タスク4: 概算食費は小さな折りたたみ(既定閉)になった。見出し(トグル)は
       // 割り当て後に出るが、金額・リンクは展開して初めて出る
-      check('MEALPLAN-01(Fix3) 割り当てると概算食費セクションが出る', mpAssignedText.includes('表示している週の概算食費'))
+      check('MEALPLAN-01(Fix3) 割り当てると概算食費セクションが出る', mpAssignedText.includes(ja.mealPlan.weekCostTitle))
       // タスク4: 折りたたみを展開してから金額・食数・リンクを確認する
-      await mpPage.getByRole('button', { name: '表示している週の概算食費' }).click()
+      await mpPage.getByRole('button', { name: ja.mealPlan.weekCostTitle }).click()
       await mpPage.waitForTimeout(300)
       const mpCostText = await mpPage.textContent('body')
       const costMatch = mpCostText.match(/約([\d,]+)円/)
@@ -9393,7 +9403,7 @@ try {
       // Fix4: 埋まった枠を再度開くと現在のレシピ行に「選択中」バッジが出る
       await mpPage.getByRole('button', { name: '肉じゃが' }).first().click()
       await mpPage.waitForTimeout(400)
-      const currentPickRow = mpPage.locator('li', { hasText: '選択中' })
+      const currentPickRow = mpPage.locator('li', { hasText: ja.mealPlan.pickCurrentBadge })
       check('MEALPLAN-01(Fix4) 「選択中」バッジが出る', await currentPickRow.isVisible())
       check(
         'MEALPLAN-01(Fix4) 「選択中」バッジは現在のレシピ(肉じゃが)の行に付く',
@@ -9405,7 +9415,7 @@ try {
       // Fix5: aria-pressed(見た目は変更しない)
       // 2026-08-09 便EN(オーナー指示): 「献立を提案」グループは既定で畳んである。
       // 中の操作(提案の条件・入れかた・先週コピー)を触る前に開く
-      await openWeekGroup(mpPage, '献立を提案')
+      await openWeekGroup(mpPage, ja.mealPlan.weekGroupAutoTitle)
       await mpPage.waitForTimeout(300)
       // 2026-07-16 UI総点検A-3で既定折りたたみ → 2026-08-19 便ID・④で**窓**になった。
       // 条件は窓の中にあるので、開いて触り、触り終えたら閉じてから次の操作へ移る
@@ -9429,9 +9439,9 @@ try {
       await mpPage.waitForTimeout(200)
       await mpPage.locator('[data-testid="plan-conditions-close"]').click()
       await mpPage.waitForTimeout(400)
-      const breakfastFilterBtn = mpPage.getByRole('button', { name: '朝食', exact: true })
-      const lunchFilterBtn = mpPage.getByRole('button', { name: '昼食', exact: true })
-      const dinnerFilterBtn = mpPage.getByRole('button', { name: '夕食', exact: true })
+      const breakfastFilterBtn = mpPage.getByRole('button', { name: ja.mealPlan.slot.breakfast, exact: true })
+      const lunchFilterBtn = mpPage.getByRole('button', { name: ja.mealPlan.slot.lunch, exact: true })
+      const dinnerFilterBtn = mpPage.getByRole('button', { name: ja.mealPlan.slot.dinner, exact: true })
       // 2026-07-13更新: 新規ユーザーの既定表示食事帯は「夕食のみ」(オーナー判断・プレッシャー軽減)。
       // まっさらプロファイルで検証しているこのテストでは朝食/昼食=false、夕食=trueが既定になる
       check(
@@ -9440,7 +9450,7 @@ try {
           (await lunchFilterBtn.getAttribute('aria-pressed')) === 'false' &&
           (await dinnerFilterBtn.getAttribute('aria-pressed')) === 'true',
       )
-      const weekToggleBtn = mpPage.getByRole('button', { name: '週', exact: true })
+      const weekToggleBtn = mpPage.getByRole('button', { name: ja.mealPlan.viewWeek, exact: true })
       const monthToggleBtn = mpPage.getByRole('button', { name: '月', exact: true })
       check(
         'MEALPLAN-01(Fix5・便U-1) 日/週/月タブにもaria-pressedが付く(週表示中はfalse/true/false)',
@@ -9456,7 +9466,7 @@ try {
       await mpPage.waitForTimeout(300)
       check(
         'MEALPLAN-01(Fix6) 最後の1枠(夕食)を外そうとすると説明トーストが出る',
-        (await mpPage.textContent('body')).includes('少なくとも1つは表示したままにします'),
+        stripZwspText(await mpPage.textContent('body')).includes(ja.mealPlan.slotFilterKeepOne),
       )
       check(
         'MEALPLAN-01(Fix6) 夕食フィルタは外れずaria-pressed=trueのまま',
@@ -9472,9 +9482,9 @@ try {
         'MEALPLAN-01(便EK) 前提: 昼食を表示に足せた(残る側の食事を用意する)',
         (await lunchFilterBtn.getAttribute('aria-pressed')) === 'true',
       )
-      await mpPage.getByRole('button', { name: 'レシピを選ぶ', exact: true }).first().click()
+      await mpPage.getByRole('button', { name: ja.mealPlan.emptyAssign, exact: true }).first().click()
       await mpPage.waitForTimeout(400)
-      await mpPage.getByPlaceholder('レシピ名で絞り込み').fill('ほうれん草のおひたし')
+      await mpPage.getByPlaceholder(ja.mealPlan.pickSearchPlaceholder).fill('ほうれん草のおひたし')
       await mpPage.waitForTimeout(300)
       await mpPage.getByText('ほうれん草のおひたし', { exact: true }).first().click()
       await mpPage.waitForTimeout(500)
@@ -9539,7 +9549,7 @@ try {
         ((await mpPage.textContent('body')) ?? '').includes('表示している週の朝食・夕食をまとめて空にする'),
       )
       mpDialogs.length = 0
-      await mpPage.getByRole('button', { name: '空にする', exact: true }).click()
+      await mpPage.getByRole('button', { name: ja.mealPlan.clearWeekSlotButton, exact: true }).click()
       await mpPage.waitForTimeout(600)
       check(
         'MEALPLAN-01(便U-4/便DJ) 確認後、選んだ食事を並べた削除完了のトーストが出る',
@@ -9586,10 +9596,10 @@ try {
       // 表示中の7行すべての曜日が日付と食い違っていた(水曜に「月 2026/07/29 今日」と出る)。
       // このモードは自動テストが1件も無く、ユーザーからも報告されにくい盲点だったので恒久化する
       // 「表示のしかた」グループは上の「まとめて空にする」の検証で既に開いてある(2026-08-03 便DJ)
-      await selectWeekLayout(mpPage, '今日から7日間')
+      await selectWeekLayout(mpPage, ja.mealPlan.weekLayoutRolling)
       await mpPage.waitForTimeout(500)
-      const rollingHeads = await mpPage.evaluate(() => {
-        const dow = ['月', '火', '水', '木', '金', '土', '日']
+      // 曜日の名前も画面の文言。evaluate の中はブラウザ側なので**引数で渡す**（便JM）
+      const rollingHeads = await mpPage.evaluate((dow) => {
         const found = []
         const mismatch = []
         document.querySelectorAll('h2').forEach((h) => {
@@ -9601,7 +9611,7 @@ try {
           if (expected !== m[1]) mismatch.push(`${m[2]}/${m[3]}/${m[4]} は${expected}なのに${m[1]}と表示`)
         })
         return { found, mismatch }
-      })
+      }, ja.mealPlan.dow)
       check(
         'MEALPLAN-01(便CD/MP-02) 「今日から7日間」で7日分のカード見出しが出る',
         rollingHeads.found.length === 7,
@@ -9646,32 +9656,32 @@ try {
     try {
       await nbPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
       await nbPage.waitForTimeout(2000) // 初回シード完了待ち
-      await nbPage.getByRole('button', { name: '週', exact: true }).click()
+      await nbPage.getByRole('button', { name: ja.mealPlan.viewWeek, exact: true }).click()
       await openAllWeekDays(nbPage) // 便ID・⑦: 畳む既定になったので、カードの中を触る前に開く
       await nbPage.waitForTimeout(300)
       // 2026-08-03 便DJ: 「表示のしかた」グループは既定で畳まれているので先に開く
       await nbPage.getByRole('button', { name: '表示のしかたを開く' }).click()
       await nbPage.waitForTimeout(200)
-      await selectWeekLayout(nbPage, '今日から7日間')
+      await selectWeekLayout(nbPage, ja.mealPlan.weekLayoutRolling)
       await nbPage.waitForTimeout(500)
 
       // 何も割り当てていない週にはパネルを出さない(「0kcal」を7日並べない)
       const nbEmptyText = await nbPage.textContent('body')
       check(
         'NUTRI-DAY-01 未割当時は「この日の献立」の行が出ない',
-        !nbEmptyText.includes('この日の献立の栄養（1人分の概算）'),
+        !nbEmptyText.includes(ja.nutritionBalance.dayTitlePlan),
       )
       check(
         'NUTRI-WEEK-01 未割当時は「表示している週の献立」の行も出ない',
-        !nbEmptyText.includes('表示している週の献立の栄養（1人分の概算）'),
+        !nbEmptyText.includes(ja.nutritionBalance.weekTitle),
       )
 
-      await nbPage.getByRole('button', { name: 'まとめて献立を入力' }).click()
+      await nbPage.getByRole('button', { name: ja.mealPlan.fillWeek }).click()
       await nbPage.waitForTimeout(1200)
       const nbFilledText = await nbPage.textContent('body')
       check(
         'NUTRI-DAY-01 献立を入れると各日カードに「この日の献立の栄養（1人分の概算）」が出る',
-        nbFilledText.includes('この日の献立の栄養（1人分の概算）'),
+        nbFilledText.includes(ja.nutritionBalance.dayTitlePlan),
       )
       const dayToggles = nbPage.getByRole('button', { name: /^この日（.+）の栄養の概算を詳しく見る$/ })
       check(
@@ -9700,7 +9710,7 @@ try {
       )
       check(
         'NUTRI-WEEK-01 週まとめに「表示している週の献立の栄養（1人分の概算）」が出る',
-        nbFilledText.includes('表示している週の献立の栄養（1人分の概算）'),
+        nbFilledText.includes(ja.nutritionBalance.weekTitle),
       )
 
       // 日カードを展開してめやすの説明文・注記・出典・鍵付き導線を確認する
@@ -9799,7 +9809,7 @@ try {
       )
 
       // 週まとめを展開: めやすは日数で掛けず、1日分の基準を説明文1行で書く(便CW-7)
-      await nbPage.getByRole('button', { name: '表示している週の栄養の概算を詳しく見る' }).click()
+      await nbPage.getByRole('button', { name: ja.nutritionBalance.weekToggleExpand }).click()
       await nbPage.waitForTimeout(400)
       const nbWeekOpenText = await nbPage.textContent('body')
       check(
@@ -9813,7 +9823,7 @@ try {
       )
       check(
         'NUTRI-WEEK-01 週は「過ぎた日は作った記録・明日から先は登録した献立」の基準を明示する',
-        nbWeekOpenText.includes('過ぎた日は作った記録、明日から先は登録した献立で計算しています'),
+        nbWeekOpenText.includes(ja.nutritionBalance.weekBasisNote),
       )
       // 2026-08-09 便EK: 今日を含む週は「今日の数え方」も必ず添える(期間カードと同じ文)。
       // 週タブの既定表示は当週なので、この画面には必ず今日が入っている
@@ -9858,17 +9868,17 @@ try {
       // 選択は設定に記憶する(読み込み直しても外れない)
       await nbPage.reload({ waitUntil: 'networkidle' })
       await nbPage.waitForTimeout(1200)
-      await nbPage.getByRole('button', { name: '週', exact: true }).click()
+      await nbPage.getByRole('button', { name: ja.mealPlan.viewWeek, exact: true }).click()
       await openAllWeekDays(nbPage) // 便ID・⑦: 畳む既定になったので、カードの中を触る前に開く
       await nbPage.waitForTimeout(400)
-      await nbPage.getByRole('button', { name: '表示している週の栄養の概算を詳しく見る' }).click()
+      await nbPage.getByRole('button', { name: ja.nutritionBalance.weekToggleExpand }).click()
       await nbPage.waitForTimeout(400)
       check(
         'NUTRI-DAY-01(便CW-10) 選択は設定に残る(読み込み直してもONのまま)',
         await nbPage.locator('[data-testid="include-rice"]').first().isChecked(),
       )
       // 食費にも同じ選択が効き、何を足した金額なのかを必ず書く
-      await nbPage.getByRole('button', { name: '表示している週の概算食費' }).click()
+      await nbPage.getByRole('button', { name: ja.mealPlan.weekCostTitle }).click()
       await nbPage.waitForTimeout(400)
       check(
         'NUTRI-DAY-01(便CW-10) 週の概算食費に「ごはん◯杯分を含めた金額です」を添える',
@@ -9902,29 +9912,29 @@ try {
     try {
       await npPage.goto(`${BASE}/#/settings?section=pro`, { waitUntil: 'networkidle' })
       await npPage.waitForTimeout(1800)
-      await npPage.getByPlaceholder('解錠コード (例: UR-XXXX-XXXX)').fill('UR-96QS-2VSZ')
-      await npPage.getByRole('button', { name: '解錠する', exact: true }).first().click()
+      await npPage.getByPlaceholder(ja.settings.unlockCodePlaceholder).fill('UR-96QS-2VSZ')
+      await npPage.getByRole('button', { name: ja.settings.unlockActivate, exact: true }).first().click()
       await npPage.waitForTimeout(1000)
       check(
         'NUTRI-PRO-01 前提: Pro解錠が成功する',
-        (await npPage.textContent('body')).includes('Pro版をご利用いただきありがとうございます'),
+        stripZwspText(await npPage.textContent('body')).includes(ja.settings.proActivatedTitle),
       )
 
       await npPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
       await npPage.waitForTimeout(900)
-      await npPage.getByRole('button', { name: '週', exact: true }).click()
+      await npPage.getByRole('button', { name: ja.mealPlan.viewWeek, exact: true }).click()
       await openAllWeekDays(npPage) // 便ID・⑦: 畳む既定になったので、カードの中を触る前に開く
       await npPage.waitForTimeout(300)
       // 2026-08-03 便DJ: 「表示のしかた」グループは既定で畳まれているので先に開く
       await npPage.getByRole('button', { name: '表示のしかたを開く' }).click()
       await npPage.waitForTimeout(200)
-      await selectWeekLayout(npPage, '今日から7日間')
+      await selectWeekLayout(npPage, ja.mealPlan.weekLayoutRolling)
       await npPage.waitForTimeout(500)
       // 2026-08-02 便CW-6の「食事ごとの内訳」は2つ以上の食事に献立がある日にだけ出るので、
       // 既定(夕食のみ)に朝食を足してから献立を立てる
-      await npPage.getByRole('button', { name: '朝食', exact: true }).click()
+      await npPage.getByRole('button', { name: ja.mealPlan.slot.breakfast, exact: true }).click()
       await npPage.waitForTimeout(300)
-      await npPage.getByRole('button', { name: 'まとめて献立を入力' }).click()
+      await npPage.getByRole('button', { name: ja.mealPlan.fillWeek }).click()
       await npPage.waitForTimeout(1500)
       await npPage
         .getByRole('button', { name: /^この日（.+）の栄養の概算を詳しく見る$/ })
@@ -9969,7 +9979,7 @@ try {
       // 便CW-6: 食事ごとの内訳(Pro)。朝食・夕食の2食に献立があるので小計が2行出る
       check(
         'NUTRI-PRO-01(便CW-6) Pro解錠済みは展開部に「食事ごとの内訳（1人分）」が出る',
-        npOpenText.includes('食事ごとの内訳（1人分）'),
+        npOpenText.includes(ja.nutritionBalance.slotBreakdownTitle),
       )
       const npSlotRows = await npPage
         .locator('dt', { hasText: /^(朝食|昼食|夕食)$/ })
@@ -10014,12 +10024,12 @@ try {
       await mp2Page.goto(`${BASE}/#/settings?section=pro`, { waitUntil: 'networkidle' })
       await mp2Page.waitForTimeout(1500)
       // 2026-07-17設定ゼロベース裁定#7: Pro/追加レシピパックの入力欄が1つに統合された
-      await mp2Page.getByPlaceholder('解錠コード (例: UR-XXXX-XXXX)').fill('UR-96QS-2VSZ')
-      await mp2Page.getByRole('button', { name: '解錠する', exact: true }).first().click()
+      await mp2Page.getByPlaceholder(ja.settings.unlockCodePlaceholder).fill('UR-96QS-2VSZ')
+      await mp2Page.getByRole('button', { name: ja.settings.unlockActivate, exact: true }).first().click()
       await mp2Page.waitForTimeout(1000)
       check(
         'MEALPLAN-02 前提: Pro解錠が成功する',
-        (await mp2Page.textContent('body')).includes('Pro版をご利用いただきありがとうございます'),
+        stripZwspText(await mp2Page.textContent('body')).includes(ja.settings.proActivatedTitle),
       )
 
       await mp2Page.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
@@ -10070,11 +10080,11 @@ try {
       check('MEALPLAN-02(便U-5) その日の献立モーダルが開く', await dayModal.isVisible())
       check(
         'MEALPLAN-02(便U-5) 献立の無い日は献立が無いと出る',
-        (await dayModal.textContent()).includes(ja.mealPlan.monthDayModalEmpty),
+        stripZwspText(await dayModal.textContent()).includes(ja.mealPlan.monthDayModalEmpty),
       )
       check(
         'MEALPLAN-02(便U-5) モーダルに「この週を開く」ボタンがある',
-        await dayModal.getByRole('button', { name: 'この週を開く' }).isVisible(),
+        await dayModal.getByRole('button', { name: ja.mealPlan.monthDayModalOpenWeek }).isVisible(),
       )
       // ×で閉じられる
       await dayModal.locator('button[aria-label="閉じる"]').click()
@@ -10139,11 +10149,11 @@ try {
         dayModalFilledText.includes('主菜') && dayModalFilledText.includes('副菜'),
       )
       // 「この週を開く」で週タブへ移動する(従来の週ジャンプはここへ移動した)
-      await dayModalFilled.getByRole('button', { name: 'この週を開く' }).click()
+      await dayModalFilled.getByRole('button', { name: ja.mealPlan.monthDayModalOpenWeek }).click()
       await mp2Page.waitForTimeout(400)
       check(
         'MEALPLAN-02(便U-5) 「この週を開く」で週タブへ切り替わる',
-        (await mp2Page.getByRole('button', { name: '週', exact: true }).getAttribute('aria-pressed')) === 'true',
+        (await mp2Page.getByRole('button', { name: ja.mealPlan.viewWeek, exact: true }).getAttribute('aria-pressed')) === 'true',
       )
       check(
         'MEALPLAN-02(便U-5) 開いた週に投入済みの肉じゃがが見える(今日を含む週が開いている)',
@@ -10181,7 +10191,7 @@ try {
       await mp3Page.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
       await mp3Page.waitForTimeout(1800) // 初回シード完了待ち(この時点で表示食事帯は既定の「夕食のみ」)
       // 便U-1: 既定タブは「日」になったため、週プランナーの検証は「週」タブへ切り替えてから行う
-      await mp3Page.getByRole('button', { name: '週', exact: true }).click()
+      await mp3Page.getByRole('button', { name: ja.mealPlan.viewWeek, exact: true }).click()
       await openAllWeekDays(mp3Page) // 便ID・⑦: 畳む既定になったので、カードの中を触る前に開く
       await mp3Page.waitForTimeout(300)
       // 2026-07-16 便W-⑤a: ランダム週献立(サイコロ/まとめて献立)は過去日の枠を対象外にした。
@@ -10212,7 +10222,7 @@ try {
       /** その日のカードの中だけを見る（他の日の状態に左右されない） */
       const mp3Card = (date) => mp3Page.locator(`section[data-date="${date}"]`)
       const mp3Empty = (date) =>
-        mp3Card(date).getByRole('button', { name: 'レシピを選ぶ', exact: true })
+        mp3Card(date).getByRole('button', { name: ja.mealPlan.emptyAssign, exact: true })
 
       check(
         'MEALPLAN-03(便IV) 通常表示には空き枠を出さない（入っている品だけを並べる）',
@@ -10237,7 +10247,7 @@ try {
       )
 
       // 「まとめて献立を入力」ボタンにアイコン(svg)が付く(SparklesからDicesへ変更。2026-07-13)
-      const fillWeekBtn = mp3Page.getByRole('button', { name: 'まとめて献立を入力' })
+      const fillWeekBtn = mp3Page.getByRole('button', { name: ja.mealPlan.fillWeek })
       check(
         'MEALPLAN-03 「まとめて献立を入力」ボタンにアイコンが付く',
         (await fillWeekBtn.locator('svg').count()) > 0,
@@ -10245,7 +10255,7 @@ try {
 
       // 2026-08-09 便EN(オーナー指示): 「献立を提案」グループは既定で畳んである
       // (2026-08-22 便IVで3節とも畳む既定に戻った)。中の操作を触る前に開く
-      await openWeekGroup(mp3Page, '献立を提案')
+      await openWeekGroup(mp3Page, ja.mealPlan.weekGroupAutoTitle)
       await mp3Page.waitForTimeout(300)
       // 料理のジャンルは「現在の条件」の窓の中(2026-08-19 便ID・④で折りたたみ→窓)。まず開く
       await mp3Page.locator('[data-testid="plan-conditions-open"]').click()
@@ -10293,7 +10303,7 @@ try {
       // 1日目・夕食の主菜行(先頭の空き枠)に「肉じゃが」をピッカーで割り当てる
       await mp3Empty(mp3D0).first().click()
       await mp3Page.waitForTimeout(400)
-      await mp3Page.getByPlaceholder('レシピ名で絞り込み').fill('肉じゃが')
+      await mp3Page.getByPlaceholder(ja.mealPlan.pickSearchPlaceholder).fill('肉じゃが')
       await mp3Page.waitForTimeout(300)
       await mp3Page.getByText('肉じゃが', { exact: true }).first().click()
       await mp3Page.waitForTimeout(400)
@@ -10310,7 +10320,7 @@ try {
       // 行単位のサイコロ: 同じ日の副菜行(主菜が埋まっているので枠は「丸ごと空」ではない)だけを
       // 振ると、副菜だけ埋まり主菜(肉じゃが)は変わらない
       const mp3Dice = (date) =>
-        mp3Card(date).getByRole('button', { name: 'この行にレシピを自動提案する' })
+        mp3Card(date).getByRole('button', { name: ja.mealPlan.suggestAria })
       await mp3Dice(mp3D0).last().click()
       await mp3Page.waitForTimeout(400)
       check(
@@ -10353,7 +10363,7 @@ try {
         (await openWeekDayEdit(mp3Page, mp3D2)) === true,
       )
       const mp3AddBefore = await mp3Empty(mp3D2).count()
-      await mp3Card(mp3D2).getByRole('button', { name: '＋料理を追加' }).first().click()
+      await mp3Card(mp3D2).getByRole('button', { name: ja.mealPlan.addRow }).first().click()
       await mp3Page.waitForTimeout(200)
       await mp3Card(mp3D2).getByRole('button', { name: '主菜', exact: true }).click()
       await mp3Page.waitForTimeout(300)
@@ -10372,7 +10382,7 @@ try {
       // 空欄行は「既定の空欄行(×=閉じる)」と「＋料理を追加で増やした行(×=この追加した行をやめる)」の
       // 2種類。どちらの×も付いていること＝合計が空欄行の数と一致することで確かめる
       const extraRowCloseCount = await mp3Card(mp3D2)
-        .getByRole('button', { name: 'この追加した行をやめる' })
+        .getByRole('button', { name: ja.mealPlan.removeExtraRow })
         .count()
       check(
         'MEALPLAN-03(便CW-2) 既定の空欄行にも×(閉じる)が付く',
@@ -10389,7 +10399,7 @@ try {
         `before=${beforeHideEmpty} after=${await mp3Empty(mp3D2).count()}`,
       )
       // 戻す: 同じ食事の「＋料理を追加」→畳んだ役割。行が2つに増えず、元の1行に戻ること
-      await mp3Card(mp3D2).getByRole('button', { name: '＋料理を追加' }).last().click()
+      await mp3Card(mp3D2).getByRole('button', { name: ja.mealPlan.addRow }).last().click()
       await mp3Page.waitForTimeout(200)
       await mp3Card(mp3D2).getByRole('button', { name: hiddenRole, exact: true }).click()
       await mp3Page.waitForTimeout(300)
@@ -10403,9 +10413,9 @@ try {
       // 3つの食事を表示にしてから、各ブロックの地色と左帯の色が互いに違うことを見る
       // (色そのものはテーマトークン依存なので、値ではなく「3つとも違う」ことだけを固定する)。
       // 2026-08-22 便IV: 通常表示は空の食事の囲みを出さないので、**編集モードの日**で測る
-      await mp3Page.getByRole('button', { name: '朝食', exact: true }).click()
+      await mp3Page.getByRole('button', { name: ja.mealPlan.slot.breakfast, exact: true }).click()
       await mp3Page.waitForTimeout(200)
-      await mp3Page.getByRole('button', { name: '昼食', exact: true }).click()
+      await mp3Page.getByRole('button', { name: ja.mealPlan.slot.lunch, exact: true }).click()
       await mp3Page.waitForTimeout(400)
       const slotTones = await mp3Page.evaluate((date) => {
         const card = document.querySelector(`section[data-date="${date}"]`)
@@ -10479,7 +10489,7 @@ try {
       await mp4Page.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
       await mp4Page.waitForTimeout(1800) // 初回シード完了待ち(既定表示は夕食のみ)
       // 便U-1: 既定タブは「日」になったため、「まとめて献立を入力」がある「週」タブへ切り替える
-      await mp4Page.getByRole('button', { name: '週', exact: true }).click()
+      await mp4Page.getByRole('button', { name: ja.mealPlan.viewWeek, exact: true }).click()
       await openAllWeekDays(mp4Page) // 便ID・⑦: 畳む既定になったので、カードの中を触る前に開く
       await mp4Page.waitForTimeout(300)
       // 2026-07-16 便W-⑤a: 過去日はまとめて献立の対象外になったため、実行日の曜日に関係なく
@@ -10533,7 +10543,7 @@ try {
 
       // 2026-08-09 便EN(オーナー指示): 「献立を提案」グループは既定で畳んである。
       // 中の操作(提案の条件・入れかた・先週コピー)を触る前に開く
-      await openWeekGroup(mp4Page, '献立を提案')
+      await openWeekGroup(mp4Page, ja.mealPlan.weekGroupAutoTitle)
       await mp4Page.waitForTimeout(300)
       // 便DT-8: 入れかたを「総入れ替え」に倒す(既定は非破壊の「空いた枠だけ」)。
       // 2026-08-20 便II・④: 入れかたはプルダウンになった
@@ -10544,7 +10554,7 @@ try {
         (await mp4Page.locator('[data-testid="fill-mode"]').inputValue()) === 'replaceAll',
         `いまの入れかた=${await mp4Page.locator('[data-testid="fill-mode"]').inputValue()}`,
       )
-      const fillWeekBtn = mp4Page.getByRole('button', { name: 'まとめて献立を入力' })
+      const fillWeekBtn = mp4Page.getByRole('button', { name: ja.mealPlan.fillWeek })
       await fillWeekBtn.click()
       await mp4Page.waitForTimeout(1000)
       const rowsAfterFirst = await dinnerRows()
@@ -10791,7 +10801,7 @@ try {
     try {
       await mp6Page.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
       await mp6Page.waitForTimeout(1800) // 初回シード完了待ち(既定表示は夕食のみ)
-      await mp6Page.getByRole('button', { name: '週', exact: true }).click()
+      await mp6Page.getByRole('button', { name: ja.mealPlan.viewWeek, exact: true }).click()
       await openAllWeekDays(mp6Page) // 便ID・⑦: 畳む既定になったので、カードの中を触る前に開く
       await mp6Page.waitForTimeout(300)
       await mp6Page.locator('button[aria-label="前の週"]').click()
@@ -10803,7 +10813,7 @@ try {
       // 記録はありません」を出す(7日分)。よって「レシピを選ぶ」(空き枠ボタン)は0件になる
       check(
         'MEALPLAN-06(便BS) 過去週は予定グリッド(レシピを選ぶ)を1つも出さない',
-        (await mp6Page.getByRole('button', { name: 'レシピを選ぶ', exact: true }).count()) === 0,
+        (await mp6Page.getByRole('button', { name: ja.mealPlan.emptyAssign, exact: true }).count()) === 0,
       )
       check(
         'MEALPLAN-06(便BS) 記録の無い過去日は「記録が無い」を7日分出す',
@@ -10812,14 +10822,14 @@ try {
       // (a) 過去日にはサイコロ(行の自動提案)ボタン自体が出ない
       check(
         'MEALPLAN-06(過去日保護a) 過去週にはサイコロボタンが1つも出ない',
-        (await mp6Page.getByRole('button', { name: 'この行にレシピを自動提案する' }).count()) === 0,
+        (await mp6Page.getByRole('button', { name: ja.mealPlan.suggestAria }).count()) === 0,
       )
       // (a) 「まとめて献立を立てる」を押しても過去週には予定が生まれない(グリッドを出さないまま)
-      await mp6Page.getByRole('button', { name: 'まとめて献立を入力' }).click()
+      await mp6Page.getByRole('button', { name: ja.mealPlan.fillWeek }).click()
       await mp6Page.waitForTimeout(600)
       check(
         'MEALPLAN-06(過去日保護a) 「まとめて献立を立てる」を押しても過去週に予定は出ない(0のまま)',
-        (await mp6Page.getByRole('button', { name: 'レシピを選ぶ', exact: true }).count()) === 0,
+        (await mp6Page.getByRole('button', { name: ja.mealPlan.emptyAssign, exact: true }).count()) === 0,
       )
     } finally {
       await mp6Browser.close()
@@ -10873,7 +10883,7 @@ try {
 
       await mp8Page.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
       await mp8Page.waitForTimeout(1800) // 初回シード完了待ち(既定表示は夕食のみ)
-      await mp8Page.getByRole('button', { name: '週', exact: true }).click()
+      await mp8Page.getByRole('button', { name: ja.mealPlan.viewWeek, exact: true }).click()
       await openAllWeekDays(mp8Page) // 便ID・⑦: 畳む既定になったので、カードの中を触る前に開く
       await mp8Page.waitForTimeout(300)
       // 全日程を未来日にするため「次の週」へ(過去日保護と切り分ける。MEALPLAN-03/04と同じ理由)
@@ -10891,9 +10901,9 @@ try {
         (await openWeekDayEdit(mp8Page, mp8FirstDate)) === true,
         `先頭の日=${mp8FirstDate}`,
       )
-      await mp8Page.getByRole('button', { name: 'レシピを選ぶ', exact: true }).first().click()
+      await mp8Page.getByRole('button', { name: ja.mealPlan.emptyAssign, exact: true }).first().click()
       await mp8Page.waitForTimeout(400)
-      await mp8Page.getByPlaceholder('レシピ名で絞り込み').fill('肉じゃが')
+      await mp8Page.getByPlaceholder(ja.mealPlan.pickSearchPlaceholder).fill('肉じゃが')
       await mp8Page.waitForTimeout(300)
       await mp8Page.getByText('肉じゃが', { exact: true }).first().click()
       await mp8Page.waitForTimeout(400)
@@ -10904,7 +10914,7 @@ try {
       check('MEALPLAN-08 前提: 手動配置の行はauto=false(手動扱い)', manual.auto === false)
 
       // 「まとめて献立を立てる」を押す
-      const fillWeekBtn = mp8Page.getByRole('button', { name: 'まとめて献立を入力' })
+      const fillWeekBtn = mp8Page.getByRole('button', { name: ja.mealPlan.fillWeek })
       await fillWeekBtn.click()
       await mp8Page.waitForTimeout(1000)
 
@@ -10980,11 +10990,11 @@ try {
         check(`MEALPLAN-09 前提: ${date} を編集モードにできた（便IV）`, edited === true)
         await mp9Page
           .locator(`section[data-date="${date}"]`)
-          .getByRole('button', { name: 'レシピを選ぶ', exact: true })
+          .getByRole('button', { name: ja.mealPlan.emptyAssign, exact: true })
           .first()
           .click()
         await mp9Page.waitForTimeout(400)
-        await mp9Page.getByPlaceholder('レシピ名で絞り込み').fill(title)
+        await mp9Page.getByPlaceholder(ja.mealPlan.pickSearchPlaceholder).fill(title)
         await mp9Page.waitForTimeout(300)
         await mp9Page.getByText(title, { exact: true }).first().click()
         await mp9Page.waitForTimeout(400)
@@ -10992,7 +11002,7 @@ try {
 
       await mp9Page.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
       await mp9Page.waitForTimeout(1800)
-      await mp9Page.getByRole('button', { name: '週', exact: true }).click()
+      await mp9Page.getByRole('button', { name: ja.mealPlan.viewWeek, exact: true }).click()
       await openAllWeekDays(mp9Page) // 便ID・⑦: 畳む既定になったので、カードの中を触る前に開く
       await mp9Page.waitForTimeout(300)
       // 全日程を未来日にする(MEALPLAN-03/04/08と同じ理由)
@@ -11011,12 +11021,12 @@ try {
       check(
         // 2026-07-30 便CH/C12: バッジ文言を平易な「主菜と別ジャンル」に変えた
         'MEALPLAN-09(B) 主菜(和食)と副菜(洋食)が食い違う枠に「主菜と別ジャンル」バッジが出る',
-        (await mp9Page.getByText('主菜と別ジャンル', { exact: true }).count()) >= 1,
+        (await mp9Page.getByText(ja.mealPlan.genreMixedBadge, { exact: true }).count()) >= 1,
       )
 
       // (A) 火曜: 主菜=カレーライス(一品もの)を手動で入れる(次の先頭の未定=火曜の主菜)
       await assign(mp9Dates[1], 'カレーライス')
-      await mp9Page.getByRole('button', { name: 'まとめて献立を入力' }).click()
+      await mp9Page.getByRole('button', { name: ja.mealPlan.fillWeek }).click()
       await mp9Page.waitForTimeout(1200)
 
       // カレーの入った枠(date)に副菜行が無いことをIndexedDBで確認
@@ -11133,13 +11143,13 @@ try {
       await swPage.getByText('肉じゃが', { exact: true }).first().click()
       await swPage.waitForTimeout(500)
       const swRecipeId = Number(swPage.url().match(/#\/recipes\/(\d+)/)?.[1])
-      await swPage.getByRole('button', { name: '今日の献立に追加' }).click()
+      await swPage.getByRole('button', { name: ja.detail.todayAdd }).click()
       await swPage.waitForTimeout(300)
       check(
         'SLOTWIN-01 ボタン押下で窓「朝食・昼食・夕食のどれに入れますか？」が開く',
-        (await swPage.textContent('body')).includes('朝食・昼食・夕食のどれに入れますか？'),
+        stripZwspText(await swPage.textContent('body')).includes(ja.detail.todaySlotDialogTitle),
       )
-      await swPage.getByRole('button', { name: '夕食', exact: true }).click()
+      await swPage.getByRole('button', { name: ja.mealPlan.slot.dinner, exact: true }).click()
       await swPage.waitForTimeout(500)
       check(
         'SLOTWIN-01 「今日の夕食に追加しました」トーストが出る',
@@ -11166,7 +11176,7 @@ try {
         (await swPage.textContent('body')).includes('肉じゃが'),
       )
       // 週タブの今日の夕食枠にも見える
-      await swPage.getByRole('button', { name: '週', exact: true }).click()
+      await swPage.getByRole('button', { name: ja.mealPlan.viewWeek, exact: true }).click()
       await openAllWeekDays(swPage) // 便ID・⑦: 畳む既定になったので、カードの中を触る前に開く
       await swPage.waitForTimeout(500)
       check(
@@ -11234,9 +11244,9 @@ try {
       await swPage.getByText('カレーライス', { exact: true }).first().click()
       await swPage.waitForTimeout(500)
       const swCurryId = Number(swPage.url().match(/#\/recipes\/(\d+)/)?.[1])
-      await swPage.getByRole('button', { name: '今日の献立に追加' }).click()
+      await swPage.getByRole('button', { name: ja.detail.todayAdd }).click()
       await swPage.waitForTimeout(300)
-      await swPage.getByRole('button', { name: '朝食・昼食・夕食を決めずに今日の献立に追加' }).click()
+      await swPage.getByRole('button', { name: ja.detail.todaySlotUndecided }).click()
       await swPage.waitForTimeout(500)
       check(
         'SLOTWIN-01(決めない) todayListへ直接追加される',
@@ -11294,7 +11304,7 @@ try {
       await plPage.getByRole('button', { name: '作った！' }).click()
       await plPage.waitForTimeout(300)
       await plPage.locator('input[type="date"]').fill(plYesterday)
-      await plPage.getByRole('button', { name: '記録する' }).click()
+      await plPage.getByRole('button', { name: ja.detail.cookedSave }).click()
       await plPage.waitForTimeout(500)
       check(
         'PASTLOG-01 前提: 昨日の日付で作った記録を保存できる',
@@ -11304,7 +11314,7 @@ try {
       // (a) 週タブ: 昨日の枠に「作った記録」カード(レシピ名+✓)が出る
       await plPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
       await plPage.waitForTimeout(800)
-      await plPage.getByRole('button', { name: '週', exact: true }).click()
+      await plPage.getByRole('button', { name: ja.mealPlan.viewWeek, exact: true }).click()
       await openAllWeekDays(plPage) // 便ID・⑦: 畳む既定になったので、カードの中を触る前に開く
       await plPage.waitForTimeout(500)
       if (!(await plPage.textContent('body')).includes(plYesterdaySlash)) {
@@ -11386,7 +11396,7 @@ try {
       await plPage.getByRole('button', { name: /月の食費/ }).click()
       await plPage.waitForTimeout(300)
       const plMonthTable =
-        (await plPage.locator('table', { hasText: '献立を1食ずつ足した合計' }).first().textContent()) ?? ''
+        (await plPage.locator('table', { hasText: ja.mealPlan.intakeCostRowPersonalNote }).first().textContent()) ?? ''
       // 2026-08-19 便HV・⑧⑨: 過去と未来で行を分けなくなったので、「全員分」は
       // 作った食数ぶんと作る食数ぶんを足した1行になった(数え方の書き方もそれに合わせた)
       check(
@@ -11582,20 +11592,20 @@ try {
       // 日セルは data-date で掴む(予定プレビュー・数字が入っても壊れない)
       const rcDay = (date) => rcPage.locator(`button[data-date="${date}"]`)
       // 2026-08-19 便HV・⑦: ボタン名は「期間で絞る」(結果カードの見出しは「期間の食費と栄養」のまま)
-      const rcModeBtn = rcPage.getByRole('button', { name: '期間で絞る', exact: true })
+      const rcModeBtn = rcPage.getByRole('button', { name: ja.mealPlan.rangeCostToggle, exact: true })
       // 便DRで期間カードも月タブと同じ体裁(食費の表＋折りたたみ)になったため、
       // 本文全体ではなくカード/表を掴んで読む(同じ画面に月の食費の表があり、文言が重なるため)
       const rcCard = rcPage.locator('[data-testid="range-result-card"]')
       const rcTable = rcPage.locator('[data-testid="range-cost-table"]')
-      const rcNextMonthBtn = rcPage.getByRole('button', { name: '次の月', exact: true })
-      const rcPrevMonthBtn = rcPage.getByRole('button', { name: '前の月', exact: true })
+      const rcNextMonthBtn = rcPage.getByRole('button', { name: ja.mealPlan.nextMonth, exact: true })
+      const rcPrevMonthBtn = rcPage.getByRole('button', { name: ja.mealPlan.prevMonth, exact: true })
 
       // ===== モードON: 案内が出る =====
       await rcModeBtn.click()
       await rcPage.waitForTimeout(300)
       check(
         'MEALPLAN-07 モードONで開始日案内が出る',
-        ((await rcPage.textContent('body')) ?? '').includes('開始日をタップしてください'),
+        stripZwspText(await rcPage.textContent('body')).includes(ja.mealPlan.rangeCostGuideStart),
       )
       check('MEALPLAN-07 モードONはaria-pressed=true', (await rcModeBtn.getAttribute('aria-pressed')) === 'true')
 
@@ -11606,7 +11616,7 @@ try {
       await rcPage.waitForTimeout(200)
       check(
         'MEALPLAN-07 開始日タップ後は終了日案内が出る',
-        ((await rcPage.textContent('body')) ?? '').includes('終了日をタップしてください'),
+        stripZwspText(await rcPage.textContent('body')).includes(ja.mealPlan.rangeCostGuideEnd),
       )
       check(
         'MEALPLAN-07 モード中は日モーダルが開かない(開始日タップ時点)',
@@ -11623,7 +11633,7 @@ try {
       check('MEALPLAN-07 結果カードに日数(6日間)が出る', rcFutureText.includes('6日間'))
       check(
         'MEALPLAN-07(便CA③) 未来だけの期間は「登録した献立で計算」と明示する',
-        rcFutureText.includes('今日から先の期間なので、登録した献立で計算しています'),
+        rcFutureText.includes(ja.mealPlan.rangeBasisPlanOnly),
         `本文=${rcFutureText.slice(0, 40)}`,
       )
       check(
@@ -11676,7 +11686,7 @@ try {
         'MEALPLAN-07(便DR) 内訳と価格の但し書きは既定で畳まれている',
         !rcFutureCardText.includes('内訳 作った記録'),
       )
-      await rcCard.getByRole('button', { name: '内訳を見る' }).click()
+      await rcCard.getByRole('button', { name: ja.mealPlan.intakeCostDetailsOpen }).click()
       await rcPage.waitForTimeout(200)
       const rcFutureOpenText = (await rcCard.textContent()) ?? ''
       check(
@@ -11804,7 +11814,7 @@ try {
       // 実行日が1日だと当月に過去日が無く、末日だと未来日が無いので、その間の日だけ検証する
       // (2026-08-08 便EA: 今日は記録・献立の両方で数えるようになったため、過去/未来の
       //  どちらかが空だと基準行が「◯/◯〜◯/◯は作った記録、…」の形にならない)
-      await rcPage.getByRole('button', { name: '今月へ戻る' }).click()
+      await rcPage.getByRole('button', { name: ja.mealPlan.thisMonth }).click()
       await rcPage.waitForTimeout(400)
       if (rcTodayDay >= 2 && rcTodayDay < rcCurLastDay) {
         await rcDay(`${rcCurPrefix}-01`).click()
@@ -11870,7 +11880,7 @@ try {
       await rcNextMonthBtn.click()
       await rcPage.waitForTimeout(400)
       const rcPhotoModeBtn = rcPage.getByRole('button', { name: '写真', exact: true })
-      const rcNutriModeBtn = rcPage.getByRole('button', { name: '栄養', exact: true })
+      const rcNutriModeBtn = rcPage.getByRole('button', { name: ja.mealPlan.monthCellModeNutrition, exact: true })
       const rcCostModeBtn = rcPage.getByRole('button', { name: '食費', exact: true })
       check(
         'MEALPLAN-07(便CA②) 写真/栄養/食費の切り替えが3つとも出る',
@@ -12070,7 +12080,7 @@ try {
       await eaPage.waitForTimeout(600)
 
       // ---------- EA-1: 栄養モードのセルに単位(kcal)が出る ----------
-      await eaPage.getByRole('button', { name: '栄養', exact: true }).click()
+      await eaPage.getByRole('button', { name: ja.mealPlan.monthCellModeNutrition, exact: true }).click()
       await eaPage.waitForTimeout(500)
       const eaCellText = (await eaPage.locator(`button[data-date="${eaToday}"]`).textContent()) ?? ''
       check(
@@ -12089,7 +12099,7 @@ try {
       await eaPage.waitForTimeout(400)
 
       // ---------- EA-2b: 開始日・終了日の手入力 ----------
-      await eaPage.getByRole('button', { name: '期間で絞る', exact: true }).click()
+      await eaPage.getByRole('button', { name: ja.mealPlan.rangeCostToggle, exact: true }).click()
       await eaPage.waitForTimeout(400)
       const eaStartInput = eaPage.locator('[data-testid="range-date-start"]')
       const eaEndInput = eaPage.locator('[data-testid="range-date-end"]')
@@ -12145,7 +12155,7 @@ try {
       )
       check(
         'RANGE-EA(便EA-2b) 月をまたぐ期間でも結果カードが空にならない',
-        !eaCrossText.includes('この期間には、作った記録も登録した献立もありません'),
+        !eaCrossText.includes(ja.mealPlan.rangeIntakeEmpty),
       )
     } finally {
       await eaBrowser.close()
@@ -12238,7 +12248,7 @@ try {
       await s12Page.getByRole('button', { name: '月', exact: true }).click()
       await s12Page.waitForTimeout(400)
       // 翌月へ移動(全日が未来日になる)
-      await s12Page.getByRole('button', { name: '次の月', exact: true }).click()
+      await s12Page.getByRole('button', { name: ja.mealPlan.nextMonth, exact: true }).click()
       await s12Page.waitForTimeout(400)
 
       const s12Grid = s12Page.locator('div.grid.grid-cols-7').last()
@@ -12323,13 +12333,13 @@ try {
       // 先週(source)= 今日-7 / 今日-6、今週= 今日(day0) / 今日+1(day1) を決定的に扱う
       await cwPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
       await cwPage.waitForTimeout(500)
-      await cwPage.getByRole('button', { name: '週', exact: true }).click()
+      await cwPage.getByRole('button', { name: ja.mealPlan.viewWeek, exact: true }).click()
       await openAllWeekDays(cwPage) // 便ID・⑦: 畳む既定になったので、カードの中を触る前に開く
       await cwPage.waitForTimeout(300)
       // 2026-08-03 便DJ: 「表示のしかた」グループは既定で畳まれているので先に開く
       await cwPage.getByRole('button', { name: '表示のしかたを開く' }).click()
       await cwPage.waitForTimeout(200)
-      await selectWeekLayout(cwPage, '今日から7日間')
+      await selectWeekLayout(cwPage, ja.mealPlan.weekLayoutRolling)
       await cwPage.waitForTimeout(300)
 
       // IndexedDB直書きで先週2日分のsourceと、今週day0の手動配置を仕込む
@@ -12359,7 +12369,7 @@ try {
       )
       await cwPage.reload({ waitUntil: 'networkidle' })
       await cwPage.waitForTimeout(800)
-      await cwPage.getByRole('button', { name: '週', exact: true }).click()
+      await cwPage.getByRole('button', { name: ja.mealPlan.viewWeek, exact: true }).click()
       await openAllWeekDays(cwPage) // 便ID・⑦: 畳む既定になったので、カードの中を触る前に開く
       await cwPage.waitForTimeout(400)
 
@@ -12477,7 +12487,7 @@ try {
     try {
       await svPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
       await svPage.waitForTimeout(2000) // 初回シード完了待ち
-      await svPage.getByRole('button', { name: '週', exact: true }).click()
+      await svPage.getByRole('button', { name: ja.mealPlan.viewWeek, exact: true }).click()
       await openAllWeekDays(svPage) // 便ID・⑦: 畳む既定になったので、カードの中を触る前に開く
       await svPage.waitForTimeout(400)
       // 今日の夕食・主菜にレシピを1品入れる。
@@ -12491,7 +12501,7 @@ try {
         'MEALPLAN-SERV 前提: 今日のカードを編集モードにできた（便IV）',
         (await openWeekDayEdit(svPage, svToday)) === true,
       )
-      await svPage.getByRole('button', { name: 'レシピを選ぶ' }).first().click()
+      await svPage.getByRole('button', { name: ja.mealPlan.emptyAssign }).first().click()
       await svPage.waitForTimeout(500)
       await svPage.locator('ul li button').first().click()
       await svPage.waitForTimeout(700)
@@ -12515,7 +12525,7 @@ try {
             .filter((v) => v && /[0-9]/.test(v)),
         )
       }
-      await svPage.getByRole('button', { name: '表示している週の買い物メモを作る' }).click()
+      await svPage.getByRole('button', { name: ja.mealPlan.goToShopping }).click()
       await svPage.waitForTimeout(1200)
       const svAmountsBefore = await svReadAmounts()
       check(
@@ -12527,16 +12537,16 @@ try {
       // 食数を2倍にすると、同じ材料の分量も2倍になる
       await svPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
       await svPage.waitForTimeout(900)
-      await svPage.getByRole('button', { name: '週', exact: true }).click()
+      await svPage.getByRole('button', { name: ja.mealPlan.viewWeek, exact: true }).click()
       await openAllWeekDays(svPage) // 便ID・⑦: 畳む既定になったので、カードの中を触る前に開く
       await svPage.waitForTimeout(400)
       await openWeekDayEdit(svPage, svToday) // 便IV: 食数のボタンは編集モードの中
       await svPage.getByRole('button', { name: /この行の食数を変える/ }).first().click()
       await svPage.waitForTimeout(400)
       for (let i = 0; i < svBase; i++) {
-        await svPage.getByRole('button', { name: '食数を増やす' }).click()
+        await svPage.getByRole('button', { name: ja.mealPlan.servingsUp }).click()
       }
-      await svPage.getByRole('button', { name: '決定' }).click()
+      await svPage.getByRole('button', { name: ja.mealPlan.servingsSave }).click()
       await svPage.waitForTimeout(700)
       check(
         'MEALPLAN-SERV 食数を変えると結果がトーストに出る',
@@ -12560,7 +12570,7 @@ try {
         svSaved.length === 1 && svSaved[0].servings === svBase * 2,
         `saved=${JSON.stringify(svSaved)}`,
       )
-      await svPage.getByRole('button', { name: '表示している週の買い物メモを作る' }).click()
+      await svPage.getByRole('button', { name: ja.mealPlan.goToShopping }).click()
       await svPage.waitForTimeout(1200)
       const svAmountsAfter = await svReadAmounts()
       // 分量は「小さじ1/2」のような分数表記も出るので、分数のまま数値にして比べる
@@ -12602,12 +12612,12 @@ try {
     try {
       await srPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
       await srPage.waitForTimeout(2000) // 初回シード完了待ち
-      await srPage.getByRole('button', { name: '週', exact: true }).click()
+      await srPage.getByRole('button', { name: ja.mealPlan.viewWeek, exact: true }).click()
       await openAllWeekDays(srPage) // 便ID・⑦: 畳む既定になったので、カードの中を触る前に開く
       await srPage.waitForTimeout(500)
       // 既定の「表示する食事」は夕食だけなので、朝食・昼食も出して3食で検証する
       // (範囲えらびの食事チップは「表示している食事」だけを出す仕様のため)
-      const srSlotFilter = srPage.getByRole('group', { name: '表示する食事' })
+      const srSlotFilter = srPage.getByRole('group', { name: ja.mealPlan.slotFilterTitle })
       for (const name of ['朝食', '昼食']) {
         const btn = srSlotFilter.getByRole('button', { name, exact: true })
         if ((await btn.getAttribute('aria-pressed')) !== 'true') await btn.click()
@@ -12615,11 +12625,11 @@ try {
       }
       // 「次の週」へ移す＝7日とも未来日になり、実行日によって選べる日数が変わらない
       // (当週は今日より前の日が対象外なので、日曜に走らせると選べる日が1日しか無い)
-      await srPage.getByRole('button', { name: '次の週' }).click()
+      await srPage.getByRole('button', { name: ja.mealPlan.nextWeek }).click()
       await openAllWeekDays(srPage) // 便ID・⑦: 畳む既定になったので、カードの中を触る前に開く
       await srPage.waitForTimeout(700)
       // 週ぜんぶに献立を入れる(絞る前/絞った後を比べる材料を作る)
-      await srPage.getByRole('button', { name: 'まとめて献立を入力' }).click()
+      await srPage.getByRole('button', { name: ja.mealPlan.fillWeek }).click()
       await srPage.waitForTimeout(3000)
 
       // ---------- ①既定: 開かなければ従来どおり ----------
@@ -12633,10 +12643,10 @@ try {
       )
       check(
         'SHOPRANGE-EA(既定) ボタン名は従来どおり「表示している週の買い物メモを作る」',
-        await srPage.getByRole('button', { name: '表示している週の買い物メモを作る' }).isVisible(),
+        await srPage.getByRole('button', { name: ja.mealPlan.goToShopping }).isVisible(),
       )
       const srCountDraft = () => srPage.locator('textarea').count()
-      await srPage.getByRole('button', { name: '表示している週の買い物メモを作る' }).click()
+      await srPage.getByRole('button', { name: ja.mealPlan.goToShopping }).click()
       await srPage.waitForTimeout(1500)
       const srAll = await srCountDraft()
       check('SHOPRANGE-EA(既定) 週ぜんぶから下書きができる', srAll > 0, `rows=${srAll}`)
@@ -12651,10 +12661,10 @@ try {
       // ---------- ②日付と食事で絞る ----------
       await srPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
       await srPage.waitForTimeout(1200)
-      await srPage.getByRole('button', { name: '週', exact: true }).click()
+      await srPage.getByRole('button', { name: ja.mealPlan.viewWeek, exact: true }).click()
       await openAllWeekDays(srPage) // 便ID・⑦: 畳む既定になったので、カードの中を触る前に開く
       await srPage.waitForTimeout(500)
-      await srPage.getByRole('button', { name: '次の週' }).click()
+      await srPage.getByRole('button', { name: ja.mealPlan.nextWeek }).click()
       await openAllWeekDays(srPage) // 便ID・⑦: 畳む既定になったので、カードの中を触る前に開く
       await srPage.waitForTimeout(700)
       await srPage.getByTestId('shop-range-toggle').click()
@@ -12676,10 +12686,10 @@ try {
       await srPage.waitForTimeout(300)
       check(
         'SHOPRANGE-EA(絞る) 絞るとボタン名が「選んだ範囲の買い物メモを作る」に変わる',
-        await srPage.getByRole('button', { name: '選んだ範囲の買い物メモを作る' }).isVisible(),
+        await srPage.getByRole('button', { name: ja.mealPlan.goToShoppingPicked }).isVisible(),
       )
       const srKeptDate = await srDateChips.nth(0).getAttribute('data-date')
-      await srPage.getByRole('button', { name: '選んだ範囲の買い物メモを作る' }).click()
+      await srPage.getByRole('button', { name: ja.mealPlan.goToShoppingPicked }).click()
       await srPage.waitForTimeout(1500)
       const srOneDay = await srCountDraft()
       check(
@@ -12698,10 +12708,10 @@ try {
       // ---------- ③食事で絞る + 「表示している週全部に戻す」 ----------
       await srPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
       await srPage.waitForTimeout(1200)
-      await srPage.getByRole('button', { name: '週', exact: true }).click()
+      await srPage.getByRole('button', { name: ja.mealPlan.viewWeek, exact: true }).click()
       await openAllWeekDays(srPage) // 便ID・⑦: 畳む既定になったので、カードの中を触る前に開く
       await srPage.waitForTimeout(500)
-      await srPage.getByRole('button', { name: '次の週' }).click()
+      await srPage.getByRole('button', { name: ja.mealPlan.nextWeek }).click()
       await openAllWeekDays(srPage) // 便ID・⑦: 畳む既定になったので、カードの中を触る前に開く
       await srPage.waitForTimeout(700)
       await srPage.getByTestId('shop-range-toggle').click()
@@ -12715,7 +12725,7 @@ try {
         ((await srPage.getByTestId('shop-range-summary').textContent()) ?? '').includes('夕食'),
         `summary=${await srPage.getByTestId('shop-range-summary').textContent()}`,
       )
-      await srPage.getByRole('button', { name: '選んだ範囲の買い物メモを作る' }).click()
+      await srPage.getByRole('button', { name: ja.mealPlan.goToShoppingPicked }).click()
       await srPage.waitForTimeout(1500)
       const srDinnerOnly = await srCountDraft()
       check(
@@ -12725,10 +12735,10 @@ try {
       )
       await srPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
       await srPage.waitForTimeout(1200)
-      await srPage.getByRole('button', { name: '週', exact: true }).click()
+      await srPage.getByRole('button', { name: ja.mealPlan.viewWeek, exact: true }).click()
       await openAllWeekDays(srPage) // 便ID・⑦: 畳む既定になったので、カードの中を触る前に開く
       await srPage.waitForTimeout(500)
-      await srPage.getByRole('button', { name: '次の週' }).click()
+      await srPage.getByRole('button', { name: ja.mealPlan.nextWeek }).click()
       await openAllWeekDays(srPage) // 便ID・⑦: 畳む既定になったので、カードの中を触る前に開く
       await srPage.waitForTimeout(700)
       await srPage.getByTestId('shop-range-toggle').click()
@@ -12741,7 +12751,7 @@ try {
         `SHOPRANGE-EA(絞る) 「${ja.mealPlan.shopRangeReset}」で既定へ戻る`,
         ((await srPage.getByTestId('shop-range-summary').textContent()) ?? '').includes(
           ja.mealPlan.shopRangeSummaryAll,
-        ) && (await srPage.getByRole('button', { name: '表示している週の買い物メモを作る' }).isVisible()),
+        ) && (await srPage.getByRole('button', { name: ja.mealPlan.goToShopping }).isVisible()),
       )
     } finally {
       await srBrowser.close()
@@ -12774,7 +12784,7 @@ try {
     try {
       await hhPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
       await hhPage.waitForTimeout(2000) // 初回シード完了待ち
-      await hhPage.getByRole('button', { name: '週', exact: true }).click()
+      await hhPage.getByRole('button', { name: ja.mealPlan.viewWeek, exact: true }).click()
       await openAllWeekDays(hhPage) // 便ID・⑦: 畳む既定になったので、カードの中を触る前に開く
       await hhPage.waitForTimeout(400)
       // 今日の最初の空き枠に「肉じゃが」(登録2人分)を入れる。
@@ -12788,9 +12798,9 @@ try {
         'MEALPLAN-HOUSE 前提: 今日のカードを編集モードにできた（便IV）',
         (await openWeekDayEdit(hhPage, hhToday)) === true,
       )
-      await hhPage.getByRole('button', { name: 'レシピを選ぶ' }).first().click()
+      await hhPage.getByRole('button', { name: ja.mealPlan.emptyAssign }).first().click()
       await hhPage.waitForTimeout(500)
-      await hhPage.getByPlaceholder('レシピ名で絞り込み').fill('肉じゃが')
+      await hhPage.getByPlaceholder(ja.mealPlan.pickSearchPlaceholder).fill('肉じゃが')
       await hhPage.waitForTimeout(300)
       await hhPage.getByText('肉じゃが', { exact: true }).first().click()
       await hhPage.waitForTimeout(800)
@@ -12806,7 +12816,7 @@ try {
       )
       // 未設定のときの概算食費(合計金額)と注記を控える
       const hhOpenCost = async () => {
-        await hhPage.getByRole('button', { name: '表示している週の概算食費' }).click()
+        await hhPage.getByRole('button', { name: ja.mealPlan.weekCostTitle }).click()
         await hhPage.waitForTimeout(400)
         const text = (await hhPage.textContent('body')) ?? ''
         return {
@@ -12829,7 +12839,7 @@ try {
             .filter((v) => v && /[0-9]/.test(v)),
         )
       }
-      await hhPage.getByRole('button', { name: '表示している週の買い物メモを作る' }).click()
+      await hhPage.getByRole('button', { name: ja.mealPlan.goToShopping }).click()
       await hhPage.waitForTimeout(1200)
       const hhAmountsBefore = await hhReadAmounts()
       check(
@@ -12862,7 +12872,7 @@ try {
       // --- 設定「食数の設定」を4人分にする ---
       await hhPage.goto(`${BASE}/#/settings?section=household`, { waitUntil: 'networkidle' })
       await hhPage.waitForTimeout(900)
-      const hhSelect = hhPage.getByLabel('食数の設定')
+      const hhSelect = hhPage.getByLabel(ja.settings.householdServingsTitle)
       check(
         'MEALPLAN-HOUSE 設定の個人設定節に「食数の設定」がある(既定は設定しない)',
         (await hhSelect.count()) === 1 && (await hhSelect.inputValue()) === '',
@@ -12880,7 +12890,7 @@ try {
       // 献立の行・概算食費・買い物メモが4人分になる
       await hhPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
       await hhPage.waitForTimeout(1200)
-      await hhPage.getByRole('button', { name: '週', exact: true }).click()
+      await hhPage.getByRole('button', { name: ja.mealPlan.viewWeek, exact: true }).click()
       await openAllWeekDays(hhPage) // 便ID・⑦: 畳む既定になったので、カードの中を触る前に開く
       await openWeekDayEdit(hhPage, hhToday) // 便IV: 食数のボタンは編集モードの中
       await hhPage.waitForTimeout(500)
@@ -12895,7 +12905,7 @@ try {
         hhCostAfter.note === '4' && hhCostAfter.yen === hhCostBefore.yen * 2,
         `before=${JSON.stringify(hhCostBefore)} after=${JSON.stringify(hhCostAfter)}`,
       )
-      await hhPage.getByRole('button', { name: '表示している週の買い物メモを作る' }).click()
+      await hhPage.getByRole('button', { name: ja.mealPlan.goToShopping }).click()
       await hhPage.waitForTimeout(1200)
       const hhAmountsAfter = await hhReadAmounts()
       const hhAmountNum = (v) => {
@@ -12929,7 +12939,7 @@ try {
       const hhKcal = async () =>
         ((await hhPage.textContent('body')) ?? '').match(/([\d,]+)kcal/)?.[1]
       const hhKcalBefore = await hhKcal()
-      await hhPage.getByRole('button', { name: '人数を増やす' }).click()
+      await hhPage.getByRole('button', { name: ja.detail.servingsUp }).click()
       await hhPage.waitForTimeout(500)
       check(
         'MEALPLAN-HOUSE 詳細で手で人数を変えるとその画面ではそちらが優先(4→5人分)',
@@ -12945,7 +12955,7 @@ try {
       // 枠ごとに決めた食数は「食数の設定」より強い。戻すボタンは既定(=4人分)を名乗る
       await hhPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
       await hhPage.waitForTimeout(1000)
-      await hhPage.getByRole('button', { name: '週', exact: true }).click()
+      await hhPage.getByRole('button', { name: ja.mealPlan.viewWeek, exact: true }).click()
       await openAllWeekDays(hhPage) // 便ID・⑦: 畳む既定になったので、カードの中を触る前に開く
       await openWeekDayEdit(hhPage, hhToday) // 便IV: 食数のボタンは編集モードの中
       await hhPage.waitForTimeout(400)
@@ -12955,8 +12965,8 @@ try {
         'MEALPLAN-HOUSE 食数の窓に設定の「食数の設定」の値が出る',
         ((await hhPage.textContent('body')) ?? '').includes('設定の「食数の設定」は4人分です'),
       )
-      await hhPage.getByRole('button', { name: '食数を増やす' }).click()
-      await hhPage.getByRole('button', { name: '決定' }).click()
+      await hhPage.getByRole('button', { name: ja.mealPlan.servingsUp }).click()
+      await hhPage.getByRole('button', { name: ja.mealPlan.servingsSave }).click()
       await hhPage.waitForTimeout(700)
       check(
         'MEALPLAN-HOUSE 枠ごとに決めた食数は「食数の設定」より優先される(5人分)',
@@ -13093,21 +13103,21 @@ try {
       const dnToday = `${dnNow.getFullYear()}-${String(dnNow.getMonth() + 1).padStart(2, '0')}-${String(dnDay).padStart(2, '0')}`
 
       // 週タブ: 今日のカードのメモ欄に入力し、欄から離れると保存される
-      await dnPage.getByRole('button', { name: '週', exact: true }).click()
+      await dnPage.getByRole('button', { name: ja.mealPlan.viewWeek, exact: true }).click()
       await openAllWeekDays(dnPage) // 便ID・⑦: 畳む既定になったので、カードの中を触る前に開く
       await dnPage.waitForTimeout(400)
       const dnWeekInput = dnPage.getByLabel(dnNoteLabel)
       check('MEALPLAN-A2 週タブの各日カードにメモ欄がある', (await dnWeekInput.count()) === 1)
       check(
         'MEALPLAN-A2 メモ欄は空のとき書き方の例をプレースホルダーで示す',
-        (await dnWeekInput.getAttribute('placeholder')) === '外食、実家、お弁当いる など',
+        (await dnWeekInput.getAttribute('placeholder')) === ja.mealPlan.dayNotePlaceholder,
       )
       await dnWeekInput.fill('外食')
       await dnPage.keyboard.press('Enter')
       await dnPage.waitForTimeout(500)
       check(
         'MEALPLAN-A2 メモを書いて欄を離れると保存され、保存した旨のトーストが出る',
-        ((await dnPage.textContent('body')) ?? '').includes('この日のメモを保存しました'),
+        stripZwspText(await dnPage.textContent('body')).includes(ja.mealPlan.dayNoteSaved),
       )
       const dnStored = await dnPage.evaluate(
         (date) =>
@@ -13175,7 +13185,7 @@ try {
       await dnPage.waitForTimeout(500)
       check(
         'MEALPLAN-A2 メモを空にして離れると消した旨のトーストが出る',
-        ((await dnPage.textContent('body')) ?? '').includes('この日のメモを消しました'),
+        stripZwspText(await dnPage.textContent('body')).includes(ja.mealPlan.dayNoteRemoved),
       )
       const dnAfter = await dnPage.evaluate(
         (date) =>
@@ -13192,7 +13202,7 @@ try {
         dnToday,
       )
       check('MEALPLAN-A2 空にしたメモはデータごと消える(空のメモを残さない)', dnAfter === null)
-      await dnPage.getByRole('button', { name: '閉じる', exact: true }).first().click()
+      await dnPage.getByRole('button', { name: ja.common.close, exact: true }).first().click()
       await dnPage.waitForTimeout(400)
       check(
         'MEALPLAN-A2 メモを消すと月セルの印も消える',
@@ -13268,11 +13278,11 @@ try {
       check(
         // 2026-08-19 便HV・⑦でボタン名を「期間で絞る」に変えた(機能は同じ)
         'MEALPLAN-A3B3(B-3) 期間指定のUI(期間で絞る)も従来どおり残っている',
-        (await mePage.getByRole('button', { name: '期間で絞る', exact: true }).count()) === 1,
+        (await mePage.getByRole('button', { name: ja.mealPlan.rangeCostToggle, exact: true }).count()) === 1,
       )
 
       // 翌月へ移動(全日が未来日=編集対象)。10日のセルを開く
-      await mePage.getByRole('button', { name: '次の月', exact: true }).click()
+      await mePage.getByRole('button', { name: ja.mealPlan.nextMonth, exact: true }).click()
       await mePage.waitForTimeout(400)
       const meNext = new Date(meNow.getFullYear(), meNow.getMonth() + 1, 1)
       const meDate = `${meNext.getFullYear()}-${String(meNext.getMonth() + 1).padStart(2, '0')}-10`
@@ -13297,10 +13307,10 @@ try {
       check('MEALPLAN-A3B3(A-3) 日モーダルが開く', await meModal.isVisible())
       check(
         'MEALPLAN-A3B3(A-3) 献立の無い未来日でも、その場で選べる空き行が出る',
-        (await meModal.getByRole('button', { name: 'レシピを選ぶ' }).count()) >= 1,
+        (await meModal.getByRole('button', { name: ja.mealPlan.emptyAssign }).count()) >= 1,
       )
       // 主菜行の「レシピを選ぶ」→ピッカー→肉じゃが
-      await meModal.getByRole('button', { name: 'レシピを選ぶ' }).first().click()
+      await meModal.getByRole('button', { name: ja.mealPlan.emptyAssign }).first().click()
       await mePage.waitForTimeout(400)
       check(
         'MEALPLAN-A3B3(A-3) 月タブのままピッカーが開く(週タブへ飛ばない)',
@@ -13313,7 +13323,7 @@ try {
       await mePage.waitForTimeout(400)
       check(
         'MEALPLAN-A3B3(便CH/C13) ピッカーはEscapeで閉じる',
-        (await mePage.getByRole('heading', { name: 'レシピを選ぶ' }).count()) === 0,
+        (await mePage.getByRole('heading', { name: ja.mealPlan.pickTitle }).count()) === 0,
       )
       check(
         'MEALPLAN-A3B3(便CH/C13) ピッカーを閉じても下の日モーダルは開いたまま残る',
@@ -13332,9 +13342,9 @@ try {
       // 続きの検証のため、日モーダル→ピッカーを開き直す
       await mePage.locator(`button[data-date="${meDate}"]`).click()
       await mePage.waitForTimeout(400)
-      await meModal.getByRole('button', { name: 'レシピを選ぶ' }).first().click()
+      await meModal.getByRole('button', { name: ja.mealPlan.emptyAssign }).first().click()
       await mePage.waitForTimeout(400)
-      await mePage.getByPlaceholder('レシピ名で絞り込み').fill('肉じゃが')
+      await mePage.getByPlaceholder(ja.mealPlan.pickSearchPlaceholder).fill('肉じゃが')
       await mePage.waitForTimeout(300)
       await mePage.getByRole('button', { name: /肉じゃが/ }).first().click()
       await mePage.waitForTimeout(600)
@@ -13394,10 +13404,10 @@ try {
       )
       check(
         'MEALPLAN-A3B3(B-3) 未来の月は「今日から先の期間なので、登録した献立で計算しています」と基準を明示する',
-        meBodyAfter.includes('今日から先の期間なので、登録した献立で計算しています'),
+        meBodyAfter.includes(ja.mealPlan.rangeBasisPlanOnly),
       )
       // 2026-08-03 便DQ: 食費は表になった。1行目「一人分／献立を1食ずつ足した合計」の金額を読む
-      const meCostTable = mePage.locator('table', { hasText: '献立を1食ずつ足した合計' }).first()
+      const meCostTable = mePage.locator('table', { hasText: ja.mealPlan.intakeCostRowPersonalNote }).first()
       const meCostTableText = (await meCostTable.textContent()) ?? ''
       const meSummaryYen = /1人分献立を1食ずつ足した合計約([\d,]+)円(\d+)食/.exec(meCostTableText)
       check(
@@ -13429,7 +13439,7 @@ try {
       )
       check(
         'MEALPLAN-A3B3(便CH/C12) 数字の前提(何をもとにした概算か)を常設で出す',
-        meBodyAfter.includes('食材の目安価格をもとに自動計算した概算の数値です'),
+        meBodyAfter.includes(ja.mealPlan.intakeCostEstimateNote),
       )
       // 2026-08-03 便DQ: 栄養は別カード(見出しは「◯月の栄養（1人分）」)。
       // 2026-08-07 便DU: そのカード自体が折りたたみになり、開けば8項目がまとめて出る
@@ -13450,7 +13460,7 @@ try {
         ((await mePage.textContent('body')) ?? '').includes('調理による変化などは反映しておらず') &&
           ((await mePage.textContent('body')) ?? '').includes('出典: '),
       )
-      await mePage.getByRole('button', { name: '内訳を見る' }).click()
+      await mePage.getByRole('button', { name: ja.mealPlan.intakeCostDetailsOpen }).click()
       await mePage.waitForTimeout(300)
       const meBodyOpen = (await mePage.textContent('body')) ?? ''
       check(
@@ -13466,7 +13476,7 @@ try {
       // A-3: 月の窓から削除もできる(データごと消える)
       await mePage.locator(`button[data-date="${meDate}"]`).click()
       await mePage.waitForTimeout(400)
-      await meModal.getByRole('button', { name: 'この割り当てを外す' }).first().click()
+      await meModal.getByRole('button', { name: ja.mealPlan.clear }).first().click()
       await mePage.waitForTimeout(600)
       const meAfterRemove = await mePage.evaluate(
         (date) =>
@@ -13623,7 +13633,7 @@ try {
       // ⑨ 表示の切り替えに見出しと説明が付く
       check(
         'MEALPLAN-DU(⑨) 「カレンダーに出す情報」の見出しが画面に出る',
-        duBody0.includes('カレンダーに出す情報'),
+        duBody0.includes(ja.mealPlan.monthCellModeLabel),
       )
       check(
         'MEALPLAN-DU(⑨) 写真モードでは「何が出るのか」の説明が切り替えのすぐ下に出る',
@@ -13691,7 +13701,7 @@ try {
         await (async () => {
           const legend = ((await duPage.textContent('body')) ?? '').replaceAll('\u200b', '')
           return (
-            legend.includes('数字は、その日に1人が食べる分の食費（円）の概算です') &&
+            legend.includes(ja.mealPlan.monthCellCostLegend) &&
             !legend.includes('今日は作った分は記録・まだの分は献立で計算しています')
           )
         })(),
@@ -13719,7 +13729,7 @@ try {
       )
       check(
         'MEALPLAN-DU(⑥) 既定は「自動で選ぶ」が選ばれている',
-        (await duPicker.getByRole('button', { name: 'カレンダーに出す写真を自動で選ぶ' }).getAttribute(
+        (await duPicker.getByRole('button', { name: ja.mealPlan.monthDayCoverAutoAria }).getAttribute(
           'aria-pressed',
         )) === 'true',
       )
@@ -13745,7 +13755,7 @@ try {
         !!duChosen && duChosen[duToday] === duIds.second,
         `保存=${JSON.stringify(duChosen)} 期待=${duToday}:${duIds.second}`,
       )
-      await duPicker.getByRole('button', { name: 'カレンダーに出す写真を自動で選ぶ' }).click()
+      await duPicker.getByRole('button', { name: ja.mealPlan.monthDayCoverAutoAria }).click()
       await duPage.waitForTimeout(500)
       const duCleared = await duPage.evaluate(
         () =>
@@ -13767,11 +13777,11 @@ try {
       )
 
       // ⑧ 献立を1品足すと「キャンセル」「保存」に変わり、キャンセルで開いたときへ戻る
-      await duModal.getByRole('button', { name: 'レシピを選ぶ' }).first().click()
+      await duModal.getByRole('button', { name: ja.mealPlan.emptyAssign }).first().click()
       await duPage.waitForTimeout(400)
       // 同じ画面に「◯◯の写真をカレンダーに出す」ボタンもあるので、レシピの選択はピッカーの中だけを見る
       const duRecipePicker = duPage.locator('[data-testid="recipe-picker"]')
-      await duRecipePicker.getByPlaceholder('レシピ名で絞り込み').fill('肉じゃが')
+      await duRecipePicker.getByPlaceholder(ja.mealPlan.pickSearchPlaceholder).fill('肉じゃが')
       await duPage.waitForTimeout(300)
       await duRecipePicker.getByRole('button', { name: /肉じゃが/ }).first().click()
       await duPage.waitForTimeout(700)
@@ -13930,14 +13940,14 @@ try {
 
       // A-1: 週タブで「表示している週をテンプレートとして保存」
       // (2026-08-03 便DJ: 「献立テンプレート」グループは既定で畳まれているので先に開く)
-      await tpPage.getByRole('button', { name: '週', exact: true }).click()
+      await tpPage.getByRole('button', { name: ja.mealPlan.viewWeek, exact: true }).click()
       await openAllWeekDays(tpPage) // 便ID・⑦: 畳む既定になったので、カードの中を触る前に開く
       await tpPage.waitForTimeout(400)
       await tpPage.getByRole('button', { name: `${ja.mealPlan.weekGroupTemplateTitle}を開く` }).click()
       await tpPage.waitForTimeout(200)
-      await tpPage.getByRole('button', { name: '表示している週をテンプレートとして保存' }).click()
+      await tpPage.getByRole('button', { name: ja.mealPlan.templateSave }).click()
       await tpPage.waitForTimeout(300)
-      const tpSaveModal = tpPage.getByRole('dialog', { name: '表示している週をテンプレートとして保存' })
+      const tpSaveModal = tpPage.getByRole('dialog', { name: ja.mealPlan.templateSave })
       check('MEALPLAN-A1B2(A-1) 保存の窓が開き、名前を付けられる', (await tpSaveModal.count()) === 1)
       await tpSaveModal.getByLabel('テンプレートの名前').fill('定番セット')
       await tpSaveModal.getByRole('button', { name: '保存する' }).click()
@@ -13978,7 +13988,7 @@ try {
       // (便DE-8で「流し込む」→「内容を入れる」、便DJで「テンプレートを適用」に改名)
       await tpPage.getByRole('button', { name: '月', exact: true }).click()
       await tpPage.waitForTimeout(400)
-      await tpPage.getByRole('button', { name: '次の月' }).click()
+      await tpPage.getByRole('button', { name: ja.mealPlan.nextMonth }).click()
       await tpPage.waitForTimeout(500)
       await tpPage.getByRole('button', { name: 'テンプレートを適用' }).click()
       await tpPage.waitForTimeout(400)
@@ -14075,7 +14085,9 @@ try {
     try {
       const psNow = new Date()
       const psToday = `${psNow.getFullYear()}-${String(psNow.getMonth() + 1).padStart(2, '0')}-${String(psNow.getDate()).padStart(2, '0')}`
-      const psLabel = `${psNow.getMonth() + 1}/${psNow.getDate()}（${['日', '月', '火', '水', '木', '金', '土'][psNow.getDay()]}）`
+      // 曜日の名前は ja.ts から読む（書き写さない・禁じ手②）。ja.mealPlan.dow は月曜始まりなので、
+      // JSの getDay()（日曜=0）を月曜始まりへ直してから引く
+      const psLabel = `${psNow.getMonth() + 1}/${psNow.getDate()}（${ja.mealPlan.dow[(psNow.getDay() + 6) % 7]}）`
       await psPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
       await psPage.waitForTimeout(1800) // 初回シード完了待ち
       await psPage.evaluate(
@@ -14123,14 +14135,14 @@ try {
       await psPage.waitForTimeout(900)
 
       // 週タブ: 献立表を開く（既定は閉じている＝画面を占領しない）
-      await psPage.getByRole('button', { name: '週', exact: true }).click()
+      await psPage.getByRole('button', { name: ja.mealPlan.viewWeek, exact: true }).click()
       await openAllWeekDays(psPage) // 便ID・⑦: 畳む既定になったので、カードの中を触る前に開く
       await psPage.waitForTimeout(400)
       check(
         'MEALPLAN-A4 献立表は既定で畳まれている(画面を占領しない)',
         (await psPage.locator('.plan-sheet-preview').count()) === 0,
       )
-      await psPage.getByRole('button', { name: '献立表（印刷・画像で保存）', exact: true }).click()
+      await psPage.getByRole('button', { name: ja.mealPlan.planSheetTitle, exact: true }).click()
       await psPage.waitForTimeout(400)
       check(
         'MEALPLAN-A4 開くと献立表1枚がプレビューされる',
@@ -14224,7 +14236,7 @@ try {
       check(
         'MEALPLAN-A4(印刷) 印刷時は献立表だけが見え、画面のUI(タブ等)は紙に出ない',
         (await psPage.locator('.plan-sheet-print').isVisible()) === true &&
-          (await psPage.getByRole('button', { name: '週', exact: true }).isVisible()) === false,
+          (await psPage.getByRole('button', { name: ja.mealPlan.viewWeek, exact: true }).isVisible()) === false,
       )
       check(
         'MEALPLAN-A4(印刷) 印刷用の1枚はアプリ本体の外(body直下)に置き、白紙ページが続かないようにする',
@@ -14293,7 +14305,7 @@ try {
           window.__e2ePrintCount += 1
         }
       })
-      await psPage.getByRole('button', { name: '印刷する', exact: true }).click()
+      await psPage.getByRole('button', { name: ja.mealPlan.planSheetPrint, exact: true }).click()
       await psPage.waitForTimeout(300)
       check(
         'MEALPLAN-A4(印刷) 「印刷する」でブラウザの印刷が呼ばれる',
@@ -14303,7 +14315,7 @@ try {
       // 画像保存: 非対応環境ではPNGダウンロードに切り替わる(=生成成功の確認)
       const [psDownload] = await Promise.all([
         psPage.waitForEvent('download', { timeout: 15000 }),
-        psPage.getByRole('button', { name: '画像で保存', exact: true }).click(),
+        psPage.getByRole('button', { name: ja.mealPlan.planSheetImage, exact: true }).click(),
       ])
       check(
         'MEALPLAN-A4(画像) 献立表の画像が生成されPNGダウンロードに切り替わる',
@@ -14312,7 +14324,7 @@ try {
       )
       check(
         'MEALPLAN-A4(画像) 保存したことを結果メッセージで伝える',
-        ((await psPage.textContent('body')) ?? '').includes('献立表の画像を保存しました'),
+        stripZwspText(await psPage.textContent('body')).includes(ja.mealPlan.planSheetImageDone),
       )
 
       // 月タブでも同じ機構で1枚にまとまる(見出しはその月)
@@ -14415,9 +14427,9 @@ try {
       await fmPage.waitForTimeout(900)
       await fmPage.getByRole('button', { name: '月', exact: true }).click()
       await fmPage.waitForTimeout(400)
-      await fmPage.getByRole('button', { name: '次の月' }).click()
+      await fmPage.getByRole('button', { name: ja.mealPlan.nextMonth }).click()
       await fmPage.waitForTimeout(600)
-      await fmPage.getByRole('button', { name: '献立をまとめて提案' }).click()
+      await fmPage.getByRole('button', { name: ja.mealPlan.fillMonth }).click()
       // 月まるごとの提案は枠数が多いので、書き込みが終わるまで長めに待つ
       await fmPage.waitForTimeout(6000)
       check(
@@ -14493,7 +14505,7 @@ try {
       const fmBefore = fmMonthPlans
         .map((e) => `${e.date}|${e.slot}|${e.role ?? 'main'}|${e.recipeId}`)
         .sort()
-      await fmPage.getByRole('button', { name: '献立をまとめて提案' }).click()
+      await fmPage.getByRole('button', { name: ja.mealPlan.fillMonth }).click()
       await fmPage.waitForTimeout(2500)
       const fmAfterSecond = await fmPage.evaluate(
         (prefix) =>
@@ -14623,7 +14635,7 @@ try {
       const roBody = (await roPage.textContent('body')) ?? ''
       check(
         'MEALPLAN-ROLE(便DH) 前提: 2つの見出しが縦一列で出る',
-        roBody.includes('レシピ一覧から選択中') && roBody.includes('今週の献立の予定'),
+        roBody.includes(ja.mealPlan.todayPickedLabel) && roBody.includes('今週の献立の予定'),
       )
       check(
         'MEALPLAN-ROLE(便DE-2) 長い説明文と「食い違っています」の警告は出さない',
@@ -14764,7 +14776,7 @@ try {
         )
         // オレンジ地・白字(既存CTAと同じトークン)。直接色指定ではなくクラスで確認する
         const shuffleClass =
-          (await dhPage.getByRole('button', { name: 'おまかせで1品出す' }).getAttribute('class')) ??
+          (await dhPage.getByRole('button', { name: ja.dayStart.shuffle }).getAttribute('class')) ??
           ''
         check(
           'DAYSUGGEST-01 「おまかせで1品出す」はオレンジ地・白字(bg-accent/text-on-accent)',
@@ -15052,7 +15064,7 @@ try {
       await rsPage.waitForTimeout(300)
 
       const urlInput = rsPage.getByPlaceholder('https://…')
-      const loadUrlBtn = rsPage.getByRole('button', { name: 'URLから読み込む' })
+      const loadUrlBtn = rsPage.getByRole('button', { name: ja.settings.recipeSetUrlLoad })
 
       // エラー(見つからない)パス
       await urlInput.fill(`${BASE}/e2e-nonexistent-set.json`)
@@ -15163,7 +15175,7 @@ try {
       await dsPage.waitForTimeout(600)
 
       // 2) 材料エリアに「だしのとり方」への小さなリンクが出る(だし汁の行)
-      const dashiLink = dsPage.getByRole('link', { name: 'だしのとり方' })
+      const dashiLink = dsPage.getByRole('link', { name: ja.detail.dashiRecipeLink })
       check('DASH-01 「だし汁」の材料行に「だしのとり方」へのリンクが出る', (await dashiLink.count()) > 0)
 
       // 3) リンクをタップすると収録レシピ「だしのとり方」の詳細へ遷移する
@@ -15181,7 +15193,7 @@ try {
       // 4) 収録レシピ「だしのとり方」をユーザーが削除するとリンクは出なくなる
       await dsPage.goto(`${BASE}/#/recipes/${dashiRecipeId}/edit`, { waitUntil: 'networkidle' })
       await dsPage.waitForTimeout(600)
-      await dsPage.getByRole('button', { name: 'このレシピを削除' }).click()
+      await dsPage.getByRole('button', { name: ja.form.deleteRecipe }).click()
       await dsPage.waitForTimeout(800)
       await dsPage.evaluate(() => sessionStorage.removeItem('uchirecipe:recipesListState'))
       await dsPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
@@ -15192,7 +15204,7 @@ try {
       await dsPage.waitForTimeout(600)
       check(
         'DASH-01 収録レシピ「だしのとり方」を削除するとリンクは出ない(ユーザー削除を尊重)',
-        (await dsPage.getByRole('link', { name: 'だしのとり方' }).count()) === 0,
+        (await dsPage.getByRole('link', { name: ja.detail.dashiRecipeLink }).count()) === 0,
       )
     } finally {
       await dsBrowser.close()
@@ -15555,7 +15567,7 @@ try {
         await l2Page.goto(`${BASE}/#/recipes/new`, { waitUntil: 'networkidle' })
         await l2Page.reload({ waitUntil: 'networkidle' })
         await l2Page.waitForTimeout(1600)
-        await l2Page.getByPlaceholder('例: 肉じゃが').fill(title)
+        await l2Page.getByPlaceholder(ja.form.namePlaceholder).fill(title)
         await l2Page.getByRole('button', { name: '保存する' }).first().click()
         await l2Page.waitForTimeout(900)
       }
@@ -15685,7 +15697,7 @@ try {
         await ntPage.waitForTimeout(1600)
         await ntPage.getByText(title, { exact: true }).first().click()
         await ntPage.waitForTimeout(700)
-        await ntPage.getByRole('button', { name: '栄養価の概算を詳しく見る' }).click()
+        await ntPage.getByRole('button', { name: ja.nutrition.toggleExpand }).click()
         await ntPage.waitForTimeout(300)
         return (await ntPage.textContent('body')) ?? ''
       }
@@ -15764,7 +15776,7 @@ try {
       })
       await cdPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
       await cdPage.waitForTimeout(2000) // 初回シード完了待ち
-      await cdPage.getByRole('button', { name: '週', exact: true }).click()
+      await cdPage.getByRole('button', { name: ja.mealPlan.viewWeek, exact: true }).click()
       await cdPage.waitForTimeout(700)
 
       // 前提: 「表示のしかた」と別の週・テンプレートの節は畳んだまま(＝畳んだ状態で測っている)
@@ -15869,7 +15881,7 @@ try {
       )
       await cdPage.goBack()
       await cdPage.waitForTimeout(900)
-      await cdPage.getByRole('button', { name: '週', exact: true }).click()
+      await cdPage.getByRole('button', { name: ja.mealPlan.viewWeek, exact: true }).click()
       await cdPage.waitForTimeout(600)
       // 戻ると節は既定（畳んである）に戻るので、開き直してから触る
       await openWeekGroup(cdPage, ja.mealPlan.weekGroupDisplayTitle)
@@ -15976,9 +15988,9 @@ try {
       await puPage.waitForTimeout(500)
 
       // 新規追加: 名前「テスト食材」・価格「500」・数量「2」・単位「個」で追加する
-      await puPage.getByLabel('食材名', { exact: true }).fill('テスト食材')
-      await puPage.getByLabel('価格（円）', { exact: true }).fill('500')
-      await puPage.getByLabel('数量', { exact: true }).fill('2')
+      await puPage.getByLabel(ja.priceMaster.nameLabel, { exact: true }).fill('テスト食材')
+      await puPage.getByLabel(ja.priceMaster.priceLabel, { exact: true }).fill('500')
+      await puPage.getByLabel(ja.priceMaster.quantityLabel, { exact: true }).fill('2')
       await puPage.getByLabel('単位', { exact: true }).selectOption('個')
       await puPage.getByRole('button', { name: '追加', exact: true }).click()
       await puPage.waitForTimeout(400)
@@ -16172,7 +16184,7 @@ try {
       // 「バックアップ」タブ→「ファイルに書き出す」で実際に書き出す
       await srcPage.goto(`${BASE}/#/settings`, { waitUntil: 'networkidle' })
       await srcPage.waitForTimeout(500)
-      await srcPage.getByRole('button', { name: 'バックアップ', exact: true }).click()
+      await srcPage.getByRole('button', { name: ja.settings.tabBackup, exact: true }).click()
       await srcPage.waitForTimeout(300)
       const [download] = await Promise.all([
         srcPage.waitForEvent('download'),
@@ -16229,7 +16241,7 @@ try {
       await dstPage.waitForTimeout(1800) // 初回シード完了待ち(まっさらな別プロファイル)
       await dstPage.goto(`${BASE}/#/settings`, { waitUntil: 'networkidle' })
       await dstPage.waitForTimeout(500)
-      await dstPage.getByRole('button', { name: 'バックアップ', exact: true }).click()
+      await dstPage.getByRole('button', { name: ja.settings.tabBackup, exact: true }).click()
       await dstPage.waitForTimeout(300)
       const fileChooser = await clickReplaceImport(dstPage)
       await fileChooser.setFiles({
@@ -16296,7 +16308,7 @@ try {
       await dstPage.waitForTimeout(500)
       check(
         'CODEBACKUP-01 復元後、Pro節の表示も解錠済みになっている',
-        (await dstPage.textContent('body')).includes('Pro版をご利用いただきありがとうございます'),
+        stripZwspText(await dstPage.textContent('body')).includes(ja.settings.proActivatedTitle),
       )
     } finally {
       await dstBrowser.close()
@@ -16323,11 +16335,11 @@ try {
       await mergePage.waitForTimeout(1800) // 初回シード完了待ち(まっさらな別プロファイル)
       await mergePage.goto(`${BASE}/#/settings`, { waitUntil: 'networkidle' })
       await mergePage.waitForTimeout(500)
-      await mergePage.getByRole('button', { name: 'バックアップ', exact: true }).click()
+      await mergePage.getByRole('button', { name: ja.settings.tabBackup, exact: true }).click()
       await mergePage.waitForTimeout(300)
       const [mergeChooser] = await Promise.all([
         mergePage.waitForEvent('filechooser'),
-        mergePage.getByRole('button', { name: '今のデータに追加' }).click(),
+        mergePage.getByRole('button', { name: ja.settings.backupImportMerge }).click(),
       ])
       await mergeChooser.setFiles({
         name: 'uchi-recipe-backup.json',
@@ -16468,7 +16480,7 @@ try {
 
       await compatPage.goto(`${BASE}/#/settings`, { waitUntil: 'networkidle' })
       await compatPage.waitForTimeout(500)
-      await compatPage.getByRole('button', { name: 'バックアップ', exact: true }).click()
+      await compatPage.getByRole('button', { name: ja.settings.tabBackup, exact: true }).click()
       await compatPage.waitForTimeout(300)
       const compatFileChooser = await clickReplaceImport(compatPage)
       await compatFileChooser.setFiles({
@@ -16588,7 +16600,7 @@ try {
 
       await ruPage.goto(`${BASE}/#/settings`, { waitUntil: 'networkidle' })
       await ruPage.waitForTimeout(500)
-      await ruPage.getByRole('button', { name: 'バックアップ', exact: true }).click()
+      await ruPage.getByRole('button', { name: ja.settings.tabBackup, exact: true }).click()
       await ruPage.waitForTimeout(300)
 
       const emptyBackup = JSON.stringify({
@@ -16648,7 +16660,7 @@ try {
       await ruPage.waitForTimeout(800)
       check(
         'REPLACEUNDO-01(c) 「元に戻す」後に復元完了メッセージが出る',
-        (await ruPage.textContent('body')).includes('元のデータに戻しました'),
+        stripZwspText(await ruPage.textContent('body')).includes(ja.settings.replaceUndoDone),
       )
       const afterUndoRecipeCount = await countTable('recipes')
       const afterUndoSnapshotCount = await countTable('preImportSnapshots')
@@ -16696,11 +16708,11 @@ try {
       })
       await cmaPage.goto(`${BASE}/#/settings`, { waitUntil: 'networkidle' })
       await cmaPage.waitForTimeout(500)
-      await cmaPage.getByRole('button', { name: 'バックアップ', exact: true }).click()
+      await cmaPage.getByRole('button', { name: ja.settings.tabBackup, exact: true }).click()
       await cmaPage.waitForTimeout(300)
       const [cmaFileChooser] = await Promise.all([
         cmaPage.waitForEvent('filechooser'),
-        cmaPage.getByRole('button', { name: '今のデータに追加' }).click(),
+        cmaPage.getByRole('button', { name: ja.settings.backupImportMerge }).click(),
       ])
       await cmaFileChooser.setFiles({
         name: 'with-code-backup.json',
@@ -16775,11 +16787,11 @@ try {
       })
       await cmbPage.goto(`${BASE}/#/settings`, { waitUntil: 'networkidle' })
       await cmbPage.waitForTimeout(500)
-      await cmbPage.getByRole('button', { name: 'バックアップ', exact: true }).click()
+      await cmbPage.getByRole('button', { name: ja.settings.tabBackup, exact: true }).click()
       await cmbPage.waitForTimeout(300)
       const [cmbFileChooser] = await Promise.all([
         cmbPage.waitForEvent('filechooser'),
-        cmbPage.getByRole('button', { name: '今のデータに追加' }).click(),
+        cmbPage.getByRole('button', { name: ja.settings.backupImportMerge }).click(),
       ])
       await cmbFileChooser.setFiles({
         name: 'old-format-no-code-backup.json',
@@ -16906,7 +16918,7 @@ try {
         // 2026-08-12 便FW: 「書き出す手順」の説明にボタン名を書いたので、本文の文字で
         // 有無を測ると必ず引っかかる。見たいのは「ボタンが出ているか」なのでボタンで数える
         'ARCHIVE-01 書き出す前は「書き出した記録を端末から消す」が出ない(2段階)',
-        (await arPage.getByRole('button', { name: '書き出した記録を端末から消す' }).count()) === 0,
+        (await arPage.getByRole('button', { name: ja.settings.archiveDeleteButton }).count()) === 0,
       )
 
       // --- 2026-08-20 便IJ・①: 読みかたの制限が「書き出す前」に画面に出ていること ---
@@ -16958,7 +16970,7 @@ try {
       // 書き出し(保存先を選べない環境=自動ダウンロード経路)
       const [arDownload] = await Promise.all([
         arPage.waitForEvent('download'),
-        arPage.getByRole('button', { name: '古い記録をファイルに書き出す' }).click(),
+        arPage.getByRole('button', { name: ja.settings.archiveExportButton }).click(),
       ])
       const arJson = readFileSync(await arDownload.path(), 'utf-8')
       const arFile = JSON.parse(arJson)
@@ -17002,7 +17014,7 @@ try {
       )
 
       // 書き出しが済んで初めて出る削除ボタン→端末から消す
-      const arDeleteBtn = arPage.getByRole('button', { name: '書き出した記録を端末から消す' })
+      const arDeleteBtn = arPage.getByRole('button', { name: ja.settings.archiveDeleteButton })
       check('ARCHIVE-01 書き出したあとに削除ボタンが出る', (await arDeleteBtn.count()) === 1)
       await arDeleteBtn.click()
       await arPage.waitForTimeout(900)
@@ -17040,13 +17052,13 @@ try {
         // 便FWと同じ理由でボタンの数で見る（説明文にはボタン名が書いてある）
         'ARCHIVE-01 削除後は対象0件になり書き出しボタンが消える',
         arAfterText.includes('より前の記録はありません') &&
-          (await arPage.getByRole('button', { name: '古い記録をファイルに書き出す' }).count()) === 0,
+          (await arPage.getByRole('button', { name: ja.settings.archiveExportButton }).count()) === 0,
       )
 
       // アーカイブを見る: 書き出したファイルを選ぶと中身が読める(端末には保存しない)
       const [arViewChooser] = await Promise.all([
         arPage.waitForEvent('filechooser'),
-        arPage.getByRole('button', { name: 'アーカイブを見る' }).click(),
+        arPage.getByRole('button', { name: ja.settings.archiveViewButton }).click(),
       ])
       // 2026-08-20 便IH・④: **自分で付け替えた名前**のファイルを選ぶ。
       // 読み込みは中身の種別マークだけを見ていて名前は見ていない、を画面で確かめる
@@ -17068,7 +17080,7 @@ try {
       )
       check(
         'ARCHIVE-01 閲覧の窓に「端末には保存されません」の帯が出る',
-        arViewText.includes('これは閲覧だけです。端末には保存されません'),
+        arViewText.includes(ja.settings.archiveViewBanner),
       )
       check('ARCHIVE-01 閲覧の窓に記録件数が出る', arViewText.includes('記録2件'))
       check(
@@ -17108,7 +17120,7 @@ try {
         (async () => {
           await arPage.keyboard.press('Escape') // 閲覧の窓を閉じてから
           await arPage.waitForTimeout(400)
-          await arPage.getByRole('button', { name: 'アーカイブを見る' }).click()
+          await arPage.getByRole('button', { name: ja.settings.archiveViewButton }).click()
         })(),
       ])
       await arWrongChooser.setFiles({
@@ -17242,7 +17254,7 @@ try {
 
       const [a2Download] = await Promise.all([
         a2Page.waitForEvent('download'),
-        a2Page.getByRole('button', { name: '古い記録をファイルに書き出す' }).click(),
+        a2Page.getByRole('button', { name: ja.settings.archiveExportButton }).click(),
       ])
       const a2File = JSON.parse(readFileSync(await a2Download.path(), 'utf-8'))
       check(
@@ -17268,7 +17280,7 @@ try {
 
       // 削除の確認文(規約F)。窓の文字は改行が消えるので、箇条書きは li ごとに読む
       await setConfirmAnswer(a2Page, 'off')
-      await a2Page.getByRole('button', { name: '書き出した記録を端末から消す' }).click()
+      await a2Page.getByRole('button', { name: ja.settings.archiveDeleteButton }).click()
       await a2Page.waitForTimeout(500)
       const a2Confirm = await a2Page.evaluate(() => {
         const dialog = document.querySelector('[data-testid="confirm"]')
@@ -17360,7 +17372,7 @@ try {
       // 「アーカイブを見る」: 残った記録も読める(端末には書き戻さない)
       const [a2ViewChooser] = await Promise.all([
         a2Page.waitForEvent('filechooser'),
-        a2Page.getByRole('button', { name: 'アーカイブを見る' }).click(),
+        a2Page.getByRole('button', { name: ja.settings.archiveViewButton }).click(),
       ])
       // 2026-08-20 便IH・④: **前の名前**（uchi-recipe-records-）で書き出したファイルを選ぶ。
       // 名前を変えたあとも、それまでに書き出したファイルが読めなくなっていないことを確かめる
@@ -17518,7 +17530,7 @@ try {
       })
       const [chooser] = await Promise.all([
         page.waitForEvent('filechooser'),
-        page.getByRole('button', { name: '今のデータに追加' }).click(),
+        page.getByRole('button', { name: ja.settings.backupImportMerge }).click(),
       ])
       await chooser.setFiles({
         name: 'uchi-recipe-backup-e2e.json',
@@ -17666,7 +17678,7 @@ try {
     const jdImport = async (page, recipes) => {
       const [chooser] = await Promise.all([
         page.waitForEvent('filechooser'),
-        page.getByRole('button', { name: '今のデータに追加' }).click(),
+        page.getByRole('button', { name: ja.settings.backupImportMerge }).click(),
       ])
       await chooser.setFiles({
         name: 'uchi-recipe-backup-ja.json',
@@ -17946,7 +17958,7 @@ try {
       await fsPage.waitForTimeout(1800) // 初回シード完了待ち
       await fsPage.goto(`${BASE}/#/settings`, { waitUntil: 'networkidle' })
       await fsPage.waitForTimeout(500)
-      await fsPage.getByRole('button', { name: 'バックアップ', exact: true }).click()
+      await fsPage.getByRole('button', { name: ja.settings.tabBackup, exact: true }).click()
       await fsPage.waitForTimeout(300)
 
       check(
@@ -17989,7 +18001,7 @@ try {
       // 初回マウント時の判定のまま)。本物のreloadで再マウントさせる(便Zと同じ既知の落とし穴)
       await fsPage.reload({ waitUntil: 'networkidle' })
       await fsPage.waitForTimeout(800)
-      await fsPage.getByRole('button', { name: 'バックアップ', exact: true }).click()
+      await fsPage.getByRole('button', { name: ja.settings.tabBackup, exact: true }).click()
       await fsPage.waitForTimeout(300)
       check(
         'FILESAVE-01(a) 保存先の記録がある状態で再訪問すると「前回の場所に上書き」ボタンが出る',
@@ -18005,7 +18017,7 @@ try {
       // 「前回の場所に上書き」: 記録した偽handleにはrequestPermission等のメソッドが無いため
       // overwriteSavedFileが例外を投げ、保存先選択(注入したshowSaveFilePicker)へ
       // フォールバックする。そちらもAbortError扱いになるため、結局エラー表示は出ない
-      await fsPage.getByRole('button', { name: '前回の場所に上書き' }).click()
+      await fsPage.getByRole('button', { name: ja.settings.backupOverwrite }).click()
       await fsPage.waitForTimeout(500)
       check(
         'FILESAVE-01(b) 上書き失敗→保存先選択へフォールバックしてもエラー表示が出ない',
@@ -18036,7 +18048,7 @@ try {
       await icPage.waitForTimeout(1800) // 初回シード完了待ち
       await icPage.goto(`${BASE}/#/settings`, { waitUntil: 'networkidle' })
       await icPage.waitForTimeout(500)
-      await icPage.getByRole('button', { name: 'バックアップ', exact: true }).click()
+      await icPage.getByRole('button', { name: ja.settings.tabBackup, exact: true }).click()
       await icPage.waitForTimeout(300)
 
       // (a)(b) ボタン押下でconfirmダイアログが実際に出ることを検知し、キャンセル(dismiss)する。
@@ -18048,7 +18060,7 @@ try {
       icPage.once('filechooser', () => {
         filechooserFired = true
       })
-      await icPage.getByRole('button', { name: 'データを上書き' }).click()
+      await icPage.getByRole('button', { name: ja.settings.backupImportReplace }).click()
       await icPage.waitForTimeout(500)
       const icConfirm = icPage.locator('[data-testid="confirm"]')
       const icConfirmText = ((await icConfirm.textContent().catch(() => '')) ?? '').replaceAll('​', '')
@@ -18067,7 +18079,7 @@ try {
 
       // (c) 同じボタンをもう一度押し、今度は「上書きする」を押すと実際にファイル選択へ進むこと
       const icChooser = icPage.waitForEvent('filechooser')
-      await icPage.getByRole('button', { name: 'データを上書き' }).click()
+      await icPage.getByRole('button', { name: ja.settings.backupImportReplace }).click()
       await icPage.locator('[data-testid="confirm-ok"]').click()
       const fileChooser = await icChooser
       check('IMPORTCONFIRM-01 「上書きする」を押すとファイル選択(filechooser)が開く', !!fileChooser)
@@ -18113,13 +18125,13 @@ try {
 
         // テスト用Pro解錠コード(docs/22の実機確認チェックリスト記載。販売用ではない)。
         // 2026-07-17設定ゼロベース裁定#7: Pro/追加レシピパックの入力欄が1つに統合された
-        await fbPage.getByPlaceholder('解錠コード (例: UR-XXXX-XXXX)').fill('UR-96QS-2VSZ')
-        await fbPage.getByRole('button', { name: '解錠する', exact: true }).first().click()
+        await fbPage.getByPlaceholder(ja.settings.unlockCodePlaceholder).fill('UR-96QS-2VSZ')
+        await fbPage.getByRole('button', { name: ja.settings.unlockActivate, exact: true }).first().click()
         await fbPage.waitForTimeout(1000)
         const fbText = await fbPage.textContent('body')
         check(
           'PRO-FALLBACK-01 crypto.subtle無効でも純JSフォールバックでPro解錠が通る',
-          fbText.includes('Pro版をご利用いただきありがとうございます'),
+          fbText.includes(ja.settings.proActivatedTitle),
           fbText.includes('コードが正しくありません')
             ? 'コード検証が失敗した(フォールバック不一致の疑い)'
             : `本文に成功メッセージなし: ${fbText.slice(0, 200)}`,
@@ -18173,7 +18185,7 @@ try {
       // 2026-08-03 オーナー指示: 「原価を見る」は押した状態でラベルが「材料に戻す」に
       // 入れ替わる同一ボタンのトグルになった。開閉どちらの表記でも同じボタンを掴めるようにする
       const viewButton = pvPage.getByRole('button', { name: new RegExp(`^(${ja.detail.priceViewShow}|${ja.detail.priceViewHide})$`) })
-      const editButton = pvPage.getByRole('button', { name: '原価を編集' })
+      const editButton = pvPage.getByRole('button', { name: ja.detail.priceEditShow })
       const onionRow = ingredientsSection.locator('li', { hasText: '玉ねぎ' })
       const waterRow = ingredientsSection.locator('li', { hasText: '水' })
 
@@ -18191,7 +18203,7 @@ try {
 
       check(
         'PRICEVIEW-01(2026-08-03) 既定は「原価を見る」表記(戻す側の表記は出ていない)',
-        (await pvPage.getByRole('button', { name: '原価を見る' }).count()) === 1 &&
+        (await pvPage.getByRole('button', { name: ja.detail.priceViewShow }).count()) === 1 &&
           (await pvPage.getByRole('button', { name: ja.detail.priceViewHide }).count()) === 0,
       )
 
@@ -18282,9 +18294,9 @@ try {
       )
       check(
         'PRICEVIEW-01(a) 編集モーダルに現在の価格(50)が入っている',
-        (await priceEditDialog.getByLabel('価格（円）').inputValue()) === '50',
+        (await priceEditDialog.getByLabel(ja.priceMaster.priceLabel).inputValue()) === '50',
       )
-      await priceEditDialog.getByLabel('価格（円）').fill('70')
+      await priceEditDialog.getByLabel(ja.priceMaster.priceLabel).fill('70')
       await priceEditDialog.getByRole('button', { name: '保存する' }).click()
       await pvPage.waitForTimeout(400)
       check('PRICEVIEW-01(a) 保存後は編集モーダルが閉じる', (await pvPage.getByRole('dialog').count()) === 0)
@@ -18333,10 +18345,10 @@ try {
       const addDialog = pvPage.getByRole('dialog')
       check(
         'PRICEVIEW-01(b) 「＋登録」で登録モーダルが開き、名前欄に「水」が初期値で入る(編集可)',
-        (await addDialog.getByLabel('食材名').inputValue()) === '水',
+        (await addDialog.getByLabel(ja.priceMaster.nameLabel).inputValue()) === '水',
       )
-      await addDialog.getByLabel('価格（円）').fill('10')
-      await addDialog.getByLabel('数量', { exact: true }).fill('1')
+      await addDialog.getByLabel(ja.priceMaster.priceLabel).fill('10')
+      await addDialog.getByLabel(ja.priceMaster.quantityLabel, { exact: true }).fill('1')
       await addDialog.getByLabel('単位', { exact: true }).selectOption('L')
       await addDialog.getByRole('button', { name: '保存する' }).click()
       await pvPage.waitForTimeout(400)
@@ -18362,7 +18374,7 @@ try {
       check('PRICEVIEW-01 「原価を見る」を再度押すと非表示になる: aria-pressed=false', (await viewButton.getAttribute('aria-pressed')) === 'false')
       check(
         'PRICEVIEW-01(2026-08-03) 非表示に戻るとラベルも「原価を見る」に戻る',
-        (await pvPage.getByRole('button', { name: '原価を見る' }).count()) === 1 &&
+        (await pvPage.getByRole('button', { name: ja.detail.priceViewShow }).count()) === 1 &&
           (await pvPage.getByRole('button', { name: ja.detail.priceViewHide }).count()) === 0,
       )
       check(
@@ -18409,8 +18421,8 @@ try {
       })
       const jgOnionRow = jgIngredients.locator('li', { hasText: '玉ねぎ' })
       const jgViewButton = jgPage.getByRole('button', { name: new RegExp(`^(${ja.detail.priceViewShow}|${ja.detail.priceViewHide})$`) })
-      const jgUp = jgPage.getByRole('button', { name: '人数を増やす' })
-      const jgDown = jgPage.getByRole('button', { name: '人数を減らす' })
+      const jgUp = jgPage.getByRole('button', { name: ja.detail.servingsUp })
+      const jgDown = jgPage.getByRole('button', { name: ja.detail.servingsDown })
       // 写真下の合計「約◯円」だけを読む（1食あたりの行と混ざらないよう、行の先頭側から取る）
       const readTotalYen = async () => {
         const body = (await jgPage.textContent('body')) ?? ''
@@ -18495,7 +18507,7 @@ try {
       // ---------- ④印はNG食材の札と場所を取り合わない（札を増やしていない） ----------
       check(
         'JGCOST-01 印のために新しい札(枠付き)を増やしていない＝NG食材の札とは別の見せ方',
-        (await jgPage.getByText('NG食材を含みます').count()) === 0 &&
+        (await jgPage.getByText(ja.detail.ngWarning).count()) === 0 &&
           /約[\d,]+円※/.test(jgAfterBody),
       )
     } finally {
@@ -18527,7 +18539,7 @@ try {
       // シェアボタン→選択モーダル(旧インラインパネルは廃止)
       await shPage.locator('button[aria-label="シェア"]').click()
       await shPage.waitForTimeout(300)
-      const shareDialog = shPage.getByRole('dialog', { name: 'シェアする内容' })
+      const shareDialog = shPage.getByRole('dialog', { name: ja.share.dialogTitle })
       check('SHARE-01 シェアボタンで選択モーダルが開く', (await shareDialog.count()) === 1)
       const dialogText = (await shareDialog.textContent()) ?? ''
       // 2026-07-29 便CI/C10: 旧文「…作り方は常に入ります」は画像カードでは事実と違った
@@ -18545,7 +18557,7 @@ try {
       )
       check(
         'SHARE-01/C14 テキストは貼り付けで取り込める旨が案内されている',
-        dialogText.includes('テキスト貼り付けで自動入力') && dialogText.includes('取り込めます'),
+        dialogText.includes(ja.paste.open) && dialogText.includes('取り込めます'),
         dialogText,
       )
       check('SHARE-01 レシピ画像の行に「※画像カードのみ」が併記される', dialogText.includes('※画像カードのみ'))
@@ -18561,16 +18573,16 @@ try {
         // チェック行ラベルから「（めやす）」は削除済み・シェア本文側は法務配慮で残す
         "SHARE-01(B') 既定: 栄養OFF・無料のラベルは「1食あたりのカロリー」(塩分を含まない)",
         !(await optionCheckbox('1食あたりのカロリー').isChecked()) &&
-          !dialogText.includes('1食あたりのカロリー・塩分'),
+          !dialogText.includes(ja.share.optNutrition),
       )
       check('SHARE-01 既定: 材料をすべて載せるOFF', !(await optionCheckbox('材料をすべて載せる').isChecked()))
 
       // (a) 既定選択のままテキストでシェア → chromiumはnavigator.share非対応のためコピーになる
-      await shareDialog.getByRole('button', { name: 'テキストでシェア' }).click()
+      await shareDialog.getByRole('button', { name: ja.share.textOption }).click()
       await shPage.waitForTimeout(600)
       check(
         'SHARE-01(a) コピー完了メッセージがモーダル内に出る',
-        ((await shareDialog.textContent()) ?? '').includes('レシピの文章をコピーしました'),
+        stripZwspText(await shareDialog.textContent()).includes(ja.share.copied),
       )
       const copiedDefault = await shPage.evaluate(() => navigator.clipboard.readText())
       // 2026-07-23 便BJ・docs/55 CEO提案2-1: 料理名と人数分は別行(貼り付けパーサーが人数分だけの
@@ -18597,7 +18609,7 @@ try {
       // (b) 材料をすべて載せる+原価ON → 全材料と原価行(登録人数4人分基準)が入る
       await optionCheckbox('材料をすべて載せる').check()
       await optionCheckbox('原価').check()
-      await shareDialog.getByRole('button', { name: 'テキストでシェア' }).click()
+      await shareDialog.getByRole('button', { name: ja.share.textOption }).click()
       await shPage.waitForTimeout(600)
       const copiedFull = await shPage.evaluate(() => navigator.clipboard.readText())
       check(
@@ -18611,7 +18623,7 @@ try {
 
       // (b-2) 栄養ON(無料視点) → カロリーだけの栄養行が入り、塩分は入らない(2026-08-01 線引きB')
       await optionCheckbox('1食あたりのカロリー').check()
-      await shareDialog.getByRole('button', { name: 'テキストでシェア' }).click()
+      await shareDialog.getByRole('button', { name: ja.share.textOption }).click()
       await shPage.waitForTimeout(600)
       const copiedNutrition = await shPage.evaluate(() => navigator.clipboard.readText())
       check(
@@ -18628,7 +18640,7 @@ try {
       // (c) 画像カードでシェア → 非対応環境ではPNGダウンロード(=生成成功のみ確認)
       const [download] = await Promise.all([
         shPage.waitForEvent('download', { timeout: 15000 }),
-        shareDialog.getByRole('button', { name: '画像カードでシェア' }).click(),
+        shareDialog.getByRole('button', { name: ja.share.imageOption }).click(),
       ])
       check(
         'SHARE-01(c) 画像カードが生成されPNGダウンロードに切り替わる',
@@ -18643,10 +18655,10 @@ try {
       const stepLineCount = copiedFull.split('\n').filter((l) => /^\d+\.\s/.test(l)).length
       await shPage.goto(`${BASE}/#/recipes/new`, { waitUntil: 'networkidle' })
       await shPage.waitForTimeout(500)
-      await shPage.getByText('テキスト貼り付けで自動入力').click()
+      await shPage.getByText(ja.paste.open).click()
       await shPage.waitForTimeout(300)
       await shPage.locator(`textarea[placeholder="${ja.paste.placeholder}"]`).fill(copiedFull)
-      await shPage.getByRole('button', { name: '自動で振り分ける' }).click()
+      await shPage.getByRole('button', { name: ja.paste.apply }).click()
       await shPage.waitForTimeout(400)
       const rtFormText = await shPage.textContent('body')
       check(
@@ -18656,7 +18668,7 @@ try {
       )
       check(
         'SHARE-01(d) 往復: 料理名も復元される(人数分の括弧に汚れない)',
-        (await shPage.getByPlaceholder('例: 肉じゃが').inputValue()) === '豚汁',
+        (await shPage.getByPlaceholder(ja.form.namePlaceholder).inputValue()) === '豚汁',
       )
       check(
         'SHARE-01(d) 往復: 末尾の入口URLが手順に化けない(手順数=共有本文の手順行数)',
@@ -18687,7 +18699,7 @@ try {
       await fhPage.waitForTimeout(600)
       check(
         'FOCUS-HINT-01 初回のレシピ詳細で「作りながら見るならこれ」ヒントが出る',
-        (await fhPage.getByText('作りながら見るならこれ').count()) === 1,
+        (await fhPage.getByText(ja.focus.firstHint).count()) === 1,
       )
       // 2品目: もう出ない(1回だけ)
       await fhPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
@@ -18696,12 +18708,12 @@ try {
       await fhPage.waitForTimeout(600)
       check(
         'FOCUS-HINT-01 2品目以降はヒントが出ない(1回だけ)',
-        (await fhPage.getByText('作りながら見るならこれ').count()) === 0,
+        (await fhPage.getByText(ja.focus.firstHint).count()) === 0,
       )
       // 調理中モードのボタン自体は毎回ある(ヒントが消えても機能は不変)
       check(
         'FOCUS-HINT-01 ヒントが消えても「調理中モードで見る」ボタンは残る',
-        (await fhPage.getByText('調理中モードで見る').count()) >= 1,
+        (await fhPage.getByText(ja.focus.open).count()) >= 1,
       )
     } finally {
       await fhBrowser.close()
@@ -18731,16 +18743,16 @@ try {
       // (a) 新規登録の初期表示は常に「かんたん」タブ。かんたんタブの入力だけで保存が成功する
       await ftPage.goto(`${BASE}/#/recipes/new`, { waitUntil: 'networkidle' })
       await ftPage.waitForTimeout(500)
-      const simpleTab = ftPage.getByRole('tab', { name: 'かんたん' })
-      const detailTab = ftPage.getByRole('tab', { name: 'くわしく' })
+      const simpleTab = ftPage.getByRole('tab', { name: ja.form.formTabSimple })
+      const detailTab = ftPage.getByRole('tab', { name: ja.form.formTabDetail })
       check(
         'FORMTABS-01a 新規登録の初期表示は「かんたん」タブ(aria-selected)',
         (await simpleTab.getAttribute('aria-selected')) === 'true' &&
           (await detailTab.getAttribute('aria-selected')) === 'false',
       )
-      await ftPage.getByPlaceholder('例: 肉じゃが').fill('E2Eタブかんたん保存確認レシピ')
-      await ftPage.getByPlaceholder('例: じゃがいも').first().fill('テスト材料')
-      await ftPage.getByPlaceholder('例: じゃがいもを一口大に切る').first().fill('テスト手順')
+      await ftPage.getByPlaceholder(ja.form.namePlaceholder).fill('E2Eタブかんたん保存確認レシピ')
+      await ftPage.getByPlaceholder(ja.form.ingredientNamePlaceholder).first().fill('テスト材料')
+      await ftPage.getByPlaceholder(ja.form.stepTextPlaceholder).first().fill('テスト手順')
       await ftPage.getByRole('button', { name: '保存する' }).click()
       await ftPage.waitForTimeout(800)
       check(
@@ -18750,7 +18762,7 @@ try {
       // 後始末: 検証用に作成したレシピを削除
       await ftPage.locator('a[href*="/edit"]').first().click()
       await ftPage.waitForTimeout(500)
-      await ftPage.getByRole('button', { name: 'このレシピを削除' }).click()
+      await ftPage.getByRole('button', { name: ja.form.deleteRecipe }).click()
       await ftPage.waitForTimeout(800)
 
       // (b) くわしくタブが空のうちは●が出ず、入力があると出る
@@ -18758,9 +18770,9 @@ try {
       await ftPage.waitForTimeout(500)
       const dotBefore = await ftPage.locator('[aria-label="入力済みの項目があります"]').count()
       check('FORMTABS-01b くわしくタブが空のうちは●が出ない', dotBefore === 0)
-      await ftPage.getByRole('tab', { name: 'くわしく' }).click()
+      await ftPage.getByRole('tab', { name: ja.form.formTabDetail }).click()
       await ftPage.waitForTimeout(200)
-      await ftPage.getByPlaceholder('例: 冷蔵で3日。温め直すときはしっかり沸騰させる').fill('E2Eタブ確認メモ')
+      await ftPage.getByPlaceholder(ja.form.memoPlaceholder).fill('E2Eタブ確認メモ')
       await ftPage.waitForTimeout(200)
       const dotAfter = await ftPage.locator('[aria-label="入力済みの項目があります"]').count()
       check('FORMTABS-01b くわしくに入力があると見出し右に●が出る', dotAfter > 0)
@@ -18770,7 +18782,7 @@ try {
       await ftPage.waitForTimeout(300)
       check(
         'FORMTABS-01c 料理名未入力で保存するとエラーが表示される',
-        (await ftPage.textContent('body')).includes('料理名を入力してください'),
+        stripZwspText(await ftPage.textContent('body')).includes(ja.form.nameRequired),
       )
       check(
         'FORMTABS-01c 料理名未入力で保存すると「かんたん」タブへ自動的に戻る',
@@ -18780,21 +18792,21 @@ try {
 
       // (d) タブ往復してもくわしくタブの入力内容が消えない(両タブのDOMを常時マウントし
       // hidden属性で切り替えているだけの実装であることの確認)
-      await ftPage.getByRole('tab', { name: 'くわしく' }).click()
+      await ftPage.getByRole('tab', { name: ja.form.formTabDetail }).click()
       await ftPage.waitForTimeout(200)
       const memoBeforeSwitch = await ftPage
-        .getByPlaceholder('例: 冷蔵で3日。温め直すときはしっかり沸騰させる')
+        .getByPlaceholder(ja.form.memoPlaceholder)
         .inputValue()
       check(
         'FORMTABS-01d くわしくタブへ戻るとメモの入力内容がまだ残っている(切替前確認)',
         memoBeforeSwitch === 'E2Eタブ確認メモ',
       )
-      await ftPage.getByRole('tab', { name: 'かんたん' }).click()
+      await ftPage.getByRole('tab', { name: ja.form.formTabSimple }).click()
       await ftPage.waitForTimeout(200)
-      await ftPage.getByRole('tab', { name: 'くわしく' }).click()
+      await ftPage.getByRole('tab', { name: ja.form.formTabDetail }).click()
       await ftPage.waitForTimeout(200)
       const memoAfterSwitch = await ftPage
-        .getByPlaceholder('例: 冷蔵で3日。温め直すときはしっかり沸騰させる')
+        .getByPlaceholder(ja.form.memoPlaceholder)
         .inputValue()
       check(
         'FORMTABS-01d かんたん→くわしくと切り替えてもメモの入力内容が残っている(state維持)',
@@ -18834,12 +18846,12 @@ try {
       // 見出しが「写真」ではなく「画像」に改称されている(photoLabel値変更。裁定2 ①)
       check(
         'ICONPICK-01 見出しが「画像」に改称されている',
-        await ipPage.getByText('画像', { exact: true }).first().isVisible().catch(() => false),
+        await ipPage.getByText(ja.form.photoLabel, { exact: true }).first().isVisible().catch(() => false),
       )
 
-      await ipPage.getByPlaceholder('例: 肉じゃが').fill('E2Eアイコン選択確認レシピ')
-      await ipPage.getByPlaceholder('例: じゃがいも').first().fill('テスト材料')
-      await ipPage.getByPlaceholder('例: じゃがいもを一口大に切る').first().fill('テスト手順')
+      await ipPage.getByPlaceholder(ja.form.namePlaceholder).fill('E2Eアイコン選択確認レシピ')
+      await ipPage.getByPlaceholder(ja.form.ingredientNamePlaceholder).first().fill('テスト材料')
+      await ipPage.getByPlaceholder(ja.form.stepTextPlaceholder).first().fill('テスト手順')
 
       // 「アルバムから選ぶ」用のinput(capture属性が無い方)に写真を投入する
       await ipPage
@@ -18853,7 +18865,7 @@ try {
       )
 
       // 3つ目のタイル「アイコンから選ぶ」は折りたたみの開閉ボタン(裁定2 ③)
-      const iconToggle = ipPage.getByRole('button', { name: 'アイコンから選ぶ' })
+      const iconToggle = ipPage.getByRole('button', { name: ja.form.iconPickOpen })
       check(
         'ICONPICK-01 「アイコンから選ぶ」は閉じた状態(aria-expanded=false)で始まる',
         (await iconToggle.getAttribute('aria-expanded')) === 'false',
@@ -18867,7 +18879,7 @@ try {
       )
 
       // アイコン(ご飯・丼)をタップする。写真設定済みなのでshowIconInsteadOfPhotoが自動ONになるはず(裁定2 ④)
-      await ipPage.getByRole('button', { name: 'ご飯・丼', exact: true }).click()
+      await ipPage.getByRole('button', { name: ja.icon.rice, exact: true }).click()
       await ipPage.waitForTimeout(300)
       check(
         'ICONPICK-01 写真設定済みでアイコンを選ぶとプレビューが写真からアイコン表示に切り替わる',
@@ -18876,14 +18888,14 @@ try {
 
       // くわしくタブの「写真ではなくアイコンを表示」トグル(このページで唯一のrole=switch)が
       // アイコンタップの副作用で自動的にONになっている(●が点く。オーナー報告に明記の仕様)
-      await ipPage.getByRole('tab', { name: 'くわしく' }).click()
+      await ipPage.getByRole('tab', { name: ja.form.formTabDetail }).click()
       await ipPage.waitForTimeout(200)
       const showIconSwitch = ipPage.locator('button[role="switch"]')
       check(
         'ICONPICK-01 くわしくタブの「写真ではなくアイコンを表示」トグルが自動でONになっている',
         (await showIconSwitch.getAttribute('aria-checked')) === 'true',
       )
-      await ipPage.getByRole('tab', { name: 'かんたん' }).click()
+      await ipPage.getByRole('tab', { name: ja.form.formTabSimple }).click()
       await ipPage.waitForTimeout(200)
 
       // 保存→詳細画面でもアイコン表示が維持されている(showIconInsteadOfPhotoが実際にDBへ連動)
@@ -18902,7 +18914,7 @@ try {
       // 後始末: 検証用に作成したレシピを削除
       await ipPage.locator('a[href*="/edit"]').first().click()
       await ipPage.waitForTimeout(500)
-      await ipPage.getByRole('button', { name: 'このレシピを削除' }).click()
+      await ipPage.getByRole('button', { name: ja.form.deleteRecipe }).click()
       await ipPage.waitForTimeout(800)
     } finally {
       await ipBrowser.close()
@@ -18931,9 +18943,9 @@ try {
       await frPage.locator('a[href*="/edit"]').first().click()
       await frPage.waitForTimeout(500)
 
-      const titleInput = frPage.getByPlaceholder('例: 肉じゃが')
+      const titleInput = frPage.getByPlaceholder(ja.form.namePlaceholder)
       await titleInput.fill('テスト改名')
-      const firstIngredientInput = frPage.getByPlaceholder('例: じゃがいも').first()
+      const firstIngredientInput = frPage.getByPlaceholder(ja.form.ingredientNamePlaceholder).first()
       await firstIngredientInput.fill('テスト材料')
 
       check(
@@ -18978,7 +18990,7 @@ try {
       )
       check(
         'FORMRESET-01a 保存前の軽いフィードバックが表示される',
-        (await frPage.textContent('body')).includes('まだ保存されていません。保存すると確定します'),
+        stripZwspText(await frPage.textContent('body')).includes(ja.form.resetFeedback),
       )
 
       // 保存せずに一覧へ離脱しても実データが壊れていないことを確認
@@ -19000,9 +19012,9 @@ try {
       // (自作レシピはラベルが「前回保存した内容に戻す」で、スターターの「デフォルトに戻す」とは異なる)
       await frPage.goto(`${BASE}/#/recipes/new`, { waitUntil: 'networkidle' })
       await frPage.waitForTimeout(500)
-      await frPage.getByPlaceholder('例: 肉じゃが').fill('FORMRESET自作レシピ')
-      await frPage.getByPlaceholder('例: じゃがいも').first().fill('にんじん')
-      await frPage.getByPlaceholder('例: じゃがいもを一口大に切る').first().fill('切る')
+      await frPage.getByPlaceholder(ja.form.namePlaceholder).fill('FORMRESET自作レシピ')
+      await frPage.getByPlaceholder(ja.form.ingredientNamePlaceholder).first().fill('にんじん')
+      await frPage.getByPlaceholder(ja.form.stepTextPlaceholder).first().fill('切る')
       await frPage.getByRole('button', { name: '保存する' }).click()
       await frPage.waitForTimeout(800)
       check(
@@ -19014,11 +19026,11 @@ try {
       await frPage.waitForTimeout(500)
       check(
         'FORMRESET-01b 自作レシピの編集画面は「前回保存した内容に戻す」ボタンになる',
-        await frPage.getByRole('button', { name: '前回保存した内容に戻す' }).isVisible(),
+        await frPage.getByRole('button', { name: ja.form.resetToSavedLabel }).isVisible(),
       )
-      const ownTitleInput = frPage.getByPlaceholder('例: 肉じゃが')
+      const ownTitleInput = frPage.getByPlaceholder(ja.form.namePlaceholder)
       await ownTitleInput.fill('FORMRESET改名後')
-      await frPage.getByRole('button', { name: '前回保存した内容に戻す' }).click()
+      await frPage.getByRole('button', { name: ja.form.resetToSavedLabel }).click()
       // 2026-08-15 便GW で「もう一度押す」方式は窓にそろえた。ここは自動押しに任せる
       // （01a のように自動押しを止めていないので、自分で押しにいくと押す相手が既に消えている）
       await frPage.waitForTimeout(600)
@@ -19169,7 +19181,7 @@ try {
         'PANTRY-BULK-01(C5) 全削除で0件になると整理モードを自動で抜ける(閉じ込められない)',
         (await readPantryItems()).length === 0 &&
           !(await pbPage.getByRole('button', { name: '完了', exact: true }).isVisible()) &&
-          !(await pbPage.getByText('タップして選択').isVisible()),
+          !(await pbPage.getByText(ja.pantry.organizeSelect).isVisible()),
       )
     } finally {
       await pbBrowser.close()
@@ -19425,12 +19437,12 @@ try {
         await uiPage.waitForTimeout(500)
         check(
           'URLIMPORT-01 エンドポイント設定時は「URLから取り込む」ボタンが出る',
-          await uiPage.getByText('URLから取り込む').isVisible(),
+          await uiPage.getByText(ja.urlImport.open).isVisible(),
         )
 
         // --- 成功パス ---
         currentCheck = 'URLIMPORT-02'
-        await uiPage.getByText('URLから取り込む').click()
+        await uiPage.getByText(ja.urlImport.open).click()
         await uiPage.waitForTimeout(300)
         await uiPage.locator('input[type="url"]').first().fill('https://example.com/success-recipe')
         await uiPage.getByRole('button', { name: '読み込む' }).click()
@@ -19501,7 +19513,7 @@ try {
         currentCheck = 'URLIMPORT-03'
         await uiPage.reload({ waitUntil: 'networkidle' })
         await uiPage.waitForTimeout(500)
-        await uiPage.getByText('URLから取り込む').click()
+        await uiPage.getByText(ja.urlImport.open).click()
         await uiPage.waitForTimeout(300)
         await uiPage.locator('input[type="url"]').first().fill('https://example.com/no-recipe-marker')
         await uiPage.getByRole('button', { name: '読み込む' }).click()
@@ -19519,7 +19531,7 @@ try {
         currentCheck = 'URLIMPORT-04'
         await uiPage.reload({ waitUntil: 'networkidle' })
         await uiPage.waitForTimeout(500)
-        await uiPage.getByText('URLから取り込む').click()
+        await uiPage.getByText(ja.urlImport.open).click()
         await uiPage.waitForTimeout(300)
         await uiPage.locator('input[type="url"]').first().fill('https://example.com/fetch-failed-marker')
         await uiPage.getByRole('button', { name: '読み込む' }).click()
@@ -19535,7 +19547,7 @@ try {
         currentCheck = 'URLIMPORT-04b'
         await uiPage.reload({ waitUntil: 'networkidle' })
         await uiPage.waitForTimeout(500)
-        await uiPage.getByText('URLから取り込む').click()
+        await uiPage.getByText(ja.urlImport.open).click()
         await uiPage.waitForTimeout(300)
         await uiPage.locator('input[type="url"]').first().fill('https://example.com/notfound-marker')
         await uiPage.getByRole('button', { name: '読み込む' }).click()
@@ -19543,7 +19555,7 @@ try {
         const notFoundBody = await uiPage.textContent('body')
         check(
           'URLIMPORT-04b 上流404は「ページが見つかりません」でURL確認を促す(時間をおいて、とは言わない)',
-          notFoundBody.includes('ページが見つかりません。URLを確認してください') &&
+          notFoundBody.includes(ja.urlImport.errorNotFound) &&
             !notFoundBody.includes('数分おいてから'),
         )
         await uiPage.locator('input[type="url"]').first().fill('https://example.com/blocked-marker')
@@ -19561,7 +19573,7 @@ try {
         await uiPage.waitForTimeout(500)
         check(
           'URLIMPORT-04b HTTP400+invalid_urlはURLの形式の案内が出る(死に文言だったものが到達する)',
-          (await uiPage.textContent('body')).includes('URLの形式が正しいか確認してください。例: https://〜'),
+          stripZwspText(await uiPage.textContent('body')).includes(ja.urlImport.errorInvalidUrl),
         )
 
         // --- 写真の自動取り込み(2026-07-21): imageUrlがあるレシピを取り込むと、
@@ -19572,10 +19584,10 @@ try {
         currentCheck = 'URLIMPORT-05'
         await uiPage.reload({ waitUntil: 'networkidle' })
         await uiPage.waitForTimeout(500)
-        await uiPage.getByText('URLから取り込む').click()
+        await uiPage.getByText(ja.urlImport.open).click()
         await uiPage.waitForTimeout(300)
         const fetchPhotoCheckbox = uiPage
-          .locator('label', { hasText: '写真も取り込む' })
+          .locator('label', { hasText: ja.urlImport.fetchPhoto })
           .locator('input[type="checkbox"]')
         check('URLIMPORT-05 「写真も取り込む」チェックボックスは既定でON', await fetchPhotoCheckbox.isChecked())
         await uiPage.locator('input[type="url"]').first().fill('https://example.com/photo-marker-recipe')
@@ -19607,10 +19619,10 @@ try {
         currentCheck = 'URLIMPORT-06'
         await uiPage.reload({ waitUntil: 'networkidle' })
         await uiPage.waitForTimeout(500)
-        await uiPage.getByText('URLから取り込む').click()
+        await uiPage.getByText(ja.urlImport.open).click()
         await uiPage.waitForTimeout(300)
         const fetchPhotoCheckboxOff = uiPage
-          .locator('label', { hasText: '写真も取り込む' })
+          .locator('label', { hasText: ja.urlImport.fetchPhoto })
           .locator('input[type="checkbox"]')
         await fetchPhotoCheckboxOff.uncheck()
         check('URLIMPORT-06 チェックを外すとOFFになる', !(await fetchPhotoCheckboxOff.isChecked()))
@@ -19640,7 +19652,7 @@ try {
         currentCheck = 'URLIMPORT-07'
         await uiPage.reload({ waitUntil: 'networkidle' })
         await uiPage.waitForTimeout(500)
-        await uiPage.getByText('URLから取り込む').click()
+        await uiPage.getByText(ja.urlImport.open).click()
         await uiPage.waitForTimeout(300)
         await uiPage.locator('input[type="url"]').first().fill('https://example.com/colon-marker-recipe')
         await uiPage.getByRole('button', { name: '読み込む' }).click()
@@ -19672,7 +19684,7 @@ try {
         currentCheck = 'URLIMPORT-08'
         await uiPage.reload({ waitUntil: 'networkidle' })
         await uiPage.waitForTimeout(500)
-        await uiPage.getByText('URLから取り込む').click()
+        await uiPage.getByText(ja.urlImport.open).click()
         await uiPage.waitForTimeout(300)
         await uiPage.locator('input[type="url"]').first().fill('https://example.com/success-recipe')
         await uiPage.getByRole('button', { name: '読み込む' }).click()
@@ -19696,7 +19708,7 @@ try {
         await setConfirmAnswer(uiPage, 'accept')
         check(
           'URLIMPORT-09 確認ダイアログをキャンセルすると中止した旨が出る(C16)',
-          (await uiPage.textContent('body')).includes('取り込みを中止しました。入力していた内容はそのままです'),
+          stripZwspText(await uiPage.textContent('body')).includes(ja.urlImport.canceled),
         )
         check(
           'URLIMPORT-09 キャンセルしたので参照元URLは前回のまま(置き換わらない)',
@@ -19709,7 +19721,7 @@ try {
         currentCheck = 'URLIMPORT-10'
         await uiPage.reload({ waitUntil: 'networkidle' })
         await uiPage.waitForTimeout(500)
-        await uiPage.getByText('URLから取り込む').click()
+        await uiPage.getByText(ja.urlImport.open).click()
         await uiPage.waitForTimeout(300)
         await uiPage.locator('input[type="url"]').first().fill('https://example.com/photo-fail-marker')
         await uiPage.getByRole('button', { name: '読み込む' }).click()
@@ -19717,7 +19729,7 @@ try {
         const photoFailBody = await uiPage.textContent('body')
         check(
           'URLIMPORT-10 写真だけ取れなかったときトーストで伝える(C01)',
-          photoFailBody.includes('写真は取り込めませんでした。レシピは取り込んでいます'),
+          photoFailBody.includes(ja.urlImport.photoNotImported),
         )
         check(
           'URLIMPORT-10 レシピ本体の成功メッセージは従来どおり(写真の失敗で成功文言を変えない)',
@@ -19729,7 +19741,7 @@ try {
         currentCheck = 'URLIMPORT-11'
         await uiPage.reload({ waitUntil: 'networkidle' })
         await uiPage.waitForTimeout(500)
-        await uiPage.getByText('URLから取り込む').click()
+        await uiPage.getByText(ja.urlImport.open).click()
         await uiPage.waitForTimeout(300)
         await uiPage.locator('input[type="url"]').first().fill('https://example.com/group-marker')
         await uiPage.getByRole('button', { name: '読み込む' }).click()
@@ -19764,7 +19776,7 @@ try {
         currentCheck = 'URLIMPORT-12'
         await uiPage.reload({ waitUntil: 'networkidle' })
         await uiPage.waitForTimeout(500)
-        await uiPage.getByText('URLから取り込む').click()
+        await uiPage.getByText(ja.urlImport.open).click()
         await uiPage.waitForTimeout(300)
         await uiPage.locator('input[type="url"]').first().fill('https://example.com/amountless-marker')
         await uiPage.getByRole('button', { name: '読み込む' }).click()
@@ -19775,7 +19787,7 @@ try {
             '材料3件（うち2件は分量が読み取れず名前だけです）・手順2件を読み込みました',
           ),
         )
-        const amountlessHints = uiPage.getByText('分量が読み取れませんでした。元のページを見て入れてください')
+        const amountlessHints = uiPage.getByText(ja.form.importedAmountlessHint)
         check('URLIMPORT-12 該当の材料行にだけ控えめな印が付く(2件)', (await amountlessHints.count()) === 2)
         // 自分で分量を入れると印は消える(「まだ空のまま」を指す印なので)
         await uiPage.locator('input[placeholder="例: 3"]').nth(1).fill('少々')
@@ -19788,7 +19800,7 @@ try {
         currentCheck = 'URLIMPORT-13'
         await uiPage.reload({ waitUntil: 'networkidle' })
         await uiPage.waitForTimeout(500)
-        await uiPage.getByText('URLから取り込む').click()
+        await uiPage.getByText(ja.urlImport.open).click()
         await uiPage.waitForTimeout(300)
         await uiPage.locator('input[type="url"]').first().fill('https://example.com/over-servings-marker')
         await uiPage.getByRole('button', { name: '読み込む' }).click()
@@ -19813,7 +19825,7 @@ try {
         currentCheck = 'URLIMPORT-14'
         await uiPage.reload({ waitUntil: 'networkidle' })
         await uiPage.waitForTimeout(500)
-        await uiPage.getByText('URLから取り込む').click()
+        await uiPage.getByText(ja.urlImport.open).click()
         await uiPage.waitForTimeout(300)
         await uiPage.locator('input[type="url"]').first().fill('https://example.com/photo-marker-first')
         await uiPage.getByRole('button', { name: '読み込む' }).click()
@@ -19830,7 +19842,7 @@ try {
         check(
           'URLIMPORT-14 写真が置き換わって消えることと、元に戻せないことを確認文に書く(規約F)',
           ckDialogs.length === 1 &&
-            ckDialogs[0].includes('いまの写真（元の写真には戻せません）'),
+            ckDialogs[0].includes(ja.urlImport.confirmPhotoReplace),
           JSON.stringify(ckDialogs),
         )
         check(
@@ -19847,7 +19859,7 @@ try {
         )
         // 「写真も取り込む」をOFFにすれば写真は守られる。そのことも確認文に書く(規約F「何が残るか」)
         await uiPage
-          .locator('label', { hasText: '写真も取り込む' })
+          .locator('label', { hasText: ja.urlImport.fetchPhoto })
           .locator('input[type="checkbox"]')
           .uncheck()
         const ckOffBefore = (await readConfirms(uiPage)).length
@@ -19859,7 +19871,7 @@ try {
           'URLIMPORT-14 チェックOFFなら「写真はそのまま残る」と書く(消える予告は出さない)',
           ckDialogsOff.length === 1 &&
             ckDialogsOff[0].includes('残るもの: 写真・料理名・ひとこと説明・メモ') &&
-            !ckDialogsOff[0].includes('いまの写真（元の写真には戻せません）'),
+            !ckDialogsOff[0].includes(ja.urlImport.confirmPhotoReplace),
           JSON.stringify(ckDialogsOff),
         )
 
@@ -19869,7 +19881,7 @@ try {
         currentCheck = 'URLIMPORT-15'
         await uiPage.reload({ waitUntil: 'networkidle' })
         await uiPage.waitForTimeout(500)
-        await uiPage.getByText('URLから取り込む').click()
+        await uiPage.getByText(ja.urlImport.open).click()
         await uiPage.waitForTimeout(300)
         await uiPage.locator('input[type="url"]').first().fill('https://example.com/slow-photo-marker')
         await uiPage.getByRole('button', { name: '読み込む' }).click()
@@ -19908,7 +19920,7 @@ try {
           .locator('textarea[placeholder="例: じゃがいもを一口大に切る"]')
           .first()
           .fill('切る')
-        await uiPage.getByText('URLから取り込む').click()
+        await uiPage.getByText(ja.urlImport.open).click()
         await uiPage.waitForTimeout(300)
         await uiPage.locator('input[type="url"]').first().fill('https://example.com/slow-recipe-marker')
         await uiPage.getByRole('button', { name: '読み込む' }).click()
@@ -20010,7 +20022,7 @@ try {
         'NAVI-01 Pro解錠済みでナビが開き2品が自動選択される',
         (await naviPage.textContent('body')).includes('2品を選択中'),
       )
-      await naviPage.getByRole('button', { name: '段取りを作る' }).click()
+      await naviPage.getByRole('button', { name: ja.cookNavi.build }).click()
       await naviPage.waitForTimeout(600)
       check(
         'NAVI-01 2品のタイムラインが組める',
@@ -20026,7 +20038,7 @@ try {
       await naviPage.waitForTimeout(400)
       check(
         'NAVI-02 動作中タイマーのタップで±調整の窓が開く(ナビ内)',
-        await naviPage.getByRole('dialog', { name: 'タイマーを調整' }).isVisible().catch(() => false),
+        await naviPage.getByRole('dialog', { name: ja.timer.adjustDialogTitle }).isVisible().catch(() => false),
       )
       check('NAVI-02 このとき単品レシピ詳細へ遷移していない', naviPage.url().includes('/cook-navi'))
       await naviPage.keyboard.press('Escape')
@@ -20044,12 +20056,12 @@ try {
       await naviPage.waitForTimeout(400)
       check(
         'NAVI-01 完了タイマーの帯はタップしても画面が変わらない(調整の窓が開く)',
-        (await naviPage.getByRole('dialog', { name: 'タイマーを調整' }).count()) === 1 &&
+        (await naviPage.getByRole('dialog', { name: ja.timer.adjustDialogTitle }).count()) === 1 &&
           naviPage.url() === urlBeforeDoneTap,
         `before=${urlBeforeDoneTap} after=${naviPage.url()}`,
       )
       await naviPage
-        .getByRole('dialog', { name: 'タイマーを調整' })
+        .getByRole('dialog', { name: ja.timer.adjustDialogTitle })
         .getByRole('button', { name: /を(開く|見る)/ })
         .click()
       await naviPage.waitForTimeout(700)
@@ -20072,7 +20084,7 @@ try {
       await naviPage.locator('div.fixed button.border-warning').first().click()
       await naviPage.waitForTimeout(400)
       await naviPage
-        .getByRole('dialog', { name: 'タイマーを調整' })
+        .getByRole('dialog', { name: ja.timer.adjustDialogTitle })
         .getByRole('button', { name: /を(開く|見る)/ })
         .click()
       await naviPage.waitForTimeout(700)
@@ -20134,7 +20146,7 @@ try {
       await nav4Page.goto(`${BASE}/#/cook-navi`)
       await nav4Page.reload({ waitUntil: 'networkidle' })
       await nav4Page.waitForTimeout(1200)
-      await nav4Page.getByRole('button', { name: '段取りを作る' }).click()
+      await nav4Page.getByRole('button', { name: ja.cookNavi.build }).click()
       await nav4Page.waitForTimeout(600)
       const body = await nav4Page.textContent('body')
       check(
@@ -20208,7 +20220,7 @@ try {
       await nav5Page.goto(`${BASE}/#/cook-navi`)
       await nav5Page.reload({ waitUntil: 'networkidle' })
       await nav5Page.waitForTimeout(1200)
-      await nav5Page.getByRole('button', { name: '段取りを作る' }).click()
+      await nav5Page.getByRole('button', { name: ja.cookNavi.build }).click()
       await nav5Page.waitForTimeout(600)
       const body5 = await nav5Page.textContent('body')
       check(
@@ -20218,7 +20230,7 @@ try {
       )
       check(
         'NAVI-05 次にどうすれば段取りが作れるかも書く',
-        body5.includes('手順に「10分煮る」のように時間があると、待ち時間を使った段取りになります。'),
+        body5.includes(ja.cookNavi.noParallelHint),
       )
       check(
         'NAVI-05 正直表示の枠が出ている',
@@ -20261,12 +20273,12 @@ try {
     try {
       await nav6Page.goto(`${BASE}/#/recipes/new`, { waitUntil: 'networkidle' })
       await nav6Page.waitForTimeout(1500)
-      await nav6Page.getByText('テキスト貼り付けで自動入力').click()
+      await nav6Page.getByText(ja.paste.open).click()
       await nav6Page.waitForTimeout(300)
       await nav6Page.locator(`textarea[placeholder="${ja.paste.placeholder}"]`).fill(
         'E2E分数自動入力レシピ\n\n材料（2人分）\n・大根　1/4本\n・しょうゆ　大さじ2\n\n作り方\n1. 大根を切る\n2. 鍋に入れて15分煮る\n3. 器に盛る',
       )
-      await nav6Page.getByRole('button', { name: '自動で振り分ける' }).click()
+      await nav6Page.getByRole('button', { name: ja.paste.apply }).click()
       await nav6Page.waitForTimeout(400)
       const minutesInputs = nav6Page.locator('input[aria-label="分（任意）"]')
       check(
@@ -20282,7 +20294,7 @@ try {
       const body6 = await nav6Page.textContent('body')
       check(
         'NAVI-06 自動で入れた分数であることが手順に表示される',
-        body6.includes('手順の文にある時間から入れました。書き換え・削除ができます'),
+        body6.includes(ja.form.stepMinutesAuto),
       )
       check('NAVI-06 取り込みの結果にも件数が出る', body6.includes('手順1件は本文の時間を「分」の欄に入れました。'))
       check(
@@ -20368,7 +20380,7 @@ try {
       await nav7Page.goto(`${BASE}/#/cook-navi`)
       await nav7Page.reload({ waitUntil: 'networkidle' })
       await nav7Page.waitForTimeout(1200)
-      await nav7Page.getByRole('button', { name: '段取りを作る' }).click()
+      await nav7Page.getByRole('button', { name: ja.cookNavi.build }).click()
       await nav7Page.waitForTimeout(600)
       check(
         'NAVI-07 段取りが作れる',
@@ -20396,7 +20408,7 @@ try {
       await nav7Page.waitForTimeout(400)
       // 2026-08-11 便FO: 帯は窓を開くだけになったので、移動は窓の「手順◯を開く」から
       await nav7Page
-        .getByRole('dialog', { name: 'タイマーを調整' })
+        .getByRole('dialog', { name: ja.timer.adjustDialogTitle })
         .getByRole('button', { name: /を(開く|見る)/ })
         .click()
       await nav7Page.waitForTimeout(900)
@@ -20422,7 +20434,7 @@ try {
 
       // NAVI-09: まとめて作った！
       currentCheck = 'NAVI-09'
-      await nav7Page.getByRole('button', { name: 'まとめて作った！' }).click()
+      await nav7Page.getByRole('button', { name: ja.cookNavi.markAllCooked }).click()
       await nav7Page.waitForTimeout(900)
       check(
         'NAVI-09 確認文に数・料理名・何が変わるかが書かれている(規約F)',
@@ -20490,9 +20502,9 @@ try {
       await nav7Page.goto(`${BASE}/#/cook-navi`)
       await nav7Page.reload({ waitUntil: 'networkidle' })
       await nav7Page.waitForTimeout(1200)
-      await nav7Page.getByRole('button', { name: '段取りを作る' }).click()
+      await nav7Page.getByRole('button', { name: ja.cookNavi.build }).click()
       await nav7Page.waitForTimeout(600)
-      await nav7Page.getByRole('button', { name: '戻る' }).first().click()
+      await nav7Page.getByRole('button', { name: ja.common.back }).first().click()
       await nav7Page.waitForTimeout(800)
       check(
         'NAVI-07 「戻る」で献立タブに戻ったとき、再開の入口が出ている',
@@ -20573,7 +20585,7 @@ try {
       await esPage.goto(`${BASE}/#/cook-navi`)
       await esPage.reload({ waitUntil: 'networkidle' })
       await esPage.waitForTimeout(1400)
-      await esPage.getByRole('button', { name: '段取りを作る' }).click()
+      await esPage.getByRole('button', { name: ja.cookNavi.build }).click()
       await esPage.waitForTimeout(700)
       check(
         'ES-01 今週の献立の予定だけでも段取りが作れる',
@@ -20626,7 +20638,7 @@ try {
       await esPage.waitForTimeout(400)
       // 2026-08-11 便FO: 帯は窓を開くだけになったので、移動は窓の「手順◯を開く」から
       await esPage
-        .getByRole('dialog', { name: 'タイマーを調整' })
+        .getByRole('dialog', { name: ja.timer.adjustDialogTitle })
         .getByRole('button', { name: /を(開く|見る)/ })
         .click()
       await esPage.waitForTimeout(1200)
@@ -20701,7 +20713,7 @@ try {
       await egPage.goto(`${BASE}/#/cook-navi`)
       await egPage.reload({ waitUntil: 'networkidle' })
       await egPage.waitForTimeout(1200)
-      await egPage.getByRole('button', { name: '段取りを作る' }).click()
+      await egPage.getByRole('button', { name: ja.cookNavi.build }).click()
       await egPage.waitForTimeout(700)
 
       const egCards = await egPage.$$eval('ol > li', (lis) => lis.map((li) => li.textContent || ''))
@@ -20720,7 +20732,7 @@ try {
         'EG-01 ナビが足した工程は「◯-1」の番号で、元の手順の1つめだと分かる',
         /^\d+-1$/.test(
           (await egPage
-            .locator('ol > li', { hasText: '湯を沸かす' })
+            .locator('ol > li', { hasText: ja.cookNavi.addedBoilWaterStep })
             .first()
             .locator('[data-testid="navi-recipe-step-number"]')
             .textContent()) ?? '',
@@ -20779,7 +20791,7 @@ try {
       await egPage.getByRole('link', { name: /EG煮物/ }).last().click()
       await egPage.waitForTimeout(800)
       check('EG-01 段取りの下のリンクからレシピ詳細が開く', /#\/recipes\/\d+/.test(egPage.url()), `url=${egPage.url()}`)
-      await egPage.getByRole('button', { name: '戻る' }).first().click()
+      await egPage.getByRole('button', { name: ja.common.back }).first().click()
       await egPage.waitForTimeout(1000)
       check(
         'EG-01 レシピ詳細の「戻る」でナビに帰る(レシピ一覧へ飛ばされない)',
@@ -20814,7 +20826,7 @@ try {
       egConfirmText = ''
       // 2026-08-20 便II・⑥: 「全て作った！」は整理モードの中に移った
       await openDayOrganize(egPage)
-      await egPage.getByRole('button', { name: '全て作った！' }).click()
+      await egPage.getByRole('button', { name: ja.mealPlan.todayMarkAllCooked }).click()
       await egPage.waitForTimeout(1000)
       check(
         'EG-01 「全て作った！」の確認文に、段取りも終わることが書いてある(規約F)',
@@ -20903,7 +20915,7 @@ try {
       await ehPage.goto(`${BASE}/#/cook-navi`)
       await ehPage.reload({ waitUntil: 'networkidle' })
       await ehPage.waitForTimeout(1200)
-      await ehPage.getByRole('button', { name: '段取りを作る' }).click()
+      await ehPage.getByRole('button', { name: ja.cookNavi.build }).click()
       await ehPage.waitForTimeout(800)
 
       // ④ 手順に埋もれた「湯を沸かす」が前の工程として分離される
@@ -21011,7 +21023,7 @@ try {
       // 「タイマーを始める」は、待ち分数が本文に書かれていない待ちカードにだけ出る
       // （本文に「15分」と書いてある手順には出ない＝そこを押そうとすると必ず待ちぼうけになる）。
       // 切り出した「湯を沸かす」がその条件を満たすので、そのカードで見る
-      const ehTimerCard = ehPage.locator('ol > li', { hasText: '湯を沸かす' }).first()
+      const ehTimerCard = ehPage.locator('ol > li', { hasText: ja.cookNavi.addedBoilWaterStep }).first()
       const ehTimerButton = ehTimerCard.getByRole('button', { name: /タイマーを始める/ })
       if ((await ehTimerButton.count()) === 0) {
         check('EH-01 常駐タイマーの番号が、ナビの段取りの通し番号になる', false, 'タイマー開始ボタンが見つからない')
@@ -21157,7 +21169,7 @@ try {
       await grPage.waitForTimeout(300)
       await grPage.getByRole('button', { name: '玉ねぎ', exact: true }).click()
       await grPage.waitForTimeout(150)
-      await grPage.getByRole('button', { name: '調味料', exact: true }).click()
+      await grPage.getByRole('button', { name: ja.pantry.group.seasoning, exact: true }).click()
       await grPage.waitForTimeout(400)
       const toast = await grPage.textContent('body')
       check(
@@ -21206,7 +21218,7 @@ try {
       // 1b) 「食材の在庫から入れる」(2026-08-02 オーナー指示・便DF)は、入れられる食材が
       // 無いときもボタン自体は出し、押せない状態＋理由の1行を添える(旧実装はボタンごと
       // 消えていて、機能があること自体に気づけなかった)
-      const pfFillBtn = pfPage.getByRole('button', { name: '食材の在庫から入れる' })
+      const pfFillBtn = pfPage.getByRole('button', { name: ja.search.pantryToIngredients })
       check(
         'PANTRYFILTER-01(便DF) 在庫が空でも「食材の在庫から入れる」ボタンは出る(押せない状態)',
         (await pfFillBtn.count()) === 1 && (await pfFillBtn.isDisabled()),
@@ -21244,7 +21256,7 @@ try {
 
       // 3b) 「食材の在庫から入れる」が押せるようになり、押すと在庫の食材が
       // 「使いたい食材」のチップとして入る(2026-08-02 オーナー指示・便DF)
-      const pfFillBtn2 = pfPage.getByRole('button', { name: '食材の在庫から入れる' })
+      const pfFillBtn2 = pfPage.getByRole('button', { name: ja.search.pantryToIngredients })
       check('PANTRYFILTER-01(便DF) 在庫があると「食材の在庫から入れる」が押せる', await pfFillBtn2.isEnabled())
       await pfFillBtn2.click()
       await pfPage.waitForTimeout(400)
@@ -21261,12 +21273,12 @@ try {
         `チップ=${JSON.stringify(await wantedChips())}`,
       )
       // 入れた食材を外して、以降の件数チェックに影響させない
-      await pfPage.getByRole('button', { name: 'このチップを削除' }).first().click()
+      await pfPage.getByRole('button', { name: ja.chip.remove }).first().click()
       await pfPage.waitForTimeout(400)
       check('PANTRYFILTER-01(便DF) 入れた食材は✗で外せる', (await wantedChips()).length === 0)
 
       // 4) ONにすると在庫の食材(玉ねぎ)を使うレシピだけに件数が絞られる
-      await pfPage.getByRole('button', { name: '在庫の食材で絞る', exact: true }).click()
+      await pfPage.getByRole('button', { name: ja.search.pantryFilter, exact: true }).click()
       await pfPage.waitForTimeout(400)
       const filteredCards = await cardCount()
       check(
@@ -21326,7 +21338,7 @@ try {
         dirTop != null && nutritionTop != null && dirTop < nutritionTop,
         `並び順=${dirTop} 栄養価で並び替え=${nutritionTop}`,
       )
-      const recentBtn = lpPage.getByRole('button', { name: '最近作った順', exact: true })
+      const recentBtn = lpPage.getByRole('button', { name: ja.search.sortRecentCooked, exact: true })
       check('LISTPANEL-01(⑦) 並べ替えに「最近作った順」がある', (await recentBtn.count()) === 1)
       await recentBtn.click()
       await lpPage.waitForTimeout(300)
@@ -21347,7 +21359,7 @@ try {
         `件数=${recentCards}`,
       )
       // 既定(更新順)に戻してパネルを閉じる
-      await lpPage.getByRole('button', { name: '更新順', exact: true }).click()
+      await lpPage.getByRole('button', { name: ja.search.sortUpdated, exact: true }).click()
       await lpPage.waitForTimeout(200)
       await lpPage.locator('[data-testid="sort-panel-close"]').click()
       await lpPage.waitForTimeout(300)
@@ -21421,12 +21433,12 @@ try {
       await lpPage.waitForTimeout(300)
 
       // ---------- ⑥ 「自分で登録したレシピのみ」だけでも条件をクリアが出る ----------
-      const clearInPanel = () => lpPage.getByRole('button', { name: '条件をクリア' })
+      const clearInPanel = () => lpPage.getByRole('button', { name: ja.search.clear })
       check(
         'LISTPANEL-01(⑥) 条件が何も無いうちは「条件をクリア」が出ない(前提)',
         (await clearInPanel().count()) === 0,
       )
-      await lpPage.getByRole('button', { name: '自分で登録したレシピのみ', exact: true }).click()
+      await lpPage.getByRole('button', { name: ja.search.myRecipesOnly, exact: true }).click()
       await lpPage.waitForTimeout(400)
       // 自作レシピ0件だと一覧が0件になり、空状態側にも「条件をクリア」が出る。
       // 見たいのは絞り込みパネルの中(=「レシピを絞り込む」の見出しより上)に出ているかどうか
@@ -21449,7 +21461,7 @@ try {
       check(
         'LISTPANEL-01(⑥) 「条件をクリア」で「自分で登録したレシピのみ」もOFFに戻る',
         (await lpPage
-          .getByRole('button', { name: '自分で登録したレシピのみ', exact: true })
+          .getByRole('button', { name: ja.search.myRecipesOnly, exact: true })
           .getAttribute('aria-pressed')) === 'false',
       )
       check(
@@ -22604,7 +22616,7 @@ try {
       await hcOpenFilter()
       check(
         'HU-CLOSE-01(⑰) 絞り込みの窓に「決定」ボタンは無い',
-        (await hcPage.getByRole('button', { name: '決定', exact: true }).count()) === 0,
+        (await hcPage.getByRole('button', { name: ja.mealPlan.servingsSave, exact: true }).count()) === 0,
       )
       check(
         'HU-CLOSE-01(⑰) 代わりに窓を閉じるボタンがある(何も押せない窓にしない)',
@@ -22614,7 +22626,7 @@ try {
       // 条件をかける（0件でも全件でもない状態を作る＝閉じ方の違いが結果に出る余地を残す）
       await hcPage.getByRole('button', { name: '主菜', exact: true }).click()
       await hcPage.waitForTimeout(300)
-      await hcPage.locator('select[aria-label="調理時間"]').selectOption({ label: '〜30分' })
+      await hcPage.locator('select[aria-label="調理時間"]').selectOption({ label: ja.search.timeUnder30 })
       await hcPage.waitForTimeout(500)
       const hcFilteredInPanel = (await hcTitles()).length
       check(
@@ -22694,7 +22706,7 @@ try {
       await hcOpenFilter()
       await hcPage
         .locator('[data-testid="recipes-filter-panel"]')
-        .getByRole('button', { name: '条件をクリア' })
+        .getByRole('button', { name: ja.search.clear })
         .click()
       await hcPage.waitForTimeout(500)
       check(
@@ -22733,20 +22745,20 @@ try {
       await scPage.getByRole('button', { name: '買い物メモ', exact: true }).click()
       await scPage.waitForTimeout(300)
       // レシピから追加(ピッカー)を開く
-      await scPage.getByRole('button', { name: 'レシピから追加', exact: true }).click()
+      await scPage.getByRole('button', { name: ja.shopping.fromRecipeTitle, exact: true }).click()
       await scPage.waitForTimeout(400)
 
-      const makeBtn = scPage.getByRole('button', { name: '下書きを作る' })
+      const makeBtn = scPage.getByRole('button', { name: ja.shopping.makeCandidates })
       check('SHOP-COUNT-01 食数0では「下書きを作る」がdisabled', await makeBtn.isDisabled())
       // 最初のレシピの食数を1にする
-      await scPage.getByRole('button', { name: '食数を増やす' }).first().click()
+      await scPage.getByRole('button', { name: ja.shopping.pickerServingUp }).first().click()
       await scPage.waitForTimeout(200)
       check('SHOP-COUNT-01 食数1で「下書きを作る」が押せる(1食以上で選択扱い)', !(await makeBtn.isDisabled()))
       await makeBtn.click()
       await scPage.waitForTimeout(500)
       const afterMake = await scPage.textContent('body')
       check('SHOP-COUNT-01 下書きを作るとトーストが出る(#4)', afterMake.includes('下書きを作りました'))
-      check('SHOP-COUNT-01 買い物メモ(下書き)セクションが出る(#14)', afterMake.includes('買い物メモ（下書き）'))
+      check('SHOP-COUNT-01 買い物メモ(下書き)セクションが出る(#14)', afterMake.includes(ja.shopping.candidateTitle))
     } finally {
       await scBrowser.close()
     }
@@ -22789,22 +22801,22 @@ try {
       await cpPage.waitForTimeout(300)
 
       // 在庫に無い新食材を手入力で1件追加
-      await cpPage.getByPlaceholder('食材を入力').fill('E2E新食材ペペロン')
+      await cpPage.getByPlaceholder(ja.shopping.manualPlaceholder).fill('E2E新食材ペペロン')
       await cpPage.getByRole('button', { name: '追加', exact: true }).click()
       await cpPage.waitForTimeout(300)
       // チェックを入れる
-      await cpPage.getByRole('button', { name: 'チェックの切り替え', exact: true }).click()
+      await cpPage.getByRole('button', { name: ja.shopping.toggleCheck, exact: true }).click()
       await cpPage.waitForTimeout(200)
       // 買い物完了 → 中央モーダル
-      await cpPage.getByRole('button', { name: '買い物完了', exact: true }).click()
+      await cpPage.getByRole('button', { name: ja.shopping.complete, exact: true }).click()
       await cpPage.waitForTimeout(300)
       const modalBody = await cpPage.textContent('body')
       check(
         'SHOP-COMPLETE-01 買い物完了で確認モーダルが出る(#7)',
-        modalBody.includes('食材の在庫に反映しますか？'),
+        modalBody.includes(ja.shopping.completeConfirmTitle),
       )
       // 反映する
-      await cpPage.getByRole('button', { name: '反映する', exact: true }).click()
+      await cpPage.getByRole('button', { name: ja.shopping.completeYes, exact: true }).click()
       await cpPage.waitForTimeout(500)
       const afterBody = await cpPage.textContent('body')
       check('SHOP-COMPLETE-01 反映するとトーストが出る(#9)', afterBody.includes('在庫に反映しました'))
@@ -22843,7 +22855,7 @@ try {
 
       // #11 売り場順: わざと売り場順と違う順(調味料→肉→野菜)で手入力し、表示は野菜→肉→調味料に整うことを確認
       for (const name of ['しょうゆ', '豚バラ肉', '玉ねぎ']) {
-        await sdPage.getByPlaceholder('食材を入力').fill(name)
+        await sdPage.getByPlaceholder(ja.shopping.manualPlaceholder).fill(name)
         await sdPage.getByRole('button', { name: '追加', exact: true }).click()
         await sdPage.waitForTimeout(200)
       }
@@ -22858,21 +22870,21 @@ try {
       )
 
       // 下書きを作る(最初のレシピを2食に)
-      await sdPage.getByRole('button', { name: 'レシピから追加', exact: true }).click()
+      await sdPage.getByRole('button', { name: ja.shopping.fromRecipeTitle, exact: true }).click()
       await sdPage.waitForTimeout(400)
-      await sdPage.getByRole('button', { name: '食数を増やす' }).first().click()
-      await sdPage.getByRole('button', { name: '食数を増やす' }).first().click()
+      await sdPage.getByRole('button', { name: ja.shopping.pickerServingUp }).first().click()
+      await sdPage.getByRole('button', { name: ja.shopping.pickerServingUp }).first().click()
       await sdPage.waitForTimeout(200)
-      await sdPage.getByRole('button', { name: '下書きを作る' }).click()
+      await sdPage.getByRole('button', { name: ja.shopping.makeCandidates }).click()
       await sdPage.waitForTimeout(500)
       const draftBody = await sdPage.textContent('body')
       check('SHOP-DRAFT-02 下書きセクションが出て「レシピを選び直す」「キャンセル」が並ぶ(#8)',
-        draftBody.includes('買い物メモ（下書き）') &&
+        draftBody.includes(ja.shopping.candidateTitle) &&
           (await sdPage.getByRole('button', { name: 'レシピを選び直す' }).isVisible()) &&
           (await sdPage.getByRole('button', { name: 'キャンセル' }).isVisible()))
 
       // #10 食材名タップで「使うレシピ」ポップ(全文+レシピ名)が出る
-      const draftSection = sdPage.locator('section', { hasText: '買い物メモ（下書き）' })
+      const draftSection = sdPage.locator('section', { hasText: ja.shopping.candidateTitle })
       await draftSection.locator('ul li').first().locator('button').nth(1).click()
       await sdPage.waitForTimeout(250)
       const popup = sdPage.getByRole('dialog')
@@ -22887,7 +22899,7 @@ try {
       const repickBody = await sdPage.textContent('body')
       check('SHOP-DRAFT-02(#8) 選び直しで直前の選択(2食)が保持されピッカーが開く',
         repickBody.includes('2食') &&
-          !(await sdPage.getByRole('button', { name: '下書きを作る' }).isDisabled()))
+          !(await sdPage.getByRole('button', { name: ja.shopping.makeCandidates }).isDisabled()))
     } finally {
       await sdBrowser.close()
     }
@@ -22956,21 +22968,21 @@ try {
       await ixPage.waitForTimeout(600)
       await ixPage.getByRole('button', { name: '買い物メモ', exact: true }).click()
       await ixPage.waitForTimeout(300)
-      await ixPage.getByRole('button', { name: 'レシピから追加', exact: true }).click()
+      await ixPage.getByRole('button', { name: ja.shopping.fromRecipeTitle, exact: true }).click()
       await ixPage.waitForTimeout(400)
       // 同梱レシピを巻き込まないよう、この検証で登録した1品だけに絞ってから食数を1にする
-      await ixPage.getByPlaceholder('レシピ名で絞り込み').fill(ixTitle)
+      await ixPage.getByPlaceholder(ja.shopping.pickerSearchPlaceholder).fill(ixTitle)
       await ixPage.waitForTimeout(400)
-      await ixPage.getByRole('button', { name: '食数を増やす' }).first().click()
+      await ixPage.getByRole('button', { name: ja.shopping.pickerServingUp }).first().click()
       await ixPage.waitForTimeout(200)
-      await ixPage.getByRole('button', { name: '下書きを作る' }).click()
+      await ixPage.getByRole('button', { name: ja.shopping.makeCandidates }).click()
       await ixPage.waitForTimeout(600)
 
       const ixDraft = (await ixPage.textContent('body')).replace(/​/g, '')
       check(
         'IX-SHOP-01 ①買い物メモの下書きに「お湯」が出ない',
-        ixDraft.includes('買い物メモ（下書き）') && !ixDraft.includes('お湯'),
-        `draftShown=${ixDraft.includes('買い物メモ（下書き）')} hasOyu=${ixDraft.includes('お湯')}`,
+        ixDraft.includes(ja.shopping.candidateTitle) && !ixDraft.includes('お湯'),
+        `draftShown=${ixDraft.includes(ja.shopping.candidateTitle)} hasOyu=${ixDraft.includes('お湯')}`,
       )
       check(
         'IX-SHOP-01 ②同じレシピの他の材料は出る(ゆで塩も落とさない)',
@@ -22979,7 +22991,7 @@ try {
       )
 
       // 確定して買い物メモに入れたあとも「お湯」は無い(下書きだけの話にしない)
-      await ixPage.getByRole('button', { name: '買い物メモに追加' }).click()
+      await ixPage.getByRole('button', { name: ja.shopping.addConfirmed }).click()
       await ixPage.waitForTimeout(600)
       const ixMemo = (await ixPage.textContent('body')).replace(/​/g, '')
       check(
@@ -23035,13 +23047,13 @@ try {
       await izPage.waitForTimeout(800)
       await izPage.getByRole('button', { name: '買い物メモ', exact: true }).click()
       await izPage.waitForTimeout(300)
-      await izPage.getByRole('button', { name: 'レシピから追加', exact: true }).click()
+      await izPage.getByRole('button', { name: ja.shopping.fromRecipeTitle, exact: true }).click()
       await izPage.waitForTimeout(400)
-      await izPage.getByPlaceholder('レシピ名で絞り込み').fill(izTitle)
+      await izPage.getByPlaceholder(ja.shopping.pickerSearchPlaceholder).fill(izTitle)
       await izPage.waitForTimeout(400)
-      await izPage.getByRole('button', { name: '食数を増やす' }).first().click()
+      await izPage.getByRole('button', { name: ja.shopping.pickerServingUp }).first().click()
       await izPage.waitForTimeout(200)
-      await izPage.getByRole('button', { name: '下書きを作る' }).click()
+      await izPage.getByRole('button', { name: ja.shopping.makeCandidates }).click()
       await izPage.waitForTimeout(700)
 
       const izDraft = izPage.locator('section').filter({ hasText: ja.shopping.candidateTitle }).last()
@@ -23099,7 +23111,7 @@ try {
       await ipPage.waitForTimeout(500)
       const ipBox = ipPage.locator(`textarea[placeholder="${ja.paste.placeholder}"]`)
       if (!(await ipBox.isVisible().catch(() => false))) {
-        await ipPage.getByText('テキスト貼り付けで自動入力').click()
+        await ipPage.getByText(ja.paste.open).click()
         await ipPage.waitForTimeout(400)
       }
       await ipBox.fill(
@@ -23124,7 +23136,7 @@ try {
           '鍋に牛乳を入れて温める。',
         ].join('\n'),
       )
-      await ipPage.getByRole('button', { name: '自動で振り分ける' }).click()
+      await ipPage.getByRole('button', { name: ja.paste.apply }).click()
       await ipPage.waitForTimeout(500)
       const ipRead = (await ipPage.textContent('body')).replace(/​/g, '')
       check(
@@ -23217,7 +23229,7 @@ try {
       // 作った!モーダルを開き、在庫反映スイッチをONにする
       await crPage.getByRole('button', { name: '作った！' }).first().click()
       await crPage.waitForTimeout(300)
-      await crPage.getByRole('switch', { name: '使った食材の在庫を減らす' }).click()
+      await crPage.getByRole('switch', { name: ja.detail.cookedReflectPantryLabel }).click()
       await crPage.waitForTimeout(300)
       const setting = await readReflectSetting()
       check(
@@ -23226,7 +23238,7 @@ try {
         `settings=${JSON.stringify({ cookedReflectPantry: setting?.cookedReflectPantry })}`,
       )
       // 記録する → 使った玉ねぎの在庫が1段階下がる(ある→少ない)
-      await crPage.getByRole('button', { name: '記録する', exact: true }).click()
+      await crPage.getByRole('button', { name: ja.detail.cookedSave, exact: true }).click()
       await crPage.waitForTimeout(700)
       const afterItems = await readPantry()
       check(
@@ -23286,10 +23298,10 @@ try {
         'WORD-CI1-01/C20 絞り込みで0件のとき「＋から登録」ではなく条件を外す案内が出る',
         emptyText.includes('条件に合うレシピが見つかりません') &&
           emptyText.includes('条件を外すと、他のレシピが出てきます') &&
-          !emptyText.includes('右下の「＋」ボタンから自分のレシピを登録できます'),
+          !emptyText.includes(ja.search.noResultHint),
         emptyText.slice(0, 400),
       )
-      const clearBtn = w1Page.getByRole('button', { name: '条件をクリア' })
+      const clearBtn = w1Page.getByRole('button', { name: ja.search.clear })
       check(
         'WORD-CI1-01/C20 絞り込みパネルを開かなくても「条件をクリア」が押せる',
         (await clearBtn.count()) === 1 && (await clearBtn.first().isVisible()),
@@ -23313,7 +23325,7 @@ try {
       })
       await w1Page.waitForTimeout(400)
       const logDialogText =
-        (await w1Page.getByRole('dialog', { name: '作った記録をつける' }).textContent()) ?? ''
+        (await w1Page.getByRole('dialog', { name: ja.detail.cookedDialogTitle }).textContent()) ?? ''
       check(
         'WORD-CI1-01/C06 在庫スイッチの説明が「ある→少ない→ない」の3段階で閉じている',
         logDialogText.includes('「ある→少ない→ない」の順に1つ下げます') &&
@@ -23322,7 +23334,7 @@ try {
       )
 
       // C01: 記録を2件つけてから削除の確認文を読む(実行はしない)
-      await w1Page.getByRole('button', { name: '記録する', exact: true }).click()
+      await w1Page.getByRole('button', { name: ja.detail.cookedSave, exact: true }).click()
       await w1Page.waitForTimeout(600)
       await w1Page.evaluate(() => {
         const btn = Array.from(document.querySelectorAll('button')).find(
@@ -23331,11 +23343,11 @@ try {
         if (btn instanceof HTMLElement) btn.click()
       })
       await w1Page.waitForTimeout(400)
-      await w1Page.getByRole('button', { name: '記録する', exact: true }).click()
+      await w1Page.getByRole('button', { name: ja.detail.cookedSave, exact: true }).click()
       await w1Page.waitForTimeout(600)
       await w1Page.locator('a[href*="/edit"]').first().click()
       await w1Page.waitForTimeout(600)
-      await w1Page.getByRole('button', { name: 'このレシピを削除' }).click()
+      await w1Page.getByRole('button', { name: ja.form.deleteRecipe }).click()
       await w1Page.waitForTimeout(500)
       const delMessage = w1Dialogs[w1Dialogs.length - 1] ?? ''
       check(
@@ -23439,7 +23451,7 @@ try {
 
       // --- C05: 記録窓に「何人分作った？」が出て、その場で直せる ---
       await openLogModal()
-      const logDialog = l2Page.getByRole('dialog', { name: '作った記録をつける' })
+      const logDialog = l2Page.getByRole('dialog', { name: ja.detail.cookedDialogTitle })
       const logDialogText = (await logDialog.textContent()) ?? ''
       check(
         'LOG-CI2-01/C05 記録窓に「何人分作った？」の欄が出る',
@@ -23456,13 +23468,13 @@ try {
         ((await logDialog.locator('span.min-w-14').textContent()) ?? '').includes(String(shownServings)),
         await logDialog.locator('span.min-w-14').textContent(),
       )
-      await logDialog.getByRole('button', { name: '人数を増やす' }).click()
+      await logDialog.getByRole('button', { name: ja.detail.servingsUp }).click()
       await l2Page.waitForTimeout(200)
       await logDialog
         .locator('input[type="file"]:not([capture])')
         .setInputFiles({ name: 'h.png', mimeType: 'image/png', buffer: tinyPng2 })
       await l2Page.waitForTimeout(600)
-      await l2Page.getByRole('button', { name: '記録する', exact: true }).click()
+      await l2Page.getByRole('button', { name: ja.detail.cookedSave, exact: true }).click()
       await l2Page.waitForTimeout(700)
       const afterFirst = await readLogs(recipeId)
       check(
@@ -23479,7 +23491,7 @@ try {
       await openLogModal()
       await logDialog.locator('input[type="text"]').first().fill('やめるテストのメモ')
       await l2Page.waitForTimeout(200)
-      await logDialog.getByRole('button', { name: 'やめる' }).click()
+      await logDialog.getByRole('button', { name: ja.common.confirmCancel }).click()
       await l2Page.waitForTimeout(400)
       await openLogModal()
       check(
@@ -23490,7 +23502,7 @@ try {
       // --- C08: 過去の日付を後から記録しても、記録は日付の新しい順に保たれる ---
       await logDialog.locator('input[type="date"]').fill('2026-06-01')
       await l2Page.waitForTimeout(200)
-      await l2Page.getByRole('button', { name: '記録する', exact: true }).click()
+      await l2Page.getByRole('button', { name: ja.detail.cookedSave, exact: true }).click()
       await l2Page.waitForTimeout(700)
       const afterPast = await readLogs(recipeId)
       const sortedDates = [...afterPast.map((l) => l.date)].sort((a, b) => b.localeCompare(a))
@@ -23503,7 +23515,7 @@ try {
       // --- C03: 記録が5件を超えたら「すべて見る（他◯件）」で続きに行ける ---
       for (let i = 0; i < 4; i++) {
         await openLogModal()
-        await l2Page.getByRole('button', { name: '記録する', exact: true }).click()
+        await l2Page.getByRole('button', { name: ja.detail.cookedSave, exact: true }).click()
         await l2Page.waitForTimeout(600)
       }
       const seeAll = l2Page.getByRole('link', { name: /すべて見る（他\d+件）/ })
@@ -23542,7 +23554,7 @@ try {
         'LOG-CI2-01/C05 履歴の行にも記録した人数が出る',
         historyText.includes(`${shownServings + 1}人分`),
       )
-      await l2Page.getByRole('link', { name: 'すべての記録を見る' }).click()
+      await l2Page.getByRole('link', { name: ja.history.filteredClear }).click()
       await l2Page.waitForTimeout(600)
       check(
         'LOG-CI2-01/C03 「すべての記録を見る」で絞り込みが外れる',
@@ -23588,14 +23600,14 @@ try {
       )
       check(
         'LOG-CI2-01/C02 削除したことがトーストで分かる',
-        (await l2Page.textContent('body')).includes('作った記録を削除しました'),
+        stripZwspText(await l2Page.textContent('body')).includes(ja.detail.cookedLogDeletedToast),
       )
 
       // --- C05: 記録の編集フォームからも人数を直せる ---
       const beforeEditServings = (await readLogs(recipeId))[0]?.servings
       await l2Page.locator('button[aria-label="この記録を編集"]').first().click()
       await l2Page.waitForTimeout(400)
-      const editRow = l2Page.locator('li', { hasText: '何人分作った？' }).last()
+      const editRow = l2Page.locator('li', { hasText: ja.detail.cookedServings }).last()
       check(
         'LOG-CI2-01/C05 記録の編集フォームにも人数の欄があり、記録済みの値で開く',
         ((await editRow.locator('span.min-w-12').textContent()) ?? '').includes(
@@ -23603,7 +23615,7 @@ try {
         ),
         await editRow.locator('span.min-w-12').textContent(),
       )
-      await editRow.getByRole('button', { name: '人数を増やす' }).click()
+      await editRow.getByRole('button', { name: ja.detail.servingsUp }).click()
       await l2Page.waitForTimeout(200)
       await l2Page.getByRole('button', { name: '保存する', exact: true }).click()
       await l2Page.waitForTimeout(700)
@@ -23650,12 +23662,12 @@ try {
         if (btn instanceof HTMLElement) btn.click()
       })
       await cyPage.waitForTimeout(400)
-      const carryDialog = cyPage.getByRole('dialog', { name: '作った記録をつける' })
+      const carryDialog = cyPage.getByRole('dialog', { name: ja.detail.cookedDialogTitle })
       await carryDialog.locator('input[type="text"]').first().fill('だし巻き卵用のメモ')
-      await carryDialog.getByRole('button', { name: 'やめる' }).click()
+      await carryDialog.getByRole('button', { name: ja.common.confirmCancel }).click()
       await cyPage.waitForTimeout(400)
 
-      await cyPage.getByRole('link', { name: 'だしのとり方' }).first().click()
+      await cyPage.getByRole('link', { name: ja.detail.dashiRecipeLink }).first().click()
       await cyPage.waitForTimeout(800)
       const afterMove = await cyPage.locator('span.min-w-14').first().textContent()
       check(
@@ -23694,7 +23706,7 @@ try {
     try {
       await fcPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
       await fcPage.waitForTimeout(2000)
-      const heart = fcPage.getByRole('button', { name: 'お気に入りに追加' }).first()
+      const heart = fcPage.getByRole('button', { name: ja.detail.favoriteOn }).first()
       check('FAV-CARD-01 一覧カードに押せるお気に入りボタンが出る', (await heart.count()) >= 1)
       await heart.click()
       await fcPage.waitForTimeout(700)
@@ -23718,7 +23730,7 @@ try {
           }),
       )
       check('FAV-CARD-01 一覧のハートでお気に入りが1件付く', favCount === 1, `favCount=${favCount}`)
-      await fcPage.getByRole('button', { name: 'お気に入りを解除' }).first().click()
+      await fcPage.getByRole('button', { name: ja.detail.favoriteOff }).first().click()
       await fcPage.waitForTimeout(700)
       const favCount2 = await fcPage.evaluate(
         () =>
@@ -23765,8 +23777,8 @@ try {
       await scPage.waitForTimeout(600)
       await scPage.locator('button[aria-label="シェア"]').click()
       await scPage.waitForTimeout(300)
-      const scDialog = scPage.getByRole('dialog', { name: 'シェアする内容' })
-      await scDialog.getByRole('button', { name: 'テキストでシェア' }).click()
+      const scDialog = scPage.getByRole('dialog', { name: ja.share.dialogTitle })
+      await scDialog.getByRole('button', { name: ja.share.textOption }).click()
       await scPage.waitForTimeout(800)
       const clip = await scPage.evaluate(() => navigator.clipboard.readText())
       check(
@@ -23834,7 +23846,7 @@ try {
       // C12: 五十音順が読みの順になっている(旧実装は漢字始まりが末尾に固まっていた)
       await s3Page.locator('button[aria-label="並び替え"]').click()
       await s3Page.waitForTimeout(300)
-      await s3Page.getByRole('button', { name: '五十音順' }).click()
+      await s3Page.getByRole('button', { name: ja.search.sortKana }).click()
       await s3Page.waitForTimeout(300)
       await s3Page.locator('[data-testid="sort-panel-close"]').click()
       await s3Page.waitForTimeout(600)
@@ -23891,11 +23903,11 @@ try {
       })
       await s3Page.waitForTimeout(400)
       await s3Page
-        .getByRole('dialog', { name: '作った記録をつける' })
+        .getByRole('dialog', { name: ja.detail.cookedDialogTitle })
         .locator('input[type="text"]')
         .first()
         .fill('こどもが完食した')
-      await s3Page.getByRole('button', { name: '記録する', exact: true }).click()
+      await s3Page.getByRole('button', { name: ja.detail.cookedSave, exact: true }).click()
       await s3Page.waitForTimeout(800)
       await openRecipesWith(`?q=${encodeURIComponent('完食')}`)
       const noteHitTitles = await s3Page.evaluate(() =>
@@ -23937,7 +23949,7 @@ try {
       await ssPage.waitForTimeout(300)
       await ssPage.locator('button[aria-label="シェア"]').click()
       await ssPage.waitForTimeout(400)
-      const ssDialog = ssPage.getByRole('dialog', { name: 'シェアする内容' })
+      const ssDialog = ssPage.getByRole('dialog', { name: ja.share.dialogTitle })
       check(
         'SHARE-SERVINGS-01/C18 シェアの窓に「いま表示している◯人分の分量でシェアします」が出る',
         ((await ssDialog.textContent()) ?? '').includes(
@@ -23945,7 +23957,7 @@ try {
         ),
         await ssDialog.textContent(),
       )
-      await ssDialog.getByRole('button', { name: 'テキストでシェア' }).click()
+      await ssDialog.getByRole('button', { name: ja.share.textOption }).click()
       await ssPage.waitForTimeout(800)
       const shared = await ssPage.evaluate(() => navigator.clipboard.readText())
       check(
@@ -23963,12 +23975,12 @@ try {
   {
     await page.goto(`${BASE}/#/recipes/new`, { waitUntil: 'networkidle' })
     await page.waitForTimeout(600)
-    await page.getByText('テキスト貼り付けで自動入力').click()
+    await page.getByText(ja.paste.open).click()
     await page.waitForTimeout(300)
     await page
       .locator(`textarea[placeholder="${ja.paste.placeholder}"]`)
       .fill('大鍋のカレー\n50人分\n材料\nじゃがいも 20個\nにんじん 10本\n作り方\n1. 全部切る\n2. 煮る')
-    await page.getByRole('button', { name: '自動で振り分ける' }).click()
+    await page.getByRole('button', { name: ja.paste.apply }).click()
     await page.waitForTimeout(500)
     const pastedServings = await page
       .locator('span.min-w-14.text-center.text-lg.font-bold.text-ink')
@@ -24113,7 +24125,7 @@ try {
       await fvPage.waitForTimeout(2000)
       await fvPage.getByText('肉じゃが', { exact: true }).first().click()
       await fvPage.waitForTimeout(700)
-      await fvPage.getByText('調理中モードで見る').click()
+      await fvPage.getByText(ja.focus.open).click()
       await fvPage.waitForTimeout(600)
       await fvPage.locator('button[aria-label="声で操作する"]').click()
       await fvPage.waitForTimeout(400)
@@ -24165,7 +24177,7 @@ try {
       await p1Page.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
       await p1Page.waitForTimeout(1800) // 初回シード待ち
       await p1Page.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
-      await p1Page.getByRole('button', { name: '週', exact: true }).click()
+      await p1Page.getByRole('button', { name: ja.mealPlan.viewWeek, exact: true }).click()
       await openAllWeekDays(p1Page) // 便ID・⑦: 畳む既定になったので、カードの中を触る前に開く
       await p1Page.waitForTimeout(400)
 
@@ -24178,7 +24190,7 @@ try {
         'PURPOSE-01 未解錠では目的の選択肢は出さない',
         (await p1Page.locator('[data-testid="purpose-picker"]').count()) === 0,
       )
-      await openWeekGroup(p1Page, '献立を提案')
+      await openWeekGroup(p1Page, ja.mealPlan.weekGroupAutoTitle)
       await p1Page.locator('[data-testid="plan-conditions-open"]').click()
       await p1Page.waitForTimeout(400)
       check(
@@ -24244,7 +24256,7 @@ try {
       await p2Page.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
       await p2Page.reload({ waitUntil: 'networkidle' })
       await p2Page.waitForTimeout(800)
-      await p2Page.getByRole('button', { name: '週', exact: true }).click()
+      await p2Page.getByRole('button', { name: ja.mealPlan.viewWeek, exact: true }).click()
       await openAllWeekDays(p2Page) // 便ID・⑦: 畳む既定になったので、カードの中を触る前に開く
       await p2Page.waitForTimeout(400)
 
@@ -24253,7 +24265,7 @@ try {
         (await p2Page.locator('[data-testid="purpose-locked-row"]').count()) === 0,
       )
       // 2026-08-09 便EN: 「献立を提案」グループが既定で畳んであるので先に開く
-      await openWeekGroup(p2Page, '献立を提案')
+      await openWeekGroup(p2Page, ja.mealPlan.weekGroupAutoTitle)
       await p2Page.waitForTimeout(300)
       await p2Page.locator('[data-testid="plan-conditions-open"]').click()
       await p2Page.waitForTimeout(400)
@@ -24315,11 +24327,11 @@ try {
       // 設定に保存され、再読み込みしても選び直さずに済む（1か月続けるための指定）
       await p2Page.reload({ waitUntil: 'networkidle' })
       await p2Page.waitForTimeout(800)
-      await p2Page.getByRole('button', { name: '週', exact: true }).click()
+      await p2Page.getByRole('button', { name: ja.mealPlan.viewWeek, exact: true }).click()
       await openAllWeekDays(p2Page) // 便ID・⑦: 畳む既定になったので、カードの中を触る前に開く
       await p2Page.waitForTimeout(400)
       // 折りたたみの状態は覚えないので、読み込み直したらまた畳んである（2026-08-09 便EN）
-      await openWeekGroup(p2Page, '献立を提案')
+      await openWeekGroup(p2Page, ja.mealPlan.weekGroupAutoTitle)
       await p2Page.waitForTimeout(300)
       check(
         'PURPOSE-02 選んだ目的は再読み込み後も残る',
@@ -24331,7 +24343,7 @@ try {
       )
 
       // まとめて献立: 目的が効いていても提案は0件にならず、入れた枠に目的が記録される
-      await p2Page.getByRole('button', { name: 'まとめて献立を入力', exact: true }).click()
+      await p2Page.getByRole('button', { name: ja.mealPlan.fillWeek, exact: true }).click()
       await p2Page.waitForTimeout(1500)
       const p2Entries = await p2Page.evaluate(
         () =>
@@ -24438,8 +24450,8 @@ try {
         const t1Body = (await t1Page.textContent('body')) ?? ''
         check(
           `TRIAL-01 ${4 - i}回目: お試し中は本物のナビが開く（ゲートが消える・全機能そのまま）`,
-          !t1Body.includes('並行調理ナビはPro版の機能です') &&
-            t1Body.includes('組み合わせるレシピを選ぶ') &&
+          !t1Body.includes(ja.cookNavi.gateTitle) &&
+            t1Body.includes(ja.cookNavi.selectTitle) &&
             t1Body.includes('2品を選択中'),
           `body先頭=${t1Body.slice(0, 200)}`,
         )
@@ -24458,11 +24470,11 @@ try {
         check(
           `TRIAL-01 ${4 - i}回目: 画面を移動して戻ってもお試しは続く（回数を余分に消費しない）`,
           (await t1Start.count()) === 0 &&
-            ((await t1Page.textContent('body')) ?? '').includes('組み合わせるレシピを選ぶ'),
+            stripZwspText(await t1Page.textContent('body')).includes(ja.cookNavi.selectTitle),
         )
         // 「戻る」でこの1回のお試しを終える（次に開くと残り回数の案内に戻る）。
         // 2026-08-09 便ES: 段取り（選んだ品）は戻るでは消さない＝お試しだけが終わる
-        await t1Page.getByRole('button', { name: '戻る' }).first().click()
+        await t1Page.getByRole('button', { name: ja.common.back }).first().click()
         await t1Page.waitForTimeout(500)
       }
       // 3回使い切ったら、鍵表示＋「お試しは終了しました。続きはPro版で」に戻る
@@ -24477,7 +24489,7 @@ try {
       )
       check(
         'TRIAL-01 使い切ったらゲート（鍵）表示に戻る',
-        ((await t1Page.textContent('body')) ?? '').includes('並行調理ナビはPro版の機能です'),
+        stripZwspText(await t1Page.textContent('body')).includes(ja.cookNavi.gateTitle),
       )
       const t1Count = await t1Page.evaluate(
         () =>
@@ -24570,7 +24582,7 @@ try {
       const t2Body = (await t2Page.textContent('body')) ?? ''
       check(
         'TRIAL-02 お試しで本物の月タブが開く（ロック案内が消える）',
-        !t2Body.includes('1か月分の献立をカレンダーで') && t2Body.includes('月の食費'),
+        !t2Body.includes(ja.mealPlan.monthLockedTitle) && t2Body.includes('月の食費'),
       )
       check(
         'TRIAL-02 表示中に「この画面がいつでも見られるようになります」を控えめに添える',
@@ -24579,14 +24591,14 @@ try {
         ),
       )
       // 閉じる（別タブへ移って戻る）とロックへ戻り、2回目は出せない
-      await t2Page.getByRole('button', { name: '週', exact: true }).click()
+      await t2Page.getByRole('button', { name: ja.mealPlan.viewWeek, exact: true }).click()
       await openAllWeekDays(t2Page) // 便ID・⑦: 畳む既定になったので、カードの中を触る前に開く
       await t2Page.waitForTimeout(400)
       await t2Page.getByRole('button', { name: '月', exact: true }).click()
       await t2Page.waitForTimeout(500)
       check(
         'TRIAL-02 閉じたらロック表示に戻る',
-        ((await t2Page.textContent('body')) ?? '').includes('1か月分の献立をカレンダーで'),
+        stripZwspText(await t2Page.textContent('body')).includes(ja.mealPlan.monthLockedTitle),
       )
       check('TRIAL-02 お試しは1回だけ（2回目のボタンは出ない）', (await t2Start.count()) === 0)
       check(
@@ -24670,7 +24682,7 @@ try {
       const dmBody = (await dmPage.textContent('body')) ?? ''
       check(
         'DEMO-01 本物の月タブが見本のデータで開く（ロック案内は出ない）',
-        !dmBody.includes('1か月分の献立をカレンダーで') &&
+        !dmBody.includes(ja.mealPlan.monthLockedTitle) &&
           dmBody.includes('5月の食費') &&
           dmBody.includes('5/1〜5/23は作った記録'),
         `body先頭=${dmBody.slice(0, 160)}`,
@@ -24679,7 +24691,7 @@ try {
       // 8項目が、見本の1か月でも数値としてそろって出る。
       // 1日あたりの平均は「全員分 ÷ ◯日」＝画面の上だけで検算できる形で出す
       // (2026-08-19 便HV・⑨で分母が「記録か献立のある日数」になった。分母の数は画面から読む)
-      const dmCostTable = (await dmPage.locator('table', { hasText: '献立を1食ずつ足した合計' }).first().textContent()) ?? ''
+      const dmCostTable = (await dmPage.locator('table', { hasText: ja.mealPlan.intakeCostRowPersonalNote }).first().textContent()) ?? ''
       const dmPerDay = /全員分[^約]{0,20}約([\d,]+)円のべ\d+食1日あたりの平均[^÷]{0,10}÷[^\d]{0,20}(\d+)日約([\d,]+)円/.exec(dmCostTable)
       check(
         'DEMO-01(便DQ・便HV) 食費の表に「全員分」と「1日あたりの平均(全員分÷◯日)」が出て、割り算が合う',
@@ -24710,7 +24722,7 @@ try {
         'DEMO-01 「食費」に切り替えると各日に金額が出る',
         ((await dmPage.locator('[data-date="2026-05-09"]').textContent()) ?? '').includes('円'),
       )
-      await dmPage.getByRole('button', { name: '栄養', exact: true }).click()
+      await dmPage.getByRole('button', { name: ja.mealPlan.monthCellModeNutrition, exact: true }).click()
       await dmPage.waitForTimeout(500)
       check(
         'DEMO-01 「栄養」に切り替えると各日にエネルギーが出る',
@@ -24736,9 +24748,9 @@ try {
       await dmPage.keyboard.press('Escape')
       await dmPage.waitForTimeout(300)
       // 月を移動して戻る（見本は5月だけなので、移動先は空になるのが正しい）
-      await dmPage.getByRole('button', { name: '次の月' }).click()
+      await dmPage.getByRole('button', { name: ja.mealPlan.nextMonth }).click()
       await dmPage.waitForTimeout(500)
-      await dmPage.getByRole('button', { name: '今月へ戻る' }).click()
+      await dmPage.getByRole('button', { name: ja.mealPlan.thisMonth }).click()
       await dmPage.waitForTimeout(500)
       check(
         'DEMO-01 月を移動して戻ると見本の月に戻る',
@@ -24755,7 +24767,7 @@ try {
       await dmPage.waitForTimeout(600)
       check(
         'DEMO-01 閉じたら元の月タブ（ロック案内）へ戻る',
-        ((await dmPage.textContent('body')) ?? '').includes('1か月分の献立をカレンダーで'),
+        stripZwspText(await dmPage.textContent('body')).includes(ja.mealPlan.monthLockedTitle),
       )
       check(
         'DEMO-01 デモは1回だけのお試しを消費しない',
@@ -24906,7 +24918,7 @@ try {
     const dlBody = async () => ((await dlPage.textContent('body')) ?? '').replaceAll('​', '')
     /** 「今日なに作る？」の見出しを持つ節そのもの(何番目の要素かではなく“同じ節に居るか”で測る) */
     const dlSuggestSection = () =>
-      dlPage.locator('section').filter({ has: dlPage.getByRole('heading', { name: '今日なに作る？' }) })
+      dlPage.locator('section').filter({ has: dlPage.getByRole('heading', { name: ja.dayStart.suggestTitle }) })
     /** 押せる大きさ。44pxは下限の保険(これを下回ると濡れた手では押しにくい) */
     const dlTapSize = async (locator) => {
       if ((await locator.count()) !== 1) return { width: 0, height: 0 }
@@ -24943,7 +24955,7 @@ try {
       await dlPage.waitForTimeout(1600)
       {
         const body = await dlBody()
-        const choose = dlPage.getByRole('button', { name: '今日の献立を探す' })
+        const choose = dlPage.getByRole('button', { name: ja.mealPlan.todayChooseButton })
         check(
           'DAYLAYOUT-01 献立が無い日に「自分で選ぶ」入口はちょうど1つ',
           (await choose.count()) === 1,
@@ -24962,7 +24974,7 @@ try {
         // 「今日の献立を探す」だけを残し、置き場所は「今日なに作る？」の下
         check(
           'DAYLAYOUT-01 献立が無い日は「今日の献立」の見出しを出さない',
-          (await dlPage.getByRole('heading', { name: '今日の献立' }).count()) === 0,
+          (await dlPage.getByRole('heading', { name: ja.mealPlan.todayTitle }).count()) === 0,
         )
         {
           const sectionBox = (await section.boundingBox()) ?? { y: 0, height: 0 }
@@ -24983,7 +24995,7 @@ try {
           await section.locator('[data-testid="day-mode-one"]').click()
           await dlPage.waitForTimeout(800)
         }
-        const oneDish = section.getByRole('button', { name: 'おまかせで1品出す' })
+        const oneDish = section.getByRole('button', { name: ja.dayStart.shuffle })
         check(
           'DAYLAYOUT-01 「決めてもらう」ボタンは「今日なに作る？」の中に1つだけ',
           (await draw.count()) === 1 &&
@@ -25078,7 +25090,7 @@ try {
         // 「今日の献立を探す」は出さない(同じ操作を2か所に作らない)
         check(
           'DAYLAYOUT-01 献立がある日は「今日の献立を探す」を出さない(入口が二重にならない)',
-          (await dlPage.getByRole('button', { name: '今日の献立を探す' }).count()) === 0 &&
+          (await dlPage.getByRole('button', { name: ja.mealPlan.todayChooseButton }).count()) === 0 &&
             (await dlPage.locator('[data-testid="today-add-more"]').count()) === 1,
         )
         if (toggleFound) {
@@ -25089,7 +25101,7 @@ try {
           'DAYLAYOUT-01 見出しを押すと「今日なに作る？」が開く',
           toggleFound && (await toggle.getAttribute('aria-expanded')) === 'true',
         )
-        const oneDish = section.getByRole('button', { name: 'おまかせで1品出す' })
+        const oneDish = section.getByRole('button', { name: ja.dayStart.shuffle })
         const oneDishFound = (await oneDish.count()) === 1
         check('DAYLAYOUT-01 開いた提案は「おまかせで1品出す」が使える', oneDishFound)
         // 振り直しても候補のカードが出ていること(開いた先で提案として機能する)。
@@ -25173,7 +25185,7 @@ try {
     })
     const dmBody = async () => ((await dmPage.textContent('body')) ?? '').replaceAll('​', '')
     const dmSection = () =>
-      dmPage.locator('section').filter({ has: dmPage.getByRole('heading', { name: '今日なに作る？' }) })
+      dmPage.locator('section').filter({ has: dmPage.getByRole('heading', { name: ja.dayStart.suggestTitle }) })
     const dmOne = () => dmPage.locator('[data-testid="day-mode-one"]')
     const dmPlan = () => dmPage.locator('[data-testid="day-mode-plan"]')
     const dmDraw = () => dmPage.locator('[data-testid="day-suggest-draw"]')
@@ -25411,7 +25423,7 @@ try {
           (await dmSlotButtons.count()) === 3,
         )
         if ((await dmSlotButtons.count()) === 3) {
-          await dmPage.getByRole('button', { name: '夕食', exact: true }).first().click()
+          await dmPage.getByRole('button', { name: ja.mealPlan.slot.dinner, exact: true }).first().click()
           await dmPage.waitForTimeout(1500)
         }
         check(
@@ -25630,7 +25642,7 @@ try {
           'DAYFLOW-01(c) ×の前に「今週の献立からも外れる」が読める',
           (await dfBody()).includes('今週の献立からも外れます'),
         )
-        const dfRemove = planned.getByRole('button', { name: '今日と今週の献立から外す' })
+        const dfRemove = planned.getByRole('button', { name: ja.mealPlan.todayPlannedRemove })
         check('DAYFLOW-01(c) 「今週の献立の予定」の行に×がある', (await dfRemove.count()) === 1)
         await dfRemove.first().click()
         await dfPage.waitForTimeout(1200)
@@ -25648,7 +25660,7 @@ try {
           'DAYFLOW-01(c) ×で今日の献立からも消える（行が別の見出しへ移らない）',
           afterToday.length === 0 &&
             (await planned.count()) === 0 &&
-            (await dfPage.getByRole('heading', { name: '今日の献立' }).count()) === 0,
+            (await dfPage.getByRole('heading', { name: ja.mealPlan.todayTitle }).count()) === 0,
           `today=${JSON.stringify(afterToday)}`,
         )
         check(
@@ -25675,7 +25687,7 @@ try {
         // 切り替えてから触る（切り替えた時点で1組出る＝押さなくても結果が見えている）
         await dfPage.locator('[data-testid="day-mode-plan"]').click()
         await dfPage.waitForTimeout(1200)
-        const omakase = dfPage.getByRole('button', { name: 'おまかせで献立を組む' })
+        const omakase = dfPage.getByRole('button', { name: ja.mealPlan.todaySuggestButton })
         const pair = dfPage.locator('[data-testid="day-suggest-pair"]')
         const pairText = async () =>
           (await pair.count()) > 0 ? ((await pair.textContent()) ?? '').replaceAll('​', '') : ''
@@ -25686,7 +25698,7 @@ try {
         check(
           'DAYFLOW-01(d) 押しただけでは今日の献立に入らない',
           (await dfRead('todayList')).length === 0 &&
-            (await dfPage.getByRole('heading', { name: '今日の献立' }).count()) === 0,
+            (await dfPage.getByRole('heading', { name: ja.mealPlan.todayTitle }).count()) === 0,
         )
         // 押すたびに別の組み合わせが出る。回数は決め打ちせず、変わった時点で止める
         // （上限は無限ループ避けの保険。候補が尽きるほど条件が狭いときのため）
@@ -25715,7 +25727,7 @@ try {
           'DAYFLOW-01(d) 入れる前に食事の枠を選ぶ窓が開く（他の画面と同じ部品・朝昼夕の3つ）',
           (await dfPage.locator('[data-testid="today-slot-button"]').count()) === 3,
         )
-        await dfPage.getByRole('button', { name: '夕食', exact: true }).first().click()
+        await dfPage.getByRole('button', { name: ja.mealPlan.slot.dinner, exact: true }).first().click()
         await dfPage.waitForTimeout(1500)
         const dfAfterApply = await dfBody()
         const dfPlansAfter = await dfRead('mealPlans')
@@ -25753,7 +25765,7 @@ try {
           /#\/recipes\/\d+/.test(dfPage.url()),
           `現在URL: ${dfPage.url()}`,
         )
-        await dfPage.getByRole('button', { name: '戻る' }).click()
+        await dfPage.getByRole('button', { name: ja.common.back }).click()
         await dfPage.waitForTimeout(1000)
         check(
           'DAYFLOW-01(e) 前提: 戻ると献立へ帰る',
@@ -25777,7 +25789,7 @@ try {
       {
         const suggestSection = dfPage
           .locator('section')
-          .filter({ has: dfPage.getByRole('heading', { name: '今日なに作る？' }) })
+          .filter({ has: dfPage.getByRole('heading', { name: ja.dayStart.suggestTitle }) })
         // 2026-08-18 便HM: (d)で「献立」に切り替えた状態が端末に残っている（覚える作りにした）。
         // ここで見たいのは1品の候補カードなので、明示的に「1品」へ戻してから測る
         await dfPage.locator('[data-testid="day-mode-one"]').click()
@@ -25796,12 +25808,12 @@ try {
           const before = await cardTitle()
           await suggestSection.locator('a[href^="#/recipes/"]').first().click()
           await dfPage.waitForTimeout(800)
-          await dfPage.getByRole('button', { name: '戻る' }).click()
+          await dfPage.getByRole('button', { name: ja.common.back }).click()
           await dfPage.waitForTimeout(1200)
           const after = await cardTitle()
           if (before.length === 0 || before !== after) mismatches.push(`${i + 1}回目: ${before} → ${after}`)
           // 次の往復は「おまかせで1品出す」で引き直してから（覚えが外れることも一緒に見る）
-          await suggestSection.getByRole('button', { name: 'おまかせで1品出す' }).click()
+          await suggestSection.getByRole('button', { name: ja.dayStart.shuffle }).click()
           await dfPage.waitForTimeout(500)
         }
         check(
@@ -25822,7 +25834,7 @@ try {
       {
         const suggestSection = dfPage
           .locator('section')
-          .filter({ has: dfPage.getByRole('heading', { name: '今日なに作る？' }) })
+          .filter({ has: dfPage.getByRole('heading', { name: ja.dayStart.suggestTitle }) })
         await dfPage.locator('[data-testid="day-mode-plan"]').click()
         await dfPage.waitForTimeout(1500)
         const dfPair = dfPage.locator('[data-testid="day-suggest-pair"]')
@@ -25840,7 +25852,7 @@ try {
           }
           await dfPair.locator('a[href^="#/recipes/"]').first().click()
           await dfPage.waitForTimeout(900)
-          await dfPage.getByRole('button', { name: '戻る' }).click()
+          await dfPage.getByRole('button', { name: ja.common.back }).click()
           await dfPage.waitForTimeout(1400)
           const after = await dfPairTitles()
           if (JSON.stringify(before) !== JSON.stringify(after)) {
@@ -25848,7 +25860,7 @@ try {
           }
           // 次の往復は「おまかせで献立を組む」で組み直してから
           // （覚えが「戻ってきた1回だけ」で外れることも一緒に見る）
-          await suggestSection.getByRole('button', { name: 'おまかせで献立を組む' }).click()
+          await suggestSection.getByRole('button', { name: ja.mealPlan.todaySuggestButton }).click()
           await dfPage.waitForTimeout(700)
         }
         check(
@@ -25879,7 +25891,7 @@ try {
       {
         const suggestSection = dfPage
           .locator('section')
-          .filter({ has: dfPage.getByRole('heading', { name: '今日なに作る？' }) })
+          .filter({ has: dfPage.getByRole('heading', { name: ja.dayStart.suggestTitle }) })
         const historyLink = () => dfPage.getByRole('link', { name: ja.mealPlan.historyLink })
         /** 出ているものが読めるまで待つ（届く前に掴まない・禁じ手⑤） */
         const dhWaitTitles = async (read) => {
@@ -25896,7 +25908,7 @@ try {
           await historyLink().click()
           await dfPage.waitForTimeout(900)
           const onHistory = (dfPage.url().split('#')[1] ?? '').startsWith('/history')
-          await dfPage.getByRole('button', { name: '戻る' }).click()
+          await dfPage.getByRole('button', { name: ja.common.back }).click()
           await dfPage.waitForTimeout(1400)
           return onHistory
         }
@@ -25931,7 +25943,7 @@ try {
           if (JSON.stringify(before) !== JSON.stringify(after))
             dhPlanMismatches.push(`${i + 1}回目: ${before.join('・')} → ${after.join('・') || '空'}`)
           // 次の往復は組み直してから（覚えが「戻ってきた1回だけ」で外れることも一緒に見る）
-          await suggestSection.getByRole('button', { name: 'おまかせで献立を組む' }).click()
+          await suggestSection.getByRole('button', { name: ja.mealPlan.todaySuggestButton }).click()
           await dfPage.waitForTimeout(700)
         }
         check(
@@ -25960,7 +25972,7 @@ try {
           const after = await dhWaitTitles(dhOneTitle)
           if (JSON.stringify(before) !== JSON.stringify(after))
             dhOneMismatches.push(`${i + 1}回目: ${before.join('')} → ${after.join('') || '空'}`)
-          await suggestSection.getByRole('button', { name: 'おまかせで1品出す' }).click()
+          await suggestSection.getByRole('button', { name: ja.dayStart.shuffle }).click()
           await dfPage.waitForTimeout(500)
         }
         check(
@@ -26032,7 +26044,7 @@ try {
     })
     const ddBody = async () => ((await ddPage.textContent('body')) ?? '').replaceAll('​', '')
     const ddSection = () =>
-      ddPage.locator('section').filter({ has: ddPage.getByRole('heading', { name: '今日なに作る？' }) })
+      ddPage.locator('section').filter({ has: ddPage.getByRole('heading', { name: ja.dayStart.suggestTitle }) })
     const ddPressed = async (testId) => {
       const loc = ddPage.locator(`[data-testid="${testId}"]`)
       return (await loc.count()) === 1 ? await loc.getAttribute('aria-pressed') : null
@@ -26066,7 +26078,7 @@ try {
         )
         check(
           'DAYDEFAULT-01 決めてもらうボタンは「おまかせで献立を組む」になっている',
-          (await ddBody()).includes('おまかせで献立を組む'),
+          stripZwspText(await ddBody()).includes(ja.mealPlan.todaySuggestButton),
         )
         check(
           'DAYDEFAULT-01 「今日の献立に入れる」まで、はじめの画面から使える',
@@ -26162,7 +26174,7 @@ try {
      * （下の wsCloseConditions と対で使う）
      */
     const wsOpenConditions = async () => {
-      const tab = wsPage.getByRole('button', { name: '週', exact: true })
+      const tab = wsPage.getByRole('button', { name: ja.mealPlan.viewWeek, exact: true })
       if ((await tab.getAttribute('aria-pressed')) !== 'true') {
         await tab.click()
         await wsPage.waitForTimeout(800)
@@ -26261,7 +26273,7 @@ try {
         `指定なし=${wsAt30 ?? '読めず'} 和食=${wsWashoku ?? '読めず'}`,
       )
       // 窓を閉じていても、いま何で絞っているかがボタンから読める（便EOの約束を壊していない）
-      await wsPage.getByRole('button', { name: '週', exact: true }).click()
+      await wsPage.getByRole('button', { name: ja.mealPlan.viewWeek, exact: true }).click()
       await wsPage.waitForTimeout(700)
       const wsCondLabel = (
         (await wsPage.locator('[data-testid="plan-conditions-open"]').textContent()) ?? ''
@@ -26313,7 +26325,7 @@ try {
       errors.push(`[pageerror@DAYPLANFILTER-01] ${err.message}`)
     })
     const pfSection = () =>
-      pfPage.locator('section').filter({ has: pfPage.getByRole('heading', { name: '今日なに作る？' }) })
+      pfPage.locator('section').filter({ has: pfPage.getByRole('heading', { name: ja.dayStart.suggestTitle }) })
     /**
      * いま組んである献立の料理名。**「献立」側の組（day-suggest-pair）からだけ**読む。
      * 1品側のカードを拾えるようにしておくと、既定が1品に戻ったときに1品の画面を
@@ -26605,7 +26617,7 @@ try {
     })
     const cpClean = (t) => (t ?? '').replaceAll('​', '').trim()
     const cpSection = () =>
-      cpPage.locator('section').filter({ has: cpPage.getByRole('heading', { name: '今日なに作る？' }) })
+      cpPage.locator('section').filter({ has: cpPage.getByRole('heading', { name: ja.dayStart.suggestTitle }) })
     const cpCard = () => cpSection().locator('[data-testid="day-suggest-result"]').first()
     const cpTitleEl = () => cpSection().locator('[data-testid="day-suggest-result-title"]').first()
     /** 端末に入っているレシピ（主要食材のチップを検査側でも同じ関数で出すため） */
@@ -26706,7 +26718,7 @@ try {
       const cpSlotButtons = cpPage.locator('[data-testid="today-slot-button"]')
       check('CARDPARTS-01 前提: 食事の枠を選ぶ窓が開く', (await cpSlotButtons.count()) === 3)
       if ((await cpSlotButtons.count()) === 3) {
-        await cpPage.getByRole('button', { name: '夕食', exact: true }).first().click()
+        await cpPage.getByRole('button', { name: ja.mealPlan.slot.dinner, exact: true }).first().click()
         await cpPage.waitForTimeout(1600)
       }
       /**
@@ -27490,16 +27502,16 @@ try {
       await fiPage.waitForTimeout(2000)
       check(
         'FORMING-01(b) まとめて入力の欄に「名前と分量の間はスペース」の注意書きがある',
-        (await fiPage.textContent('body')).includes('「豚こま 200g」のように、名前と分量の間はスペースを空けます'),
+        stripZwspText(await fiPage.textContent('body')).includes(ja.form.quickIngredientSpaceHint),
       )
-      const quick = fiPage.getByLabel('まとめて入力')
+      const quick = fiPage.getByLabel(ja.form.quickIngredientLabel)
       const rowCount = () => fiPage.locator('input[aria-label="名前"]').count()
       // 材料名は入力欄の値なので textContent には出ない(注意書きの「豚こま 200g」を拾って
       // 偽陽性になる)。value を直接読んで確かめる
       const nameValues = () =>
         fiPage.locator('input[aria-label="名前"]').evaluateAll((els) => els.map((el) => el.value))
       // 並び替えハンドルは材料行と手順行の両方にあるので、材料行のぶんの増減で見る
-      const handleCount = () => fiPage.getByRole('group', { name: '並び替え（上下に移動）' }).count()
+      const handleCount = () => fiPage.getByRole('group', { name: ja.form.reorderHandle }).count()
       // (d) IMEの変換確定Enter(isComposing=true)では行を足さない
       await quick.fill('たまねぎ 1個')
       const beforeIme = await rowCount()
@@ -27523,7 +27535,7 @@ try {
       )
       for (const line of ['豚こま 200g', 'しょうゆ 大さじ2']) {
         await quick.fill(line)
-        await fiPage.getByRole('button', { name: '材料に追加' }).click()
+        await fiPage.getByRole('button', { name: ja.form.quickIngredientAdd }).click()
         await fiPage.waitForTimeout(250)
       }
       check(
@@ -27541,7 +27553,7 @@ try {
       // (a) 「選んで削除」モード→2行選択→まとめて削除
       // ボタン名は2026-08-02 オーナー指示(便DF)で「整理」から「選んで削除」に変更(何ができるか
       // 読み取れなかったため)。名前が戻ってしまわないよう、ここで名指しして押す
-      await fiPage.getByRole('button', { name: '選んで削除', exact: true }).click()
+      await fiPage.getByRole('button', { name: ja.form.ingredientOrganizeToggle, exact: true }).click()
       await fiPage.waitForTimeout(300)
       check(
         'FORMING-01(便DF) モードに入ると消し方の説明が出る',
@@ -27554,7 +27566,7 @@ try {
         (await handleCount()) === handlesBeforeOrganize - 3,
         `整理前=${handlesBeforeOrganize} 整理中=${await handleCount()}`,
       )
-      const selectBtns = fiPage.getByRole('button', { name: 'この材料を選ぶ' })
+      const selectBtns = fiPage.getByRole('button', { name: ja.form.ingredientOrganizeSelectRow })
       await selectBtns.nth(0).click()
       await selectBtns.nth(2).click()
       await fiPage.waitForTimeout(300)
@@ -27573,7 +27585,7 @@ try {
       check(
         'FORMING-01(a) 1行まで消すと「選んで削除」モードから自動で抜ける',
         (await handleCount()) === handlesBeforeOrganize - 2 &&
-          (await fiPage.getByRole('button', { name: 'この材料を選ぶ' }).count()) === 0,
+          (await fiPage.getByRole('button', { name: ja.form.ingredientOrganizeSelectRow }).count()) === 0,
         `ハンドル数=${await handleCount()}`,
       )
     } finally {
@@ -27634,7 +27646,7 @@ try {
       await sbPage.locator('a[href^="#/recipes/"]').first().click()
       await sbPage.waitForTimeout(800)
       const sbDetailUrl = sbPage.url()
-      await sbPage.getByRole('button', { name: '栄養価の概算を詳しく見る' }).click()
+      await sbPage.getByRole('button', { name: ja.nutrition.toggleExpand }).click()
       await sbPage.waitForTimeout(500)
       await sbPage.locator('a[href^="#/settings?section=pro"]').first().click()
       await sbPage.waitForTimeout(800)
@@ -27741,10 +27753,10 @@ try {
       await bdPage.waitForTimeout(300)
       check(
         'BULKDEL-01 選択をやめると選択モードを抜ける',
-        await bdPage.getByRole('button', { name: '選択', exact: true }).isVisible(),
+        await bdPage.getByRole('button', { name: ja.recipes.selectToggle, exact: true }).isVisible(),
       )
 
-      await bdPage.getByRole('button', { name: '選択', exact: true }).click()
+      await bdPage.getByRole('button', { name: ja.recipes.selectToggle, exact: true }).click()
       await bdPage.waitForTimeout(300)
       const bdSelectingText = (await bdPage.textContent('body')) ?? ''
       check(
@@ -27958,7 +27970,7 @@ try {
       )
       check(
         'BULKDEL-01(便GZ) レシピが無いことが一覧で読んで分かる',
-        bdHistoryText.includes('このレシピは削除されています'),
+        bdHistoryText.includes(ja.cookedDetail.deletedRecipeLabel),
         bdHistoryText.slice(0, 400),
       )
       await bdPage.getByRole('button', { name: '肉じゃがの作った記録を見る' }).first().click()
@@ -27980,7 +27992,7 @@ try {
       // 実際に設定の「基本レシピを入れ直す」で2品が戻り、記録もつながり直すことまで確認する
       await bdPage.goto(`${BASE}/#/settings?section=recipe`, { waitUntil: 'networkidle' })
       await bdPage.waitForTimeout(900)
-      await bdPage.getByRole('button', { name: '基本レシピを入れ直す' }).click()
+      await bdPage.getByRole('button', { name: ja.settings.starterReload }).click()
       await bdPage.waitForTimeout(1500)
       await bdPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
       await bdPage.waitForTimeout(1200)
@@ -28061,7 +28073,7 @@ try {
       await aiPage.waitForTimeout(400)
       // 3グループにまたがる食材を手入力で足す(入力順は売り場順とわざとずらす)
       for (const name of ['しょうゆ', '玉ねぎ', '豚こま切れ肉']) {
-        await aiPage.getByPlaceholder('食材を入力').fill(name)
+        await aiPage.getByPlaceholder(ja.shopping.manualPlaceholder).fill(name)
         await aiPage.getByRole('button', { name: '追加', exact: true }).click()
         await aiPage.waitForTimeout(350)
       }
@@ -28080,7 +28092,7 @@ try {
       )
 
       // 買い物メモ内の控えめな入口 →設定の「買い物メモの売り場順」へ着地する
-      await aiPage.getByRole('link', { name: '売り場順を変える' }).click()
+      await aiPage.getByRole('link', { name: ja.shopping.aisleOrderLink }).click()
       await aiPage.waitForTimeout(1000)
       check('AISLE-01 買い物メモから売り場順の設定へ辿れる', aiPage.url().includes('section=aisle'), aiPage.url())
       check(
@@ -28089,12 +28101,12 @@ try {
       )
       check(
         'AISLE-01 未変更なら初期設定の順番であることを示す',
-        ((await aiPage.locator('#aisle-section').textContent()) ?? '').includes('いまは初期設定の順番です'),
+        ((await aiPage.locator('#aisle-section').textContent()) ?? '').includes(ja.settings.aisleOrderDefaultNote),
       )
 
       // 「調味料」を4回上へ動かして先頭にする
       const seasoningUp = aiPage
-        .locator('#aisle-section li', { hasText: '調味料' })
+        .locator('#aisle-section li', { hasText: ja.pantry.group.seasoning })
         .getByRole('button', { name: '上へ移動' })
       for (let i = 0; i < 4; i += 1) {
         await seasoningUp.click()
@@ -28117,7 +28129,7 @@ try {
         'AISLE-01 並びを変えると「いまは初期設定の順番です」が消える(ボタンは常時ある)',
         (await aiPage
           .locator('#aisle-section')
-          .getByRole('button', { name: '初期設定に戻す' })
+          .getByRole('button', { name: ja.settings.aisleOrderReset })
           .isVisible()) &&
           !((await aiPage.locator('#aisle-section').textContent()) ?? '').includes(
             'いまは初期設定の順番です',
@@ -28147,11 +28159,11 @@ try {
       // 「初期設定に戻す」で従来の並びへ戻る
       await aiPage.goto(`${BASE}/#/settings?section=aisle`, { waitUntil: 'networkidle' })
       await aiPage.waitForTimeout(1000)
-      await aiPage.locator('#aisle-section').getByRole('button', { name: '初期設定に戻す' }).click()
+      await aiPage.locator('#aisle-section').getByRole('button', { name: ja.settings.aisleOrderReset }).click()
       await aiPage.waitForTimeout(600)
       check(
         'AISLE-01 初期設定に戻すと案内が「いまは初期設定の順番です」に変わる',
-        ((await aiPage.locator('#aisle-section').textContent()) ?? '').includes('いまは初期設定の順番です'),
+        ((await aiPage.locator('#aisle-section').textContent()) ?? '').includes(ja.settings.aisleOrderDefaultNote),
       )
       await aiPage.goto(`${BASE}/#/shopping`, { waitUntil: 'networkidle' })
       await aiPage.waitForTimeout(1200)
@@ -28189,7 +28201,7 @@ try {
       await dyPage.waitForTimeout(400)
       // わざと売り場順と違う順で手入力する(調味料→野菜→肉→野菜)
       for (const name of ['しょうゆ', '玉ねぎ', '豚こま切れ肉', 'にんじん']) {
-        await dyPage.getByPlaceholder('食材を入力').fill(name)
+        await dyPage.getByPlaceholder(ja.shopping.manualPlaceholder).fill(name)
         await dyPage.getByRole('button', { name: '追加', exact: true }).click()
         await dyPage.waitForTimeout(350)
       }
@@ -28228,7 +28240,7 @@ try {
         JSON.stringify(blocks.flatMap((b) => b.names)),
       )
       // チェックを入れても、買ったものが別枠へ飛ばずそのブロックに残る
-      await dyPage.getByRole('button', { name: 'チェックの切り替え', exact: true }).first().click()
+      await dyPage.getByRole('button', { name: ja.shopping.toggleCheck, exact: true }).first().click()
       await dyPage.waitForTimeout(400)
       const afterCheck = await dyBlocks()
       check(
@@ -28239,7 +28251,7 @@ try {
       )
 
       // 手で足した食材の出所は「自分で追加」と正直に出す
-      await dyPage.getByRole('button', { name: '追加したレシピを見る' }).first().click()
+      await dyPage.getByRole('button', { name: ja.shopping.memoSourceOpen }).first().click()
       await dyPage.waitForTimeout(350)
       const dyManualPopup = dyPage.getByRole('dialog')
       check(
@@ -28276,7 +28288,7 @@ try {
       await dsPage.waitForTimeout(500)
       await dsPage.getByRole('button', { name: '買い物メモ', exact: true }).click()
       await dsPage.waitForTimeout(300)
-      await dsPage.getByRole('button', { name: 'レシピから追加', exact: true }).click()
+      await dsPage.getByRole('button', { name: ja.shopping.fromRecipeTitle, exact: true }).click()
       await dsPage.waitForTimeout(500)
       // ピッカーの先頭のレシピを1食で選ぶ(料理名は小窓の照合に使う)。
       // 2026-08-19 便HW: ピッカーの行を共通のレシピカード(「標準」)に寄せたので、
@@ -28290,21 +28302,21 @@ try {
         const title = li?.querySelector('p')
         return title?.textContent?.replace(/\u200B/g, '').trim() ?? ''
       })
-      await dsPage.getByRole('button', { name: '食数を増やす' }).first().click()
+      await dsPage.getByRole('button', { name: ja.shopping.pickerServingUp }).first().click()
       await dsPage.waitForTimeout(250)
-      await dsPage.getByRole('button', { name: '下書きを作る' }).click()
+      await dsPage.getByRole('button', { name: ja.shopping.makeCandidates }).click()
       await dsPage.waitForTimeout(600)
-      await dsPage.getByRole('button', { name: '買い物メモに追加', exact: true }).click()
+      await dsPage.getByRole('button', { name: ja.shopping.addConfirmed, exact: true }).click()
       await dsPage.waitForTimeout(700)
 
       // 買い物メモの先頭の食材をタップ→出所の小窓
-      await dsPage.getByRole('button', { name: '追加したレシピを見る' }).first().click()
+      await dsPage.getByRole('button', { name: ja.shopping.memoSourceOpen }).first().click()
       await dsPage.waitForTimeout(400)
       const dsPopup = dsPage.getByRole('dialog')
       const dsPopupText = (await dsPopup.textContent()) ?? ''
       check(
         'DY-02 買い物メモの食材タップで出所の小窓が出る',
-        (await dsPopup.isVisible()) && dsPopupText.includes('この食材を追加したレシピ'),
+        (await dsPopup.isVisible()) && dsPopupText.includes(ja.shopping.memoSourceTitle),
         dsPopupText,
       )
       check(
@@ -28382,7 +28394,7 @@ try {
       const dtBody = (await dtPage.textContent('body')) ?? ''
       check(
         'DY-03 タイマー音に音量・鳴る長さ・試聴ボタンがある',
-        dtBody.includes('音量') && dtBody.includes('鳴る長さ') && dtBody.includes('音を鳴らして確かめる'),
+        dtBody.includes('音量') && dtBody.includes('鳴る長さ') && dtBody.includes(ja.settings.timerSoundPreview),
       )
       check(
         'DY-03 鳴る長さの選択肢は秒数で書かれている(約1秒/約3秒/約5秒)',
@@ -28411,7 +28423,7 @@ try {
         JSON.stringify(await readTimerSound()),
       )
       // 試聴ボタンはエラーにならず押せる(音そのものは実行環境に依存するので押せることだけ見る)
-      await dtPage.getByRole('button', { name: '音を鳴らして確かめる', exact: true }).click()
+      await dtPage.getByRole('button', { name: ja.settings.timerSoundPreview, exact: true }).click()
       await dtPage.waitForTimeout(500)
 
       await dtPage.reload({ waitUntil: 'networkidle' })
@@ -28425,13 +28437,13 @@ try {
       )
 
       // タイマー音をOFFにすると音量・長さ・試聴は触れなくなり、理由が出る
-      await dtPage.getByRole('switch', { name: 'タイマー音', exact: true }).click()
+      await dtPage.getByRole('switch', { name: ja.settings.timerSoundTitle, exact: true }).click()
       await dtPage.waitForTimeout(500)
       check(
         'DY-03 タイマー音をOFFにすると音量・長さ・試聴が押せなくなる',
         (await dtPage.getByRole('button', { name: '大きめ', exact: true }).isDisabled()) &&
           (await dtPage.getByRole('button', { name: '約3秒', exact: true }).isDisabled()) &&
-          (await dtPage.getByRole('button', { name: '音を鳴らして確かめる', exact: true }).isDisabled()),
+          (await dtPage.getByRole('button', { name: ja.settings.timerSoundPreview, exact: true }).isDisabled()),
       )
       check(
         'DY-03 押せない理由が書かれている(無言で灰色にしない)',
@@ -28468,16 +28480,16 @@ try {
       await eePage.waitForTimeout(300)
 
       // ② ごはん→お米換算
-      await eePage.getByRole('button', { name: 'レシピから追加', exact: true }).click()
+      await eePage.getByRole('button', { name: ja.shopping.fromRecipeTitle, exact: true }).click()
       await eePage.waitForTimeout(400)
-      await eePage.getByPlaceholder('レシピ名で絞り込み').fill('牛丼')
+      await eePage.getByPlaceholder(ja.shopping.pickerSearchPlaceholder).fill('牛丼')
       await eePage.waitForTimeout(500)
-      await eePage.getByRole('button', { name: '食数を増やす' }).first().click()
-      await eePage.getByRole('button', { name: '食数を増やす' }).first().click()
+      await eePage.getByRole('button', { name: ja.shopping.pickerServingUp }).first().click()
+      await eePage.getByRole('button', { name: ja.shopping.pickerServingUp }).first().click()
       await eePage.waitForTimeout(200)
-      await eePage.getByRole('button', { name: '下書きを作る' }).click()
+      await eePage.getByRole('button', { name: ja.shopping.makeCandidates }).click()
       await eePage.waitForTimeout(600)
-      const eeDraft = eePage.locator('section', { hasText: '買い物メモ（下書き）' })
+      const eeDraft = eePage.locator('section', { hasText: ja.shopping.candidateTitle })
       const eeDraftText = (await eeDraft.textContent()) ?? ''
       check(
         'EE-01(②) 下書きの食材名が「ご飯」ではなく「米」になる',
@@ -28494,11 +28506,11 @@ try {
         eeRiceAmount === '140g',
         `分量=${eeRiceAmount}`,
       )
-      await eePage.getByRole('button', { name: '買い物メモに追加' }).click()
+      await eePage.getByRole('button', { name: ja.shopping.addConfirmed }).click()
       await eePage.waitForTimeout(600)
 
       // ⑤ チェックした食材を下にまとめるスイッチ
-      const eeSwitch = eePage.getByRole('switch', { name: 'チェックした食材を下にまとめる' })
+      const eeSwitch = eePage.getByRole('switch', { name: ja.shopping.checkedAtBottomLabel })
       check('EE-01(⑤) スイッチは既定でOFF', (await eeSwitch.getAttribute('aria-checked')) === 'false')
       const eeMemoSection = eePage.locator('section', { hasText: '買い物メモ' }).first()
       const eeRowCount = await eeMemoSection.locator('ul > li').count()
@@ -28529,15 +28541,15 @@ try {
       check(
         'EE-01(⑤) スイッチの状態は設定に保存されリロードしても維持される',
         (await eePage
-          .getByRole('switch', { name: 'チェックした食材を下にまとめる' })
+          .getByRole('switch', { name: ja.shopping.checkedAtBottomLabel })
           .getAttribute('aria-checked')) === 'true' &&
           (await eePage.locator('[data-testid="memo-checked-block"]').count()) === 1,
       )
 
       // ③④ 買い物完了の確認モーダル
-      await eePage.getByRole('button', { name: '買い物完了', exact: true }).click()
+      await eePage.getByRole('button', { name: ja.shopping.complete, exact: true }).click()
       await eePage.waitForTimeout(400)
-      const eeDialog = eePage.getByRole('dialog', { name: '食材の在庫に反映しますか？' })
+      const eeDialog = eePage.getByRole('dialog', { name: ja.shopping.completeConfirmTitle })
       const eeDialogText = (await eeDialog.innerText()) ?? ''
       check(
         'EE-01(③) 確認は「反映する」「反映せず完了」それぞれの結果を別々の行で書く',
@@ -28565,7 +28577,7 @@ try {
         idb.close()
         return out
       })
-      await eePage.getByRole('button', { name: 'あとにする', exact: true }).click()
+      await eePage.getByRole('button', { name: ja.shopping.completeLater, exact: true }).click()
       await eePage.waitForTimeout(600)
       const eePantryAfter = await eePage.evaluate(async () => {
         const req = indexedDB.open('uchi-recipe')
@@ -28588,9 +28600,9 @@ try {
       check(
         'EE-01(④) 書いてあるとおり「買い物完了」を押し直すと同じ確認が出る',
         await (async () => {
-          await eePage.getByRole('button', { name: '買い物完了', exact: true }).click()
+          await eePage.getByRole('button', { name: ja.shopping.complete, exact: true }).click()
           await eePage.waitForTimeout(400)
-          return eePage.getByRole('dialog', { name: '食材の在庫に反映しますか？' }).isVisible()
+          return eePage.getByRole('dialog', { name: ja.shopping.completeConfirmTitle }).isVisible()
         })(),
       )
       await eePage.keyboard.press('Escape')
@@ -28706,7 +28718,7 @@ try {
       await eiPage.locator('button[aria-label="絞り込み"]').click()
       await eiPage.waitForTimeout(400)
       const chipSel = 'input[placeholder="食材を1つずつ入力"]'
-      const chipCount = () => eiPage.getByRole('button', { name: 'このチップを削除' }).count()
+      const chipCount = () => eiPage.getByRole('button', { name: ja.chip.remove }).count()
       await eiPage.fill(chipSel, 'たまねぎ')
       await imeEnter(chipSel)
       await eiPage.waitForTimeout(400)
@@ -28763,7 +28775,7 @@ try {
       await eiPage.goto(`${BASE}/#/settings`, { waitUntil: 'networkidle' })
       await eiPage.waitForTimeout(1200)
       const ngSel = 'input[placeholder="例: えび"]'
-      const ngCount = () => eiPage.getByRole('button', { name: 'このNG食材を削除' }).count()
+      const ngCount = () => eiPage.getByRole('button', { name: ja.settings.ngRemove }).count()
       const beforeNg = await ngCount()
       await eiPage.fill(ngSel, 'かき')
       await imeEnter(ngSel)
@@ -28788,7 +28800,7 @@ try {
         'EI-01(d) 設定に「ホーム画面への追加方法」のリンクがある',
         (await installLink.count()) === 1 &&
           (await installLink.getAttribute('href')) === '/about/install.html' &&
-          (await installLink.innerText()).includes('ホーム画面への追加方法'),
+          stripZwspText(await installLink.innerText()).includes(ja.settings.installPageLink),
         `件数=${await installLink.count()}`,
       )
       check(
@@ -28876,7 +28888,7 @@ try {
       await elPage.goto(`${BASE}/#/cook-navi`)
       await elPage.reload({ waitUntil: 'networkidle' })
       await elPage.waitForTimeout(1200)
-      await elPage.getByRole('button', { name: '段取りを作る' }).click()
+      await elPage.getByRole('button', { name: ja.cookNavi.build }).click()
       await elPage.waitForTimeout(700)
       check(
         'EL-01 段取りの一覧に「調理中モードで見る」の入口がある',
@@ -28921,7 +28933,7 @@ try {
       await elPage.waitForTimeout(400)
       const second = await counter()
       check('EL-02 「次へ」で1つ進む', second === first.replace('1/', '2/'), `${first}→${second}`)
-      await elPage.getByRole('button', { name: '前へ' }).click()
+      await elPage.getByRole('button', { name: ja.focus.prev }).click()
       await elPage.waitForTimeout(400)
       check('EL-02 「前へ」で元の手順に帰る', (await counter()) === first, `表示=${await counter()}`)
       check(
@@ -29056,7 +29068,7 @@ try {
 
       // EL-05: 覚えていた手順が段取りに無いときは推測せず一覧に戻す
       currentCheck = 'EL-05'
-      await elPage.getByRole('button', { name: '段取りを作る' }).click()
+      await elPage.getByRole('button', { name: ja.cookNavi.build }).click()
       await elPage.waitForTimeout(700)
       // 2026-08-12 便FT: 覚え書きの置き場が localStorage（端末に残る側）に移った
       await elPage.evaluate(() => {
@@ -29106,7 +29118,7 @@ try {
       await enPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
       await enPage.waitForTimeout(1800)
       await enPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
-      await enPage.getByRole('button', { name: '週', exact: true }).click()
+      await enPage.getByRole('button', { name: ja.mealPlan.viewWeek, exact: true }).click()
       await openAllWeekDays(enPage) // 便ID・⑦: 畳む既定になったので、カードの中を触る前に開く
       await enPage.waitForTimeout(600)
 
@@ -29127,7 +29139,7 @@ try {
         await enPage.locator('[data-testid="week-fill-run"]').isVisible(),
       )
 
-      await openWeekGroup(enPage, '献立を提案')
+      await openWeekGroup(enPage, ja.mealPlan.weekGroupAutoTitle)
       await enPage.locator('[data-testid="plan-conditions-open"]').click()
       await enPage.waitForTimeout(500)
       // 2026-08-19 便IF・②(オーナー原文「無料版でpro機能の案内が折りたたみでも表示されていて
@@ -29214,7 +29226,7 @@ try {
       await enPage.locator('[data-testid="plan-conditions-close"]').click()
       await enPage.waitForTimeout(500)
 
-      await enPage.getByRole('button', { name: 'まとめて献立を入力' }).click()
+      await enPage.getByRole('button', { name: ja.mealPlan.fillWeek }).click()
       await enPage.waitForTimeout(2500)
 
       const enLockBg = () =>
@@ -29241,10 +29253,11 @@ try {
       await enPage.locator('[data-testid="day-lock"]').first().click()
       await enPage.waitForTimeout(700)
 
-      const enPanel = await enPage.evaluate(() => {
+      // 文言は ja.ts から読むが、evaluate の中はブラウザ側なので引数で渡す（便JM）
+      const enPanel = await enPage.evaluate((weekToggleAria) => {
         const btns = [...document.querySelectorAll('button[aria-label]')]
         const week = btns.find(
-          (b) => b.getAttribute('aria-label') === '表示している週の栄養の概算を詳しく見る',
+          (b) => b.getAttribute('aria-label') === weekToggleAria,
         )
         const day = btns.find((b) => (b.getAttribute('aria-label') ?? '').startsWith('この日（'))
         if (!week || !day) return null
@@ -29260,7 +29273,7 @@ try {
           weekHeight: Math.round(week.getBoundingClientRect().height),
           dayHeight: Math.round(day.getBoundingClientRect().height),
         }
-      })
+      }, ja.nutritionBalance.weekToggleExpand)
       check(
         'EN-01(項目9) 週まとめの栄養は日ごとの栄養より文字が大きい',
         !!enPanel && enPanel.weekFont > enPanel.dayFont,
@@ -29361,7 +29374,7 @@ try {
         })
       const roBefore = await roSize()
       check('EN-02 記録窓に付けた写真は横長のまま取り込まれる', roBefore === '400x200', `size=${roBefore}`)
-      const roRotate = roPage.getByRole('button', { name: '写真を右に90度回す' })
+      const roRotate = roPage.getByRole('button', { name: ja.detail.cookedLogPhotoRotate })
       check('EN-02 記録窓に「写真を右に90度回す」がある', await roRotate.isVisible())
       await roRotate.click()
       await roPage.waitForTimeout(1300)
@@ -29383,7 +29396,7 @@ try {
       )
 
       // 保存済みの記録でも同じ操作ができる（編集フォームから回して保存し直す）
-      await roPage.getByRole('button', { name: '記録する', exact: true }).click()
+      await roPage.getByRole('button', { name: ja.detail.cookedSave, exact: true }).click()
       await roPage.waitForTimeout(1800)
       // 記録一覧のサムネイル（タップで原寸表示になるボタンの中の画像）で向きを見る
       const roLogSize = () =>
@@ -29397,9 +29410,9 @@ try {
         roLogBefore === '400x200',
         `size=${roLogBefore}`,
       )
-      await roPage.getByRole('button', { name: 'この記録を編集' }).first().click()
+      await roPage.getByRole('button', { name: ja.detail.cookedLogEdit }).first().click()
       await roPage.waitForTimeout(700)
-      const roEditRotate = roPage.getByRole('button', { name: '写真を右に90度回す' })
+      const roEditRotate = roPage.getByRole('button', { name: ja.detail.cookedLogPhotoRotate })
       check('EN-02 保存済みの記録の編集にも回転ボタンがある', await roEditRotate.isVisible())
       await roEditRotate.click()
       await roPage.waitForTimeout(1300)
@@ -29475,7 +29488,7 @@ try {
       await rePage.waitForTimeout(1200)
 
       // 検索で対象を絞ってから「選択」→「全選択」。絞った結果の枚数がそのまま書き出す品数になる
-      await rePage.getByPlaceholder('料理名・材料・タグ').fill('肉じゃが')
+      await rePage.getByPlaceholder(ja.search.placeholder).fill('肉じゃが')
       await rePage.waitForTimeout(700)
       // 右下の新規登録ボタン(#/recipes/new)も同じ入れ子に居るので数から外す
       const reCardSel = 'main a[href^="#/recipes/"]:not([href$="/new"])'
@@ -29483,7 +29496,7 @@ try {
       check('RECIPEEXPORT-EM 前提: 検索で対象を絞れている', rePicked > 0 && rePicked < 10, `件数=${rePicked}`)
       const rePickedTitles = await rePage.locator(reCardSel).locator('h3, p.font-bold').allTextContents()
 
-      await rePage.getByRole('button', { name: '選択', exact: true }).click()
+      await rePage.getByRole('button', { name: ja.recipes.selectToggle, exact: true }).click()
       await rePage.waitForTimeout(400)
       await rePage.getByRole('button', { name: '全選択', exact: true }).click()
       await rePage.waitForTimeout(400)
@@ -29592,7 +29605,7 @@ try {
       check('RECIPEEXPORT-EM(c) 書き出し完了の知らせが出る', ((await rePage.textContent('body')) ?? '').includes('書き出しました'))
 
       // (c) 端末のレシピは減らない
-      await rePage.getByPlaceholder('料理名・材料・タグ').fill('')
+      await rePage.getByPlaceholder(ja.search.placeholder).fill('')
       await rePage.waitForTimeout(600)
       const reTotalAfterExport = await rePage.locator(reCardSel).count()
       check(
@@ -29604,7 +29617,7 @@ try {
       // (d) 消してから、既存の読み込み経路(「今のデータに追加」)で戻す。
       // 絞り込みを戻しても選択は残る(見えている品は落とさない)ので、「全選択」は
       // 押せない状態になっている。押せるときだけ押す
-      await rePage.getByPlaceholder('料理名・材料・タグ').fill('肉じゃが')
+      await rePage.getByPlaceholder(ja.search.placeholder).fill('肉じゃが')
       await rePage.waitForTimeout(700)
       const reSelectAll = rePage.getByRole('button', { name: '全選択', exact: true })
       if (await reSelectAll.isEnabled()) {
@@ -29623,7 +29636,7 @@ try {
 
       await rePage.goto(`${BASE}/#/settings`, { waitUntil: 'networkidle' })
       await rePage.waitForTimeout(600)
-      await rePage.getByRole('button', { name: 'バックアップ', exact: true }).click()
+      await rePage.getByRole('button', { name: ja.settings.tabBackup, exact: true }).click()
       await rePage.waitForTimeout(300)
       const [reChooser] = await Promise.all([
         rePage.waitForEvent('filechooser'),
@@ -29641,7 +29654,7 @@ try {
       )
       await rePage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
       await rePage.waitForTimeout(1200)
-      await rePage.getByPlaceholder('料理名・材料・タグ').fill('肉じゃが')
+      await rePage.getByPlaceholder(ja.search.placeholder).fill('肉じゃが')
       await rePage.waitForTimeout(700)
       check(
         'RECIPEEXPORT-EM(d) 書き出したファイルから消したレシピが戻る',
@@ -30138,7 +30151,7 @@ try {
       await eoPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
       await eoPage.waitForTimeout(1800)
       await eoPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
-      await eoPage.getByRole('button', { name: '週', exact: true }).click()
+      await eoPage.getByRole('button', { name: ja.mealPlan.viewWeek, exact: true }).click()
       await openAllWeekDays(eoPage) // 便ID・⑦: 畳む既定になったので、カードの中を触る前に開く
       await eoPage.waitForTimeout(700)
 
@@ -30171,7 +30184,7 @@ try {
       // 現在の条件（2026-08-19 便ID・④で窓の中に移った）。
       // 2026-08-20 便II・①: 調理時間もチップからプルダウンになった＝押して幅が変わる
       // 心配のあるチップは、この窓の中に1つも残っていない
-      await openWeekGroup(eoPage, '献立を提案')
+      await openWeekGroup(eoPage, ja.mealPlan.weekGroupAutoTitle)
       await eoPage.waitForTimeout(400)
       await eoPage.locator('[data-testid="plan-conditions-open"]').click()
       await eoPage.waitForTimeout(500)
@@ -30273,7 +30286,7 @@ try {
         await eoPage.waitForTimeout(900)
       }
 
-      const eoEdit = eoPage.getByRole('button', { name: '編集' }).first()
+      const eoEdit = eoPage.getByRole('button', { name: ja.mealPlan.weekDayEdit }).first()
       check('EO-03 作った記録に「編集」がある', await eoEdit.isVisible())
       // 「編集」を画面のいちばん下に置いてから押す＝直したかった見切れの再現条件
       await eoEdit.scrollIntoViewIfNeeded()
@@ -30421,7 +30434,7 @@ try {
         await upPage.waitForTimeout(1500)
         await upPage.getByText('肉じゃが', { exact: true }).first().click()
         await upPage.waitForTimeout(900)
-        await upPage.getByText('調理中モードで見る').click()
+        await upPage.getByText(ja.focus.open).click()
         await upPage.waitForTimeout(700)
         check(
           'APPUPDATE-01 前提: 調理中モードが開いている',
@@ -30440,13 +30453,13 @@ try {
         )
 
         // 調理中モードを閉じると帯が出る
-        await upPage.getByRole('button', { name: '閉じる' }).first().click()
+        await upPage.getByRole('button', { name: ja.common.close }).first().click()
         await upPage.waitForTimeout(800)
         check('APPUPDATE-01 調理中モードを閉じると更新の帯が出る', await upBanner.isVisible())
         const upBannerText = await upBanner.textContent()
         check(
           'APPUPDATE-01 帯に「新しいバージョンがあります」と「更新する」が出る',
-          upBannerText.includes('新しいバージョンがあります') && upBannerText.includes('更新する'),
+          upBannerText.includes(ja.settings.appUpdateBannerTitle) && upBannerText.includes('更新する'),
         )
         check(
           'APPUPDATE-01 帯に、あとから設定でも更新できることが書いてある',
@@ -30508,7 +30521,7 @@ try {
         await upPage.waitForTimeout(3000)
         check(
           'APPUPDATE-01 更新が無い状態で押すと「すでに最新のバージョンです」と伝える',
-          (await upPage.textContent('body')).includes('すでに最新のバージョンです'),
+          stripZwspText(await upPage.textContent('body')).includes(ja.settings.appUpdateResultLatest),
         )
         check(
           'APPUPDATE-01 「すでに最新」のときは画面を読み込み直さない',
@@ -30660,11 +30673,11 @@ try {
       // その場で編集欄を開くボタンになった（「レシピを見る」はリンクのまま）
       check(
         'EQ-01(①) 小窓からレシピ詳細へ行ける／記録はその場で直せる',
-        (await eqDialog.getByRole('button', { name: 'この記録を編集する' }).count()) === 1 &&
+        (await eqDialog.getByRole('button', { name: ja.cookedDetail.edit }).count()) === 1 &&
           (await eqDialog.getByRole('link', { name: 'レシピを見る' }).count()) === 1,
       )
       // 写真の拡大
-      await eqDialog.getByRole('button', { name: '写真を拡大表示' }).click()
+      await eqDialog.getByRole('button', { name: ja.detail.cookedPhotoView }).click()
       await eqPage.waitForTimeout(600)
       const eqZoom = eqPage.locator('div[role="dialog"][aria-label="写真を拡大表示"]')
       check('EQ-01(①) 写真を押すと拡大表示の窓が開く', (await eqZoom.count()) === 1)
@@ -30727,7 +30740,7 @@ try {
       // 飛ばされる。カレンダーなどの元の画面で編集が完結できるようにして」
       await eqPage
         .getByRole('dialog', { name: '肉じゃがの作った記録' })
-        .getByRole('button', { name: 'この記録を編集する' })
+        .getByRole('button', { name: ja.cookedDetail.edit })
         .click()
       await eqPage.waitForTimeout(800)
       check(
@@ -30741,7 +30754,7 @@ try {
           (await eqPage.locator('[data-testid="cooked-log-editor"] input[type="date"]').count()) === 1 &&
           (await eqPage.getByRole('button', { name: '保存する' }).count()) >= 1,
       )
-      await eqPage.getByRole('button', { name: 'やめる' }).click()
+      await eqPage.getByRole('button', { name: ja.common.confirmCancel }).click()
       await eqPage.waitForTimeout(500)
 
       // ---------- ⑥ 献立の「日」へ戻ったときのスクロール位置 ----------
@@ -30758,7 +30771,7 @@ try {
       const eqScrollBefore2 = await eqPage.evaluate(() => Math.round(window.scrollY))
       await eqHistoryLink.click()
       await eqPage.waitForTimeout(900)
-      await eqPage.getByRole('button', { name: '戻る' }).first().click()
+      await eqPage.getByRole('button', { name: ja.common.back }).first().click()
       await eqPage.waitForTimeout(1500)
       const eqScrollAfter = await eqPage.evaluate(() => Math.round(window.scrollY))
       /**
@@ -30807,7 +30820,7 @@ try {
         'EQ-01(④) 献立の日タブにも「作った記録の一覧」の入口がある',
         (await eqPage.getByRole('link', { name: '作った記録の一覧' }).count()) >= 1,
       )
-      await eqPage.getByRole('button', { name: '週', exact: true }).click()
+      await eqPage.getByRole('button', { name: ja.mealPlan.viewWeek, exact: true }).click()
       await openAllWeekDays(eqPage) // 便ID・⑦: 畳む既定になったので、カードの中を触る前に開く
       await eqPage.waitForTimeout(900)
       // 週タブは月曜始まりで、表示中の週は sessionStorage に覚えられる(便DT-2「戻ったら同じ場所へ返す」)。
@@ -30845,7 +30858,7 @@ try {
       // 上で「前の週」へ動いていることがあるので、今週へ開き直してから操作する
       await eqPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
       await eqPage.waitForTimeout(900)
-      await eqPage.getByRole('button', { name: '週', exact: true }).click()
+      await eqPage.getByRole('button', { name: ja.mealPlan.viewWeek, exact: true }).click()
       await openAllWeekDays(eqPage) // 便ID・⑦: 畳む既定になったので、カードの中を触る前に開く
       await eqPage.waitForTimeout(900)
       check('EQ-01(③) 今日を含む週へ帰れる', await eqShowWeekWith(eqToday), `今日=${eqToday}`)
@@ -30855,9 +30868,9 @@ try {
         'EQ-01 前提: 今日のカードを編集モードにできた（便IV）',
         (await openWeekDayEdit(eqPage, eqToday)) === true,
       )
-      await eqTodaySection.getByRole('button', { name: 'レシピを選ぶ', exact: true }).first().click()
+      await eqTodaySection.getByRole('button', { name: ja.mealPlan.emptyAssign, exact: true }).first().click()
       await eqPage.waitForTimeout(600)
-      await eqPage.getByPlaceholder('レシピ名で絞り込み').fill('肉じゃが')
+      await eqPage.getByPlaceholder(ja.mealPlan.pickSearchPlaceholder).fill('肉じゃが')
       await eqPage.waitForTimeout(500)
       await eqPage
         .locator('[data-testid="recipe-picker"]')
@@ -31275,7 +31288,7 @@ try {
       const etoNow = new Date()
       const etoPad = (n) => String(n).padStart(2, '0')
       const etoToday = `${etoNow.getFullYear()}-${etoPad(etoNow.getMonth() + 1)}-${etoPad(etoNow.getDate())}`
-      await etoPage.getByRole('button', { name: '週', exact: true }).click()
+      await etoPage.getByRole('button', { name: ja.mealPlan.viewWeek, exact: true }).click()
       await openAllWeekDays(etoPage) // 便ID・⑦: 畳む既定になったので、カードの中を触る前に開く
       await etoPage.waitForTimeout(1200)
       const etoEmpty = await etoWidth()
@@ -31294,11 +31307,11 @@ try {
       )
       for (const title of etoLongTitles) {
         const etoSection = etoPage.locator(`section[data-date="${etoToday}"]`)
-        const etoPick = etoSection.getByRole('button', { name: 'レシピを選ぶ', exact: true }).first()
+        const etoPick = etoSection.getByRole('button', { name: ja.mealPlan.emptyAssign, exact: true }).first()
         await etoPick.scrollIntoViewIfNeeded()
         await etoPick.click()
         await etoPage.waitForTimeout(700)
-        await etoPage.getByPlaceholder('レシピ名で絞り込み').fill(title)
+        await etoPage.getByPlaceholder(ja.mealPlan.pickSearchPlaceholder).fill(title)
         await etoPage.waitForTimeout(500)
         await etoPage
           .locator('[data-testid="recipe-picker"]')
@@ -31434,9 +31447,9 @@ try {
       const etcLongTitle = 'ぶりの照り焼きとほうれん草のごま和えと具だくさん味噌汁のこんだて'
       await etcPage.goto(`${BASE}/#/recipes/new`, { waitUntil: 'networkidle' })
       await etcPage.waitForTimeout(600)
-      await etcPage.getByPlaceholder('例: 肉じゃが').fill(etcLongTitle)
-      await etcPage.getByPlaceholder('例: じゃがいも').first().fill('ぶり')
-      await etcPage.getByPlaceholder('例: じゃがいもを一口大に切る').first().fill('ぶりを焼く')
+      await etcPage.getByPlaceholder(ja.form.namePlaceholder).fill(etcLongTitle)
+      await etcPage.getByPlaceholder(ja.form.ingredientNamePlaceholder).first().fill('ぶり')
+      await etcPage.getByPlaceholder(ja.form.stepTextPlaceholder).first().fill('ぶりを焼く')
       await etcPage.getByRole('button', { name: '保存する' }).click()
       await etcPage.waitForTimeout(1200)
       await etcPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
@@ -31537,7 +31550,7 @@ try {
       // ---------- 献立の日/週/月 ----------
       await etsPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
       await etsPage.waitForTimeout(2000)
-      await etsPage.getByRole('button', { name: '週', exact: true }).click()
+      await etsPage.getByRole('button', { name: ja.mealPlan.viewWeek, exact: true }).click()
       await openAllWeekDays(etsPage) // 便ID・⑦: 畳む既定になったので、カードの中を触る前に開く
       await etsPage.waitForTimeout(1300)
       await etsPage.evaluate(() => window.scrollTo(0, 1200))
@@ -31612,7 +31625,7 @@ try {
       etmPage.on('pageerror', (err) => errors.push(`[pageerror@ET-03] ${err.message}`))
       await etmPage.goto(`${BASE}/#/settings?section=backup`, { waitUntil: 'networkidle' })
       await etmPage.waitForTimeout(1500)
-      await etmPage.getByRole('button', { name: '機種変更するときは' }).click()
+      await etmPage.getByRole('button', { name: ja.settings.moveGuideToggle }).click()
       await etmPage.waitForTimeout(900)
       const etmLink = etmPage.locator('[data-testid="move-guide-transfer-link"]')
       const etmHref = (await etmLink.count()) > 0 ? await etmLink.getAttribute('href') : null
@@ -31624,7 +31637,7 @@ try {
       )
       check(
         'ET-03 リンクの文言が行き先のページ名になっている',
-        etmLabel === '「複数の端末で使う方法」のページを見る',
+        etmLabel === ja.settings.moveGuideTransferLink,
         String(etmLabel),
       )
       // アプリ内の /about/ 配下へのリンクは別窓にしない作法(iOSのホーム画面追加アプリは
@@ -31766,7 +31779,7 @@ try {
         )
         check(
           'EW-01(a) あとから見る場所を書いた一言がある',
-          ewNote === 'あとから追加するときは、設定の「ホーム画面への追加方法」を開いてください。',
+          ewNote === ja.homeScreenNotice.laterNote,
           ewNote,
         )
         check(
@@ -31983,7 +31996,7 @@ try {
         const ewHref = (await ewLink.count()) > 0 ? await ewLink.getAttribute('href') : null
         check(
           'EW-01(g) お知らせが案内した名前のリンクが設定にある',
-          ewLabel === 'ホーム画面への追加方法' && ewNote.includes(ewLabel ?? ' '),
+          ewLabel === ja.settings.installPageLink && ewNote.includes(ewLabel ?? ' '),
           JSON.stringify({ label: ewLabel, note: ewNote }),
         )
         check(
@@ -32123,12 +32136,12 @@ try {
         check('GE-01(a) 重ね窓として名乗っている(role=dialog)', info?.role === 'dialog', String(info?.role))
         check(
           'GE-01(a) 見出しが人数と台所の器具を設定できる話になっている',
-          info?.title === '作る人数と台所の器具を設定できます',
+          info?.title === ja.firstSetupNotice.title,
           String(info?.title),
         )
         check(
           'GE-01(a) 本文が2つの設定の効く先(材料の分量・段取り)を言っている',
-          info?.body === '人数は材料の分量に、台所の器具は並行調理ナビの段取りに使います。',
+          info?.body === ja.firstSetupNotice.body,
           String(info?.body),
         )
         check(
@@ -32140,7 +32153,7 @@ try {
         )
         check(
           'GE-01(a) 閉じてもあとから変えられる場所を、設定の欄の名前のまま書いてある',
-          info?.note === 'あとからでも、個人設定の「食数の設定」「台所の器具」で変えられます。',
+          info?.note === ja.firstSetupNotice.laterNote,
           String(info?.note),
         )
         // 文字数の上限(便GEで決定。オーナー「情報詰めすぎると読まずに消される」)
@@ -32227,7 +32240,7 @@ try {
           async (p) => {
             await p.goto(`${BASE}/#/settings?section=household`, { waitUntil: 'networkidle' })
             await p.waitForTimeout(1200)
-            await p.getByLabel('食数の設定').selectOption('4')
+            await p.getByLabel(ja.settings.householdServingsTitle).selectOption('4')
           },
         ],
         [
@@ -32637,7 +32650,7 @@ try {
       const eyOpen = async (title) => {
         await eyPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
         await eyPage.waitForTimeout(600)
-        await eyPage.getByPlaceholder('料理名・材料・タグ').fill(title)
+        await eyPage.getByPlaceholder(ja.search.placeholder).fill(title)
         await eyPage.waitForTimeout(700)
         await eyPage.getByText(title, { exact: true }).first().click()
         await eyPage.waitForTimeout(800)
@@ -32653,7 +32666,7 @@ try {
         eyChawanmushi.includes('約212円') ? '按分前の212円のまま' : '',
       )
       // 原価ビューで材料行そのものの金額も見る(1食あたり=全量33円÷2人分)
-      await eyPage.getByRole('button', { name: '原価を見る' }).click()
+      await eyPage.getByRole('button', { name: ja.detail.priceViewShow }).click()
       await eyPage.waitForTimeout(500)
       const eyRow = await eyPage.locator('li', { hasText: '生しいたけ' }).first().textContent()
       // 2026-08-22 便JG: 行の金額の意味が「1食あたり(全量÷登録人数)」から
@@ -32904,7 +32917,7 @@ try {
       await ezPage.goto(`${BASE}/#/cook-navi`)
       await ezPage.reload({ waitUntil: 'networkidle' })
       await ezPage.waitForTimeout(1200)
-      await ezPage.getByRole('button', { name: '段取りを作る' }).click()
+      await ezPage.getByRole('button', { name: ja.cookNavi.build }).click()
       await ezPage.waitForTimeout(700)
       await ezPage.locator('[data-testid="cook-session-start"]').click()
       await ezPage.waitForTimeout(600)
@@ -32925,7 +32938,7 @@ try {
       // マイクは自動テストで鳴らせないので、同じ道筋（一時停止→再開）をボタンで確かめる
       await ezPage.locator('[data-testid="cook-session-current-timers"] button').first().click()
       await ezPage.waitForTimeout(400)
-      const ezDialog = ezPage.getByRole('dialog', { name: 'タイマーを調整' })
+      const ezDialog = ezPage.getByRole('dialog', { name: ja.timer.adjustDialogTitle })
       const ezBeforePause = parseRemainingSeconds(await ezDialog.textContent())
       await ezPage.locator('[data-testid="timer-adjust-pause"]').click()
       await ezPage.waitForTimeout(1500)
@@ -32986,7 +32999,7 @@ try {
       )
       await ezBarRow.click()
       await ezPage.waitForTimeout(400)
-      const ezBarDialogText = await ezPage.getByRole('dialog', { name: 'タイマーを調整' }).textContent()
+      const ezBarDialogText = await ezPage.getByRole('dialog', { name: ja.timer.adjustDialogTitle }).textContent()
       check(
         'EZ-02 「段取りの◯番目を開く」が「手順⑦（3-1）を〜」の形になっている',
         // 2026-08-15 便GQ: 調理の途中は「見る」（現在地を動かさない）に言い分けたので、
@@ -32997,8 +33010,8 @@ try {
       )
       // 片付け（後続の検査にタイマーを持ち越さない）
       await ezPage
-        .getByRole('dialog', { name: 'タイマーを調整' })
-        .getByRole('button', { name: 'タイマーを消す' })
+        .getByRole('dialog', { name: ja.timer.adjustDialogTitle })
+        .getByRole('button', { name: ja.timer.stopTimer })
         .click()
       await ezPage.waitForTimeout(400)
 
@@ -33068,7 +33081,7 @@ try {
       await ezPage.goto(`${BASE}/#/meal-plan`)
       await ezPage.reload({ waitUntil: 'networkidle' })
       await ezPage.waitForTimeout(1500)
-      await ezPage.getByRole('button', { name: '週', exact: true }).click()
+      await ezPage.getByRole('button', { name: ja.mealPlan.viewWeek, exact: true }).click()
       await openAllWeekDays(ezPage) // 便ID・⑦: 畳む既定になったので、カードの中を触る前に開く
       await ezPage.waitForTimeout(1000)
       const ezTodaySection = ezPage.locator(`section[data-date="${ezSeed.today}"]`)
@@ -33109,7 +33122,7 @@ try {
       )
       // 詳細画面の「戻る」で、開いた元＝献立の週タブへ帰ること（WEEK_RETURN_LINK_STATE を
       // 渡しているので、レシピ一覧ではなく週タブに戻る。便DT-2 と同じ帰り道を使う）
-      await ezPage.getByRole('button', { name: '戻る' }).first().click()
+      await ezPage.getByRole('button', { name: ja.common.back }).first().click()
       await ezPage.waitForTimeout(1500)
       check(
         'EZ-05 詳細の「戻る」で献立の週タブに帰る（レシピ一覧へ飛ばされない）',
@@ -33201,7 +33214,7 @@ try {
       // 素の「しいたけ4枚」と書いてある寄せ鍋が、生しいたけの単価で按分される
       await faPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
       await faPage.waitForTimeout(600)
-      await faPage.getByPlaceholder('料理名・材料・タグ').fill('しいたけ')
+      await faPage.getByPlaceholder(ja.search.placeholder).fill('しいたけ')
       await faPage.waitForTimeout(800)
       const faSearchBody = (await faPage.textContent('body')) ?? ''
       check(
@@ -33217,7 +33230,7 @@ try {
         faNabe.includes('4人分で作るときの1食あたり 約217円'),
         faNabe.includes('約226円') ? '名寄せ前の226円のまま' : '',
       )
-      await faPage.getByRole('button', { name: '原価を見る' }).click()
+      await faPage.getByRole('button', { name: ja.detail.priceViewShow }).click()
       await faPage.waitForTimeout(500)
       const faNabeRow = await faPage.locator('li', { hasText: 'しいたけ' }).first().textContent()
       check(
@@ -33402,11 +33415,11 @@ try {
       })
       await fa4Page.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
       await fa4Page.waitForTimeout(1800)
-      await fa4Page.getByPlaceholder('料理名・材料・タグ').fill('肉じゃが')
+      await fa4Page.getByPlaceholder(ja.search.placeholder).fill('肉じゃが')
       await fa4Page.waitForTimeout(700)
       const fa4Picked = await fa4Page.locator('main a[href^="#/recipes/"]:not([href$="/new"])').count()
       check('FA-3 前提: 検索で対象を絞れている', fa4Picked > 0 && fa4Picked < 10, `件数=${fa4Picked}`)
-      await fa4Page.getByRole('button', { name: '選択', exact: true }).click()
+      await fa4Page.getByRole('button', { name: ja.recipes.selectToggle, exact: true }).click()
       await fa4Page.waitForTimeout(400)
       await fa4Page.getByRole('button', { name: '全選択', exact: true }).click()
       await fa4Page.waitForTimeout(400)
@@ -33441,7 +33454,7 @@ try {
       const fa4Settings = (await fa4Page.textContent('body')) ?? ''
       check(
         'FA-3 全体のバックアップは「他の人に渡さないでください」のまま(解錠コードが入るため)',
-        fa4Settings.includes('バックアップファイルにはPro版の解錠コードが含まれます。他の人に渡さないでください'),
+        fa4Settings.includes(ja.settings.backupContainsCodeNotice),
       )
     } finally {
       await fa4Browser.close()
@@ -33724,7 +33737,7 @@ try {
       await fcPage.goto(`${BASE}/#/cook-navi`)
       await fcPage.reload({ waitUntil: 'networkidle' })
       await fcPage.waitForTimeout(1200)
-      await fcPage.getByRole('button', { name: '段取りを作る' }).click()
+      await fcPage.getByRole('button', { name: ja.cookNavi.build }).click()
       await fcPage.waitForTimeout(700)
       await fcOpenSession()
 
@@ -33773,17 +33786,17 @@ try {
         await fcMicStart.click()
         await fcPage.waitForTimeout(400)
       }
-      const fcHint = fcPage.locator('[data-testid="cook-session"] p', { hasText: '声で操作' }).first()
+      const fcHint = fcPage.locator('[data-testid="cook-session"] p', { hasText: ja.focus.micLabel }).first()
       if ((await fcHint.count()) > 0) {
         const fcHintText = await fcHint.innerText()
         check(
           'FC-03 読み上げの声の案内が「読み上げ」になっている（「もう一回」で案内しない）',
-          fcHintText.includes('「読み上げ」でいまの手順を読み上げ') && !fcHintText.includes('もう一回'),
+          fcHintText.includes(ja.focus.micHintRead) && !fcHintText.includes('もう一回'),
           fcHintText,
         )
         check(
           'FC-02 止めたタイマーを動かし直す声（「再開」）が案内に載っている',
-          fcHintText.includes('「タイマー」「ストップ」「再開」でタイマー操作'),
+          fcHintText.includes(ja.focus.micHintTimer),
           fcHintText,
         )
         // 2026-08-12 便FX（オーナー指摘「タイマー説明はまとめて、タイマー操作、のみでも
@@ -33880,7 +33893,7 @@ try {
       )
       await fcPage.locator('[data-testid="cook-session-current-timers"] button').first().click()
       await fcPage.waitForTimeout(400)
-      const fcDialog = fcPage.getByRole('dialog', { name: 'タイマーを調整' })
+      const fcDialog = fcPage.getByRole('dialog', { name: ja.timer.adjustDialogTitle })
       const fcButtons = await fcDialog.evaluate((dlg) =>
         Array.from(dlg.querySelectorAll('button')).map((b) => b.textContent.trim()),
       )
@@ -34055,7 +34068,7 @@ try {
         (await fcCounter()) !== fcAfterReturn,
         `戻り先=${fcAfterReturn} 次へ=${await fcCounter()}`,
       )
-      await fcPage.getByRole('button', { name: '前へ' }).click()
+      await fcPage.getByRole('button', { name: ja.focus.prev }).click()
       await fcPage.waitForTimeout(300)
 
       // --- FC-08: 他の品の次の手順を開いたら、その品のタイマーは手順の下に来る ---
@@ -34260,7 +34273,7 @@ try {
       await fdPage.goto(`${BASE}/#/meal-plan`)
       await fdPage.reload({ waitUntil: 'networkidle' })
       await fdPage.waitForTimeout(2000)
-      await fdPage.getByRole('button', { name: '週', exact: true }).click()
+      await fdPage.getByRole('button', { name: ja.mealPlan.viewWeek, exact: true }).click()
       await openAllWeekDays(fdPage) // 便ID・⑦: 畳む既定になったので、カードの中を触る前に開く
       await fdPage.waitForTimeout(2500)
       const fdEnter = await fdGeom()
@@ -34274,7 +34287,7 @@ try {
       await fdPage.waitForTimeout(500)
       await fdPage.getByRole('button', { name: '日', exact: true }).click()
       await fdPage.waitForTimeout(800)
-      await fdPage.getByRole('button', { name: '週', exact: true }).click()
+      await fdPage.getByRole('button', { name: ja.mealPlan.viewWeek, exact: true }).click()
       await openAllWeekDays(fdPage) // 便ID・⑦: 畳む既定になったので、カードの中を触る前に開く
       await fdPage.waitForTimeout(2500)
       const fdReenter = await fdGeom()
@@ -34391,7 +34404,7 @@ try {
       )
       check(
         'FD-01 鍵を掛けたときの案内では「削除も変更もできません」を言い続ける（規約F）',
-        fdLockToast.includes('鍵を外すまで、この献立は削除も変更もできません'),
+        fdLockToast.includes(ja.mealPlan.lockEffectNote),
         fdLockToast,
       )
       await fdClickSel('[data-testid="lock-all"]')
@@ -34573,7 +34586,7 @@ try {
         fdBeforeOpen != null && /#\/recipes\/\d+/.test(fdPage.url()),
         `${JSON.stringify(fdBeforeOpen)} url=${fdPage.url()}`,
       )
-      await fdPage.getByRole('button', { name: '戻る' }).first().click()
+      await fdPage.getByRole('button', { name: ja.common.back }).first().click()
       await fdPage.waitForTimeout(2500)
       const fdBack = await fdPage.evaluate((date) => {
         const card = date ? document.querySelector(`section[data-date="${date}"]`) : null
@@ -34612,7 +34625,7 @@ try {
         /#\/recipes\/\d+/.test(fdPage.url()),
         fdPage.url(),
       )
-      await fdPage.getByRole('button', { name: '戻る' }).first().click()
+      await fdPage.getByRole('button', { name: ja.common.back }).first().click()
       await fdPage.waitForTimeout(2500)
       const fdMonthBack = await fdPage.evaluate((today) => {
         const dialogs = [...document.querySelectorAll('[role="dialog"]')]
@@ -34663,7 +34676,7 @@ try {
 
       // ---------- FD-06 小窓の中で編集が完結する ----------
       currentCheck = 'FD-06'
-      await fdPage.getByRole('button', { name: 'この記録を編集する' }).click()
+      await fdPage.getByRole('button', { name: ja.cookedDetail.edit }).click()
       await fdPage.waitForTimeout(800)
       check(
         'FD-06 「この記録を編集する」でレシピ詳細へ飛ばされない（元の画面のまま）',
@@ -34675,7 +34688,7 @@ try {
         (await fdPage.locator('[data-testid="cooked-log-editor"]').count()) === 1,
       )
       await fdPage.locator('[data-testid="cooked-log-editor"] input[type="text"]').fill('小窓で直した')
-      await fdPage.getByRole('button', { name: '人数を増やす' }).click()
+      await fdPage.getByRole('button', { name: ja.detail.servingsUp }).click()
       await fdPage.getByRole('button', { name: '保存する' }).click()
       await fdPage.waitForTimeout(1500)
       const fdSaved = await fdPage.evaluate(async (id) => {
@@ -34718,7 +34731,7 @@ try {
       await fdPage.waitForTimeout(1000)
       await fdPage.getByRole('button', { name: 'FDきんぴらごぼうの作った記録を見る' }).first().click()
       await fdPage.waitForTimeout(800)
-      await fdPage.getByRole('button', { name: 'この記録を編集する' }).click()
+      await fdPage.getByRole('button', { name: ja.cookedDetail.edit }).click()
       await fdPage.waitForTimeout(700)
       check(
         'FD-06 カレンダーから開いても、その場に編集欄が開く（レシピ詳細へ飛ばされない）',
@@ -35765,7 +35778,7 @@ try {
     const fiCounter = () => fiPage.locator('[data-testid="cook-session-counter"]').innerText()
     const fiRecipe = () => fiPage.locator('[data-testid="cook-session-recipe"]').innerText()
     const fiHint = () =>
-      fiPage.locator('[data-testid="cook-session"] p', { hasText: '声で操作' }).first().innerText()
+      fiPage.locator('[data-testid="cook-session"] p', { hasText: ja.focus.micLabel }).first().innerText()
     /** 「声で操作」をONにする（すでにONなら何もしない＝押すとOFFになってしまう） */
     const fiListen = async () => {
       const start = fiPage.locator('button[aria-label="声で操作する"]')
@@ -35857,7 +35870,7 @@ try {
       await fiPage.goto(`${BASE}/#/cook-navi`)
       await fiPage.reload({ waitUntil: 'networkidle' })
       await fiPage.waitForTimeout(1200)
-      await fiPage.getByRole('button', { name: '段取りを作る' }).click()
+      await fiPage.getByRole('button', { name: ja.cookNavi.build }).click()
       await fiPage.waitForTimeout(700)
       await fiPage.locator('[data-testid="cook-session-start"]').click()
       await fiPage.waitForTimeout(700)
@@ -36118,7 +36131,7 @@ try {
       await fcPage.waitForTimeout(900)
       await fcPage.getByText(title, { exact: true }).first().click()
       await fcPage.waitForTimeout(800)
-      await fcPage.getByRole('button', { name: '今日の献立に追加' }).first().click()
+      await fcPage.getByRole('button', { name: ja.detail.todayAdd }).first().click()
       await fcPage.waitForTimeout(500)
       await fcPage.getByRole('button', { name: slot, exact: true }).click()
       await fcPage.waitForTimeout(700)
@@ -36130,14 +36143,14 @@ try {
       // 設定「食数の設定」を4人分にする（＝枠に食数を決めていない品の既定）
       await fcPage.goto(`${BASE}/#/settings?section=household`, { waitUntil: 'networkidle' })
       await fcPage.waitForTimeout(900)
-      await fcPage.getByLabel('食数の設定').selectOption('4')
+      await fcPage.getByLabel(ja.settings.householdServingsTitle).selectOption('4')
       await fcPage.waitForTimeout(600)
 
       // ① 枠に食数を決めた品: 肉じゃがを今日の夕食に入れ、週の画面で食数を6人分にする
       await fcAddToToday('肉じゃが', '夕食')
       await fcPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
       await fcPage.waitForTimeout(1500)
-      await fcPage.getByRole('button', { name: '週', exact: true }).click()
+      await fcPage.getByRole('button', { name: ja.mealPlan.viewWeek, exact: true }).click()
       await openAllWeekDays(fcPage) // 便ID・⑦: 畳む既定になったので、カードの中を触る前に開く
       await fcPage.waitForTimeout(900)
       // 2026-08-22 便IV: 食数のボタンは編集モードの中にしか出さない
@@ -36158,10 +36171,10 @@ try {
       )
       await fcServingsBtn.first().click()
       await fcPage.waitForTimeout(500)
-      await fcPage.getByRole('button', { name: '食数を増やす' }).click()
-      await fcPage.getByRole('button', { name: '食数を増やす' }).click()
+      await fcPage.getByRole('button', { name: ja.mealPlan.servingsUp }).click()
+      await fcPage.getByRole('button', { name: ja.mealPlan.servingsUp }).click()
       await fcPage.waitForTimeout(300)
-      await fcPage.getByRole('button', { name: '決定', exact: true }).click()
+      await fcPage.getByRole('button', { name: ja.mealPlan.servingsSave, exact: true }).click()
       await fcPage.waitForTimeout(800)
       check(
         'FF-COOK 前提: 枠の食数を6人分に変えられた',
@@ -36440,13 +36453,13 @@ try {
 
       // 数える対象は「いま一覧に出ているレシピ」。「自分で登録したレシピのみ」をONにすると
       // 自分のレシピだけで数え直され、該当が1つも無いときはタグの区分ごと出さない
-      await ffPage.getByRole('button', { name: '自分で登録したレシピのみ', exact: true }).click()
+      await ffPage.getByRole('button', { name: ja.search.myRecipesOnly, exact: true }).click()
       await ffPage.waitForTimeout(700)
       check(
         'FF-FILTER 「自分で登録したレシピのみ」ONだと自分のタグで数え直す(0件なら区分ごと出さない)',
         (await ffPage.locator('[data-testid="recipes-tag-chip"]').count()) === 0,
       )
-      await ffPage.getByRole('button', { name: '条件をクリア' }).first().click()
+      await ffPage.getByRole('button', { name: ja.search.clear }).first().click()
       await ffPage.waitForTimeout(700)
       check(
         'FF-FILTER 条件をクリアするとタグの区分が戻る',
@@ -36801,7 +36814,7 @@ try {
       await flPage.goto(`${BASE}/#/cook-navi`)
       await flPage.reload({ waitUntil: 'networkidle' })
       await flPage.waitForTimeout(1200)
-      await flPage.getByRole('button', { name: '段取りを作る' }).click()
+      await flPage.getByRole('button', { name: ja.cookNavi.build }).click()
       await flPage.waitForTimeout(800)
 
       // 手順本文は文節の切れ目にゼロ幅スペースが入る(ja-phrase)。突き合わせる前に必ず取り除く
@@ -36821,12 +36834,12 @@ try {
       )
       check(
         'FL-01 段取りから外していることを画面に書く',
-        longText.includes('今回の調理では仕上がらないため、全体の目安時間に含めていません。'),
+        longText.includes(ja.cookNavi.longRestNote),
         `カード=${longText.replace(/\n/g, ' / ')}`,
       )
       check(
         'FL-01 長い待ちには「この間に、次の手作業を進められます」を出さない',
-        !longText.includes('この間に、次の手作業を進められます'),
+        !longText.includes(ja.cookNavi.waitFillHint),
         `カード=${longText.replace(/\n/g, ' / ')}`,
       )
       check(
@@ -36926,7 +36939,7 @@ try {
         reachedLong &&
           !longSession.includes('約20分の待ち時間') &&
           longSession.includes('長い待ち時間') &&
-          longSession.includes('今回の調理では仕上がらないため、全体の目安時間に含めていません。'),
+          longSession.includes(ja.cookNavi.longRestNote),
         `本文=${longSession.slice(0, 200).replace(/\n/g, ' / ')}`,
       )
       // FL-05 長い待ちで終わる品に「完成」を出さない（司令部裁定）
@@ -37063,7 +37076,7 @@ try {
       await fmPage.goto(`${BASE}/#/cook-navi`)
       await fmPage.reload({ waitUntil: 'networkidle' })
       await fmPage.waitForTimeout(1200)
-      await fmPage.getByRole('button', { name: '段取りを作る' }).click()
+      await fmPage.getByRole('button', { name: ja.cookNavi.build }).click()
       await fmPage.waitForTimeout(800)
 
       const noZw = (t) => (t ?? '').replace(/\u200B/g, '')
@@ -37219,9 +37232,9 @@ try {
           await p.waitForTimeout(500)
           await p.getByText(title, { exact: true }).first().click()
           await p.waitForTimeout(600)
-          await p.getByRole('button', { name: '今日の献立に追加' }).click()
+          await p.getByRole('button', { name: ja.detail.todayAdd }).click()
           await p.waitForTimeout(300)
-          await p.getByRole('button', { name: '夕食', exact: true }).click()
+          await p.getByRole('button', { name: ja.mealPlan.slot.dinner, exact: true }).click()
           await p.waitForTimeout(500)
           return (await p.textContent('body')) ?? ''
         }
@@ -37240,7 +37253,7 @@ try {
 
       // 2026-08-20 便II・⑥: 「全て作った！」は整理モードの中に移った
         await openDayOrganize(p)
-        await p.getByRole('button', { name: '全て作った！' }).click()
+        await p.getByRole('button', { name: ja.mealPlan.todayMarkAllCooked }).click()
         await p.waitForTimeout(900)
         check(
           'FN-01 確認文に「週の献立に残る」ことが書いてある(規約F)',
@@ -37252,7 +37265,7 @@ try {
           'FN-01 前提: 「3件の作った記録をつけました」が出て今日の献立が空になる',
           // 2026-08-17 便HI: 空の日は「今日の献立」の見出しごと出さないので、そちらで測る
           afterAll.includes('3件の作った記録をつけました') &&
-            (await p.getByRole('heading', { name: '今日の献立' }).count()) === 0,
+            (await p.getByRole('heading', { name: ja.mealPlan.todayTitle }).count()) === 0,
         )
 
         // ここが報告のバグ: 空なのに「今日の夕食にすでに入っています」と断られ、何も追加されなかった
@@ -37275,7 +37288,7 @@ try {
         check(
           'FN-01 今日の献立(日)に3品とも戻っている',
           TITLES.every((t) => restoredBody.includes(t)) &&
-            (await p.getByRole('heading', { name: '今日の献立' }).count()) === 1,
+            (await p.getByRole('heading', { name: ja.mealPlan.todayTitle }).count()) === 1,
         )
         check('FN-01 並行調理ナビの入口も戻る(2品以上あるため)', restoredBody.includes('並行調理ナビ'))
 
@@ -37359,14 +37372,14 @@ try {
         await p.goto(`${BASE}/#/cook-navi`)
         await p.reload({ waitUntil: 'networkidle' })
         await p.waitForTimeout(1200)
-        await p.getByRole('button', { name: '段取りを作る' }).click()
+        await p.getByRole('button', { name: ja.cookNavi.build }).click()
         await p.waitForTimeout(900)
 
         // FN-02: 待ちの枠の数だけ「タイマーを始める」がある（出たり出なかったりしない）
         const waitBlocks = await p.locator('[data-testid="navi-wait-block"]').count()
         const timerButtons = await p
           .locator('[data-testid="navi-wait-block"]')
-          .getByRole('button', { name: 'タイマーを始める' })
+          .getByRole('button', { name: ja.cookNavi.startTimer })
           .count()
         check(
           'FN-02 待ちの枠が3つ以上ある(判定の前提)',
@@ -37382,7 +37395,7 @@ try {
         const inTextWait = p.locator('[data-testid="navi-wait-block"]').filter({ hasText: '約2分の待ち時間' })
         check(
           'FN-02 本文に分数が書かれた待ち(「2分温める」)にもボタンがある',
-          (await inTextWait.getByRole('button', { name: 'タイマーを始める' }).count()) === 1,
+          (await inTextWait.getByRole('button', { name: ja.cookNavi.startTimer }).count()) === 1,
         )
         // 手順に時間が書かれていない待ち(調理法から当てた分数)にもボタンがある
         const estimatedWait = p
@@ -37391,7 +37404,7 @@ try {
         check(
           'FN-02 時間の書かれていない待ちにもボタンがある(目安であることは添えたまま)',
           (await estimatedWait.count()) >= 1 &&
-            (await estimatedWait.getByRole('button', { name: 'タイマーを始める' }).count()) ===
+            (await estimatedWait.getByRole('button', { name: ja.cookNavi.startTimer }).count()) ===
               (await estimatedWait.count()),
         )
 
@@ -37482,7 +37495,7 @@ try {
         // FN-03: タイマーを2本動かして献立の画面へ。帯の下に隠れる操作要素がゼロであること
         const startButtons = p
           .locator('[data-testid="navi-wait-block"]')
-          .getByRole('button', { name: 'タイマーを始める' })
+          .getByRole('button', { name: ja.cookNavi.startTimer })
         await startButtons.nth(0).click()
         await p.waitForTimeout(300)
         await startButtons.nth(1).click()
@@ -37684,7 +37697,7 @@ try {
       await foPage.reload({ waitUntil: 'networkidle' })
       await foPage.waitForTimeout(1400)
       const foScrollBeforeBuild = await foPage.evaluate(() => window.scrollY)
-      await foPage.getByRole('button', { name: '段取りを作る' }).click()
+      await foPage.getByRole('button', { name: ja.cookNavi.build }).click()
       await foPage.waitForTimeout(1600)
       const foAfterBuild = await foPage.evaluate(() => {
         const el = document.querySelector('[data-testid="cook-session-start"]')
@@ -37975,7 +37988,7 @@ try {
         foPage.url() === foUrlBefore,
         `${foUrlBefore} → ${foPage.url()}`,
       )
-      const foAdjust = foPage.getByRole('dialog', { name: 'タイマーを調整' })
+      const foAdjust = foPage.getByRole('dialog', { name: ja.timer.adjustDialogTitle })
       check('FO-08 代わりにタイマーの窓が開く', (await foAdjust.count()) === 1)
       // 2026-08-15 便GQ: 調理の途中かどうかで「開く」「見る」に名前が分かれるので、
       // ここは**手順への道があること**だけを見る（動きの語で掴まない）
@@ -37987,7 +38000,7 @@ try {
       )
       check(
         'FO-08 窓の中に大きな「タイマーを消す」がある（小さな✕を狙わなくてよい）',
-        (await foAdjust.getByRole('button', { name: 'タイマーを消す' }).count()) === 1,
+        (await foAdjust.getByRole('button', { name: ja.timer.stopTimer }).count()) === 1,
       )
       await foGoToStep.click()
       await foPage.waitForTimeout(1200)
@@ -38007,7 +38020,7 @@ try {
       await foPage.reload({ waitUntil: 'networkidle' })
       await foPage.waitForTimeout(1600)
       if ((await foPage.locator('[data-testid="cook-session-start"]').count()) === 0) {
-        await foPage.getByRole('button', { name: '段取りを作る' }).click()
+        await foPage.getByRole('button', { name: ja.cookNavi.build }).click()
         await foPage.waitForTimeout(1200)
       }
       if ((await foPage.locator('[data-testid="cook-session"]').count()) === 0) {
@@ -38187,7 +38200,7 @@ try {
       }, foIds)
       await foPage.reload({ waitUntil: 'networkidle' })
       await foPage.waitForTimeout(1600)
-      await foPage.getByRole('button', { name: '段取りを作る' }).click()
+      await foPage.getByRole('button', { name: ja.cookNavi.build }).click()
       await foPage.waitForTimeout(1400)
       await foPage.locator('[data-testid="cook-session-start"]').click()
       await foPage.waitForTimeout(700)
@@ -38349,7 +38362,7 @@ try {
         await fqPage.goto(`${BASE}/#/cook-navi`)
         await fqPage.reload({ waitUntil: 'networkidle' })
         await fqPage.waitForTimeout(1200)
-        await fqPage.getByRole('button', { name: '段取りを作る' }).click()
+        await fqPage.getByRole('button', { name: ja.cookNavi.build }).click()
         await fqPage.waitForTimeout(900)
         const cards = (
           await fqPage.locator('ol > li').evaluateAll((els) => els.map((el) => el.textContent))
@@ -38444,10 +38457,10 @@ try {
         check(
           'FP-01 前提: 今日の献立は空で「今日の献立を探す」が出ている',
           // 2026-08-17 便HI: 空の日は「今日の献立」の見出しごと出さず、ボタンだけを残す
-          (await p.getByRole('heading', { name: '今日の献立' }).count()) === 0 &&
-            (await p.getByRole('button', { name: '今日の献立を探す' }).count()) === 1,
+          (await p.getByRole('heading', { name: ja.mealPlan.todayTitle }).count()) === 0 &&
+            (await p.getByRole('button', { name: ja.mealPlan.todayChooseButton }).count()) === 1,
         )
-        await p.getByRole('button', { name: '今日の献立を探す' }).click()
+        await p.getByRole('button', { name: ja.mealPlan.todayChooseButton }).click()
         await p.waitForTimeout(1200)
 
         // 報告②: 飛び先が「ただのレシピ一覧」で、選んでいる最中だと分かる表示も決定ボタンも無かった
@@ -38455,7 +38468,7 @@ try {
         check(
           'FP-01 飛び先で「今日の献立に入れるレシピを選んでいます」が出る',
           (await banner.count()) === 1 &&
-            ((await banner.innerText()) ?? '').includes('今日の献立に入れるレシピを選んでいます'),
+            stripZwspText(await banner.innerText()).includes(ja.recipes.selectForTodayTitle),
         )
         const decide = p.getByTestId('add-selected-to-today')
         check(
@@ -38489,7 +38502,7 @@ try {
           'FP-01 食事の振り分けは品ごとではなく1回だけ聞く',
           ((await p.textContent('body')) ?? '').includes('選んだ3品を朝食・昼食・夕食のどれに入れますか？'),
         )
-        await p.getByRole('button', { name: '夕食', exact: true }).click()
+        await p.getByRole('button', { name: ja.mealPlan.slot.dinner, exact: true }).click()
         await p.waitForTimeout(1600)
 
         // 入れ終わったら献立へ戻り、何品どこへ入ったかを知らせる
@@ -38502,7 +38515,7 @@ try {
         check(
           'FP-01 今日の献立に3品とも並んでいる',
           TITLES.every((t) => afterBody.includes(t)) &&
-            (await p.getByRole('heading', { name: '今日の献立' }).count()) === 1,
+            (await p.getByRole('heading', { name: ja.mealPlan.todayTitle }).count()) === 1,
         )
         check('FP-01 2品以上あるので並行調理ナビの入口も出る', afterBody.includes('並行調理ナビ'))
 
@@ -38524,7 +38537,7 @@ try {
         )
 
         // 週タブの画面でも、副菜・汁物の行として出ている(報告④の見え方そのもの)
-        await p.getByRole('button', { name: '週', exact: true }).first().click()
+        await p.getByRole('button', { name: ja.mealPlan.viewWeek, exact: true }).first().click()
         await openAllWeekDays(p) // 便ID・⑦: 畳む既定になったので、カードの中を触る前に開く
         await p.waitForTimeout(1200)
         const domRole = async (title) => {
@@ -38565,7 +38578,7 @@ try {
         await p.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
         await p.waitForTimeout(2200)
 
-        await p.getByRole('button', { name: '選択', exact: true }).click()
+        await p.getByRole('button', { name: ja.recipes.selectToggle, exact: true }).click()
         await p.waitForTimeout(500)
         // 報告①: 選ぶ機能があるのに、使い道が書き出しと削除しかないと思わなかった。
         // 2026-08-17 便HJ: 3つの道は「選び終わる」を押した先の窓に移したので、
@@ -38576,7 +38589,7 @@ try {
           (await hint.count()) === 1 &&
             ((await hint.innerText()) ?? '')
               .replace(/​/g, '')
-              .includes('選び終わると、献立に入れる・書き出す・削除を選べます'),
+              .includes(ja.recipes.selectActionsHint),
           await hint.innerText().catch(() => ''),
         )
 
@@ -38596,7 +38609,7 @@ try {
         await p.getByTestId('selection-actions-today').click()
         await p.waitForTimeout(500)
         // 食事を決めない方でもまとめて入る(今週の予定には入れない)
-        await p.getByRole('button', { name: '朝食・昼食・夕食を決めずに今日の献立に追加' }).click()
+        await p.getByRole('button', { name: ja.detail.todaySlotUndecided }).click()
         await p.waitForTimeout(1200)
         check(
           'FP-02 一覧から入れたときは一覧に留まり、結果をその場で知らせる',
@@ -38629,7 +38642,7 @@ try {
         await p.waitForTimeout(400)
         await p.getByTestId('selection-actions-today').click()
         await p.waitForTimeout(400)
-        await p.getByRole('button', { name: '朝食・昼食・夕食を決めずに今日の献立に追加' }).click()
+        await p.getByRole('button', { name: ja.detail.todaySlotUndecided }).click()
         await p.waitForTimeout(1000)
         check(
           'FP-02 すでに入っている品は増やさず、その旨を伝える',
@@ -38657,7 +38670,7 @@ try {
         await p.waitForTimeout(2200)
         await p.getByText('ほうれん草のおひたし', { exact: true }).first().click()
         await p.waitForTimeout(800)
-        await p.getByRole('button', { name: '今日の献立に追加' }).click()
+        await p.getByRole('button', { name: ja.detail.todayAdd }).click()
         await p.waitForTimeout(500)
 
         // 「夕食だけが塗られている」＝もう選ばれているのか推奨なのか読めない、という報告への対応。
@@ -38680,20 +38693,20 @@ try {
         check(
           'FP-03 「決めない」ではなく、何が起きるかを名前で言う',
           !dialogText.includes('決めない') &&
-            dialogText.includes('朝食・昼食・夕食を決めずに今日の献立に追加'),
+            dialogText.includes(ja.detail.todaySlotUndecided),
           dialogText,
         )
         check(
           'FP-03 3つの食事との違い(今週の予定に入るかどうか)が書いてある',
-          dialogText.includes('今週の予定には入れず、今日の献立にだけ入ります'),
+          dialogText.includes(ja.detail.todaySlotUndecidedHint),
           dialogText,
         )
 
-        await p.getByRole('button', { name: '朝食・昼食・夕食を決めずに今日の献立に追加' }).click()
+        await p.getByRole('button', { name: ja.detail.todaySlotUndecided }).click()
         await p.waitForTimeout(900)
         check(
           'FP-03 押したら結果を知らせる(無言で閉じない)',
-          ((await p.textContent('body')) ?? '').includes('今日の献立に追加しました'),
+          stripZwspText(await p.textContent('body')).includes(ja.detail.todaySlotUndecidedAddedToast),
         )
         const iso3 = await todayIso(p)
         const state4 = await readTodayPlan(p, iso3)
@@ -38720,9 +38733,9 @@ try {
           await p.waitForTimeout(600)
           await p.getByText(title, { exact: true }).first().click()
           await p.waitForTimeout(700)
-          await p.getByRole('button', { name: '今日の献立に追加' }).click()
+          await p.getByRole('button', { name: ja.detail.todayAdd }).click()
           await p.waitForTimeout(300)
-          await p.getByRole('button', { name: '夕食', exact: true }).click()
+          await p.getByRole('button', { name: ja.mealPlan.slot.dinner, exact: true }).click()
           await p.waitForTimeout(700)
         }
         const iso4 = await todayIso(p)
@@ -38779,9 +38792,9 @@ try {
         await p.waitForTimeout(500)
         await p.getByText(title, { exact: true }).first().click()
         await p.waitForTimeout(700)
-        await p.getByRole('button', { name: '今日の献立に追加', exact: true }).click()
+        await p.getByRole('button', { name: ja.detail.todayAdd, exact: true }).click()
         await p.waitForTimeout(400)
-        await p.getByRole('button', { name: '朝食・昼食・夕食を決めずに今日の献立に追加' }).click()
+        await p.getByRole('button', { name: ja.detail.todaySlotUndecided }).click()
         await p.waitForTimeout(500)
       }
       /** レシピ詳細の「今日の献立に追加済み」をもう一度押して外す */
@@ -38797,7 +38810,7 @@ try {
       const openNavi = async () => {
         await p.goto(`${BASE}/#/cook-navi`, { waitUntil: 'networkidle' })
         await p.waitForTimeout(1500)
-        const build = p.getByRole('button', { name: '段取りを作る' })
+        const build = p.getByRole('button', { name: ja.cookNavi.build })
         const notice = p.getByTestId('navi-selection-dropped')
         return {
           count: Number(((await p.textContent('body')) ?? '').match(/(\d+)品を選択中/)?.[1] ?? -1),
@@ -38838,7 +38851,7 @@ try {
       for (const t of FIRST) await addToToday(t)
       const before = await openNavi()
       check('FR-01 前提: 3品入れてナビを開くと3品が選ばれている', before.count === 3, JSON.stringify(before))
-      await p.getByRole('button', { name: '段取りを作る' }).click()
+      await p.getByRole('button', { name: ja.cookNavi.build }).click()
       await p.waitForTimeout(900)
       check(
         'FR-01 前提: 段取りが出る',
@@ -38897,7 +38910,7 @@ try {
       )
       check(
         'FR-02 0品では「段取りを作る」は押せない',
-        await p.getByRole('button', { name: '段取りを作る' }).isDisabled(),
+        await p.getByRole('button', { name: ja.cookNavi.build }).isDisabled(),
       )
       await ctx.close()
     } finally {
@@ -38967,9 +38980,9 @@ try {
           await p.waitForTimeout(500)
           await p.getByText(title, { exact: true }).first().click()
           await p.waitForTimeout(700)
-          await p.getByRole('button', { name: '今日の献立に追加', exact: true }).click()
+          await p.getByRole('button', { name: ja.detail.todayAdd, exact: true }).click()
           await p.waitForTimeout(300)
-          await p.getByRole('button', { name: '夕食', exact: true }).click()
+          await p.getByRole('button', { name: ja.mealPlan.slot.dinner, exact: true }).click()
           await p.waitForTimeout(500)
           return (await p.textContent('body')) ?? ''
         }
@@ -39107,7 +39120,7 @@ try {
         await p.goto(`${BASE}/#/cook-navi`)
         await p.reload({ waitUntil: 'networkidle' })
         await p.waitForTimeout(1500)
-        await p.getByRole('button', { name: '段取りを作る' }).click()
+        await p.getByRole('button', { name: ja.cookNavi.build }).click()
         await p.waitForTimeout(900)
 
         const waitBlocks = await p.$$eval('[data-testid="navi-wait-block"]', (els) =>
@@ -39165,7 +39178,7 @@ try {
         })
         check('FS-05 前提: 待ちのブロックに「タイマーを始める」がある', timerCardId !== '', timerCardId)
         const timerCard = p.locator(`#${timerCardId}`)
-        await timerCard.getByRole('button', { name: 'タイマーを始める' }).click()
+        await timerCard.getByRole('button', { name: ja.cookNavi.startTimer }).click()
         await p.waitForTimeout(900)
         const cardAfter = noZw(await timerCard.innerText())
         check(
@@ -39205,7 +39218,7 @@ try {
         )
         check(
           'FS-08 移った直後に、番号を付け直したことをその場に出す',
-          notice === '移した手順を今の位置に入れたので、段取りの番号を付け直しています',
+          notice === ja.cookNavi.pullRenumberedNote,
           notice,
         )
         // 一覧に戻っても、並びが変わっている間は同じ説明が読める
@@ -39218,7 +39231,7 @@ try {
         )
         check(
           'FS-08 段取りの一覧でも、並びが変わっている間は理由が読める',
-          listNote === '移した手順を今の位置に入れたので、段取りの番号を付け直しています',
+          listNote === ja.cookNavi.pullRenumberedNote,
           listNote,
         )
 
@@ -39286,7 +39299,7 @@ try {
         // 助数詞ではなく数を読む。読めなかったときは null にして、
         // 「小さいから合格」に倒れないよう呼び出し側で必ず落とす（2026-08-18 便HR）
         const countOf = async (query) => {
-          await p.getByPlaceholder('料理名・材料・タグ').fill(query)
+          await p.getByPlaceholder(ja.search.placeholder).fill(query)
           await p.waitForTimeout(700)
           return readResultCount(await p.textContent('body'))?.shown ?? null
         }
@@ -39414,7 +39427,7 @@ try {
       await ftPage.goto(`${BASE}/#/cook-navi`)
       await ftPage.reload({ waitUntil: 'networkidle' })
       await ftPage.waitForTimeout(1200)
-      await ftPage.getByRole('button', { name: '段取りを作る' }).click()
+      await ftPage.getByRole('button', { name: ja.cookNavi.build }).click()
       await ftPage.waitForTimeout(800)
 
       // 何がどこまで残るのかを、閉じる前に読める場所に書いてある（規約F）
@@ -39518,7 +39531,7 @@ try {
       currentCheck = 'FT-07'
       await ftPage3.goto(`${BASE}/#/cook-navi`, { waitUntil: 'networkidle' })
       await ftPage3.waitForTimeout(1500)
-      await ftPage3.getByRole('button', { name: 'タイマーを始める' }).first().click()
+      await ftPage3.getByRole('button', { name: ja.cookNavi.startTimer }).first().click()
       await ftPage3.waitForTimeout(800)
       const ftTimerBefore = await ftPage3.locator('[data-testid="navi-wait-timer-running"]').first().innerText()
       check(
@@ -39746,7 +39759,7 @@ try {
       await fuPage.goto(`${BASE}/#/cook-navi`)
       await fuPage.reload({ waitUntil: 'networkidle' })
       await fuPage.waitForTimeout(1200)
-      await fuPage.getByRole('button', { name: '段取りを作る' }).click()
+      await fuPage.getByRole('button', { name: ja.cookNavi.build }).click()
       await fuPage.waitForTimeout(900)
 
       // --- FU-01: 画面に出ている各手順の分を足すと、ヘッダーの「1品だけなら約◯分」と一致する ---
@@ -39943,7 +39956,7 @@ try {
 
       // --- FU-04: 段取りの丸数字とレシピ内の手順番号がくっついていない ---
       currentCheck = 'FU-04'
-      const fuWaitTimer = fuPage.getByRole('button', { name: 'タイマーを始める' }).first()
+      const fuWaitTimer = fuPage.getByRole('button', { name: ja.cookNavi.startTimer }).first()
       await fuWaitTimer.click()
       await fuPage.waitForTimeout(800)
       const fuBarRow = fuPage.locator('button[aria-label*="タイマーを調整"]').first()
@@ -39960,15 +39973,15 @@ try {
       )
       await fuBarRow.click()
       await fuPage.waitForTimeout(500)
-      const fuDialogText = await fuPage.getByRole('dialog', { name: 'タイマーを調整' }).textContent()
+      const fuDialogText = await fuPage.getByRole('dialog', { name: ja.timer.adjustDialogTitle }).textContent()
       check(
         'FU-04 タイマーを調整する窓でも、丸数字と手順番号がくっついていない',
         !/[①-⑳㉑-㉟㊱-㊿]\d/.test(fuDialogText ?? ''),
         (fuDialogText ?? '').slice(0, 160),
       )
       await fuPage
-        .getByRole('dialog', { name: 'タイマーを調整' })
-        .getByRole('button', { name: 'タイマーを消す' })
+        .getByRole('dialog', { name: ja.timer.adjustDialogTitle })
+        .getByRole('button', { name: ja.timer.stopTimer })
         .click()
       await fuPage.waitForTimeout(600)
 
@@ -40026,7 +40039,7 @@ try {
       if (await fuCooked.count()) {
         await fuCooked.click()
         await fuPage.waitForTimeout(1200)
-        const fuSave = fuPage.getByRole('button', { name: '記録する' }).first()
+        const fuSave = fuPage.getByRole('button', { name: ja.detail.cookedSave }).first()
         if (await fuSave.count()) {
           await fuSave.click()
           await fuPage.waitForTimeout(1200)
@@ -40050,14 +40063,14 @@ try {
       currentCheck = 'FU-03'
       await fuPage.goto(`${BASE}/#/recipes/new`, { waitUntil: 'networkidle' })
       await fuPage.waitForTimeout(700)
-      await fuPage.getByText('テキスト貼り付けで自動入力').click()
+      await fuPage.getByText(ja.paste.open).click()
       await fuPage.waitForTimeout(300)
       await fuPage.locator(`textarea[placeholder="${ja.paste.placeholder}"]`).fill(
         'FU貼り付け時間つき\n2人分\n調理時間 1時間30分\n\n材料\n・にんじん　1本\n・しょうゆ　大さじ2\n\n作り方\n1. にんじんを切る\n2. 20分煮る',
       )
-      await fuPage.getByRole('button', { name: '自動で振り分ける' }).click()
+      await fuPage.getByRole('button', { name: ja.paste.apply }).click()
       await fuPage.waitForTimeout(600)
-      const fuCookMinutes = await fuPage.getByLabel('調理時間（分）').inputValue()
+      const fuCookMinutes = await fuPage.getByLabel(ja.form.cookMinutesLabel).inputValue()
       const fuPasteBody = await fuPage.textContent('body')
       check(
         'FU-03 貼り付けの「調理時間 1時間30分」が調理時間の欄に入る（90分）',
@@ -40075,12 +40088,12 @@ try {
       await fuPage.goto(`${BASE}/#/recipes/new`)
       await fuPage.reload({ waitUntil: 'networkidle' })
       await fuPage.waitForTimeout(900)
-      await fuPage.getByText('テキスト貼り付けで自動入力').click()
+      await fuPage.getByText(ja.paste.open).click()
       await fuPage.waitForTimeout(300)
       await fuPage.locator(`textarea[placeholder="${ja.paste.placeholder}"]`).fill(
         'FU貼り付け時間なし\n2人分\n\n材料\n・にんじん　1本\n\n作り方\n1. にんじんを切る\n2. 10分煮る',
       )
-      await fuPage.getByRole('button', { name: '自動で振り分ける' }).click()
+      await fuPage.getByRole('button', { name: ja.paste.apply }).click()
       await fuPage.waitForTimeout(600)
       const fuPasteBody2 = await fuPage.textContent('body')
       check(
@@ -40144,7 +40157,7 @@ try {
       errors.push(`[console@FX] ${t}`)
     })
     const fxHint = () =>
-      fxPage.locator('[data-testid="cook-session"] p', { hasText: '声で操作' }).first().innerText()
+      fxPage.locator('[data-testid="cook-session"] p', { hasText: ja.focus.micLabel }).first().innerText()
     try {
       await fxPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
       await fxPage.waitForTimeout(1800)
@@ -40195,13 +40208,13 @@ try {
       await fxPage.goto(`${BASE}/#/cook-navi`)
       await fxPage.reload({ waitUntil: 'networkidle' })
       await fxPage.waitForTimeout(1400)
-      await fxPage.getByRole('button', { name: '段取りを作る' }).click()
+      await fxPage.getByRole('button', { name: ja.cookNavi.build }).click()
       await fxPage.waitForTimeout(1000)
 
       // --- FX-11: 湯沸かしの待ちに、全体の目安への数え方が添えてある（司令部裁定A案） ---
       currentCheck = 'FX-11'
       const fxBoilBlock = await fxPage
-        .locator('[data-testid="navi-wait-block"]', { hasText: '沸くまでの待ち時間' })
+        .locator('[data-testid="navi-wait-block"]', { hasText: ja.cookNavi.waitBlockBoil })
         .first()
         .innerText()
         .catch(() => '')
@@ -40301,9 +40314,9 @@ try {
       const fxHintText = await fxHint()
       check(
         'FX-02 声の案内は3つ（手順の移動／読み上げ／タイマー操作）',
-        fxHintText.includes('声で操作:「次へ」「戻って」で手順の移動') &&
-          fxHintText.includes('「読み上げ」でいまの手順を読み上げ') &&
-          fxHintText.includes('「タイマー」「ストップ」「再開」でタイマー操作'),
+        fxHintText.includes(ja.focus.micHintMove) &&
+          fxHintText.includes(ja.focus.micHintRead) &&
+          fxHintText.includes(ja.focus.micHintTimer),
         fxHintText,
       )
       check(
@@ -40424,7 +40437,7 @@ try {
         .catch(() => '')
       check(
         'FX-05 読み上げを使うと、読み方の直し方を案内する',
-        fxReadingHint.includes('読み方が合わないときは') &&
+        fxReadingHint.includes(ja.focus.readingHintTitle) &&
           fxReadingHint.includes('端末の設定で声を切り替える') &&
           fxReadingHint.includes('iPhone') &&
           fxReadingHint.includes('Android'),
@@ -40461,7 +40474,7 @@ try {
       check(
         'FX-08 確認文に、消えるものと残るものの両方が書いてある（規約F）',
         fxDialogMessage.includes('作った段取り・選んでいた3品の組み合わせ・調理中だった手順') &&
-          fxDialogMessage.includes('レシピ・今日の献立・作った記録・動いているタイマー'),
+          fxDialogMessage.includes(ja.cookNavi.discardTimelineKept),
         fxDialogMessage,
       )
       check(
@@ -40531,7 +40544,7 @@ try {
       check('FX-12 前提: 同梱のフレンチトーストとおひたしを今日の献立に入れられた', fxStarterOk === true)
       await fxPage.reload({ waitUntil: 'networkidle' })
       await fxPage.waitForTimeout(1800)
-      await fxPage.getByRole('button', { name: '段取りを作る' }).click()
+      await fxPage.getByRole('button', { name: ja.cookNavi.build }).click()
       await fxPage.waitForTimeout(1200)
       const fxToastCards = await fxPage.evaluate(() =>
         [...document.querySelectorAll('[id^="navi-step-"]')].map((card) => ({
@@ -40678,7 +40691,7 @@ try {
       )
       check(
         'FW-01 リンクの文言が行き先の中身を言っている',
-        ((await fwProLink.textContent().catch(() => '')) ?? '').trim() === 'Pro版の詳しい説明を見る',
+        ((await fwProLink.textContent().catch(() => '')) ?? '').trim() === ja.settings.proDetailLinkActivated,
       )
       const fwProRes = await fwPage.request.get(`${BASE}/about/manual.html`)
       const fwProBody = fwProRes.ok() ? await fwProRes.text() : ''
@@ -40699,7 +40712,7 @@ try {
       )
       check(
         'FW-02 「今のデータに追加」のボタンは残っている',
-        (await fwPage.getByRole('button', { name: '今のデータに追加' }).count()) === 1,
+        (await fwPage.getByRole('button', { name: ja.settings.backupImportMerge }).count()) === 1,
       )
       check(
         'FW-02 「今のデータに追加」の下の説明文は出さない（オーナー指示で削除）',
@@ -40907,7 +40920,7 @@ try {
       await fpPage.waitForTimeout(600)
       await fpPage.getByRole('button', { name: '作った！' }).first().click()
       await fpPage.waitForTimeout(400)
-      const fpDetailSwitch = fpPage.getByRole('switch', { name: '使った食材の在庫を減らす' })
+      const fpDetailSwitch = fpPage.getByRole('switch', { name: ja.detail.cookedReflectPantryLabel })
       check(
         'FW-04 在庫でONにすると、レシピ詳細の「作った！」のスイッチもONになっている（連動）',
         (await fpDetailSwitch.getAttribute('aria-checked')) === 'true',
@@ -40915,7 +40928,7 @@ try {
       // 逆向きにも連動する（レシピ詳細で切ると在庫の画面も切れる）
       await fpDetailSwitch.click()
       await fpPage.waitForTimeout(400)
-      await fpPage.getByRole('button', { name: 'やめる' }).first().click()
+      await fpPage.getByRole('button', { name: ja.common.confirmCancel }).first().click()
       await fpPage.waitForTimeout(300)
       await fpPage.goto(`${BASE}/#/shopping`, { waitUntil: 'networkidle' })
       await fpPage.waitForTimeout(600)
@@ -40957,7 +40970,7 @@ try {
         (await fpPage.locator('[data-testid="day-pantry-cooked-hint"]').count()) === 1,
       )
       fpDialogs.length = 0
-      await fpPage.getByRole('button', { name: '全て作った！' }).first().click()
+      await fpPage.getByRole('button', { name: ja.mealPlan.todayMarkAllCooked }).first().click()
       await fpPage.waitForTimeout(1200)
       check(
         'FW-04 「全て作った！」の確認文が、どの設定で在庫が減るのかを名前で言う',
@@ -41164,7 +41177,7 @@ try {
       await gjPage.goto(`${BASE}/#/cook-navi`)
       await gjPage.reload({ waitUntil: 'networkidle' })
       await gjPage.waitForTimeout(1500)
-      await gjPage.getByRole('button', { name: '段取りを作る' }).click()
+      await gjPage.getByRole('button', { name: ja.cookNavi.build }).click()
       await gjPage.waitForTimeout(1000)
 
       const gjAuto = await gjOrder()
@@ -41265,7 +41278,7 @@ try {
           t.includes('電子レンジが空いていません。') ||
           t.includes('魚焼きグリルが空いていません。') ||
           t.includes('トースターが空いていません。') ||
-          t.includes('火にかけたまま、次にこの品へ手を戻すまでが長くなります。'),
+          t.includes(ja.cookNavi.reorderIssueUnattended),
         ),
         gjIssues.join(' / '),
       )
@@ -41404,7 +41417,7 @@ try {
         gjExpired,
       )
       // 組み直すと、自動で組んだ並びから始まる（昨日の並びを当てにいかない）
-      await gjPage.getByRole('button', { name: '段取りを作る' }).click()
+      await gjPage.getByRole('button', { name: ja.cookNavi.build }).click()
       await gjPage.waitForTimeout(1000)
       check(
         'GJ-04 組み直すと、自動で組んだ並びから始まる',
@@ -41491,7 +41504,7 @@ try {
       await glPage.goto(`${BASE}/#/cook-navi`)
       await glPage.reload({ waitUntil: 'networkidle' })
       await glPage.waitForTimeout(1600)
-      await glPage.getByRole('button', { name: '段取りを作る' }).click()
+      await glPage.getByRole('button', { name: ja.cookNavi.build }).click()
       await glPage.waitForTimeout(1200)
 
       // --- GL-01: 目安の分数につく印 ---
@@ -41615,7 +41628,7 @@ try {
       )
       check(
         'GL-02 行き先は2つとも言葉で書いてある（OK／キャンセルではない）',
-        glResetText.includes('自動の並びに戻す') && glResetText.includes('並べ替えたままにする'),
+        glResetText.includes('自動の並びに戻す') && glResetText.includes(ja.cookNavi.reorderUndoAllCancel),
         glResetText,
       )
       await glPage.locator('[data-testid="navi-reorder-reset-modal-cancel"]').click()
@@ -41685,7 +41698,7 @@ try {
       const glHasTimerButton = async () =>
         (await glPage
           .locator('[data-testid="cook-session-wait-block"]')
-          .getByRole('button', { name: 'タイマーを始める' })
+          .getByRole('button', { name: ja.cookNavi.startTimer })
           .count()) > 0
       // 待ちのタイマーが出る手順まで進む（何手順目かは段取り次第なので決め打ちにしない）
       let glSteps = 0
@@ -41918,7 +41931,7 @@ try {
       await gsPage.waitForTimeout(2000)
       await gsPage.getByText('肉じゃが', { exact: true }).first().click()
       await gsPage.waitForTimeout(700)
-      await gsPage.getByText('調理中モードで見る').click()
+      await gsPage.getByText(ja.focus.open).click()
       await gsPage.waitForTimeout(600)
 
       // --- GS-03: 案内を出す条件を、並行調理ナビ（FO-03）とそろえる ---
@@ -42256,7 +42269,7 @@ try {
         )
         check(
           'NOHOME-01 端末のホーム画面への追加案内は残る(別物なので消さない)',
-          body.includes('ホーム画面への追加方法'),
+          body.includes(ja.settings.installPageLink),
         )
       }
 
@@ -42398,7 +42411,7 @@ try {
         // 選択モードに入る前後で、入口のボタンが同じ場所にあること(2026-08-17 便HJ)。
         // 幅は名前の長さで変わるので、動かないことを上端と右端で測る
         const suToggleBefore = await suButtonBox('選択')
-        await suPage.getByRole('button', { name: '選択', exact: true }).click()
+        await suPage.getByRole('button', { name: ja.recipes.selectToggle, exact: true }).click()
         await suPage.waitForTimeout(300)
         const suToggleAfter = await suButtonBox('選択をやめる')
         check(
@@ -42525,7 +42538,7 @@ try {
         await suPage.waitForTimeout(1400)
         check(
           `SELECT-UI-01(${suLabel}) タブを移動して戻ると、選択は残らずふだんの一覧に戻る`,
-          (await suPage.getByRole('button', { name: '選択', exact: true }).count()) === 1 &&
+          (await suPage.getByRole('button', { name: ja.recipes.selectToggle, exact: true }).count()) === 1 &&
             (await suPage.getByTestId('selection-bar').count()) === 0 &&
             (await suSelectedCount()) === 0,
         )
@@ -42535,8 +42548,8 @@ try {
         const suBackToPlainList = async () =>
           (await suPage.getByTestId('selection-bar').count()) === 0 &&
           (await suSelectedCount()) === 0 &&
-          (await suPage.getByRole('button', { name: '選択', exact: true }).count()) === 1
-        await suPage.getByRole('button', { name: '選択', exact: true }).click()
+          (await suPage.getByRole('button', { name: ja.recipes.selectToggle, exact: true }).count()) === 1
+        await suPage.getByRole('button', { name: ja.recipes.selectToggle, exact: true }).click()
         await suPage.waitForTimeout(300)
         const suPoint4 = await suFreeCardPoint()
         await suPage.mouse.click(suPoint4.x, suPoint4.y)
@@ -42549,7 +42562,7 @@ try {
           await suBackToPlainList(),
         )
 
-        await suPage.getByRole('button', { name: '選択', exact: true }).click()
+        await suPage.getByRole('button', { name: ja.recipes.selectToggle, exact: true }).click()
         await suPage.waitForTimeout(300)
         const suPoint5 = await suFreeCardPoint()
         await suPage.mouse.click(suPoint5.x, suPoint5.y)
@@ -42665,7 +42678,7 @@ try {
         s2Plain.fullyVisibleCards > 0,
         JSON.stringify(s2Plain),
       )
-      await s2Page.getByRole('button', { name: '選択', exact: true }).click()
+      await s2Page.getByRole('button', { name: ja.recipes.selectToggle, exact: true }).click()
       await s2Page.waitForTimeout(400)
       await s2Page.locator('[data-testid="select-card"]').first().click()
       await s2Page.waitForTimeout(400)
@@ -42700,9 +42713,9 @@ try {
       )
       check(
         'SELECT-UI-02 献立から来たときは「入れずに献立に戻る」がある',
-        (await s2Page.getByRole('button', { name: '入れずに献立に戻る' }).count()) === 1,
+        (await s2Page.getByRole('button', { name: ja.recipes.selectExitToMealPlan }).count()) === 1,
       )
-      await s2Page.getByRole('button', { name: '入れずに献立に戻る' }).click()
+      await s2Page.getByRole('button', { name: ja.recipes.selectExitToMealPlan }).click()
       await s2Page.waitForTimeout(1000)
       check(
         'SELECT-UI-02 「入れずに献立に戻る」を押すと献立の画面へ戻る',
@@ -42755,7 +42768,7 @@ try {
         }
         /** 2品選んで「選び終わる」まで進み、どうするかの窓を開く */
         const s3OpenDialog = async () => {
-          await s3Page.getByRole('button', { name: '選択', exact: true }).click()
+          await s3Page.getByRole('button', { name: ja.recipes.selectToggle, exact: true }).click()
           await s3Page.waitForTimeout(400)
           const cards = s3Page.locator('[data-testid="select-card"]')
           await cards.nth(0).click()
@@ -43503,7 +43516,7 @@ try {
       await wcPage.waitForTimeout(2400) // 初回シード完了待ち
       await wcPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
       await wcPage.waitForTimeout(1500)
-      await wcPage.getByRole('button', { name: '週', exact: true }).click()
+      await wcPage.getByRole('button', { name: ja.mealPlan.viewWeek, exact: true }).click()
       await wcPage.waitForTimeout(800)
       // 「献立を提案」グループは 2026-08-19 便IF・⑤⑥ で既定が「開く」に戻った。
       // 畳んでいるときだけ開く＝既定がどちらでも、この先は「開いた状態」から測れる
@@ -43922,7 +43935,7 @@ try {
         await wfPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
         await wfPage.reload({ waitUntil: 'networkidle' })
         await wfPage.waitForTimeout(1800)
-        const tab = wfPage.getByRole('button', { name: '週', exact: true })
+        const tab = wfPage.getByRole('button', { name: ja.mealPlan.viewWeek, exact: true })
         if ((await tab.getAttribute('aria-pressed')) !== 'true') {
           await tab.click()
           await wfPage.waitForTimeout(800)
@@ -44730,9 +44743,9 @@ try {
       await frPage.waitForTimeout(1800) // 初回シード完了待ち
       await frPage.getByText('肉じゃが', { exact: true }).first().click()
       await frPage.waitForTimeout(500)
-      await frPage.getByRole('button', { name: '今日の献立に追加' }).click()
+      await frPage.getByRole('button', { name: ja.detail.todayAdd }).click()
       await frPage.waitForTimeout(300)
-      await frPage.getByRole('button', { name: '夕食', exact: true }).click()
+      await frPage.getByRole('button', { name: ja.mealPlan.slot.dinner, exact: true }).click()
       await frPage.waitForTimeout(600)
 
       // ---------- 日タブ: 「今日なに作る？」を畳んだまま ----------
@@ -44775,7 +44788,7 @@ try {
       )
 
       // ---------- 週タブ: 「献立を提案」を畳んだまま ----------
-      await frPage.getByRole('button', { name: '週', exact: true }).click()
+      await frPage.getByRole('button', { name: ja.mealPlan.viewWeek, exact: true }).click()
       await frPage.waitForTimeout(1000)
       const frFill = frPage.locator('[data-testid="week-fill-run"]')
       check(
@@ -44876,7 +44889,7 @@ try {
       // 前提①: 週の枠（密度「小」）に品を入れる。UIから入れる（献立の作りに手を入れない）
       await ngPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
       await ngPage.waitForTimeout(1800)
-      await ngPage.getByRole('button', { name: '週', exact: true }).first().click()
+      await ngPage.getByRole('button', { name: ja.mealPlan.viewWeek, exact: true }).first().click()
       await ngPage.waitForTimeout(1000)
       const ngFill = ngPage.locator('[data-testid="week-fill-run"]')
       if ((await ngFill.count()) === 1) {
@@ -45016,7 +45029,7 @@ try {
       // ---- 小（週の枠）: 印だけ。言葉は出さず、料理名が残っていること ----
       await ngPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
       await ngPage.waitForTimeout(2000)
-      await ngPage.getByRole('button', { name: '週', exact: true }).first().click()
+      await ngPage.getByRole('button', { name: ja.mealPlan.viewWeek, exact: true }).first().click()
       await ngPage.waitForTimeout(1600)
       const ngSlotCards = await ngPage.evaluate(() =>
         Array.from(document.querySelectorAll('[data-testid="row-recipe"]')).map((el) => {
@@ -45149,7 +45162,7 @@ try {
       }
       await ogPage.locator('[data-testid="day-suggest-apply"]').click()
       await ogPage.waitForTimeout(600)
-      await ogPage.getByRole('button', { name: '夕食', exact: true }).first().click()
+      await ogPage.getByRole('button', { name: ja.mealPlan.slot.dinner, exact: true }).first().click()
       await ogPage.waitForTimeout(1600)
       const ogOrganize = ogPage.locator('[data-testid="day-organize"]')
       check('IUORG-02 前提: 「整理」がある', (await ogOrganize.count()) === 1)
@@ -45538,7 +45551,7 @@ try {
         check('IUTODAY-07 前提: 今日の献立のボタンがある', (await tdToggle.count()) === 1)
         check(
           'IUTODAY-07 週で組んだだけで、レシピ詳細が「今日の献立に追加済み」になる',
-          (await tdLabel()).includes(ja.detail.todayAdded),
+          stripZwspText(await tdLabel()).includes(ja.detail.todayAdded),
           `ボタン=${await tdLabel()}`,
         )
         // 規約F: 押すと今週の献立からも外れることが、押す前に読める場所に書いてある
@@ -45555,7 +45568,7 @@ try {
         )
         check(
           'IUTODAY-07 外したあとは「今日の献立に追加」に戻る',
-          (await tdLabel()).includes(ja.detail.todayAdd) &&
+          stripZwspText(await tdLabel()).includes(ja.detail.todayAdd) &&
             !(await tdLabel()).includes(ja.detail.todayAdded),
           `ボタン=${await tdLabel()}`,
         )
@@ -45616,7 +45629,7 @@ try {
     try {
       await ivPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
       await ivPage.waitForTimeout(2200) // 初回シード完了待ち
-      await ivPage.getByRole('button', { name: '週', exact: true }).click()
+      await ivPage.getByRole('button', { name: ja.mealPlan.viewWeek, exact: true }).click()
       await ivPage.waitForTimeout(1200)
 
       /** 節の見出しの開閉状態（読み上げ名で掴む＝画面のどこにあっても同じ判定） */
@@ -45743,7 +45756,7 @@ try {
       await iwPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
       await iwPage.reload({ waitUntil: 'networkidle' })
       await iwPage.waitForTimeout(1800)
-      await iwPage.getByRole('button', { name: '週', exact: true }).click()
+      await iwPage.getByRole('button', { name: ja.mealPlan.viewWeek, exact: true }).click()
       await iwPage.waitForTimeout(1200)
       // 週を献立で埋める（測る対象を作ってから測る）
       await iwPage.locator('[data-testid="week-fill-run"]').first().click()
@@ -45905,7 +45918,7 @@ try {
       // ここから先は週タブを見るので、明示的に週へ戻してから曜日カードを開き直す
       await iwPage.goBack()
       await iwPage.waitForTimeout(1800)
-      await iwPage.getByRole('button', { name: '週', exact: true }).click()
+      await iwPage.getByRole('button', { name: ja.mealPlan.viewWeek, exact: true }).click()
       await iwPage.waitForTimeout(1200)
       await openAllWeekDays(iwPage)
       await iwPage.waitForTimeout(600)
@@ -45941,7 +45954,7 @@ try {
       // （日曜など）だと0日**になる。過ぎた日の献立はどの画面にも出ないので、この節は日曜に
       // まとめて落ちていた。週の区切りを「今日から7日間」にすれば今日が初日になり、
       // 先の日が必ず6日ある（この節が測るのは編集モードの振る舞いで、週の区切り方には依らない）
-      await selectWeekLayout(iwPage, '今日から7日間')
+      await selectWeekLayout(iwPage, ja.mealPlan.weekLayoutRolling)
       await iwPage.waitForTimeout(800)
       // 切り替えると見ている7日間がずれるので、**その週にもう一度献立を入れ直す**
       // （前に入れたのは「週区切り」の7日間で、今日から7日間には空の日が混ざる）
@@ -46053,17 +46066,33 @@ try {
       // 便IVのときは過ぎた日の編集モードに中身が無かったので出していなかった＝前提が変わった。
       // 過ぎた日の編集モードで触るのは**作った記録**で、献立の枠は今までどおり出さない
       // （それは下の JFPAST-01 が測る）
-      const iwPastEdit = await iwPage.evaluate(() => {
-        const out = []
-        for (const s of document.querySelectorAll('section[data-date]')) {
-          out.push({
-            date: s.getAttribute('data-date'),
-            edit: s.querySelectorAll('[data-testid="week-day-edit"]').length,
-            slots: s.querySelectorAll('[data-testid="slot-block"]').length,
-          })
-        }
-        return out
-      })
+      // 2026-08-23 便JM（禁じ手①の裏返し）: ここは**過ぎた日**を測る検査なのに、いま見ている
+      // 7日間は「今日から7日間」＝過ぎた日が1日も無い。前の形（週区切り）でも今日が月曜なら
+      // 過ぎた日は0日で、filter() が空 → every() が素通りで合格していた（測れていないのに緑）。
+      // 「前の週」へ1回送れば、区切り方にも曜日にも依らず**7日とも過ぎた日**になる。
+      // JFPAST-01 が同じ理由で同じ送り方をしている（見本）。
+      await iwPage.getByRole('button', { name: ja.mealPlan.prevWeek, exact: true }).click()
+      await iwPage.waitForTimeout(900)
+      await openAllWeekDays(iwPage)
+      await iwPage.waitForTimeout(400)
+      const readDayCards = () =>
+        iwPage.evaluate(() => {
+          const out = []
+          for (const s of document.querySelectorAll('section[data-date]')) {
+            out.push({
+              date: s.getAttribute('data-date'),
+              edit: s.querySelectorAll('[data-testid="week-day-edit"]').length,
+              slots: s.querySelectorAll('[data-testid="slot-block"]').length,
+            })
+          }
+          return out
+        })
+      const iwPastEdit = await readDayCards()
+      check(
+        'IVEDIT-03 前提: 前の週へ送ると7日とも過ぎた日になっている（曜日・区切り方に依らない）',
+        iwPastEdit.length === 7 && iwPastEdit.every((d) => d.date && d.date < iwToday),
+        JSON.stringify(iwPastEdit),
+      )
       check(
         'IVEDIT-03 過ぎた日にも編集の切り替えを出す（便JF・①で記録を足せるようになった）',
         // 7日ぶん読めていることを先に見る＝1枚も掴めていないのに every() で素通りしない
@@ -46072,9 +46101,19 @@ try {
       )
       check(
         'IVEDIT-03 過ぎた日には献立の枠を出さない（記録だけを見せる画面のまま）',
-        iwPastEdit.length === 7 &&
-          iwPastEdit.filter((d) => d.date < iwToday).every((d) => d.slots === 0),
+        iwPastEdit.length === 7 && iwPastEdit.every((d) => d.slots === 0),
         JSON.stringify(iwPastEdit),
+      )
+      // 続きの検査は今日のカードを触るので、見ている7日間を戻しておく
+      await iwPage.getByRole('button', { name: ja.mealPlan.nextWeek, exact: true }).click()
+      await iwPage.waitForTimeout(900)
+      await openAllWeekDays(iwPage)
+      await iwPage.waitForTimeout(400)
+      const iwBackToToday = await readDayCards()
+      check(
+        'IVEDIT-03 前提: 今日を含む7日間へ戻せた（続きの検査の土台）',
+        iwBackToToday.some((d) => d.date === iwToday),
+        JSON.stringify(iwBackToToday.map((d) => d.date)),
       )
 
       // ---- IVLOCK-04: 鍵の掛かった食事は通常表示でも分かる ----
@@ -46218,12 +46257,12 @@ try {
       // （コードはWEEKLOCK-MONTHと同じ検証用の1本）
       await iyPage.goto(`${BASE}/#/settings`, { waitUntil: 'networkidle' })
       await iyPage.waitForTimeout(1600)
-      await iyPage.getByPlaceholder('解錠コード (例: UR-XXXX-XXXX)').fill('UR-96QS-2VSZ')
-      await iyPage.getByRole('button', { name: '解錠する', exact: true }).click()
+      await iyPage.getByPlaceholder(ja.settings.unlockCodePlaceholder).fill('UR-96QS-2VSZ')
+      await iyPage.getByRole('button', { name: ja.settings.unlockActivate, exact: true }).click()
       await iyPage.waitForTimeout(900)
       check(
         'IYGENRE-01 前提: Pro版を解錠した（月タブの窓を見るため）',
-        ((await iyPage.textContent('body')) ?? '').includes('Pro版をご利用いただきありがとうございます'),
+        stripZwspText(await iyPage.textContent('body')).includes(ja.settings.proActivatedTitle),
       )
       await iyPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
       await iyPage.reload({ waitUntil: 'networkidle' })
@@ -46467,7 +46506,7 @@ try {
           await izPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
           await izPage.reload({ waitUntil: 'networkidle' })
           await izPage.waitForTimeout(1800)
-          await izPage.getByRole('button', { name: '週', exact: true }).click()
+          await izPage.getByRole('button', { name: ja.mealPlan.viewWeek, exact: true }).click()
           await izPage.waitForTimeout(1200)
           // 測る対象（献立の入った日）を作ってから測る
           await izPage.locator('[data-testid="week-fill-run"]').first().click()
@@ -46703,7 +46742,7 @@ try {
           await izPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
           await izPage.reload({ waitUntil: 'networkidle' })
           await izPage.waitForTimeout(1800)
-          await izPage.getByRole('button', { name: '週', exact: true }).click()
+          await izPage.getByRole('button', { name: ja.mealPlan.viewWeek, exact: true }).click()
           await izPage.waitForTimeout(1200)
           await izPage.locator('[data-testid="week-fill-run"]').first().click()
           await izPage.waitForTimeout(2600)
@@ -46824,7 +46863,7 @@ try {
       return (await l.count()) === 1 ? (await l.getAttribute('aria-pressed')) === 'true' : null
     }
     const izOpenWeek = async () => {
-      await izPage.getByRole('button', { name: '週', exact: true }).click()
+      await izPage.getByRole('button', { name: ja.mealPlan.viewWeek, exact: true }).click()
       await izPage.waitForTimeout(1200)
       await openAllWeekDays(izPage)
       await izPage.waitForTimeout(400)
@@ -46846,7 +46885,7 @@ try {
         return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
       })
       // 2026-08-23 司令部（禁じ手①）: 上と同じ理由。日曜だと「今日より先の日」が同じ週に0日
-      await selectWeekLayout(izPage, '今日から7日間')
+      await selectWeekLayout(izPage, ja.mealPlan.weekLayoutRolling)
       await izPage.waitForTimeout(800)
       await izPage.locator('[data-testid="week-fill-run"]').first().click()
       await izPage.waitForTimeout(2600)
@@ -46968,9 +47007,9 @@ try {
     try {
       await jaPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
       await jaPage.waitForTimeout(2400) // 初回シード完了待ち
-      await jaPage.getByRole('button', { name: '週', exact: true }).click()
+      await jaPage.getByRole('button', { name: ja.mealPlan.viewWeek, exact: true }).click()
       await jaPage.waitForTimeout(900)
-      await jaPage.getByRole('button', { name: '前の週', exact: true }).click()
+      await jaPage.getByRole('button', { name: ja.mealPlan.prevWeek, exact: true }).click()
       await openAllWeekDays(jaPage)
       await jaPage.waitForTimeout(700)
       // 掴む日は「画面に出ている日のうち今日より前のもの」＝並び順にも曜日にも依らない
@@ -47103,7 +47142,7 @@ try {
       )
       await jbPage.reload({ waitUntil: 'networkidle' })
       await jbPage.waitForTimeout(1400)
-      await jbPage.getByRole('button', { name: '週', exact: true }).click()
+      await jbPage.getByRole('button', { name: ja.mealPlan.viewWeek, exact: true }).click()
       await jbPage.waitForTimeout(900)
       // 仕込んだ日のカードが出る週まで送る（前後どちらへも送れる形にする）
       for (let i = 0; i < 4; i++) {
@@ -47232,7 +47271,7 @@ try {
     try {
       await jcPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
       await jcPage.waitForTimeout(2400)
-      await jcPage.getByRole('button', { name: '週', exact: true }).click()
+      await jcPage.getByRole('button', { name: ja.mealPlan.viewWeek, exact: true }).click()
       await jcPage.waitForTimeout(900)
       await openWeekGroup(jcPage, ja.mealPlan.weekGroupDisplayTitle)
       await jcPage.waitForTimeout(500)
@@ -47248,7 +47287,8 @@ try {
       )
       check(
         'JFUI-03 選べるのは今までと同じ2つ',
-        JSON.stringify(jcOptions) === JSON.stringify(['週区切り', '今日から7日間']),
+        JSON.stringify(jcOptions) ===
+          JSON.stringify([ja.mealPlan.weekLayoutCalendar, ja.mealPlan.weekLayoutRolling]),
         `選べる字=${JSON.stringify(jcOptions)}`,
       )
       check(
@@ -47257,7 +47297,7 @@ try {
         `高さ=${Math.round((await jcSelect.first().boundingBox())?.height ?? 0)}px`,
       )
       // 選ぶと本当に切り替わる（先頭の日付が今日になる）
-      await jcSelect.first().selectOption({ label: '今日から7日間' })
+      await jcSelect.first().selectOption({ label: ja.mealPlan.weekLayoutRolling })
       await jcPage.waitForTimeout(1000)
       const jcFirst = await jcPage.locator('section[data-date]').first().getAttribute('data-date')
       const jcToday = await jcPage.evaluate(() => {
@@ -47277,7 +47317,7 @@ try {
       // 押して選ぶ形が残っていない（チップの2択に戻っていない）
       check(
         'JFUI-03 2つのボタンを押し分ける形は残っていない',
-        (await jcPage.getByRole('button', { name: '週区切り', exact: true }).count()) === 0,
+        (await jcPage.getByRole('button', { name: ja.mealPlan.weekLayoutCalendar, exact: true }).count()) === 0,
       )
     } finally {
       await jcBrowser.close()
@@ -47471,7 +47511,7 @@ try {
         await jlnPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
         await jlnPage.reload({ waitUntil: 'networkidle' })
         await jlnPage.waitForTimeout(2200)
-        await jlnPage.getByRole('button', { name: '週', exact: true }).first().click()
+        await jlnPage.getByRole('button', { name: ja.mealPlan.viewWeek, exact: true }).first().click()
         await jlnPage.waitForTimeout(1600)
         await jlnPage.getByRole('button', { name: ja.mealPlan.nextWeek }).first().click()
         await jlnPage.waitForTimeout(1400)
@@ -47805,9 +47845,9 @@ try {
     try {
       await jfPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
       await jfPage.waitForTimeout(2400)
-      await jfPage.getByRole('button', { name: '週', exact: true }).click()
+      await jfPage.getByRole('button', { name: ja.mealPlan.viewWeek, exact: true }).click()
       await jfPage.waitForTimeout(900)
-      await jfPage.getByRole('button', { name: '前の週', exact: true }).click()
+      await jfPage.getByRole('button', { name: ja.mealPlan.prevWeek, exact: true }).click()
       await openAllWeekDays(jfPage)
       await jfPage.waitForTimeout(700)
       const jfDates = await jfPage.locator('section[data-date]').evaluateAll((els) =>
@@ -47917,7 +47957,7 @@ try {
       )
       await jgPage.reload({ waitUntil: 'networkidle' })
       await jgPage.waitForTimeout(1400)
-      await jgPage.getByRole('button', { name: '週', exact: true }).click()
+      await jgPage.getByRole('button', { name: ja.mealPlan.viewWeek, exact: true }).click()
       await jgPage.waitForTimeout(900)
       for (let i = 0; i < 4; i++) {
         if ((await jgPage.locator(`section[data-date="${jgSeed}"]`).count()) > 0) break
@@ -48043,7 +48083,7 @@ try {
       )
       await jhPage.reload({ waitUntil: 'networkidle' })
       await jhPage.waitForTimeout(1400)
-      await jhPage.getByRole('button', { name: '週', exact: true }).click()
+      await jhPage.getByRole('button', { name: ja.mealPlan.viewWeek, exact: true }).click()
       await jhPage.waitForTimeout(900)
       for (let i = 0; i < 4; i++) {
         if ((await jhPage.locator(`section[data-date="${jhSeed}"]`).count()) > 0) break
@@ -48180,11 +48220,11 @@ try {
       )
       await jiPage.reload({ waitUntil: 'networkidle' })
       await jiPage.waitForTimeout(1400)
-      await jiPage.getByRole('button', { name: '週', exact: true }).click()
+      await jiPage.getByRole('button', { name: ja.mealPlan.viewWeek, exact: true }).click()
       await jiPage.waitForTimeout(900)
       // 献立を7日ぶん入れる（消す相手を作る）
       await openWeekGroup(jiPage, ja.mealPlan.weekGroupAutoTitle)
-      await jiPage.getByRole('button', { name: 'まとめて献立を入力' }).click()
+      await jiPage.getByRole('button', { name: ja.mealPlan.fillWeek }).click()
       await jiPage.waitForTimeout(3200)
       const jiPlanBefore = await jiPlanCount()
       const jiCookedBefore = await jiCookedCount()
@@ -48335,7 +48375,7 @@ try {
       )
 
       // ④ 料理中に見る画面でも同じ注記が読める
-      await jhPage.getByRole('button', { name: '調理中モードで見る' }).click()
+      await jhPage.getByRole('button', { name: ja.focus.open }).click()
       await jhPage.waitForTimeout(900)
       const jhFocusNote = jhPage.locator('[data-testid="focus-safety-step-0"]')
       check('JHSAFE-01 調理中モードでも同じ注記が読める', (await jhFocusNote.count()) === 1)
@@ -48364,7 +48404,7 @@ try {
       // ⑤ 余計だと思う人は設定で消せる（消したあと、同じ場所で戻せる）
       await jhPage.goto(`${BASE}/#/settings`, { waitUntil: 'networkidle' })
       await jhPage.waitForTimeout(1200)
-      const jhSwitch = jhPage.getByRole('switch', { name: '安全のめやすを表示する' })
+      const jhSwitch = jhPage.getByRole('switch', { name: ja.settings.safetyShow })
       check('JHSAFE-01 前提: 設定に入り切りの切り替えがある', (await jhSwitch.count()) === 1)
       check('JHSAFE-01 既定は表示する側になっている', (await jhSwitch.getAttribute('aria-checked')) === 'true')
       await jhSwitch.click()
@@ -48383,7 +48423,7 @@ try {
       )
       await jhPage.goto(`${BASE}/#/settings`, { waitUntil: 'networkidle' })
       await jhPage.waitForTimeout(1200)
-      await jhPage.getByRole('switch', { name: '安全のめやすを表示する' }).click()
+      await jhPage.getByRole('switch', { name: ja.settings.safetyShow }).click()
       await jhPage.waitForTimeout(700)
       await jhPage.goto(`${BASE}/#/recipes/${jhIds.risky}`)
       await jhPage.reload({ waitUntil: 'networkidle' })
@@ -48571,7 +48611,7 @@ try {
         await jpPage.waitForTimeout(600)
         check(
           'JIPRICE-01 前提: 自分で直したので「デフォルトに戻す」が出る',
-          (await jpFlourRow.textContent()).includes(ja.priceMaster.resetToDefault),
+          stripZwspText(await jpFlourRow.textContent()).includes(ja.priceMaster.resetToDefault),
         )
         await jpFlourRow.getByRole('button', { name: ja.priceMaster.resetToDefaultAria.replace('{name}', '小麦粉') }).click()
         await jpPage.waitForTimeout(700)
@@ -48779,7 +48819,7 @@ try {
         'JKPHOTO-01 編集画面の入口からも同じ窓が開く',
         await jkPage.locator('[data-testid="photo-focus-modal"]').isVisible(),
       )
-      await jkPage.getByRole('button', { name: 'やめる', exact: true }).click()
+      await jkPage.getByRole('button', { name: ja.common.confirmCancel, exact: true }).click()
       await jkPage.waitForTimeout(400)
       check(
         'JKPHOTO-01 「やめる」で窓が閉じ、編集画面はそのまま残る',
@@ -49005,7 +49045,7 @@ try {
 
       await jkPage.goto(`${BASE}/#/settings`, { waitUntil: 'networkidle' })
       await jkPage.waitForTimeout(500)
-      await jkPage.getByRole('button', { name: 'バックアップ', exact: true }).click()
+      await jkPage.getByRole('button', { name: ja.settings.tabBackup, exact: true }).click()
       await jkPage.waitForTimeout(300)
       const [jkDownload] = await Promise.all([
         jkPage.waitForEvent('download'),
@@ -49039,7 +49079,7 @@ try {
       await jkDstPage.waitForTimeout(1800)
       await jkDstPage.goto(`${BASE}/#/settings`, { waitUntil: 'networkidle' })
       await jkDstPage.waitForTimeout(500)
-      await jkDstPage.getByRole('button', { name: 'バックアップ', exact: true }).click()
+      await jkDstPage.getByRole('button', { name: ja.settings.tabBackup, exact: true }).click()
       await jkDstPage.waitForTimeout(300)
       const jkChooser = await clickReplaceImport(jkDstPage)
       await jkChooser.setFiles({

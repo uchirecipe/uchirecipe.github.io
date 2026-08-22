@@ -519,6 +519,7 @@ import {
   toStoredPhotoFocus,
 } from '../src/logic/photoFocus.ts'
 import { fileURLToPath } from 'node:url'
+import { createRequire } from 'node:module'
 import path from 'node:path'
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
 // 並行調理ナビの診断が使う「割ってはいけない手順」の判定（2026-08-16 便HA・docs/68 の裁定）。
@@ -28935,6 +28936,224 @@ import { safetyNotesFor, stepSafetyNotes, wholeRecipeSafetyNotes } from '../src/
       ),
       true,
     )
+  }
+}
+
+// ==========================================================================================
+// JM-1 / JM-2（2026-08-23 便JM）: e2e が画面の日本語を**書き写していない**ことの見張り
+//
+// なぜ要るか: 2026-08-22〜23 の1日で、アプリの文言を直しただけで e2e が6回赤くなった。
+// いちばん重いのは**掴む側**（getByRole の name / getByText など）で、文言が変わると
+// 要素を掴めず30秒待って**実行が中断**する。2026-08-22 は UI-390-01 でそれが起き、
+// 以降の約3,700件が走らないまま「合格96/97件」で終わっていた（緑にも赤にも見えない）。
+//
+// 測るもの: scripts/e2e-smoke.mjs の中で、**ja.ts にまったく同じ値がある日本語**を
+// 直接書いている箇所を、文言ごとに数える。既知の一覧（scripts/data/e2e-ja-copy-known.json）と
+// 突き合わせて、
+//   ・一覧に無い文言が現れた／一覧より数が増えた → 赤（新しく書き写しを増やせない）
+//   ・一覧より数が減った／もう書き写していない  → 赤（直したら一覧から消す）
+// の両向きで見張る。一覧は減らしていくためのもので、増やすときは理由を報告に書くこと。
+//
+// 「ja.ts に同じ値がある」ものだけを数えるのは、テストが自分で作った料理名や材料名
+// （「肉じゃが」「玉ねぎ」等）を巻き込まないため＝画面に出る文言だけを対象にする。
+// ==========================================================================================
+{
+  const jmRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
+  const jmSrc = readFileSync(path.join(jmRoot, 'scripts/e2e-smoke.mjs'), 'utf-8').split('\n')
+
+  /** ja.ts に出てくる文言（値）を全部集める */
+  const jmValues = new Set()
+  const jmWalk = (o) => {
+    for (const v of Object.values(o)) {
+      if (typeof v === 'string') jmValues.add(v)
+      else if (v && typeof v === 'object') jmWalk(v)
+    }
+  }
+  jmWalk(ja)
+  eq('JM-1 前提: ja.ts の文言を読めている（0件なら見張りが壊れている）', jmValues.size > 500, true)
+
+  // 掴む側＝これで要素を探している書き方。ここが外れると**実行が中断**する
+  const JM_GRAB = [
+    /getByRole\(\s*'[^']*'\s*,\s*\{[^}]*?name:\s*'((?:[^'\\])*)'/g,
+    /getBy(?:Text|Label|Placeholder|Title)\(\s*'((?:[^'\\])*)'/g,
+    /hasText:\s*'((?:[^'\\])*)'/g,
+    // 画面の名前を受け取って掴みにいく道具（中で getByRole / selectOption に渡している）。
+    // 呼び出し側に書き写すと、道具の中を直しても外れる＝同じ穴なので一緒に数える
+    /(?:selectWeekLayout|openWeekGroup)\([^,]*,\s*'((?:[^'\\])*)'/g,
+    /selectOption\(\s*\{\s*label:\s*'((?:[^'\\])*)'/g,
+  ]
+  // 判定側＝出ている文字と見比べている書き方。外れても中断はしないが赤になる
+  const JM_JUDGE = [
+    /\.(?:includes|startsWith|endsWith)\(\s*'((?:[^'\\])*)'/g,
+    /(?:===|!==)\s*'((?:[^'\\])*)'/g,
+  ]
+  /** 短い語は言い換えが起きにくく、ja.ts のどのキーか決めにくいので判定側は10文字以上だけ見る */
+  const JM_JUDGE_MIN = 10
+  const jmHasJa = (s) => /[぀-ヿ一-鿿]/.test(s)
+
+  const jmCount = (patterns, minLength) => {
+    const out = {}
+    for (const line of jmSrc) {
+      if (/^\s*\/\//.test(line) || /^\s*\*/.test(line)) continue // コメント行は数えない
+      for (const re of patterns) {
+        re.lastIndex = 0
+        let m
+        while ((m = re.exec(line))) {
+          const text = m[1]
+          if (!jmHasJa(text)) continue
+          if (!jmValues.has(text)) continue // 画面に出る文言でないもの（テストが作った名前）は対象外
+          if ([...text].length < minLength) continue
+          out[text] = (out[text] ?? 0) + 1
+        }
+      }
+    }
+    return out
+  }
+
+  const jmKnownRaw = JSON.parse(
+    readFileSync(path.join(jmRoot, 'scripts/data/e2e-ja-copy-known.json'), 'utf-8'),
+  )
+  /** 「増えたもの」「減ったもの」を、直し方が分かる文にして返す */
+  const jmDiff = (now, known, kind) => {
+    const grew = []
+    const shrank = []
+    for (const [text, n] of Object.entries(now)) {
+      const was = known[text] ?? 0
+      if (n > was)
+        grew.push(
+          `${kind}「${text}」が${was}→${n}か所に増えた（ja.ts から読む形にするか、増やす理由を報告に書いて一覧を更新すること）`,
+        )
+    }
+    for (const [text, was] of Object.entries(known)) {
+      const n = now[text] ?? 0
+      if (n < was)
+        shrank.push(`${kind}「${text}」は${was}→${n}か所に減った（一覧から消すか数を直してください）`)
+    }
+    return { grew, shrank }
+  }
+
+  {
+    const now = jmCount(JM_GRAB, 1)
+    const total = Object.values(now).reduce((a, b) => a + b, 0)
+    eq('JM-1 前提: e2e を走査できている（0件なら見張りが壊れている）', jmSrc.length > 1000, true)
+    // 「書き写しが1つも見つからない」は、直しきったのか正規表現が壊れたのか区別が付かない。
+    // いまは一覧に残りがあるので、見つからなくなったら下の突き合わせが必ず赤にする
+    const { grew, shrank } = jmDiff(now, jmKnownRaw['掴む側'] ?? {}, '掴む側')
+    eq('JM-1 掴む側（getByRole の name など）に、画面の文言の書き写しが増えていない', grew, [])
+    eq('JM-1 掴む側の一覧に、もう書き写していないものが残っていない', shrank, [])
+    eq(
+      'JM-1 掴む側の残りは一覧どおり（数え方が変わったら気づけるようにする）',
+      total,
+      Object.values(jmKnownRaw['掴む側'] ?? {}).reduce((a, b) => a + b, 0),
+    )
+  }
+  {
+    const now = jmCount(JM_JUDGE, JM_JUDGE_MIN)
+    const total = Object.values(now).reduce((a, b) => a + b, 0)
+    const { grew, shrank } = jmDiff(now, jmKnownRaw['判定側'] ?? {}, '判定側')
+    eq(
+      `JM-2 判定側（includes など）に、${JM_JUDGE_MIN}文字以上の文言の書き写しが増えていない`,
+      grew,
+      [],
+    )
+    eq('JM-2 判定側の一覧に、もう書き写していないものが残っていない', shrank, [])
+    eq(
+      'JM-2 判定側の残りは一覧どおり（数え方が変わったら気づけるようにする）',
+      total,
+      Object.values(jmKnownRaw['判定側'] ?? {}).reduce((a, b) => a + b, 0),
+    )
+  }
+
+  // ---- JM-3: 照合の前にゼロ幅スペースを外す道具が e2e にあること（禁じ手②の後半） ----
+  // BudouX（logic/jaWrap.ts）が折返しのために U+200B を差し込むので、素の includes は
+  // 同じ文なのに外れる。しかも「出ていないこと」を測る向きでは外れたまま素通りで合格になる。
+  eq(
+    'JM-3 e2e に、照合前にゼロ幅スペースを外す道具がある',
+    /const stripZwspText = \(s\) => \(s \?\? ''\)\.replaceAll\('\\u200b', ''\)/.test(jmSrc.join('\n')),
+    true,
+  )
+
+  // ---- JM-4: ja.ts の文言を**ブラウザ側で走る関数の中**に書いていないこと ----
+  //
+  // page.evaluate / evaluateAll / waitForFunction などに渡す関数は、文字列にしてブラウザへ
+  // 送られてから向こうで走る。向こうには ja が無いので、中に ja.xxx と書くと
+  // 「ja is not defined」でその節が**実行中断**する（2026-08-23 便JM で WEEKUI-01 に実発。
+  // 書き写しを ja.ts へ寄せる作業のいちばん危ない落とし穴なので、見張りを常設にする）。
+  // 正しい形は、文言を evaluate の**引数で渡す**こと:
+  //   page.evaluate((title) => ..., ja.mealPlan.weekCostTitle)
+  //
+  // 中身の判定には構文解析が要るので acorn を使う（vite/rollup が必ず連れてくる）。
+  // 読み込めないときは黙って素通りさせず、その場で赤にする。
+  {
+    const jmRequire = createRequire(import.meta.url)
+    let jmAcorn = null
+    try {
+      jmAcorn = jmRequire('acorn')
+    } catch {
+      jmAcorn = null
+    }
+    eq('JM-4 前提: 構文解析の道具(acorn)を読める（読めないと見張りが素通りする）', jmAcorn !== null, true)
+    if (jmAcorn) {
+      /** ブラウザ側で走る関数を受け取る呼び出し */
+      const JM_BROWSER_FNS = new Set([
+        'evaluate',
+        'evaluateAll',
+        'evaluateHandle',
+        '$eval',
+        '$$eval',
+        'addInitScript',
+        'exposeFunction',
+        'waitForFunction',
+      ])
+      const jmAst = jmAcorn.parse(jmSrc.join('\n'), {
+        ecmaVersion: 'latest',
+        sourceType: 'module',
+        locations: true,
+      })
+      const jmWalkAst = (node, fn) => {
+        if (!node || typeof node.type !== 'string') return
+        fn(node)
+        for (const k of Object.keys(node)) {
+          if (k === 'type' || k === 'start' || k === 'end' || k === 'loc') continue
+          const v = node[k]
+          if (Array.isArray(v)) {
+            for (const c of v) if (c && typeof c.type === 'string') jmWalkAst(c, fn)
+          } else if (v && typeof v.type === 'string') jmWalkAst(v, fn)
+        }
+      }
+      const jmBrowserRanges = []
+      jmWalkAst(jmAst, (n) => {
+        if (n.type !== 'CallExpression') return
+        const c = n.callee
+        const name =
+          c && c.type === 'MemberExpression' && c.property && c.property.type === 'Identifier'
+            ? c.property.name
+            : null
+        if (!name || !JM_BROWSER_FNS.has(name)) return
+        const arg = n.arguments[0]
+        if (!arg) return
+        if (arg.type === 'ArrowFunctionExpression' || arg.type === 'FunctionExpression')
+          jmBrowserRanges.push({ s: arg.start, e: arg.end, fn: name, line: n.loc.start.line })
+      })
+      eq(
+        'JM-4 前提: ブラウザ側で走る関数を見つけられている（0個なら見張りが壊れている）',
+        jmBrowserRanges.length > 100,
+        true,
+      )
+      const jmLeaked = []
+      jmWalkAst(jmAst, (n) => {
+        if (n.type !== 'MemberExpression') return
+        let root = n
+        while (root.object && root.object.type === 'MemberExpression') root = root.object
+        if (!root.object || root.object.type !== 'Identifier' || root.object.name !== 'ja') return
+        const r = jmBrowserRanges.find((x) => n.start >= x.s && n.end <= x.e)
+        if (r)
+          jmLeaked.push(
+            `${n.loc.start.line}行目の ja.*** が ${r.fn}(${r.line}行目) の中にある（文言は引数で渡すこと）`,
+          )
+      })
+      eq('JM-4 ja.ts の文言が、ブラウザ側で走る関数の中に入り込んでいない', [...new Set(jmLeaked)], [])
+    }
   }
 }
 
