@@ -45926,6 +45926,18 @@ try {
         (await iwEditOn(iwToday)) === false,
         `編集モード=${await iwEditOn(iwToday)}`,
       )
+      // 2026-08-23 司令部（禁じ手①）: 「今日を含む週の、今日より先の日」は**今日が週の最終日
+      // （日曜など）だと0日**になる。過ぎた日の献立はどの画面にも出ないので、この節は日曜に
+      // まとめて落ちていた。週の区切りを「今日から7日間」にすれば今日が初日になり、
+      // 先の日が必ず6日ある（この節が測るのは編集モードの振る舞いで、週の区切り方には依らない）
+      await selectWeekLayout(iwPage, '今日から7日間')
+      await iwPage.waitForTimeout(800)
+      // 切り替えると見ている7日間がずれるので、**その週にもう一度献立を入れ直す**
+      // （前に入れたのは「週区切り」の7日間で、今日から7日間には空の日が混ざる）
+      await iwPage.locator('[data-testid="week-fill-run"]').first().click()
+      await iwPage.waitForTimeout(2600)
+      await openAllWeekDays(iwPage)
+      await iwPage.waitForTimeout(400)
       // 編集モードに入る前に、献立の入っている別の日を1つ選んでおく（他の日が巻き添えにならないこと用）
       const iwOtherDate = await iwPage.evaluate((today) => {
         for (const s of document.querySelectorAll('section[data-date]')) {
@@ -46822,6 +46834,13 @@ try {
         const p = (n) => String(n).padStart(2, '0')
         return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
       })
+      // 2026-08-23 司令部（禁じ手①）: 上と同じ理由。日曜だと「今日より先の日」が同じ週に0日
+      await selectWeekLayout(izPage, '今日から7日間')
+      await izPage.waitForTimeout(800)
+      await izPage.locator('[data-testid="week-fill-run"]').first().click()
+      await izPage.waitForTimeout(2600)
+      await openAllWeekDays(izPage)
+      await izPage.waitForTimeout(400)
       const izLater = await izPage.evaluate((today) => {
         for (const s of document.querySelectorAll('section[data-date]')) {
           const d = s.getAttribute('data-date')
