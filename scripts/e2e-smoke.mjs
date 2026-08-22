@@ -717,6 +717,29 @@ const openWeekDayEdit = async (page, date) => {
   return (await edit.first().getAttribute('aria-pressed')) === 'true'
 }
 /**
+ * 月タブの日の窓を編集モードにする（2026-08-23 便JN）。
+ *
+ * オーナー原文「献立／月／・見た目を週に寄せて、編集ボタンをつけて。」に沿って、
+ * 窓は**通常表示（写真と料理名だけ）で開く**ようになった。サイコロ・×・食数・役割・
+ * 時間帯の鍵・「＋料理を追加」・「レシピを見る」・「カレンダーに出す写真」は
+ * 編集モードの中にしか出ない。それらを触る検査は、まずここを通してから触る
+ * （モードそのものは JNVIEW-01／JNEDIT-02 が受け持つ）。
+ *
+ * 掴み方は data-testid と aria の状態だけ（並び順・入れ子の段数・クラス名に依らない）。
+ * **すでに編集モードなら押さない**＝押す回数を決め打ちしない。
+ * 窓が開いていない・サンプルの1か月では切り替えが無いので false を返す
+ * （黙って合格に倒さないよう、呼び出し側で見ること）。
+ */
+const openMonthDayEdit = async (page) => {
+  const edit = page.locator('[data-testid="day-modal-edit"]')
+  if ((await edit.count()) === 0) return false
+  if ((await edit.first().getAttribute('aria-pressed')) !== 'true') {
+    await edit.first().click()
+    await page.waitForTimeout(400)
+  }
+  return (await edit.first().getAttribute('aria-pressed')) === 'true'
+}
+/**
  * 画面に出ている数を「助数詞に依らず」読むための道具（2026-08-18 便HR）。
  *
  * 2026-08-08と2026-08-18の2回、**数え方を見直すたびにe2eが赤くなった**。
@@ -10078,9 +10101,11 @@ try {
       )
       const dayModal = mp2Page.locator('[role="dialog"]')
       check('MEALPLAN-02(便U-5) その日の献立モーダルが開く', await dayModal.isVisible())
+      // 2026-08-23 便JN: 窓は通常表示で開くようになったので、空の日の1行も
+      // 週タブの通常表示と同じもの（押す場所の名前まで言う1行）に変わった
       check(
-        'MEALPLAN-02(便U-5) 献立の無い日は献立が無いと出る',
-        stripZwspText(await dayModal.textContent()).includes(ja.mealPlan.monthDayModalEmpty),
+        'MEALPLAN-02(便U-5) 献立の無い日は、献立が無いことと押す場所が1行で分かる',
+        stripZwspText(await dayModal.textContent()).includes(ja.mealPlan.weekDayViewEmpty),
       )
       check(
         'MEALPLAN-02(便U-5) モーダルに「この週を開く」ボタンがある',
@@ -10139,14 +10164,19 @@ try {
       )
       // 2026-07-29 便CB-1・docs/59 A-3で、この窓は「閲覧+週を開く」から「その場で編集できる」へ変わった。
       // レシピ名は詳細へのリンクではなく、押すとレシピを選び直せるボタンになる(週タブの行と同じ機構)。
-      // 元の検証意図(窓が行き止まりでなく、その日の献立に手が届く)はこの形で引き継ぐ
+      // 元の検証意図(窓が行き止まりでなく、その日の献立に手が届く)はこの形で引き継ぐ。
+      // 2026-08-23 便JN: その編集の面は「編集」を押した先へ移った(週タブと同じ2モード)。
+      // 通常表示のままでは出ないので、先に編集モードへ入ってから同じことを見る
+      const mp2EditOn = await openMonthDayEdit(mp2Page)
+      check('MEALPLAN-02(便JN) 前提: 日の窓を編集モードにできた', mp2EditOn === true, `結果=${mp2EditOn}`)
+      const mp2EditText = stripZwspText(await dayModalFilled.textContent())
       check(
         'MEALPLAN-02(便CB-1/A-3) レシピ名は押すと選び直せるボタンになっている(週タブと同じ編集行)',
         (await dayModalFilled.getByRole('button', { name: '肉じゃが' }).count()) > 0,
       )
       check(
         'MEALPLAN-02(便CB-1/A-3) 窓の中に主菜・副菜の行ラベルが出る(役割の粒度を保ったまま編集できる)',
-        dayModalFilledText.includes('主菜') && dayModalFilledText.includes('副菜'),
+        mp2EditText.includes(ja.mealPlan.role.main) && mp2EditText.includes(ja.mealPlan.role.side),
       )
       // 「この週を開く」で週タブへ移動する(従来の週ジャンプはここへ移動した)
       await dayModalFilled.getByRole('button', { name: ja.mealPlan.monthDayModalOpenWeek }).click()
@@ -13305,6 +13335,9 @@ try {
       await mePage.waitForTimeout(400)
       const meModal = mePage.locator('[role="dialog"]')
       check('MEALPLAN-A3B3(A-3) 日モーダルが開く', await meModal.isVisible())
+      // 2026-08-23 便JN: 空き行や1品ごとの操作は「編集」を押した先へ移った（週タブと同じ2モード）
+      const meEditOn = await openMonthDayEdit(mePage)
+      check('MEALPLAN-A3B3(便JN) 前提: 日の窓を編集モードにできた', meEditOn === true, `結果=${meEditOn}`)
       check(
         'MEALPLAN-A3B3(A-3) 献立の無い未来日でも、その場で選べる空き行が出る',
         (await meModal.getByRole('button', { name: ja.mealPlan.emptyAssign }).count()) >= 1,
@@ -13339,9 +13372,11 @@ try {
             'true',
         `url=${mePage.url()}`,
       )
-      // 続きの検証のため、日モーダル→ピッカーを開き直す
+      // 続きの検証のため、日モーダル→編集モード→ピッカーを開き直す
       await mePage.locator(`button[data-date="${meDate}"]`).click()
       await mePage.waitForTimeout(400)
+      const meEditOn2 = await openMonthDayEdit(mePage)
+      check('MEALPLAN-A3B3(便JN) 前提: 開き直した窓も編集モードにできた', meEditOn2 === true, `結果=${meEditOn2}`)
       await meModal.getByRole('button', { name: ja.mealPlan.emptyAssign }).first().click()
       await mePage.waitForTimeout(400)
       await mePage.getByPlaceholder(ja.mealPlan.pickSearchPlaceholder).fill('肉じゃが')
@@ -13473,9 +13508,11 @@ try {
         meBodyOpen.includes('概算') &&
           meBodyOpen.includes('食材の目安価格で自動計算しています'),
       )
-      // A-3: 月の窓から削除もできる(データごと消える)
+      // A-3: 月の窓から削除もできる(データごと消える)。2026-08-23 便JN: 外すのは編集モードの中
       await mePage.locator(`button[data-date="${meDate}"]`).click()
       await mePage.waitForTimeout(400)
+      const meEditOn3 = await openMonthDayEdit(mePage)
+      check('MEALPLAN-A3B3(便JN) 前提: 外す前に窓を編集モードにできた', meEditOn3 === true, `結果=${meEditOn3}`)
       await meModal.getByRole('button', { name: ja.mealPlan.clear }).first().click()
       await mePage.waitForTimeout(600)
       const meAfterRemove = await mePage.evaluate(
@@ -13721,6 +13758,15 @@ try {
           (await duModal.locator('[data-testid="day-modal-cancel"]').count()) === 0,
       )
       const duPicker = duModal.locator('[data-testid="day-cover-picker"]')
+      // 2026-08-23 便JN: 「カレンダーに出す写真」の指名は編集モードの中へ移した
+      // （通常表示は写真と料理名だけ＝オーナー原文「普段の見え方をシンプルにする」）
+      check(
+        'MEALPLAN-DU(便JN) 通常表示には写真の選び直しを出さない',
+        (await duPicker.count()) === 0,
+        `件数=${await duPicker.count()}`,
+      )
+      const duEditOn = await openMonthDayEdit(duPage)
+      check('MEALPLAN-DU(便JN) 前提: 日の窓を編集モードにできた', duEditOn === true, `結果=${duEditOn}`)
       check('MEALPLAN-DU(⑥) 候補が2つ以上ある日に写真の選び直しが出る', (await duPicker.count()) === 1)
       check(
         'MEALPLAN-DU(⑥) 候補は「自動で選ぶ」＋その日の料理2品',
@@ -34617,6 +34663,9 @@ try {
       await fdPage.waitForTimeout(1500)
       await fdPage.locator(`[data-date="${fdSeed.today}"]`).first().click()
       await fdPage.waitForTimeout(1000)
+      // 2026-08-23 便JN: 「レシピを見る」は編集モードの中へ移った（週タブと同じ2モード）
+      const fdMonthEditOn = await openMonthDayEdit(fdPage)
+      check('FD-03 前提: 月タブの日の窓を編集モードにできた', fdMonthEditOn === true, `結果=${fdMonthEditOn}`)
       check(
         'FD-03 前提: 月タブの日の窓が開き、中に「レシピを見る」がある',
         (await fdPage.locator('[data-testid="slot-open-recipe"]').count()) >= 1,
@@ -49120,6 +49169,362 @@ try {
       )
     } finally {
       await jkBrowser.close()
+    }
+  }
+
+
+  // --- JNVIEW-01 / JNEDIT-02 / JNLOCK-03 / JNPAST-04: 月タブの日の窓を、週の曜日カードと同じ2モードにする ---
+  //
+  // 2026-08-23 便JN・オーナー原文「献立／月／・見た目を週に寄せて、編集ボタンをつけて。」
+  // 週タブは 2026-08-22 便IV で「通常表示＝写真と料理名だけ／『編集』で1品ごとの操作が出る」に
+  // なった。月タブの日の窓だけが**開いた瞬間から全部の操作が出ている**古い形で残っていたので、
+  // 同じ2モードにする。文言・部品・鍵の止め方は週とまったく同じものを使う（同じものを2つ作らない）。
+  currentCheck = 'JNVIEW-01'
+  {
+    const jnBrowser = await chromium.launch()
+    const jnContext = await jnBrowser.newContext({ viewport: { width: 390, height: 844 } })
+    const jnPage = await jnContext.newPage()
+    jnPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@JNVIEW-01] ${err.message}`)
+    })
+    try {
+      await jnPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await jnPage.waitForTimeout(2400) // 初回シード完了待ち
+      // 月タブは買い切り版の機能なので、測る前に解錠しておく（線引きそのものは他の節が受け持つ）
+      await jnPage.evaluate(async () => {
+        const db = await new Promise((res, rej) => {
+          const r = indexedDB.open('uchi-recipe')
+          r.onsuccess = () => res(r.result)
+          r.onerror = () => rej(r.error)
+        })
+        const P = (req) =>
+          new Promise((res, rej) => {
+            req.onsuccess = () => res(req.result)
+            req.onerror = () => rej(req.error)
+          })
+        const cur = (await P(db.transaction('settings').objectStore('settings').get(1))) || { id: 1 }
+        await P(
+          db
+            .transaction('settings', 'readwrite')
+            .objectStore('settings')
+            .put({ ...cur, id: 1, proCode: 'UR-E2E-TEST-ONLY', proActivatedAt: Date.now() }),
+        )
+        db.close()
+      })
+      // 生のIndexedDBへ書いたので読み込み直す（CLAUDE.md 禁じ手⑥。Dexieの購読は張り直さないと届かない）
+      await jnPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+      await jnPage.reload({ waitUntil: 'networkidle' })
+      await jnPage.waitForTimeout(1800)
+      // 献立を作ってから測る。「今日から7日間」にすれば、今日が何曜日でも今日に献立が入る（禁じ手①）
+      await jnPage.getByRole('button', { name: ja.mealPlan.viewWeek, exact: true }).click()
+      await jnPage.waitForTimeout(1200)
+      const jnLayoutOk = await selectWeekLayout(jnPage, ja.mealPlan.weekLayoutRolling)
+      check('JNVIEW-01 前提: 週の区切りを「今日から7日間」にできた', jnLayoutOk === true, `結果=${jnLayoutOk}`)
+      await jnPage.locator('[data-testid="week-fill-run"]').first().click()
+      await jnPage.waitForTimeout(3000)
+      await jnPage.getByRole('button', { name: ja.mealPlan.viewMonth, exact: true }).click()
+      await jnPage.waitForTimeout(1600)
+
+      const jnToday = await jnPage.evaluate(() => {
+        const d = new Date()
+        const pad = (n) => String(n).padStart(2, '0')
+        return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+      })
+      const jnCell = (date) => jnPage.locator(`[data-testid="month-day-cell"][data-date="${date}"]`)
+      check(
+        'JNVIEW-01 前提: カレンダーに今日のマスが出ている',
+        (await jnCell(jnToday).count()) === 1,
+        `マス=${await jnCell(jnToday).count()}件`,
+      )
+      await jnCell(jnToday).click()
+      await jnPage.waitForTimeout(1000)
+      const jnDialog = jnPage.locator('[role="dialog"]')
+      check('JNVIEW-01 前提: 日の窓が開いた', (await jnDialog.count()) === 1, `窓=${await jnDialog.count()}件`)
+      check(
+        'JNVIEW-01 前提: 窓にその日の献立が1品以上入っている',
+        (await jnDialog.locator('[data-testid="row-recipe"]').count()) > 0,
+        `品数=${await jnDialog.locator('[data-testid="row-recipe"]').count()}`,
+      )
+
+      const jnEdit = jnPage.locator('[data-testid="day-modal-edit"]')
+      check(
+        'JNVIEW-01 日の窓の見出しに「編集」の切り替えがある',
+        (await jnEdit.count()) === 1,
+        `ボタン=${await jnEdit.count()}件`,
+      )
+      const jnEditBox = (await jnEdit.count()) === 1 ? await jnEdit.boundingBox() : null
+      check(
+        'JNVIEW-01 「編集」は指で押せる大きさ(44px以上)',
+        !!jnEditBox && jnEditBox.height >= 44,
+        `高さ=${jnEditBox?.height}`,
+      )
+      /** 窓が編集モードに入っているか。ボタンが無ければ null（見つからない＝合格に倒さない） */
+      const jnEditOn = async () =>
+        (await jnEdit.count()) === 1 ? (await jnEdit.getAttribute('aria-pressed')) === 'true' : null
+      check(
+        'JNVIEW-01 窓を開いた直後は通常表示（週の曜日カードと同じ既定）',
+        (await jnEditOn()) === false,
+        `編集モード=${await jnEditOn()}`,
+      )
+
+      // 通常表示の1品カードは「写真＋料理名」だけ（週の IVCARD-02 とまったく同じ物差し）
+      const jnCards = await jnPage.evaluate(() => {
+        const dialog = document.querySelector('[role="dialog"]')
+        if (!dialog) return null
+        const cvs = document.createElement('canvas').getContext('2d')
+        return [...dialog.querySelectorAll('[data-testid="row-recipe"]')].map((el) => {
+          const title = el.querySelector('[data-testid="row-title"]')
+          const cs = title ? getComputedStyle(title) : null
+          if (cs) cvs.font = `${cs.fontWeight} ${cs.fontSize} ${cs.fontFamily}`
+          const text = (title?.textContent ?? '').replaceAll('​', '')
+          const tw = title ? title.getBoundingClientRect().width : 0
+          let fit = 0
+          if (cs) {
+            for (let i = 1; i <= Math.max(text.length, 20); i++) {
+              const probe = i <= text.length ? text.slice(0, i) : text + 'あ'.repeat(i - text.length)
+              if (cvs.measureText(probe).width <= tw) fit = i
+              else break
+            }
+          }
+          const r = el.getBoundingClientRect()
+          return {
+            all: (el.textContent ?? '').replaceAll('​', '').trim(),
+            title: text,
+            fitChars: fit,
+            cardHeight: Math.round(r.height),
+            thumbs: el.querySelectorAll('[data-testid="row-thumb"]').length,
+          }
+        })
+      })
+      check(
+        'JNVIEW-01 前提: 通常表示の1品カードを実測できた',
+        Array.isArray(jnCards) && jnCards.length > 0 && jnCards.every((c) => c.title.length > 0),
+        JSON.stringify(jnCards),
+      )
+      check(
+        'JNVIEW-01 1品カードに出る文字は料理名だけ',
+        Array.isArray(jnCards) && jnCards.length > 0 && jnCards.every((c) => c.all === c.title),
+        JSON.stringify(jnCards),
+      )
+      check(
+        'JNVIEW-01 1品カードには写真（または代わり絵）が付いている',
+        Array.isArray(jnCards) && jnCards.length > 0 && jnCards.every((c) => c.thumbs === 1),
+        JSON.stringify(jnCards),
+      )
+      check(
+        'JNVIEW-01 料理名が10文字以上読める（週の1品カードと同じ物差し）',
+        Array.isArray(jnCards) && jnCards.length > 0 && jnCards.every((c) => c.fitChars >= 10),
+        JSON.stringify(jnCards),
+      )
+
+      /** 窓の献立の枠の中に、どの操作が出ているかを数える（並び順・入れ子の段数に依らない） */
+      const jnOps = () =>
+        jnPage.evaluate((aria) => {
+          const dialog = document.querySelector('[role="dialog"]')
+          if (!dialog) return null
+          const blocks = [...dialog.querySelectorAll('[data-testid="slot-block"]')]
+          const text = blocks.map((b) => b.textContent ?? '').join(' ').replaceAll('​', '')
+          const byAria = (name) =>
+            blocks
+              .flatMap((b) => [...b.querySelectorAll('[aria-label]')])
+              .filter((el) => (el.getAttribute('aria-label') ?? '').startsWith(name)).length
+          return {
+            blocks: blocks.length,
+            dice: byAria(aria.suggest),
+            remove: byAria(aria.clear),
+            addRow: blocks
+              .flatMap((b) => [...b.querySelectorAll('button')])
+              .filter((b) => (b.textContent ?? '').trim() === aria.addRow).length,
+            servings: /\d+人分/.test(text) ? 1 : 0,
+            roleLabel: aria.roles.filter((r) => text.includes(r)).length,
+            slotLock: dialog.querySelectorAll('[data-testid="slot-lock"]').length,
+            lockMark: dialog.querySelectorAll('[data-testid="slot-lock-mark"]').length,
+            cards: dialog.querySelectorAll('[data-testid="row-recipe"]').length,
+          }
+        }, {
+          suggest: ja.mealPlan.suggestAria,
+          clear: ja.mealPlan.clear,
+          addRow: ja.mealPlan.addRow,
+          roles: [ja.mealPlan.role.main, ja.mealPlan.role.side],
+        })
+      const jnViewOps = await jnOps()
+      check('JNVIEW-01 前提: 窓の中の献立の枠を読めた', jnViewOps !== null && jnViewOps.blocks > 0, JSON.stringify(jnViewOps))
+      check(
+        'JNVIEW-01 通常表示に、引き直し・外す・追加の操作を出さない',
+        jnViewOps !== null && jnViewOps.dice === 0 && jnViewOps.remove === 0 && jnViewOps.addRow === 0,
+        JSON.stringify(jnViewOps),
+      )
+      check(
+        'JNVIEW-01 通常表示に、役割（主菜/副菜）・食数・時間帯の鍵を出さない',
+        jnViewOps !== null &&
+          jnViewOps.roleLabel === 0 &&
+          jnViewOps.servings === 0 &&
+          jnViewOps.slotLock === 0,
+        JSON.stringify(jnViewOps),
+      )
+
+      // ---- JNEDIT-02: 「編集」で1品ごとの操作が出る ----
+      currentCheck = 'JNEDIT-02'
+      await jnEdit.click()
+      await jnPage.waitForTimeout(800)
+      check('JNEDIT-02 「編集」を押すと編集モードに入る', (await jnEditOn()) === true, `編集モード=${await jnEditOn()}`)
+      const jnEditOps = await jnOps()
+      check(
+        'JNEDIT-02 編集モードで、引き直し・外す・追加・食数・役割・時間帯の鍵が全部出る',
+        jnEditOps !== null &&
+          jnEditOps.dice > 0 &&
+          jnEditOps.remove > 0 &&
+          jnEditOps.addRow > 0 &&
+          jnEditOps.servings === 1 &&
+          jnEditOps.roleLabel > 0 &&
+          jnEditOps.slotLock > 0,
+        JSON.stringify(jnEditOps),
+      )
+      check(
+        'JNEDIT-02 編集モードでも1品カードは残っている（差し替えの入口）',
+        jnEditOps !== null && jnEditOps.cards > 0,
+        JSON.stringify(jnEditOps),
+      )
+      await jnEdit.click()
+      await jnPage.waitForTimeout(800)
+      check('JNEDIT-02 もう一度押すと通常表示に戻る', (await jnEditOn()) === false, `編集モード=${await jnEditOn()}`)
+
+      // 窓を閉じて開き直したら、また通常表示から始まる（編集モードを持ち越さない）
+      await jnEdit.click()
+      await jnPage.waitForTimeout(600)
+      const jnCloseBtn = jnPage.locator('[data-testid="day-modal-close"]')
+      check('JNEDIT-02 前提: 窓の「閉じる」を掴めた', (await jnCloseBtn.count()) === 1, `ボタン=${await jnCloseBtn.count()}件`)
+      if ((await jnCloseBtn.count()) === 1) {
+        await jnCloseBtn.click()
+        await jnPage.waitForTimeout(700)
+      }
+      await jnCell(jnToday).click()
+      await jnPage.waitForTimeout(900)
+      check(
+        'JNEDIT-02 窓を開き直すと通常表示から始まる（編集モードを持ち越さない）',
+        (await jnEditOn()) === false,
+        `編集モード=${await jnEditOn()}`,
+      )
+
+      // ---- JNLOCK-03: 鍵を掛けた日でも「編集」は押せて、中の操作だけが止まる ----
+      currentCheck = 'JNLOCK-03'
+      await jnEdit.click()
+      await jnPage.waitForTimeout(700)
+      const jnSlotLock = jnPage.locator('[role="dialog"] [data-testid="slot-lock"]').first()
+      check('JNLOCK-03 前提: 窓の中の時間帯の鍵を掴めた', (await jnSlotLock.count()) === 1)
+      await jnSlotLock.click()
+      await jnPage.waitForTimeout(1200)
+      const jnLockedOps = await jnOps()
+      check(
+        'JNLOCK-03 鍵を掛けると、その食事には「＋料理を追加」が出ない',
+        jnLockedOps !== null && jnLockedOps.addRow === 0,
+        JSON.stringify(jnLockedOps),
+      )
+      check(
+        'JNLOCK-03 鍵を掛けた理由の1行が出る',
+        (await jnPage.locator('[role="dialog"] [data-testid="slot-lock-note"]').count()) > 0,
+        `1行=${await jnPage.locator('[role="dialog"] [data-testid="slot-lock-note"]').count()}件`,
+      )
+      // 止め方は「出さない」でも「出したまま押せなくする」でもよい（アプリは引き直しを出さず、
+      // 外す・食数は出したまま押せなくしている）。**どの止め方でも同じ判定になる形**で見る。
+      // 見つけた操作が0件のまま合格に倒れないよう、数えた総数も一緒に見る
+      const jnLockedDisabled = await jnPage.evaluate((aria) => {
+        const dialog = document.querySelector('[role="dialog"]')
+        if (!dialog) return null
+        const byAria = [...dialog.querySelectorAll('[aria-label]')].filter((el) =>
+          [aria.suggest, aria.clear].some((name) =>
+            (el.getAttribute('aria-label') ?? '').startsWith(name),
+          ),
+        )
+        // 料理名のカードそのもの（押すと差し替えの窓が開く）も、鍵で止まる操作の1つ
+        const ops = [...byAria, ...dialog.querySelectorAll('[data-testid="row-recipe"]')]
+        return {
+          ops: ops.length,
+          pressable: ops.filter((el) => !el.disabled).length,
+          addRow: [...dialog.querySelectorAll('button')].filter(
+            (b) => (b.textContent ?? '').trim() === aria.addRow,
+          ).length,
+        }
+      }, {
+        suggest: ja.mealPlan.suggestAria,
+        clear: ja.mealPlan.clear,
+        addRow: ja.mealPlan.addRow,
+      })
+      check(
+        'JNLOCK-03 鍵を掛けた食事では、1品を触る操作がどれも押せない（出ていないか、出ていても押せない）',
+        jnLockedDisabled !== null && jnLockedDisabled.ops > 0 && jnLockedDisabled.pressable === 0,
+        JSON.stringify(jnLockedDisabled),
+      )
+      // 「完了」で通常表示に戻しても、鍵の印だけは残って読める（週の IVLOCK-04 と同じ）
+      await jnEdit.click()
+      await jnPage.waitForTimeout(800)
+      const jnAfterLock = await jnOps()
+      check(
+        'JNLOCK-03 通常表示に戻しても鍵の印は出ている',
+        jnAfterLock !== null && jnAfterLock.lockMark > 0,
+        JSON.stringify(jnAfterLock),
+      )
+      check(
+        'JNLOCK-03 鍵を掛けた日でも「編集」は押せる（押した先で中の操作だけが止まる）',
+        (await jnEdit.count()) === 1 && (await jnEdit.isEnabled()),
+        `ボタン=${await jnEdit.count()}件`,
+      )
+      // 後片付け: 鍵を外して次の節へ渡す
+      await jnEdit.click()
+      await jnPage.waitForTimeout(700)
+      await jnPage.locator('[role="dialog"] [data-testid="slot-lock"]').first().click()
+      await jnPage.waitForTimeout(1000)
+      await jnEdit.click()
+      await jnPage.waitForTimeout(600)
+      if ((await jnPage.locator('[data-testid="day-modal-close"]').count()) === 1) {
+        await jnPage.locator('[data-testid="day-modal-close"]').click()
+        await jnPage.waitForTimeout(700)
+      }
+
+      // ---- JNPAST-04: 過ぎた日の窓にも「編集」があり、そこだけに作った記録の追加が出る ----
+      currentCheck = 'JNPAST-04'
+      // 「前の月」へ送れば、今日が何日でも**その月の全部が過ぎた日**になる（禁じ手①）
+      await jnPage.getByRole('button', { name: ja.mealPlan.prevMonth, exact: true }).click()
+      await jnPage.waitForTimeout(1200)
+      const jnPastDate = await jnPage.evaluate(() => {
+        const cells = [...document.querySelectorAll('[data-testid="month-day-cell"]')]
+        return cells.length > 0 ? cells[cells.length - 1].getAttribute('data-date') : null
+      })
+      check(
+        'JNPAST-04 前提: 前の月の日を掴めた（今日より前の日付）',
+        jnPastDate !== null && jnPastDate < jnToday,
+        `日付=${jnPastDate} 今日=${jnToday}`,
+      )
+      if (jnPastDate) {
+        await jnCell(jnPastDate).click()
+        await jnPage.waitForTimeout(900)
+        check(
+          'JNPAST-04 過ぎた日の窓にも「編集」がある',
+          (await jnEdit.count()) === 1,
+          `ボタン=${await jnEdit.count()}件`,
+        )
+        check(
+          'JNPAST-04 通常表示には「作った記録を追加」を出さない',
+          (await jnPage.locator('[role="dialog"] [data-testid="past-record-add"]').count()) === 0,
+        )
+        if ((await jnEdit.count()) === 1) {
+          await jnEdit.click()
+          await jnPage.waitForTimeout(800)
+        }
+        check(
+          'JNPAST-04 編集モードにすると「作った記録を追加」が出る',
+          (await jnPage.locator('[role="dialog"] [data-testid="past-record-add"]').count()) === 1,
+          `ボタン=${await jnPage.locator('[role="dialog"] [data-testid="past-record-add"]').count()}件`,
+        )
+        check(
+          'JNPAST-04 過ぎた日の窓には献立の枠を出さない（記録だけを見せる画面のまま）',
+          (await jnPage.locator('[role="dialog"] [data-testid="slot-block"]').count()) === 0,
+          `枠=${await jnPage.locator('[role="dialog"] [data-testid="slot-block"]').count()}件`,
+        )
+      }
+    } finally {
+      await jnBrowser.close()
     }
   }
 

@@ -455,6 +455,56 @@ export function planDayEditKind(date: string, today: string): DayEditKind {
 }
 
 /**
+ * 月タブの「日の窓」に何を出すか（2026-08-23 便JN・オーナー原文
+ * 「献立／月／・見た目を週に寄せて、編集ボタンをつけて。」）。
+ *
+ * 週タブは 便IV で「通常表示＝写真と料理名だけ／『編集』で1品ごとの操作が出る」に、
+ * 便JF で「過ぎた日の編集モードは作った記録を触る」になった。月タブの日の窓だけが
+ * **開いた瞬間から全部の操作が出ている**古い形で残っていたので、同じ決めごとにそろえる。
+ * 「編集／完了」の文言・部品・鍵の止め方は週とまったく同じものを使う（同じものを2つ作らない）。
+ *
+ * どのモードで何を出すかをここ1か所に置くのは、画面のあちこちに散らばった真偽値では
+ * 「通常表示に操作が1つ残っている」を見張れないため（週の作り直しで実際に起きた形）。
+ *
+ * 今日は引数で受け取る＝曜日・月替わりの前提を持たない（CLAUDE.md 禁じ手①）。
+ */
+export type MonthDayWindowView = {
+  /** 見出しの行に「編集／完了」を出すか（サンプルは書き込み先が無いので出さない） */
+  editToggle: boolean
+  /**
+   * 献立の枠の出し方。
+   *  'view'   … 写真と料理名だけ（週の通常表示と同じ部品）
+   *  'editor' … 1品ごとの操作つき（週の編集モードと同じ部品）
+   *  'none'   … 出さない（過ぎた日＝作った記録だけが残る画面のまま・便BS）
+   *  'demo'   … 見本の1か月。読むだけの並べ方
+   */
+  plan: 'view' | 'editor' | 'none' | 'demo'
+  /** 「作った記録を追加」（過ぎた日の編集モードだけ・便JF・①） */
+  recordAdd: boolean
+  /** 記録のカードに「消す」を出すか（過ぎた日の編集モードだけ・便JF） */
+  recordDelete: boolean
+  /** 「カレンダーに出す写真」の指名（便DU）。普段の見え方を軽くするため編集モードの中に置く */
+  cover: boolean
+}
+export function monthDayWindowView(input: {
+  date: string
+  today: string
+  editing: boolean
+  isDemo: boolean
+}): MonthDayWindowView {
+  const past = planDayEditKind(input.date, input.today) === 'record'
+  // 見本の1か月は書き込み先が無いので、編集モードそのものに入れない
+  const editing = input.editing && !input.isDemo
+  return {
+    editToggle: !input.isDemo,
+    plan: past ? 'none' : input.isDemo ? 'demo' : editing ? 'editor' : 'view',
+    recordAdd: past && editing,
+    recordDelete: past && editing,
+    cover: editing,
+  }
+}
+
+/**
  * 週タブの通常表示に並べる1品（2026-08-22 便IV）。
  *
  * オーナー原文: 「週献立は、通常表示はレシピカード（レシピ名と画像のみ）のみ

@@ -121,6 +121,7 @@ import {
   planToggleDayEdit,
   planDayEditKind,
   planViewRows,
+  monthDayWindowView,
   WEEK_GROUP_DEFAULT_OPEN,
   PLAN_QUICK_MINUTES_OPTIONS,
   DEFAULT_PLAN_QUICK_MINUTES,
@@ -1265,6 +1266,18 @@ const LOCK_SAMPLE_PLAN_DAYS = new Set([2, 8, 16, 20, 24, 29])
  *
  * 2026-07-29 便CB-1・docs/59 A-2: 日付メモのある日は右上に小さな点だけを出す(hasNote)。
  * 写真モードの主役は写真なので、文字は出さず点1つ＝写真の邪魔をしない大きさに留める。
+ *
+ * 2026-08-23 便JN: 3つの分岐（数字／写真あり／写真なし）のどれで描かれても
+ * `data-testid="month-day-cell"` を必ず付ける。検査がマスを掴むのに Tailwind のクラス
+ * （.grid-cols-7 や .border-accent）を頼っていたので、並べ方や色の当て方を変えるたびに
+ * 掴めなくなっていた（掴めないと30秒待って実行が中断する＝CLAUDE.md 禁じ手④）。
+ * どのモードでも同じ目印で掴める形にしておく。
+ *
+ * **マスの中身は週の1品カードには寄せない**（便JNの判断）。マスの実測は390pxで48px角・
+ * 320pxで38px角しかなく、いま出している9pxの料理名で読めるのは**390pxで5文字・320pxで3文字**。
+ * 週の1品カード（幅251px・15文字）と同じ「写真＋料理名」を同時に入れると、写真を24pxまで
+ * 潰したうえで料理名が2文字になる。カレンダーは1か月を見渡す一覧なので、
+ * 料理名を読む場所は日の窓のほうに置き、そこを週の曜日カードと同じ2モードにした。
  */
 function MonthDayCell({
   date,
@@ -1362,6 +1375,7 @@ function MonthDayCell({
     return (
       <button
         type="button"
+        data-testid="month-day-cell"
         data-date={date}
         onClick={onClick}
         aria-label={ariaLabel}
@@ -1406,6 +1420,7 @@ function MonthDayCell({
     return (
       <button
         type="button"
+        data-testid="month-day-cell"
         data-date={date}
         onClick={onClick}
         aria-label={ja.mealPlan.monthDayHasLog}
@@ -1437,7 +1452,13 @@ function MonthDayCell({
           'border-dashed border-edge bg-surface text-ink-muted'
         : 'border-edge bg-surface text-ink'
   return (
-    <button type="button" data-date={date} onClick={onClick} className={`${base} ${tone}`}>
+    <button
+      type="button"
+      data-testid="month-day-cell"
+      data-date={date}
+      onClick={onClick}
+      className={`${base} ${tone}`}
+    >
       <span className="leading-none">{dayNum}</span>
       {/* S-1(docs/59): 今日・未来日の予定は、点ではなく主菜名（無ければ「◯件」）でプレビューし、
           先の予定を月表で読めるようにする（過去日の写真日記＝上の分岐には出さない）。
@@ -1932,6 +1953,15 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
   // ボタンへ移動）。nullなら非表示
   const [dayModalDate, setDayModalDate] = useState<string | null>(null)
   /**
+   * 月タブの日の窓の「編集モード」（2026-08-23 便JN・オーナー原文
+   * 「献立／月／・見た目を週に寄せて、編集ボタンをつけて。」）。
+   *
+   * 覚え方は週タブとまったく同じ（編集している日の日付1つだけ・logic/mealPlan.ts の
+   * planToggleDayEdit）。窓は一度に1日ぶんしか開かないので、これで足りる。
+   * 別の日の窓を開けばその日付には当たらないので、開き直すたび必ず通常表示から始まる。
+   */
+  const [monthEditDate, setMonthEditDate] = useState<string | null>(null)
+  /**
    * 月タブの日の窓から「この週を開く」（2026-08-20 便IG・⑩。オーナー原文
    * 「月から「この週を開く」したときは、記録がある日は開いた状態、選んだ日付まで
    *   スクロールして表示。」）。
@@ -2061,6 +2091,17 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
   }
   // 過去日は予定(献立)を表示から消し、作った記録だけを日記のように見せる(便BS・タスク2。非破壊)
   const dayModalIsPast = dayModalDate ? isPastDate(dayModalDate, today) : false
+  /** いま開いている窓が編集モードか（2026-08-23 便JN。週の曜日カードと同じ覚え方） */
+  const dayModalEditing = dayModalDate != null && monthEditDate === dayModalDate
+  /** その窓に何を出すか（週と共用の決めごと。中身は logic/mealPlan.ts の monthDayWindowView） */
+  const dayModalWindow = monthDayWindowView({
+    date: dayModalDate ?? today,
+    today,
+    editing: dayModalEditing,
+    isDemo,
+  })
+  /** 日ごとの鍵。掛かっている日は「編集」は押せるが、中の操作が止まる（2026-08-22 便JFと同じ） */
+  const dayModalLocked = dayModalDate != null && isDayMealLocked(lockedKeys, dayModalDate)
   const dayModalTitle = dayModalDate
     ? ja.mealPlan.monthDayModalTitle
         .replace('{m}', String(Number(dayModalDate.slice(5, 7))))
@@ -3107,6 +3148,8 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
   } | null>(null)
   const openDayModal = (date: string) => {
     cancelledNoteDateRef.current = null
+    // 窓は必ず通常表示から開く（2026-08-23 便JN。週の曜日カードの既定と同じ）
+    setMonthEditDate(null)
     setDayModalSnapshot({
       date,
       entries: (monthEntries ?? []).filter((e) => e.date === date).map((e) => ({ ...e })),
@@ -9293,25 +9336,99 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
             onClick={(e) => e.stopPropagation()}
             className="max-h-[85vh] w-full max-w-sm overflow-x-hidden overflow-y-auto overscroll-contain rounded-md border border-edge bg-surface p-[var(--space-md)] shadow-md"
           >
-            <div className="flex items-center justify-between gap-2">
-              <h3 className="font-bold">{dayModalTitle}</h3>
-              <button
-                type="button"
-                onClick={() => setDayModalDate(null)}
-                aria-label={ja.common.close}
-                className="tap-target -mr-2 -mt-1 shrink-0 rounded-full p-2 text-ink-muted"
-              >
-                <X size={20} aria-hidden />
-              </button>
+            {/* 2026-08-23 便JN: 見出しの行に「編集／完了」を置く（週の曜日カードと同じ場所・
+                同じ文言・同じ見た目＝押している間は塗りつぶし・名前は「完了」に変わる）。
+                狭い画面では折り返して日付を1行に保つ（週の見出しと同じ作法）。
+                「編集」と「閉じる」は結果の違う操作なので12px空ける（便IZ） */}
+            <div className="flex flex-wrap items-center gap-3">
+              <h3 className="min-w-0 flex-1 font-bold">{dayModalTitle}</h3>
+              <span className="ml-auto flex shrink-0 items-center gap-3">
+                {dayModalWindow.editToggle && (
+                  <button
+                    type="button"
+                    data-testid="day-modal-edit"
+                    data-date={dayModalDate}
+                    onClick={() =>
+                      setMonthEditDate((prev) => planToggleDayEdit(prev, dayModalDate))
+                    }
+                    aria-pressed={dayModalEditing}
+                    /* 読み上げの名前は、その日の編集モードで触るものを言う（便JF・①と同じ）。
+                       過ぎた日は献立ではなく作った記録を触るので、同じ「編集」でも名乗りを変える */
+                    aria-label={(dayModalEditing
+                      ? ja.mealPlan.weekDayEditOffAria
+                      : dayModalIsPast
+                        ? ja.mealPlan.weekDayRecordEditOnAria
+                        : ja.mealPlan.weekDayEditOnAria
+                    ).replace('{date}', dayModalDate.replaceAll('-', '/'))}
+                    className={`inline-flex min-h-11 shrink-0 items-center gap-1 rounded-sm border px-3 py-2 text-sm font-bold ${
+                      dayModalEditing
+                        ? 'border-accent bg-accent text-on-accent'
+                        : 'border-edge bg-surface text-ink-muted'
+                    }`}
+                  >
+                    <Pencil size={14} aria-hidden />
+                    <SwapLabel
+                      current={dayModalEditing ? ja.mealPlan.weekDayEditDone : ja.mealPlan.weekDayEdit}
+                      labels={[ja.mealPlan.weekDayEdit, ja.mealPlan.weekDayEditDone]}
+                    />
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setDayModalDate(null)}
+                  aria-label={ja.common.close}
+                  className="tap-target -mr-2 shrink-0 rounded-full p-2 text-ink-muted"
+                >
+                  <X size={20} aria-hidden />
+                </button>
+              </span>
             </div>
-            {dayModalIsPast ? (
+            {/* 過ぎた日の編集モードだけに出す「作った記録を追加」（2026-08-23 便JN。
+                週の曜日カード＝便JF・①とまったく同じ入口・同じ止め方）。
+                通常表示には出さない＝過ぎた日の窓は今までどおり
+                「作った記録が並ぶだけ」の見え方を保つ */}
+            {dayModalWindow.recordAdd && (
+              <div className="mt-[var(--space-sm)]">
+                <button
+                  type="button"
+                  data-testid="past-record-add"
+                  data-date={dayModalDate}
+                  onClick={() => {
+                    setRecordPickDate(dayModalDate)
+                    setPickerQuery('')
+                  }}
+                  /* 鍵の掛かった日では押せない（便JF・オーナー原文
+                     「鍵をかけたら編集もできなくなるようにして。」）。止め方は週と同じ＝
+                     ボタンは同じ場所に出したまま押せなくし、理由はすぐ下の1行が言う */
+                  disabled={dayModalLocked}
+                  className={`flex min-h-11 w-full items-center justify-center gap-2 rounded-md border border-accent bg-surface py-3 font-bold text-accent-ink shadow-sm ${
+                    dayModalLocked ? 'opacity-40' : ''
+                  }`}
+                >
+                  <Plus size={18} aria-hidden />
+                  {ja.mealPlan.pastRecordAdd}
+                </button>
+                {dayModalLocked && (
+                  <p data-testid="past-record-locked-note" className="mt-1 text-xs text-ink-muted">
+                    {ja.mealPlan.pastRecordLockedNote}
+                  </p>
+                )}
+                {/* 在庫を下げる設定がONの人にだけ、押す前に読める場所で違いを書く（規約F） */}
+                {!dayModalLocked && settings?.cookedReflectPantry && (
+                  <p data-testid="past-record-pantry-note" className="mt-1 text-xs text-ink-muted">
+                    {ja.mealPlan.pastRecordPantryNote}
+                  </p>
+                )}
+              </div>
+            )}
+            {dayModalWindow.plan === 'none' ? (
               // 過去日: 予定は表示から消す(便BS・タスク2)。記録が無ければ空案内だけ出す(記録があれば下の
               // 「作った記録」ブロックが主役になる)。mealPlansデータは削除しない=非破壊。
               // 過去日は週タブと同じく編集グリッドも出さない(過ぎた日の献立は振り返る対象)
               dayModalLogs.length === 0 ? (
                 <p className="mt-[var(--space-sm)] text-sm text-ink-muted">{ja.mealPlan.pastNoRecord}</p>
               ) : null
-            ) : isDemo ? (
+            ) : dayModalWindow.plan === 'demo' ? (
               // サンプルデモ: その日の献立を読むだけにする（書き込み先が無いので編集欄は出さない）
               <div className="mt-[var(--space-sm)]">
                 {dayModalEntries.length === 0 ? (
@@ -9347,14 +9464,42 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
               // 今日・未来日: 週タブと同じ編集ブロック(2026-07-29 便CB-1・docs/59 A-3)。
               // 週へ飛ばずに この窓のまま レシピの追加・差し替え・削除ができる。
               // 出す食事は「表示する食事」の設定に従いつつ、設定で隠していても既に献立が
-              // 入っている食事は必ず出す(月から見たときにデータが見えなくならないように)
+              // 入っている食事は必ず出す(月から見たときにデータが見えなくならないように)。
+              //
+              // 2026-08-23 便JN: ここを週タブと同じ2モードにした。通常表示
+              // （renderSlotView＝写真と料理名だけ）と編集モード（renderSlotEditor＝
+              // 1品ごとの操作すべて）を、見出しの「編集」で切り替える。
+              // 使う部品・並べ方は週タブとまったく同じものをそのまま呼ぶ
               <div className="mt-[var(--space-sm)] space-y-[var(--space-sm)]">
-                {dayModalEntries.length === 0 && (
-                  <p className="text-sm text-ink-muted">{ja.mealPlan.monthDayModalEmpty}</p>
+                {dayModalWindow.plan === 'editor' ? (
+                  <>
+                    {dayModalEntries.length === 0 && (
+                      <p className="text-sm text-ink-muted">{ja.mealPlan.monthDayModalEmpty}</p>
+                    )}
+                    {MEAL_SLOTS.filter(
+                      (slot) =>
+                        visibleSlots.includes(slot) || (dayModalBySlot.get(slot)?.length ?? 0) > 0,
+                    ).map((slot) => renderSlotEditor(dayModalDate, slot))}
+                  </>
+                ) : (
+                  <>
+                    {MEAL_SLOTS.filter(
+                      (slot) =>
+                        visibleSlots.includes(slot) || (dayModalBySlot.get(slot)?.length ?? 0) > 0,
+                    ).map((slot) => renderSlotView(dayModalDate, slot))}
+                    {/* 通常表示は空き枠を出さないので、1品も無い日は押す場所の名前を1行で書く
+                        （書かないと行き止まりになる）。週タブの通常表示と同じ1行を使う */}
+                    {!MEAL_SLOTS.some(
+                      (slot) =>
+                        (dayModalBySlot.get(slot)?.length ?? 0) > 0 ||
+                        isMealSlotLocked(lockedKeys, dayModalDate, slot),
+                    ) && (
+                      <p data-testid="day-modal-view-empty" className="text-sm text-ink-muted">
+                        {ja.mealPlan.weekDayViewEmpty}
+                      </p>
+                    )}
+                  </>
                 )}
-                {MEAL_SLOTS.filter(
-                  (slot) => visibleSlots.includes(slot) || (dayModalBySlot.get(slot)?.length ?? 0) > 0,
-                ).map((slot) => renderSlotEditor(dayModalDate, slot))}
               </div>
             )}
             {/* その日の「作った記録」(2026-07-17 便Z-2・docs/35 §3。画像付き)。
@@ -9377,6 +9522,19 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                       // 2026-08-09 便EQ(オーナー実機「月献立の作った記録から献立名をタップで
                       // 整理された記録を見たい」): 料理名を押すと記録の中身の小窓が開く
                       onOpenDetail={() => setLogDetail(entry)}
+                      // 記録の削除は**編集モードのときだけ**渡す（2026-08-23 便JN。
+                      // 週の曜日カード＝便JFと同じ作法。渡さなければボタンは出ない
+                      // ＝通常表示は今までどおり、記録のカードが並ぶだけ）
+                      onDelete={
+                        dayModalWindow.recordDelete && dayModalDate
+                          ? () => void deletePastCookedRecord(dayModalDate, entry)
+                          : undefined
+                      }
+                      /* 鍵の掛かった日では消せない（足す側とまったく同じ判断＝日ごとの鍵） */
+                      deleteDisabled={dayModalLocked}
+                      // 削除済みレシピの記録には行き先が無いので、カードそのものを記録の小窓にする
+                      // (2026-08-16 便GZ。'below' のままだと押せないレシピ詳細へのリンクになる)
+                      detailAs={entry.detachedRecordId != null ? 'card' : 'below'}
                     />
                   ))}
                 </ul>
@@ -9387,7 +9545,10 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                 写真の候補が2つ以上ある日だけ出す(1つしかない日は選ぶ意味がない)。
                 選ばない状態が既定＝logic/monthCover.ts の優先順(記録の写真＞レシピの写真)で自動に決まる。
                 ここで選ぶのは表示の好みだけで、献立や作った記録のデータには一切触らない */}
-            {!isDemo && dayModalCoverOptions.length >= 2 && (
+            {/* 2026-08-23 便JN: 「普段の見え方をシンプルにする」（オーナー原文）に合わせ、
+                この指名は編集モードの中に置く。読むための情報ではなく、
+                カレンダーの見た目を決める操作なので、通常表示には並べない */}
+            {dayModalWindow.cover && dayModalCoverOptions.length >= 2 && (
               <div className="mt-[var(--space-md)]" data-testid="day-cover-picker">
                 <p className="text-xs font-bold text-ink-muted">{ja.mealPlan.monthDayCoverTitle}</p>
                 <p className="mt-0.5 text-xs text-ink-muted">{ja.mealPlan.monthDayCoverHint}</p>
