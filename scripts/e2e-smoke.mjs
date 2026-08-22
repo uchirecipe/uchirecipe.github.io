@@ -1869,7 +1869,7 @@ try {
       // 人数ステッパーの位置を毎回測り、開閉で動かないことを見張る(再発防止)。
       // 位置は見出し「材料」を原点にした相対座標で測る(クリックで画面がスクロールしても
       // ずれない。ビューポート座標のままだと「スクロールした」だけで落ちてしまう)
-      const costToggle = w390Page.getByRole('button', { name: /^(原価を見る|材料に戻す)$/ })
+      const costToggle = w390Page.getByRole('button', { name: new RegExp(`^(${ja.detail.priceViewShow}|${ja.detail.priceViewHide})$`) })
       const measure = async () => {
         const doc = await w390Page.evaluate(() => ({
           scrollWidth: document.documentElement.scrollWidth,
@@ -18111,7 +18111,7 @@ try {
       })
       // 2026-08-03 オーナー指示: 「原価を見る」は押した状態でラベルが「材料に戻す」に
       // 入れ替わる同一ボタンのトグルになった。開閉どちらの表記でも同じボタンを掴めるようにする
-      const viewButton = pvPage.getByRole('button', { name: /^(原価を見る|材料に戻す)$/ })
+      const viewButton = pvPage.getByRole('button', { name: new RegExp(`^(${ja.detail.priceViewShow}|${ja.detail.priceViewHide})$`) })
       const editButton = pvPage.getByRole('button', { name: '原価を編集' })
       const onionRow = ingredientsSection.locator('li', { hasText: '玉ねぎ' })
       const waterRow = ingredientsSection.locator('li', { hasText: '水' })
@@ -18131,7 +18131,7 @@ try {
       check(
         'PRICEVIEW-01(2026-08-03) 既定は「原価を見る」表記(戻す側の表記は出ていない)',
         (await pvPage.getByRole('button', { name: '原価を見る' }).count()) === 1 &&
-          (await pvPage.getByRole('button', { name: '材料に戻す' }).count()) === 0,
+          (await pvPage.getByRole('button', { name: ja.detail.priceViewHide }).count()) === 0,
       )
 
       // ---------- 「原価を見る」ON: 「原価を編集」ボタンが出現し、各行が1食あたりの按分原価になる ----------
@@ -18139,10 +18139,14 @@ try {
       await pvPage.waitForTimeout(300)
       check('PRICEVIEW-01 「原価を見る」ON: 押したボタンがaria-pressed=trueになる', (await viewButton.getAttribute('aria-pressed')) === 'true')
       // 2026-08-03 オーナー指示「押しても場所が変わらず、表示中は戻し方が分かる表記にする」の再発防止
+      // 2026-08-22 司令部: 文言を**書き写していた**ため、便JJで「材料に戻す」→「材料を表示」に
+      // したときに落ちた（禁じ手②）。測っているのは「押したらラベルが入れ替わる」ことなので、
+      // ja.ts から読む形にする（文言が変わっても意図は変わらない）
       check(
-        'PRICEVIEW-01(2026-08-03) 原価表示中はラベルが「材料に戻す」に入れ替わる',
-        (await pvPage.getByRole('button', { name: '材料に戻す' }).count()) === 1 &&
-          (await pvPage.getByRole('button', { name: '原価を見る' }).count()) === 0,
+        'PRICEVIEW-01(2026-08-03) 原価表示中はラベルが戻し方の名前に入れ替わる',
+        (await pvPage.getByRole('button', { name: ja.detail.priceViewHide }).count()) === 1 &&
+          (await pvPage.getByRole('button', { name: ja.detail.priceViewShow }).count()) === 0,
+        `いま出ているラベル=${ja.detail.priceViewHide}`,
       )
       check('PRICEVIEW-01 「原価を見る」ON: 「原価を編集」ボタンが出現する(階層構造)', (await editButton.count()) === 1)
       const onText = await ingredientsSection.textContent()
@@ -18298,7 +18302,7 @@ try {
       check(
         'PRICEVIEW-01(2026-08-03) 非表示に戻るとラベルも「原価を見る」に戻る',
         (await pvPage.getByRole('button', { name: '原価を見る' }).count()) === 1 &&
-          (await pvPage.getByRole('button', { name: '材料に戻す' }).count()) === 0,
+          (await pvPage.getByRole('button', { name: ja.detail.priceViewHide }).count()) === 0,
       )
       check(
         'PRICEVIEW-01 非表示に戻る: 「原価を編集」ボタンも消える(階層構造)',
@@ -18343,7 +18347,7 @@ try {
         has: jgPage.getByRole('heading', { name: '材料', level: 2 }),
       })
       const jgOnionRow = jgIngredients.locator('li', { hasText: '玉ねぎ' })
-      const jgViewButton = jgPage.getByRole('button', { name: /^(原価を見る|材料に戻す)$/ })
+      const jgViewButton = jgPage.getByRole('button', { name: new RegExp(`^(${ja.detail.priceViewShow}|${ja.detail.priceViewHide})$`) })
       const jgUp = jgPage.getByRole('button', { name: '人数を増やす' })
       const jgDown = jgPage.getByRole('button', { name: '人数を減らす' })
       // 写真下の合計「約◯円」だけを読む（1食あたりの行と混ざらないよう、行の先頭側から取る）
