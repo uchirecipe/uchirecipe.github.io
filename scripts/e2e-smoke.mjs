@@ -30406,14 +30406,14 @@ try {
         // ④設定の「アプリの更新」から反映できる（帯を閉じたあとの受け皿）
         const upCheckButton = upPage.locator('[data-testid="app-update-check"]')
         check('APPUPDATE-01 設定に「最新の状態にする」がある', await upCheckButton.isVisible())
+        // 2026-08-22 司令部: 文言を**2つとも書き写していた**ため、便JJで「〜で足ります」→
+        // 「〜をお使いください」に直した瞬間に落ちた（禁じ手②）。ja.ts から読む形へ
+        const upBody = (await upPage.textContent('body')).replaceAll('\u200b', '')
         check(
           'APPUPDATE-01 設定に「困ったとき」との使い分けが書いてある',
-          (await upPage.textContent('body')).includes(
-            '表示の乱れが直らないときは「困ったとき」の「アプリの表示を修復する」をお使いください',
-          ) &&
-            (await upPage.textContent('body')).includes(
-              '新しいバージョンにしたいだけなら、「アプリの更新」の「最新の状態にする」で足ります',
-            ),
+          upBody.includes(ja.settings.appUpdateVsRefreshNote) &&
+            upBody.includes(ja.settings.refreshAppVsUpdateNote),
+          `見つからない方=${!upBody.includes(ja.settings.appUpdateVsRefreshNote) ? 'appUpdateVsRefreshNote' : 'refreshAppVsUpdateNote'}`,
         )
         await upCheckButton.scrollIntoViewIfNeeded()
         await upPage.waitForTimeout(200)
