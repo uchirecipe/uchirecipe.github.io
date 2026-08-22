@@ -825,7 +825,7 @@ export const ja = {
     rangeCostRowPerDayNote: '1人分÷選んだ{d}日',
     // どの日をどちらの基準で数えたかの明示(便CA)。混在する期間は両方、片方だけの期間は片方を出す
     rangeBasisBoth: '{ps}〜{pe}は作った記録、{fs}〜{fe}は登録した献立で計算しています',
-    rangeBasisActualOnly: '過ぎた日なので、作った記録だけで計算しています',
+    rangeBasisActualOnly: '作った記録だけで計算しています',
     rangeBasisPlanOnly: '今日から先の期間なので、登録した献立で計算しています',
     // 2026-08-08 便EA(オーナー指摘「今日の『作った記録』が集計に入っていない」)。
     // 今日は記録と献立が同居しうるので、過去だけ・未来だけの期間とは別の言い方にする

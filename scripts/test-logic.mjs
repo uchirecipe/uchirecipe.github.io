@@ -27463,6 +27463,20 @@ Aみりん 大さじ1
       /excludedDirectionNoteTotal/.test(jfPanelSrc),
       true,
     )
+    // 2026-08-22 司令部の裁定（便JFの申し送り1・A案）: 月の期間カードだけ「過ぎた日なので、」が
+    // 残っていた。オーナーが余計だと言ったのは**頭の「過ぎた日なので、」**の部分で、「だけ」には
+    // 月では意味がある（過去と先の日が混ざりうる期間なので、記録だけで数えていることを言う必要が
+    // ある）。頭だけ落として、週の言い回しとそろえる
+    eq(
+      'JF-2 月の期間カードも「過ぎた日なので、」を頭に付けない',
+      ja.mealPlan.rangeBasisActualOnly.startsWith('過ぎた日なので'),
+      false,
+    )
+    eq(
+      'JF-2 ただし「だけ」は残す（記録だけで数えていることは言う）',
+      ja.mealPlan.rangeBasisActualOnly.includes('だけ'),
+      true,
+    )
     // レシピ詳細の栄養は、一覧のすぐ下に出るので添え書きの要らない側を使ったまま
     const jfTeaserSrc = jfRead('src/components/NutritionTeaser.tsx')
     eq(
