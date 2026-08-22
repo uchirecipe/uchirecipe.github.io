@@ -23295,6 +23295,31 @@ Aみりん 大さじ1
       [],
     )
 
+    // IK-5: **使い方ページ以外**が載せている同じ図も、控えと同じ大きさで書く（2026-08-22 司令部）。
+    // 直した穴: 上の IK-2 は manual.html しか読んでいなかったので、紹介ページ（index.html）が
+    // 同じ図を載せていても取りこぼす。実際に 2026-08-22 の撮り直しで paste.webp が
+    // 780x924→780x964 に変わったとき、manual.html だけが直り index.html が古い数字のまま残った
+    // （e2e の SHOTSIZE-EP と FE-LP が拾ったが、単体では通っていた＝発見が1段階遅れる）。
+    // 図は縦横比が狂うと崩れて出るので、載せている場所を全部見る。
+    const otherPages = readdirSync(path.join(appRoot, 'public/about'))
+      .filter((f) => f.endsWith('.html') && f !== 'manual.html')
+    eq('IK-5 使い方ページ以外のページを読めている（0件なら見張りが壊れている）', otherPages.length > 0, true)
+    const otherFigureSizes = []
+    for (const file of otherPages) {
+      const raw = readFileSync(path.join(appRoot, 'public/about', file), 'utf-8')
+      for (const m of raw.matchAll(/<img\s+src="\/about\/img\/manual\/([a-z0-9-]+)\.webp"([^>]*)>/g)) {
+        const name = m[1]
+        const w = Number(m[2].match(/\swidth="(\d+)"/)?.[1])
+        const h = Number(m[2].match(/\sheight="(\d+)"/)?.[1])
+        if (!shotSizes[name]) {
+          otherFigureSizes.push(`${file} ${name} 撮影の控えに無い`)
+        } else if (shotSizes[name].w !== w || shotSizes[name].h !== h) {
+          otherFigureSizes.push(`${file} ${name} ページ=${w}x${h} 撮影=${shotSizes[name].w}x${shotSizes[name].h}`)
+        }
+      }
+    }
+    eq('IK-5 使い方ページ以外が載せている図も、width/height が撮影の控えと同じ', otherFigureSizes, [])
+
     eq(
       'IK-3 どの図にも説明（alt）がある',
       figures.filter((f) => f.alt.trim().length < 6).map((f) => f.name ?? '(名前の取れない図)'),
