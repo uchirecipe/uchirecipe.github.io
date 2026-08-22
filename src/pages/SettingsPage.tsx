@@ -1793,6 +1793,32 @@ export default function SettingsPage() {
             </button>
           </section>
 
+          {/* 安全のめやす（2026-08-22 便JH）。既定は表示。ここで切ると、どの画面にも出さない。
+              レシピのデータには何も書き込まないので、切っても入れてもレシピの中身は変わらない */}
+          <section className={sectionCls}>
+            <h2 className="font-bold">{ja.settings.safetyTitle}</h2>
+            <p className="mt-1 text-sm text-ink-muted">{ja.settings.safetyDescription}</p>
+            <label className="mt-[var(--space-sm)] flex items-center justify-between gap-3">
+              <span className="min-w-0 text-sm font-bold text-ink-muted">{ja.settings.safetyShow}</span>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={!settings.safetyNotesOff}
+                aria-label={ja.settings.safetyShow}
+                onClick={() => updateSettings({ safetyNotesOff: !settings.safetyNotesOff })}
+                className={`relative h-8 w-14 shrink-0 rounded-full transition-colors ${
+                  settings.safetyNotesOff ? 'bg-edge' : 'bg-accent'
+                }`}
+              >
+                <span
+                  className={`absolute top-1 h-6 w-6 rounded-full bg-surface shadow-sm transition-all ${
+                    settings.safetyNotesOff ? 'left-1' : 'left-7'
+                  }`}
+                />
+              </button>
+            </label>
+          </section>
+
           {/* レシピセットの読み込み */}
           <section className={sectionCls}>
             <h2 className="font-bold">{ja.settings.recipeSetTitle}</h2>
