@@ -47362,6 +47362,251 @@ try {
     }
   }
 
+
+  // --- JFLOCKEDIT-08: 鍵を掛けた日は記録も編集できない（オーナー原文
+  //     「記録は編集モードで消せる。鍵をかけたら編集もできなくなるようにして。」） ---
+  currentCheck = 'JFLOCKEDIT-08'
+  {
+    const jhBrowser = await chromium.launch()
+    const jhContext = await jhBrowser.newContext({ viewport: { width: 390, height: 844 } })
+    const jhPage = await jhContext.newPage()
+    jhPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@JFLOCKEDIT-08] ${err.message}`)
+    })
+    try {
+      await jhPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+      await jhPage.waitForTimeout(2400)
+      // 過ぎた日に記録を1件仕込む（生のIndexedDBへ書いたので必ず読み込み直す・禁じ手⑥）
+      const jhSeed = await jhPage.evaluate(
+        () =>
+          new Promise((resolve, reject) => {
+            const d = new Date()
+            d.setDate(d.getDate() - 10)
+            const date = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+            const req = indexedDB.open('uchi-recipe')
+            req.onsuccess = () => {
+              const tx = req.result.transaction('recipes', 'readwrite')
+              const store = tx.objectStore('recipes')
+              const g = store.getAll()
+              g.onsuccess = () => {
+                const r = g.result.find((x) => x.title === 'カレーライス')
+                if (!r) {
+                  reject(new Error('カレーライスが見つからない'))
+                  return
+                }
+                r.cookedLogs = [{ date }, ...(r.cookedLogs ?? [])]
+                store.put(r)
+              }
+              tx.oncomplete = () => resolve(date)
+              tx.onerror = () => reject(tx.error)
+            }
+            req.onerror = () => reject(req.error)
+          }),
+      )
+      await jhPage.reload({ waitUntil: 'networkidle' })
+      await jhPage.waitForTimeout(1400)
+      await jhPage.getByRole('button', { name: '週', exact: true }).click()
+      await jhPage.waitForTimeout(900)
+      for (let i = 0; i < 4; i++) {
+        if ((await jhPage.locator(`section[data-date="${jhSeed}"]`).count()) > 0) break
+        const shown = await jhPage.locator('section[data-date]').first().getAttribute('data-date')
+        await jhPage.locator(`button[aria-label="${shown && jhSeed < shown ? '前の週' : '次の週'}"]`).click()
+        await jhPage.waitForTimeout(700)
+      }
+      await openAllWeekDays(jhPage)
+      await jhPage.waitForTimeout(700)
+      const jhCard = jhPage.locator(`section[data-date="${jhSeed}"]`)
+      await jhCard.locator('[data-testid="week-day-edit"]').first().click()
+      await jhPage.waitForTimeout(600)
+      const jhAdd = jhCard.locator('[data-testid="past-record-add"]')
+      const jhDel = jhCard.locator('[data-testid="past-record-delete"]')
+      const jhNote = jhCard.locator('[data-testid="past-record-locked-note"]')
+      check(
+        'JFLOCKEDIT-08 前提: 鍵を掛ける前は、足すのも消すのも押せる',
+        (await jhAdd.count()) === 1 &&
+          (await jhAdd.first().isEnabled()) &&
+          (await jhDel.count()) === 1 &&
+          (await jhDel.first().isEnabled()),
+        `足す=${await jhAdd.count()}件 消す=${await jhDel.count()}件`,
+      )
+      check('JFLOCKEDIT-08 前提: 鍵を掛ける前は理由の1行を出さない', (await jhNote.count()) === 0)
+      const jhLock = jhPage.locator(`[data-testid="day-lock"][data-date="${jhSeed}"]`)
+      check('JFLOCKEDIT-08 前提: その日の鍵を掴めた', (await jhLock.count()) === 1)
+      await jhLock.first().click()
+      await jhPage.waitForTimeout(900)
+      check(
+        'JFLOCKEDIT-08 鍵を掛けると、記録を足せなくなる',
+        (await jhAdd.count()) === 1 && (await jhAdd.first().isDisabled()),
+        `押せる=${(await jhAdd.count()) === 1 ? await jhAdd.first().isEnabled() : '掴めない'}`,
+      )
+      check(
+        'JFLOCKEDIT-08 鍵を掛けると、記録を消せなくなる',
+        (await jhDel.count()) === 1 && (await jhDel.first().isDisabled()),
+        `押せる=${(await jhDel.count()) === 1 ? await jhDel.first().isEnabled() : '掴めない'}`,
+      )
+      check(
+        'JFLOCKEDIT-08 押せない理由が、同じカードの中で読める',
+        (await jhNote.count()) === 1 && (await jhNote.first().isVisible()),
+        `理由の1行=${(await jhNote.count()) === 1 ? await jhNote.first().textContent() : 'なし'}`,
+      )
+      // 鍵は可逆（外せばすぐ元どおり）
+      await jhLock.first().click()
+      await jhPage.waitForTimeout(900)
+      check(
+        'JFLOCKEDIT-08 鍵を外すと、また足せる・消せる（掛け外しは自由）',
+        (await jhAdd.first().isEnabled()) &&
+          (await jhDel.first().isEnabled()) &&
+          (await jhNote.count()) === 0,
+        `足す=${await jhAdd.first().isEnabled()} 消す=${await jhDel.first().isEnabled()}`,
+      )
+    } finally {
+      await jhBrowser.close()
+    }
+  }
+
+  // --- JFCLEAR-09: 「まとめて空にする」は作った記録を消さない（オーナー原文
+  //     「まとめて献立を空ににする機能の対象外にしたい。献立を変種していたら
+  //       誤って記録まで消してしまう事故が起こりそう」） ---
+  currentCheck = 'JFCLEAR-09'
+  {
+    const jiBrowser = await chromium.launch()
+    const jiContext = await jiBrowser.newContext({ viewport: { width: 390, height: 844 } })
+    const jiPage = await jiContext.newPage()
+    jiPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@JFCLEAR-09] ${err.message}`)
+    })
+    /** 端末に入っている「作った記録」の総件数（読むだけなので読み込み直しは要らない） */
+    const jiCookedCount = () =>
+      jiPage.evaluate(
+        () =>
+          new Promise((resolve, reject) => {
+            const req = indexedDB.open('uchi-recipe')
+            req.onsuccess = () => {
+              const g = req.result.transaction('recipes', 'readonly').objectStore('recipes').getAll()
+              g.onsuccess = () =>
+                resolve(g.result.reduce((n, r) => n + (r.cookedLogs?.length ?? 0), 0))
+              g.onerror = () => reject(g.error)
+            }
+            req.onerror = () => reject(req.error)
+          }),
+      )
+    /** 端末に入っている献立の行数 */
+    const jiPlanCount = () =>
+      jiPage.evaluate(
+        () =>
+          new Promise((resolve, reject) => {
+            const req = indexedDB.open('uchi-recipe')
+            req.onsuccess = () => {
+              const g = req.result.transaction('mealPlans', 'readonly').objectStore('mealPlans').getAll()
+              g.onsuccess = () => resolve(g.result.length)
+              g.onerror = () => reject(g.error)
+            }
+            req.onerror = () => reject(req.error)
+          }),
+      )
+    try {
+      await jiPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+      await jiPage.waitForTimeout(2400)
+      // 今日と昨日に作った記録を仕込む（生のIndexedDBへ書いたので読み込み直す・禁じ手⑥）
+      await jiPage.evaluate(
+        () =>
+          new Promise((resolve, reject) => {
+            const iso = (offset) => {
+              const d = new Date()
+              d.setDate(d.getDate() + offset)
+              return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+            }
+            const req = indexedDB.open('uchi-recipe')
+            req.onsuccess = () => {
+              const tx = req.result.transaction('recipes', 'readwrite')
+              const store = tx.objectStore('recipes')
+              const g = store.getAll()
+              g.onsuccess = () => {
+                const a = g.result.find((x) => x.title === 'カレーライス')
+                const b = g.result.find((x) => x.title === '肉じゃが')
+                if (!a || !b) {
+                  reject(new Error('仕込むレシピが見つからない'))
+                  return
+                }
+                a.cookedLogs = [{ date: iso(0) }, ...(a.cookedLogs ?? [])]
+                b.cookedLogs = [{ date: iso(-1) }, ...(b.cookedLogs ?? [])]
+                store.put(a)
+                store.put(b)
+              }
+              tx.oncomplete = () => resolve(undefined)
+              tx.onerror = () => reject(tx.error)
+            }
+            req.onerror = () => reject(req.error)
+          }),
+      )
+      await jiPage.reload({ waitUntil: 'networkidle' })
+      await jiPage.waitForTimeout(1400)
+      await jiPage.getByRole('button', { name: '週', exact: true }).click()
+      await jiPage.waitForTimeout(900)
+      // 献立を7日ぶん入れる（消す相手を作る）
+      await openWeekGroup(jiPage, ja.mealPlan.weekGroupAutoTitle)
+      await jiPage.getByRole('button', { name: 'まとめて献立を入力' }).click()
+      await jiPage.waitForTimeout(3200)
+      const jiPlanBefore = await jiPlanCount()
+      const jiCookedBefore = await jiCookedCount()
+      check(
+        'JFCLEAR-09 前提: 消す相手の献立と、守る相手の作った記録が両方ある',
+        jiPlanBefore > 0 && jiCookedBefore >= 2,
+        `献立=${jiPlanBefore}行 作った記録=${jiCookedBefore}件`,
+      )
+      // 朝食・昼食・夕食を全部選んでから「空にする」
+      await openWeekGroup(jiPage, ja.mealPlan.weekGroupDisplayTitle)
+      await jiPage.waitForTimeout(400)
+      for (const slot of ['朝食', '昼食', '夕食']) {
+        const chip = jiPage.getByRole('button', { name: `空にする食事として${slot}を選ぶ` })
+        if ((await chip.count()) === 1 && (await chip.first().getAttribute('aria-pressed')) !== 'true') {
+          await chip.first().click()
+          await jiPage.waitForTimeout(250)
+        }
+      }
+      await setConfirmAnswer(jiPage, 'off')
+      await jiPage.locator('[data-testid="week-clear-slot"]').click()
+      await jiPage.waitForTimeout(800)
+      const jiConfirmText = ((await jiPage.locator('[data-testid="confirm"]').textContent()) ?? '')
+        .replaceAll('​', '')
+      // 消す相手は見出しで名指しする（「予定◯品を削除します」）。
+      // 「作った記録は残ります」とは**書かない**——2026-08-18 のオーナー指摘
+      // 「『〜外しました（作った記録は残ります）』、作った記録もするということ？
+      //   消すだけですよね。嘘書かないで。」で、触らないものを「残ります」と書くのは
+      // 禁じ手になっている（見張り＝test-logic の PLANWORD-1）。
+      // 記録に触らないことは、下の実データの数え比べで見張る
+      check(
+        'JFCLEAR-09 押す前に、消す相手を「予定」と名指ししている',
+        jiConfirmText.includes('予定') && jiConfirmText.includes('削除します'),
+        `確認文=${jiConfirmText}`,
+      )
+      check(
+        'JFCLEAR-09 触らない「作った記録」の話は確認文に混ぜない（2026-08-18 オーナー指摘）',
+        !jiConfirmText.includes('作った記録'),
+        `確認文=${jiConfirmText}`,
+      )
+      await jiPage.locator('[data-testid="confirm-ok"]').click()
+      await setConfirmAnswer(jiPage, 'accept')
+      await jiPage.waitForTimeout(1600)
+      const jiPlanAfter = await jiPlanCount()
+      const jiCookedAfter = await jiCookedCount()
+      check(
+        'JFCLEAR-09 前提: 「空にする」が実際に献立を消している（何も起きていないのに合格にしない）',
+        jiPlanAfter < jiPlanBefore,
+        `献立 前=${jiPlanBefore}行 後=${jiPlanAfter}行`,
+      )
+      check(
+        'JFCLEAR-09 作った記録は1件も消えない',
+        jiCookedAfter === jiCookedBefore,
+        `作った記録 前=${jiCookedBefore}件 後=${jiCookedAfter}件`,
+      )
+    } finally {
+      await jiBrowser.close()
+    }
+  }
+
 } catch (err) {
   ng(`実行中断(${currentCheck})`, err.message)
 } finally {

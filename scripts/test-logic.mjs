@@ -27404,6 +27404,7 @@ Aみりん 大さじ1
   const jfRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
   const jfRead = (rel) => readFileSync(path.join(jfRoot, rel), 'utf-8')
   const jfMealPlanSrc = jfRead('src/pages/MealPlanPage.tsx')
+  const mealPlanLogicJF2 = await import('../src/logic/mealPlan.ts')
 
   // --- JF-1: 過ぎた日の編集モードは「作った記録を足す」（①） ---
   {
@@ -27623,6 +27624,96 @@ Aみりん 大さじ1
     eq(
       'JF-6 レシピの無い記録も、消す前の姿を控えてから消せる',
       /restoreDetachedRecord/.test(jfDetachedSrc),
+      true,
+    )
+  }
+
+  // --- JF-7: 鍵を掛けたら記録も編集できない／「まとめて空にする」は記録を消さない
+  //           （オーナー追加指示「記録は編集モードで消せる。鍵をかけたら編集もできなくなるようにして。
+  //             変更を入れるなら、まとめて献立を空ににする機能の対象外にしたい。
+  //             献立を変種していたら誤って記録まで消してしまう事故が起こりそう」） ---
+  {
+    // (1) 鍵を掛けた日は、記録の追加も削除も止まる。
+    //     献立の側は 2026-08-08 便EA で「鍵を掛けたら手での操作も全部止める」になっているので、
+    //     記録も**同じ止め方**（押せる場所は出したまま、押せなくする）にそろえる
+    eq(
+      'JF-7 記録を足す入口が、鍵で止まる形になっている',
+      /data-testid="past-record-add"[\s\S]{0,900}disabled=\{/.test(jfMealPlanSrc),
+      true,
+    )
+    eq(
+      'JF-7 記録の削除も、鍵で止まる形になっている',
+      /data-testid="past-record-delete"[\s\S]{0,500}disabled=\{/.test(jfMealPlanSrc),
+      true,
+    )
+    // 止める判断は、日付の横の鍵の絵と**同じ値**でなければならない
+    // （閉じた鍵が出ているのに押せる／開いた鍵なのに押せない、を作らない）
+    eq(
+      'JF-7 前提: 日付の横の鍵は「その日の3食とも掛かっているか」で描いている',
+      /const dayLocked = isDayMealLocked\(lockedKeys, date\)/.test(jfMealPlanSrc),
+      true,
+    )
+    eq(
+      'JF-7 止める判断も同じ値（鍵の絵と食い違わせない）',
+      /data-testid="past-record-add"[\s\S]{0,900}disabled=\{dayLocked\}/.test(jfMealPlanSrc) &&
+        /deleteDisabled=\{dayLocked\}/.test(jfMealPlanSrc),
+      true,
+    )
+    eq(
+      'JF-7 押せない理由を読める文言がある',
+      typeof ja.mealPlan.pastRecordLockedNote === 'string' &&
+        ja.mealPlan.pastRecordLockedNote.length > 0,
+      true,
+    )
+    eq(
+      'JF-7 その理由が、鍵の掛かった日に出る形になっている',
+      /data-testid="past-record-locked-note"/.test(jfMealPlanSrc),
+      true,
+    )
+
+    // (2) 「まとめて空にする」は作った記録に触らない。
+    //     消す計画（planClearMealSlots）が返すのは**献立の行の番号だけ**で、
+    //     それを受ける removeMealEntries は mealPlans しか触らない
+    const clearPlan = mealPlanLogicJF2.planClearMealSlots(
+      [
+        { id: 1, date: '2026-08-20', slot: 'dinner' },
+        { id: 2, date: '2026-08-21', slot: 'dinner' },
+      ],
+      ['dinner'],
+      new Set(),
+    )
+    eq(
+      'JF-7 消す計画が返すのは献立の行の番号だけ（記録を指す口を持たない）',
+      Object.keys(clearPlan).sort(),
+      ['entryIdsToRemove', 'lockedEntryCount', 'lockedSlotCount', 'targetCount'],
+    )
+    const dbMealPlanSrc = jfRead('src/db/mealPlan.ts')
+    const removeFn = dbMealPlanSrc.slice(
+      dbMealPlanSrc.indexOf('export async function removeMealEntries'),
+    )
+    const removeBody = removeFn.slice(0, removeFn.indexOf('\n}\n') + 3)
+    eq(
+      'JF-7 前提: 献立の行を消す関数を読めている',
+      removeBody.includes('bulkDelete'),
+      true,
+    )
+    eq(
+      'JF-7 献立の行を消す関数は、レシピ（＝作った記録の置き場所）に触らない',
+      /db\.recipes|cookedLogs|detachedLogs/.test(removeBody),
+      false,
+    )
+    // 消す相手は見出しで名指ししてある（「予定◯品を削除します」）＝
+    // 作った記録が対象でないことは、名前のほうで言い切っている。
+    // 「作った記録は残ります」と書き足すのは 2026-08-18 のオーナー指摘（嘘書かないで）で
+    // 禁じられており、PLANWORD-1 が見張っている。ここでは名指しのほうを固定する
+    eq(
+      'JF-7 確認の見出しが、消す相手を「予定」と名指ししている（食事を選んだとき）',
+      (ja.mealPlan.clearWeekSlotConfirmTitle ?? '').includes('予定'),
+      true,
+    )
+    eq(
+      'JF-7 確認の見出しが、消す相手を「予定」と名指ししている（3食とも選んだとき）',
+      (ja.mealPlan.clearWeekSlotConfirmAllTitle ?? '').includes('予定'),
       true,
     )
   }

@@ -579,6 +579,7 @@ function CookedLogCard({
   readOnly = false,
   onOpenDetail,
   onDelete,
+  deleteDisabled = false,
   detailAs = 'card',
 }: {
   recipe: Recipe
@@ -605,6 +606,13 @@ function CookedLogCard({
    * （通常表示は今までどおり、記録のカードが並ぶだけ）。
    */
   onDelete?: () => void
+  /**
+   * 削除を出したまま押せなくする（2026-08-22 便JF・オーナー原文
+   * 「鍵をかけたら編集もできなくなるようにして。」）。
+   * 止め方は、鍵の掛かった献立の×・食数・サイコロとまったく同じ（2026-08-08 便EA）
+   * ＝ボタンは同じ場所に出したまま押せなくする。押せない理由は呼び出し側が1行で添える。
+   */
+  deleteDisabled?: boolean
   /**
    * 小窓の開き方。
    *  'card'  … カードそのものを押すと小窓が開く（月タブの日の窓）
@@ -654,11 +662,14 @@ function CookedLogCard({
               type="button"
               data-testid="past-record-delete"
               onClick={onDelete}
+              disabled={deleteDisabled}
               aria-label={ja.mealPlan.pastRecordDeleteAria
                 .replace('{m}', String(Number(log.date.slice(5, 7))))
                 .replace('{d}', String(Number(log.date.slice(8, 10))))
                 .replace('{title}', recipe.title)}
-              className="inline-flex min-h-11 items-center gap-1 text-xs font-bold text-warning underline"
+              className={`inline-flex min-h-11 items-center gap-1 text-xs font-bold text-warning underline ${
+                deleteDisabled ? 'opacity-40' : ''
+              }`}
             >
               <Trash2 size={14} aria-hidden />
               {ja.mealPlan.pastRecordDelete}
@@ -8457,13 +8468,28 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                     setRecordPickDate(date)
                     setPickerQuery('')
                   }}
-                  className="flex min-h-11 w-full items-center justify-center gap-2 rounded-md border border-accent bg-surface py-3 font-bold text-accent-ink shadow-sm"
+                  /* 鍵の掛かった日では押せない（2026-08-22 便JF・オーナー原文
+                     「鍵をかけたら編集もできなくなるようにして。」）。
+                     止め方は鍵の掛かった献立の×・食数・サイコロと同じ＝ボタンは同じ場所に
+                     出したまま押せなくする（2026-08-08 便EA）。理由はすぐ下の1行が言う */
+                  disabled={dayLocked}
+                  className={`flex min-h-11 w-full items-center justify-center gap-2 rounded-md border border-accent bg-surface py-3 font-bold text-accent-ink shadow-sm ${
+                    dayLocked ? 'opacity-40' : ''
+                  }`}
                 >
                   <Plus size={18} aria-hidden />
                   {ja.mealPlan.pastRecordAdd}
                 </button>
-                {/* 在庫を下げる設定がONの人にだけ、押す前に読める場所で違いを書く（規約F） */}
-                {settings?.cookedReflectPantry && (
+                {/* 押せない理由（2026-08-22 便JF）。鍵を外せば元どおりであることまで1行で言う
+                    ＝鍵の掛かった献立を触ろうとしたときの案内（lockedEditBlocked）と同じ言い回し */}
+                {dayLocked && (
+                  <p data-testid="past-record-locked-note" className="mt-1 text-xs text-ink-muted">
+                    {ja.mealPlan.pastRecordLockedNote}
+                  </p>
+                )}
+                {/* 在庫を下げる設定がONの人にだけ、押す前に読める場所で違いを書く（規約F）。
+                    鍵が掛かっていて足せないときは出さない（起きないことの説明を先に読ませない） */}
+                {!dayLocked && settings?.cookedReflectPantry && (
                   <p data-testid="past-record-pantry-note" className="mt-1 text-xs text-ink-muted">
                     {ja.mealPlan.pastRecordPantryNote}
                   </p>
@@ -8497,6 +8523,9 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                             ? () => void deletePastCookedRecord(date, entry)
                             : undefined
                         }
+                        /* 鍵の掛かった日では消せない（2026-08-22 便JF）。
+                           足す側（past-record-add）とまったく同じ止め方・同じ判断（日ごとの鍵） */
+                        deleteDisabled={dayLocked}
                         // 削除済みレシピの記録には行き先が無いので、カードそのものを記録の小窓にする
                         // (2026-08-16 便GZ。'below' のままだと押せないレシピ詳細へのリンクになる)
                         detailAs={entry.detachedRecordId != null ? 'card' : 'below'}
