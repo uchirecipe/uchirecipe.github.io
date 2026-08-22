@@ -67,7 +67,10 @@ for (const [name, count] of nameCounts) {
 // priceDefaults.tsの冒頭コメントに「172件」と書いてあったが実際は170件で、追加・整理のたびに
 // コメントだけが取り残されていた。件数はコメントに書かず、ここで実配列と突き合わせる。
 // 意図して増減させたときは、この数を直すこと(直し忘れれば必ずここで落ちる)。
-const PRICE_DEFAULTS_COUNT = 169
+// 2026-08-22 便JG: オーナーの実データ31品で「価格なし」だった常用食材12件を追加して169→181件
+// （卵黄・卵白・生クリーム・赤ワイン・ローリエ・えんどう豆・ホットケーキミックス・無塩バター・
+//   マッシュルーム・粉砂糖・青ねぎ・塩鮭）。「粗びき黒こしょう」→「黒こしょう」は改名なので増えない
+const PRICE_DEFAULTS_COUNT = 181
 check(
   PRICE_DEFAULTS.length === PRICE_DEFAULTS_COUNT,
   `PRICE_DEFAULTSの件数が想定と違う: 実際=${PRICE_DEFAULTS.length}件 / 想定=${PRICE_DEFAULTS_COUNT}件。` +

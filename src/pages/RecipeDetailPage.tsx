@@ -48,6 +48,7 @@ import {
   estimateRecipeCost,
   estimateIngredientRowCost,
   normalizeIngredientNameForPrice,
+  recipeCostConfidence,
 } from '../logic/priceEstimate'
 import { seasoningGroupColorToken } from '../logic/seasoningGroup'
 import { shareText, shareImageCard, type ShareOptions } from '../logic/share'
@@ -565,6 +566,9 @@ export default function RecipeDetailPage() {
   // 表示人数(servingsOverride)を追わず常にrecipe.servings(登録人数)で割る
   const costPerServingRegistered =
     recipe.servings > 0 ? Math.round(totalPrice / recipe.servings) : totalPrice
+  // 価格が分からない材料の分は合計に1円も入っていない＝この金額は必ず実際より安く出る。
+  // 知らせる条件はlogic/priceEstimate.tsのrecipeCostConfidenceに集約(2026-08-22 便JG)
+  const costConfidence = recipeCostConfidence(recipe.ingredients, priceIndex)
 
   const saveLog = async () => {
     if (!logDate) return
@@ -772,6 +776,14 @@ export default function RecipeDetailPage() {
               {ja.detail.priceAbout}
               {scaledPrice.toLocaleString()}
               {ja.detail.priceYen}
+              {/* 価格が分からない材料があるときの印(2026-08-22 便JG)。NG食材は枠付きの札で
+                  この行に並ぶので、こちらは金額の文字に添えるだけにして場所を取り合わない。
+                  印の意味は下の1行で書くので、読み上げでは重複させない */}
+              {costConfidence.shouldWarn && (
+                <span aria-hidden className="font-bold text-accent-ink">
+                  {ja.detail.costRoughMark}
+                </span>
+              )}
             </span>
           )}
           {ngIndices.size > 0 && (
@@ -789,6 +801,16 @@ export default function RecipeDetailPage() {
             {ja.detail.pricePerServing
               .replace('{s}', String(servings))
               .replace('{n}', perServingPrice.toLocaleString())}
+          </p>
+        )}
+
+        {/* 上の印の意味(2026-08-22 便JG・オーナー原文「目安とはいえ実際と大きく異なることを
+            記号でお知らせして欲しい」「ティラミスとか、１食４円なわけない。チーズがたくさん」)。
+            金額のすぐ下に置く＝どの数字の話かが場所で分かる */}
+        {totalPrice > 0 && costConfidence.shouldWarn && (
+          <p className="mt-0.5 text-sm text-ink-muted">
+            {ja.detail.costRoughMark}
+            {ja.detail.costPricelessNote.replace('{n}', String(costConfidence.pricelessCount))}
           </p>
         )}
 
@@ -933,12 +955,17 @@ export default function RecipeDetailPage() {
               // 編集モードのときだけマスタ照合する(チップ表示・タップ編集に使う)
               const matchedEntry = costMode === 'edit' ? matchPriceEntry(ing.name, priceIndex) : undefined
               const hasOwnPrice = ing.price != null && ing.price > 0
-              // 「原価を見る」時だけ計算する1食あたりの按分原価(2026-07-20 便AJ・docs/45)。
-              // 全量(登録量)の金額を登録人数(recipe.servings)で割った固定値で、表示人数
-              // (servingsOverride)には追従させない(仕様書「2食分などの変動値は出さない」)
+              // 「原価を見る」時だけ計算する、その行の分量ぶんの金額(2026-08-22 便JG)。
+              // 2026-07-20 便AJ(docs/45)では「1食あたり＝登録人数で割った固定値」を出しており、
+              // 表示人数を変えても金額だけ動かなかった。同じ行の分量(scaleAmount)は表示人数に
+              // 追随するので、登録17人分のシフォンケーキを2人分で見ると「卵 1/2個」の行に
+              // 「約6円」(100円÷17人分)が出て、半分の卵の値段(約12円)と合っていなかった
+              // (オーナー原文「原価が、人数分の表示に合わせて計算されていない。人数の増減で
+              // 数値が変わらない。何人分を表示しているの？」「卵が半量で６円」)。
+              // 分量と同じ人数分を指す金額(shownYen)を出す＝「その量でいくらか」が読める
               const rowCost =
                 costMode === 'view'
-                  ? estimateIngredientRowCost(ing, priceIndex, recipe.servings)
+                  ? estimateIngredientRowCost(ing, priceIndex, recipe.servings, servings)
                   : undefined
               return (
                 <li
@@ -996,16 +1023,16 @@ export default function RecipeDetailPage() {
                         )}
                       </span>
                     ) : costMode === 'view' ? (
-                      /* 原価を見るモード: 計量表記の位置に1食あたりの按分原価を出す
-                         (2026-07-20 便AJ・docs/45。編集導線は無い=タップ不可の静的テキスト。
-                         価格情報が無い材料は「価格なし」、四捨五入で0円になる材料は
-                         「1円未満」を出す) */
+                      /* 原価を見るモード: 計量表記の位置に、その分量ぶんの金額を出す
+                         (2026-07-20 便AJ・docs/45で新設し、2026-08-22 便JGで表示人数に追随させた。
+                         編集導線は無い=タップ不可の静的テキスト。価格情報が無い材料は「価格なし」、
+                         四捨五入で0円になる材料は「1円未満」を出す) */
                       <span className="shrink-0 font-bold">
                         {rowCost ? (
-                          rowCost.perServingYen > 0 ? (
+                          rowCost.shownYen > 0 ? (
                             <>
                               {ja.detail.priceAbout}
-                              {rowCost.perServingYen.toLocaleString()}
+                              {rowCost.shownYen.toLocaleString()}
                               {ja.detail.priceYen}
                             </>
                           ) : (
