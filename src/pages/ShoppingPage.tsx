@@ -591,7 +591,7 @@ export default function ShoppingPage() {
       {activeTab === 'memo' && (
         <>
         {/* 買い物メモ */}
-        <section className="mt-[var(--space-md)] rounded-md border border-edge bg-surface p-[var(--space-md)] shadow-sm">
+        <section className="mt-[var(--space-md)] rounded-md border border-edge bg-surface p-[var(--space-md)]">
           <div className="flex items-center justify-between gap-2">
             <h2 className="text-xl font-bold">{ja.shopping.memoTitle}</h2>
             <button

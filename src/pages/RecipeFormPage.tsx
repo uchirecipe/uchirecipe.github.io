@@ -1814,7 +1814,7 @@ function RecipeFormInner() {
             {ja.urlImport.open}
           </button>
           <Collapse open={urlImportOpen}>
-            <div className="mt-[var(--space-sm)] rounded-md border border-edge bg-surface p-[var(--space-md)] shadow-sm">
+            <div className="mt-[var(--space-sm)] rounded-md border border-edge bg-surface p-[var(--space-md)]">
               <p className="text-sm text-ink-muted">{ja.urlImport.description}</p>
               <input
                 type="url"
@@ -1896,7 +1896,7 @@ function RecipeFormInner() {
         {ja.paste.open}
       </button>
       <Collapse open={pasteOpen}>
-        <div className="mt-[var(--space-sm)] rounded-md border border-edge bg-surface p-[var(--space-md)] shadow-sm">
+        <div className="mt-[var(--space-sm)] rounded-md border border-edge bg-surface p-[var(--space-md)]">
           <p className="text-sm text-ink-muted">{ja.paste.description}</p>
           <textarea
             value={pasteText}
@@ -2356,7 +2356,7 @@ function RecipeFormInner() {
           {steps.map((row, index) => (
             <div
               key={index}
-              className="rounded-md border border-edge bg-surface p-[var(--space-sm)] shadow-sm"
+              className="rounded-md border border-edge bg-surface p-[var(--space-sm)]"
             >
               <div className="flex gap-[var(--space-sm)]">
                 <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-accent font-bold text-on-accent">

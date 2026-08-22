@@ -27577,6 +27577,65 @@ Aみりん 大さじ1
   }
 }
 
+// ---------- JE-1: 並ぶカードの「角」と「線」がトークンの1か所で決まっている ----------
+//
+// 2026-08-22 便JE（オーナー確定「②：４px。（中略）見本では角が消えて見えていたものがあるため、
+// 実装時に上手くいかない可能性が心配。」／「レシピカードの線を濃く（太く？）すると、
+// レシピカードが見分けやすいかも」）。
+//
+// ここで見張るのは**決まりごとの側**（画面の見え方は e2e の JECARD-01 / JELINE-02 が測る）:
+//  ①角と線が src/index.css の1か所（--radius-card / --border-card）で決まっていること
+//  ②その2つが @theme inline に登録されていること
+//    ＝登録が消えると `rounded-card` `border-edge-card` は**何もしないクラス**になり、
+//      角は直角に戻り、線は消える（オーナーが心配した「角が消えて見える」がそのまま起きる）
+//  ③線の色を直に書いていないこと（既存トークンの混合で作る＝5テーマとも自動で追従する）
+//  ④画面側のファイルに、角の px を直に書いた抜け道が無いこと
+{
+  const jeRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
+  const jeCss = readFileSync(path.join(jeRoot, 'src/index.css'), 'utf-8')
+  const jeDecl = (name) => {
+    const m = jeCss.match(new RegExp(`^\\s*${name}:\\s*([^;]+);`, 'm'))
+    return m ? m[1].trim() : null
+  }
+  eq('JE-1 並ぶカードの角丸のトークン（--radius-card）がある', jeDecl('--radius-card') !== null, true)
+  eq('JE-1 並ぶカードの線のトークン（--border-card）がある', jeDecl('--border-card') !== null, true)
+  // @theme inline に登録されていないと、rounded-card / border-edge-card は何もしないクラスになる
+  const jeTheme = jeCss.slice(jeCss.indexOf('@theme inline'))
+  eq(
+    'JE-1 rounded-card が使えるように登録されている',
+    /--radius-card:\s*var\(--radius-card\)/.test(jeTheme),
+    true,
+  )
+  eq(
+    'JE-1 border-edge-card が使えるように登録されている',
+    /--color-edge-card:\s*var\(--border-card\)/.test(jeTheme),
+    true,
+  )
+  // 線の色は既存トークンの混合で作る（直に色を書かない＝テーマを変えたら自動で追従する）
+  const jeBorderCard = jeDecl('--border-card') ?? ''
+  eq('JE-1 線の色を直に書いていない', /#[0-9a-fA-F]{3,8}|\brgb\(/.test(jeBorderCard), false)
+  eq(
+    'JE-1 線の色を既存のトークンから作っている',
+    /var\(--text\)/.test(jeBorderCard) && /var\(--border\)/.test(jeBorderCard),
+    true,
+  )
+  // 画面側に角の px を直に書いた抜け道が無いか（トークンを変えても直らない場所を作らない）
+  const jeFiles = [
+    'src/components/RecipeCard.tsx',
+    'src/pages/MealPlanPage.tsx',
+    'src/pages/RecipesPage.tsx',
+    'src/pages/MealTemplatesPage.tsx',
+    'src/pages/MealPlanCopyWeekPage.tsx',
+  ]
+  const jeHardCoded = []
+  for (const f of jeFiles) {
+    const src = readFileSync(path.join(jeRoot, f), 'utf-8')
+    for (const m of src.matchAll(/rounded-\[[^\]]*\]/g)) jeHardCoded.push(`${f}: ${m[0]}`)
+    for (const m of src.matchAll(/borderRadius:\s*'[^']*'/g)) jeHardCoded.push(`${f}: ${m[0]}`)
+  }
+  eq('JE-1 角の大きさを直に書いた場所が無い', jeHardCoded, [])
+}
+
 // ---------- 結果 ----------
 console.log(`合格: ${passed}件 / 失敗: ${failures.length}件`)
 for (const f of failures) console.log(`  NG ${f}`)

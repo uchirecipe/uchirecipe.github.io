@@ -159,8 +159,16 @@ const themeOptions: { value: ThemeSetting; label: string }[] = [
   { value: 'green', label: ja.settings.themeGreen },
 ]
 
+/**
+ * 設定の1つの節を包む枠。
+ *
+ * 2026-08-22 便JE（オーナー確定「影なし」）: 影（shadow-sm）を外した。
+ * これは**説明と操作を入れておく入れ物**であって、押せるものでも行き先のあるカードでもない。
+ * 影を持たせると「持ち上がっている＝押すと別の画面へ行く」という合図が薄まる
+ * （影の意味づけは src/index.css の --shadow-sm / --shadow-md を参照）。
+ */
 const sectionCls =
-  'mt-[var(--space-md)] rounded-md border border-edge bg-surface p-[var(--space-md)] shadow-sm'
+  'mt-[var(--space-md)] rounded-md border border-edge bg-surface p-[var(--space-md)]'
 
 // 「ふだん作る人数」の選択肢(2026-08-03 便DK)。範囲はレシピの人数分と同じ1〜20
 // (logic/servings.ts。手で作れない人数がここからだけ入る、という穴を作らない)
@@ -1174,7 +1182,7 @@ export default function SettingsPage() {
           「ファイルに書き出す」を押す既存の流れを維持するため)。30日超(または未実施)は警告色。
           ボタン文言は2026-07-30 便CJ/C7で「今すぐ保存」から改名(保存しないのに保存を名乗っていた) */}
       <div
-        className={`mt-[var(--space-sm)] flex items-center gap-2 rounded-md border px-[var(--space-sm)] py-2 shadow-sm ${
+        className={`mt-[var(--space-sm)] flex items-center gap-2 rounded-md border px-[var(--space-sm)] py-2 ${
           backupBannerWarning ? 'border-warning' : 'border-edge'
         }`}
       >

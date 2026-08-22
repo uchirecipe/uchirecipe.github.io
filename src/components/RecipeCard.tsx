@@ -27,6 +27,19 @@ import { cardPartsFor, type CardPartKey, type CardPlace } from '../logic/cardPar
 import { ja } from '../i18n/ja'
 import { usePhotoUrl } from './usePhotoUrl'
 
+/*
+ * カードの角丸と枠（2026-08-22 便JE・オーナー確定）
+ *
+ * 3つの密度（大／標準／小）はどれも「同じ形がたくさん並ぶカード」なので、
+ * 角丸は --radius-card（rounded-card＝4px）、枠は --border-card（border-edge-card）で統一する。
+ *  ・角丸 … オーナー原文「②：４px。（中略）外側の『夕食』などのカードも同様に。」
+ *    入れ子（曜日カード → 朝食/昼食/夕食の枠 → このカード → 中の写真）まで同じ値にそろえる
+ *  ・枠 … オーナー原文「レシピカードの線を濃く（太く？）すると、レシピカードが見分けやすいかも」
+ *    **濃くする方**を採った。太くする（1px→2px）と、カードの中に残る幅が2px縮んで
+ *    料理名の幅が削れる（オーナーが直させたばかりの箇所）。濃さは5テーマとも 3:1 以上。
+ * どちらも値は src/index.css の1か所（トークン）にあり、ここには px も色も書かない。
+ */
+
 /** 季節バッジのアイコン（「通年」は表示しないので含めない） */
 export const seasonIcons: Record<Exclude<Season, 'all'>, typeof Flower2> = {
   spring: Flower2,
@@ -469,10 +482,10 @@ export default function RecipeCard({
    */
   if (density === 'small') {
     const tone = muted
-      ? 'border-edge bg-app/60 text-ink-muted opacity-70'
-      : 'border-edge bg-surface text-ink'
+      ? 'border-edge-card bg-app/60 text-ink-muted opacity-70'
+      : 'border-edge-card bg-surface text-ink'
     return pressable(
-      `relative flex h-full min-h-[var(--tap-min)] w-full min-w-0 items-stretch gap-1 overflow-hidden rounded-sm border ${tone} ${
+      `relative flex h-full min-h-[var(--tap-min)] w-full min-w-0 items-stretch gap-1 overflow-hidden rounded-card border ${tone} ${
         disabled ? 'opacity-40' : ''
       }`,
       <>
@@ -508,17 +521,17 @@ export default function RecipeCard({
 
   if (density === 'standard') {
     const tone = muted
-      ? 'border-edge bg-app/60 text-ink-muted opacity-70'
-      : 'border-edge bg-surface text-ink'
+      ? 'border-edge-card bg-app/60 text-ink-muted opacity-70'
+      : 'border-edge-card bg-surface text-ink'
     return (
       <div
         data-testid={testId}
-        className={`relative rounded-md border shadow-sm ${tone} ${disabled ? 'opacity-40' : ''}`}
+        className={`relative rounded-card border shadow-sm ${tone} ${disabled ? 'opacity-40' : ''}`}
       >
         {pressable(
           'flex w-full items-center gap-[var(--space-sm)] p-[var(--space-sm)]',
           <>
-            {thumb(24, 'h-14 w-14 shrink-0 overflow-hidden rounded-sm')}
+            {thumb(24, 'h-14 w-14 shrink-0 overflow-hidden rounded-card')}
             <div className="min-w-0 flex-1">
               <div className="flex items-start justify-between gap-1">
                 {titleBadges && (
@@ -618,7 +631,7 @@ export default function RecipeCard({
       // h-full: 一覧のグリッドは行の高さを全カードで揃えている(RecipesPage の grid-auto-rows:1fr)。
       // カード自身が行いっぱいに伸びないと、中身の短いカードだけ枠が途中で切れて見える
       // (2026-08-09 オーナー実機「レシピカードの大きさがレシピ名の長さによって変わる」)
-      className="relative h-full overflow-hidden rounded-md bg-surface shadow-sm border border-edge"
+      className="relative h-full overflow-hidden rounded-card bg-surface shadow-sm border border-edge-card"
     >
       {pressable(
         'block h-full',
