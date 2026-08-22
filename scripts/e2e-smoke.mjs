@@ -47153,6 +47153,215 @@ try {
     }
   }
 
+
+  // --- JFLOCK-06: 過去だけの週にも鍵を出す（便IF・⑪の巻き戻し。便JF追加指示①） ---
+  // 週区切り(既定)で「前の週」へ1回送れば、今日が何曜日でも7日とも過ぎた日になる（禁じ手①）
+  currentCheck = 'JFLOCK-06'
+  {
+    const jfBrowser = await chromium.launch()
+    const jfContext = await jfBrowser.newContext({ viewport: { width: 390, height: 844 } })
+    const jfPage = await jfContext.newPage()
+    jfPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@JFLOCK-06] ${err.message}`)
+    })
+    try {
+      await jfPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+      await jfPage.waitForTimeout(2400)
+      await jfPage.getByRole('button', { name: '週', exact: true }).click()
+      await jfPage.waitForTimeout(900)
+      await jfPage.getByRole('button', { name: '前の週', exact: true }).click()
+      await openAllWeekDays(jfPage)
+      await jfPage.waitForTimeout(700)
+      const jfDates = await jfPage.locator('section[data-date]').evaluateAll((els) =>
+        els.map((el) => el.getAttribute('data-date')),
+      )
+      const jfToday = await jfPage.evaluate(() => {
+        const d = new Date()
+        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+      })
+      check(
+        'JFLOCK-06 前提: 7日とも過ぎた日の週を出せた',
+        jfDates.length === 7 && jfDates.every((d) => d < jfToday),
+        `週=${jfDates.join(',')} 今日=${jfToday}`,
+      )
+      const jfDayLocks = jfPage.locator('[data-testid="day-lock"]')
+      check(
+        'JFLOCK-06 過去だけの週でも、日ごとの鍵が7日ぶん出る',
+        (await jfDayLocks.count()) === 7,
+        `鍵=${await jfDayLocks.count()}件`,
+      )
+      check(
+        'JFLOCK-06 過去だけの週でも「すべてロック」が出る',
+        (await jfPage.locator('[data-testid="lock-all"]').count()) === 1,
+      )
+      // 掛けられること（押しても何も起きないボタンを置かない）
+      const jfFirstLock = jfPage.locator(`[data-testid="day-lock"][data-date="${jfDates[0]}"]`)
+      check(
+        'JFLOCK-06 前提: 押す前は掛かっていない',
+        (await jfFirstLock.first().getAttribute('aria-pressed')) === 'false',
+      )
+      await jfFirstLock.first().click()
+      await jfPage.waitForTimeout(800)
+      check(
+        'JFLOCK-06 過ぎた日にも鍵を掛けられる',
+        (await jfFirstLock.first().getAttribute('aria-pressed')) === 'true',
+        `aria-pressed=${await jfFirstLock.first().getAttribute('aria-pressed')}`,
+      )
+      // 週を送って戻っても掛かったまま（見た目だけの印になっていない＝端末に残っている）
+      await jfPage.locator('button[aria-label="次の週"]').click()
+      await jfPage.waitForTimeout(700)
+      await jfPage.locator('button[aria-label="前の週"]').click()
+      await openAllWeekDays(jfPage)
+      await jfPage.waitForTimeout(700)
+      check(
+        'JFLOCK-06 掛けた鍵は週を送って戻っても残る',
+        (await jfPage
+          .locator(`[data-testid="day-lock"][data-date="${jfDates[0]}"]`)
+          .first()
+          .getAttribute('aria-pressed')) === 'true',
+      )
+      // 鍵の効きめ: 「まとめて空にする」は表示している週の全日を対象にするので、
+      // 鍵を掛けた過ぎた日の献立はそこで守られる（過去だけの週で守る手段がこれしかなかった）
+      await jfPage.getByRole('button', { name: `${ja.mealPlan.weekGroupDisplayTitle}を開く` }).click()
+      await jfPage.waitForTimeout(400)
+      check(
+        'JFLOCK-06 同じ週に「まとめて空にする」もある（鍵が守る相手）',
+        (await jfPage.locator('[data-testid="week-clear-slot"]').count()) === 1,
+      )
+    } finally {
+      await jfBrowser.close()
+    }
+  }
+
+  // --- JFDEL-07: 過ぎた日の編集モードから記録を削除できる（便JF追加指示②） ---
+  currentCheck = 'JFDEL-07'
+  {
+    const jgBrowser = await chromium.launch()
+    const jgContext = await jgBrowser.newContext({ viewport: { width: 390, height: 844 } })
+    const jgPage = await jgContext.newPage()
+    jgPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@JFDEL-07] ${err.message}`)
+    })
+    try {
+      await jgPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+      await jgPage.waitForTimeout(2400)
+      // 過ぎた日に記録を2件仕込む（1件消しても「残るもの」を数えられるようにする）。
+      // 生のIndexedDBへ書いたので必ず読み込み直す（禁じ手⑥）
+      const jgSeed = await jgPage.evaluate(
+        () =>
+          new Promise((resolve, reject) => {
+            const d = new Date()
+            d.setDate(d.getDate() - 9)
+            const date = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+            const req = indexedDB.open('uchi-recipe')
+            req.onsuccess = () => {
+              const tx = req.result.transaction('recipes', 'readwrite')
+              const store = tx.objectStore('recipes')
+              const g = store.getAll()
+              g.onsuccess = () => {
+                const a = g.result.find((x) => x.title === 'カレーライス')
+                const b = g.result.find((x) => x.title === '肉じゃが')
+                if (!a || !b) {
+                  reject(new Error('仕込むレシピが見つからない'))
+                  return
+                }
+                a.cookedLogs = [{ date }, ...(a.cookedLogs ?? [])]
+                b.cookedLogs = [{ date }, ...(b.cookedLogs ?? [])]
+                store.put(a)
+                store.put(b)
+              }
+              tx.oncomplete = () => resolve(date)
+              tx.onerror = () => reject(tx.error)
+            }
+            req.onerror = () => reject(req.error)
+          }),
+      )
+      await jgPage.reload({ waitUntil: 'networkidle' })
+      await jgPage.waitForTimeout(1400)
+      await jgPage.getByRole('button', { name: '週', exact: true }).click()
+      await jgPage.waitForTimeout(900)
+      for (let i = 0; i < 4; i++) {
+        if ((await jgPage.locator(`section[data-date="${jgSeed}"]`).count()) > 0) break
+        const shown = await jgPage.locator('section[data-date]').first().getAttribute('data-date')
+        await jgPage.locator(`button[aria-label="${shown && jgSeed < shown ? '前の週' : '次の週'}"]`).click()
+        await jgPage.waitForTimeout(700)
+      }
+      await openAllWeekDays(jgPage)
+      await jgPage.waitForTimeout(700)
+      const jgCard = jgPage.locator(`section[data-date="${jgSeed}"]`)
+      check(
+        'JFDEL-07 前提: 記録を2件仕込んだ過ぎた日のカードを開けた',
+        (await jgCard.locator('[data-testid="cooked-log-card"]').count()) === 2,
+        `記録=${await jgCard.locator('[data-testid="cooked-log-card"]').count()}件（${jgSeed}）`,
+      )
+      check(
+        'JFDEL-07 通常表示には削除の入口を出さない（普段の見え方は今までどおり）',
+        (await jgCard.locator('[data-testid="past-record-delete"]').count()) === 0,
+      )
+      await jgCard.locator('[data-testid="week-day-edit"]').first().click()
+      await jgPage.waitForTimeout(600)
+      const jgDelete = jgCard.locator('[data-testid="past-record-delete"]')
+      check(
+        'JFDEL-07 編集モードにすると、記録1件ごとに削除が出る',
+        (await jgDelete.count()) === 2,
+        `削除=${await jgDelete.count()}件`,
+      )
+      check(
+        'JFDEL-07 削除は指で押せる大きさ(44px以上)',
+        Math.round((await jgDelete.first().boundingBox())?.height ?? 0) >= 44,
+        `高さ=${Math.round((await jgDelete.first().boundingBox())?.height ?? 0)}px`,
+      )
+      // 消す前に確かめる（規約F: 何が消えて何が残るかを件数つきで両方書く）
+      await setConfirmAnswer(jgPage, 'off')
+      await jgDelete.first().click()
+      await jgPage.waitForTimeout(700)
+      const jgConfirmText = ((await jgPage.locator('[data-testid="confirm"]').textContent()) ?? '')
+        .replaceAll('​', '')
+      check(
+        'JFDEL-07 消す前に確認の窓が出る',
+        jgConfirmText.length > 0,
+        `確認文=${jgConfirmText.slice(0, 120)}`,
+      )
+      check(
+        'JFDEL-07 確認文に「消えるもの」と「残るもの」が両方あり、件数が入っている（規約F）',
+        jgConfirmText.includes('消えるもの') &&
+          jgConfirmText.includes('残るもの') &&
+          /\d+件/.test(jgConfirmText),
+        `確認文=${jgConfirmText}`,
+      )
+      check(
+        'JFDEL-07 戻せるので「元に戻せません」とは言わない',
+        !jgConfirmText.includes('元に戻せません'),
+        `確認文=${jgConfirmText}`,
+      )
+      await jgPage.locator('[data-testid="confirm-ok"]').click()
+      await setConfirmAnswer(jgPage, 'accept')
+      await jgPage.waitForTimeout(1000)
+      check(
+        'JFDEL-07 確認して押すと、その記録が1件だけ消える',
+        (await jgCard.locator('[data-testid="cooked-log-card"]').count()) === 1,
+        `残り=${await jgCard.locator('[data-testid="cooked-log-card"]').count()}件`,
+      )
+      const jgUndo = jgPage.getByRole('button', { name: '元に戻す', exact: true })
+      check(
+        'JFDEL-07 消したあとのトーストから1回で戻せる',
+        (await jgUndo.count()) === 1,
+        `元に戻す=${await jgUndo.count()}件`,
+      )
+      await jgUndo.first().click()
+      await jgPage.waitForTimeout(1000)
+      check(
+        'JFDEL-07 「元に戻す」で消した記録が戻る',
+        (await jgCard.locator('[data-testid="cooked-log-card"]').count()) === 2,
+        `戻したあと=${await jgCard.locator('[data-testid="cooked-log-card"]').count()}件`,
+      )
+    } finally {
+      await jgBrowser.close()
+    }
+  }
+
 } catch (err) {
   ng(`実行中断(${currentCheck})`, err.message)
 } finally {

@@ -30,7 +30,7 @@ import {
   Printer,
   ImageDown,
 } from 'lucide-react'
-import { listRecipes, addCookedLog, removeOneTapCookedLog } from '../db/recipes'
+import { listRecipes, addCookedLog, removeOneTapCookedLog, deleteCookedLog } from '../db/recipes'
 import { useSettings, updateSettings } from '../db/settings'
 import { usePriceEntries } from '../db/prices'
 import { usePantryItems } from '../db/pantry'
@@ -50,6 +50,8 @@ import {
   addRecipesToToday,
 } from '../db/mealPlan'
 import { useDayNoteRange, saveDayNote } from '../db/dayNotes'
+// 削除した記録を1回で戻すため、消す前のまとまりを控える（2026-08-22 便JF）
+import { deleteDetachedLogWithSnapshot, restoreDetachedRecord } from '../db/detachedLogs'
 import { useMealPlanLocks, toLockKeySet, applyMealLockToggle } from '../db/mealPlanLocks'
 import { useMealTemplates, saveMealTemplate, deleteMealTemplate } from '../db/mealTemplates'
 import {
@@ -115,7 +117,6 @@ import {
   planSlotLockToggle,
   planAllLockToggle,
   planClearMealSlots,
-  planShowWeekLock,
   planToggleDayEdit,
   planDayEditKind,
   planViewRows,
@@ -219,6 +220,7 @@ import { useScrollLock } from '../components/useScrollLock'
 import type {
   CookedLog,
   DayNote,
+  DetachedCookedRecord,
   MealPlanEntry,
   MealPurpose,
   MealRole,
@@ -576,6 +578,7 @@ function CookedLogCard({
   linkState,
   readOnly = false,
   onOpenDetail,
+  onDelete,
   detailAs = 'card',
 }: {
   recipe: Recipe
@@ -596,6 +599,12 @@ function CookedLogCard({
    * 「献立名をタップで整理された記録（記録、日付、食数など、入力した情報全て）を見られるように」）。
    */
   onOpenDetail?: () => void
+  /**
+   * この記録を1件だけ消す（2026-08-22 便JF・オーナー追加指示「削除ボタンも入れて」）。
+   * **渡したときだけ**削除のボタンが出る＝過ぎた日の編集モードの中でしか出ない
+   * （通常表示は今までどおり、記録のカードが並ぶだけ）。
+   */
+  onDelete?: () => void
   /**
    * 小窓の開き方。
    *  'card'  … カードそのものを押すと小窓が開く（月タブの日の窓）
@@ -624,17 +633,38 @@ function CookedLogCard({
         titleBadges={<CheckCircle2 size={16} className="text-accent-ink" aria-hidden />}
       />
       {/* カードの押下にレシピ詳細という別の役割があるところ（週タブの過去日）では、
-          記録の中身への入口を1行足す（2026-08-09 便EQ） */}
-      {!readOnly && onOpenDetail && detailAs === 'below' && (
-        <button
-          type="button"
-          onClick={onOpenDetail}
-          aria-label={openDetailAria}
-          className="mt-0.5 ml-12 inline-flex items-center gap-0.5 text-xs font-bold text-accent-ink underline"
-        >
-          {ja.cookedDetail.openFromPlan}
-          <ChevronRight size={14} aria-hidden />
-        </button>
+          記録の中身への入口を1行足す（2026-08-09 便EQ）。
+          2026-08-22 便JF: 編集モードのときは、その隣に削除を並べる。
+          間隔は12px（gap-3）＝押し間違いが起きる近さを作らない（便IZと同じ作法） */}
+      {!readOnly && (onDelete || (onOpenDetail && detailAs === 'below')) && (
+        <div className="ml-12 flex flex-wrap items-center gap-3">
+          {onOpenDetail && detailAs === 'below' && (
+            <button
+              type="button"
+              onClick={onOpenDetail}
+              aria-label={openDetailAria}
+              className="inline-flex min-h-11 items-center gap-0.5 text-xs font-bold text-accent-ink underline"
+            >
+              {ja.cookedDetail.openFromPlan}
+              <ChevronRight size={14} aria-hidden />
+            </button>
+          )}
+          {onDelete && (
+            <button
+              type="button"
+              data-testid="past-record-delete"
+              onClick={onDelete}
+              aria-label={ja.mealPlan.pastRecordDeleteAria
+                .replace('{m}', String(Number(log.date.slice(5, 7))))
+                .replace('{d}', String(Number(log.date.slice(8, 10))))
+                .replace('{title}', recipe.title)}
+              className="inline-flex min-h-11 items-center gap-1 text-xs font-bold text-warning underline"
+            >
+              <Trash2 size={14} aria-hidden />
+              {ja.mealPlan.pastRecordDelete}
+            </button>
+          )}
+        </div>
       )}
     </li>
   )
@@ -1606,13 +1636,6 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
   // 現在以外のときだけ出す)。従来表示=当週の月曜、今日起点表示=今日、が「現在」の起点
   const currentWeekAnchor = rollingWeek ? today : weekDates(new Date())[0]
   const isAtCurrentWeek = dates[0] === currentWeekAnchor
-  /**
-   * 表示している週で、鍵（ロック）のボタンを出すか（2026-08-19 便IF・⑪。オーナー原文
-   * 「過去の日付の１週間表示では、ロック機能使いませんよね？残しておく意味ある？」）。
-   * 判断は logic/mealPlan.ts の planShowWeekLock（過ぎた日しか無い週では出さない）。
-   */
-  const showWeekLock = planShowWeekLock(dates, today)
-
   // デモでは週タブを出さないので、端末の週の予定は読んでも使わない（見本の月の予定だけで組む）
   const dbEntries = useMealPlanRange(dates[0], dates[6])
   const entries = isDemo ? EMPTY_ENTRIES : dbEntries
@@ -3422,6 +3445,94 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
     const toast = fillRecordText(ja.mealPlan.pastRecordAddedToast, date, recipe.title)
     setMessage(toast)
     setUndoRecord({ recipeId, date, title: recipe.title, message: toast })
+  }
+
+  /**
+   * 過ぎた日の記録を1件だけ消す（2026-08-22 便JF・オーナー追加指示「削除ボタンも入れて」）。
+   *
+   * 消す前に確認の窓を通す（規約F: 何が消えて何が残るかを件数つきで両方書く）。
+   * 記録の小窓（「記録を見る」）からの削除は今までどおり残してあり、こちらは
+   * **編集モードの中だけ**に出る2本目の道。
+   *
+   * レシピを消したあとに残っている記録（detachedRecordId 付き）も同じボタンで消せる。
+   * 消す前の姿を控えてから消すので、どちらの記録もトーストの「元に戻す」で1回で戻る。
+   */
+  const deletePastCookedRecord = async (
+    date: string,
+    entry: CookedLogDetailTarget & { detachedRecordId?: number },
+  ) => {
+    const title = entry.recipe.title
+    const fill = (text: string) => fillRecordText(text, date, title)
+    // 「残るもの」の件数は**その日の他の記録**（画面に並んでいるものと同じ数え方）
+    const restCount = Math.max(0, shownLogsOf(date).length - 1)
+    const ok = await confirm({
+      title: fill(ja.mealPlan.pastRecordDeleteTitle),
+      bullets: [
+        {
+          label: ja.mealPlan.pastRecordDeleteGoneLabel,
+          text: ja.mealPlan.pastRecordDeleteGone.replace(
+            '{p}',
+            entry.log.photo ? ja.mealPlan.pastRecordDeleteGonePhoto : '',
+          ),
+        },
+        {
+          label: ja.mealPlan.pastRecordDeleteKeptLabel,
+          text: ja.mealPlan.pastRecordDeleteKept.replace('{n}', String(restCount)),
+        },
+      ],
+      confirmLabel: ja.mealPlan.pastRecordDeleteOk,
+    })
+    if (!ok) return
+    // 出すトーストの文言は先に決める＝控えとトーストが必ず同じ字になる（ほかの取り消しと同じ作法）
+    const toast = fill(ja.mealPlan.pastRecordDeletedToast)
+    if (entry.detachedRecordId != null) {
+      const snapshot = await deleteDetachedLogWithSnapshot(entry.detachedRecordId, entry.logIndex)
+      if (!snapshot) return
+      setUndoRecordDelete({ kind: 'detached', record: snapshot, date, title, message: toast })
+    } else if (entry.recipe.id != null) {
+      // 戻すときに同じ中身（日付・人数・メモ・写真）で入れ直せるよう、消す前の1件を控える
+      const removed = entry.log
+      await deleteCookedLog(entry.recipe.id, entry.logIndex)
+      setUndoRecordDelete({
+        kind: 'recipe',
+        recipeId: entry.recipe.id,
+        log: removed,
+        date,
+        title,
+        message: toast,
+      })
+    } else {
+      return
+    }
+    setMessage(toast)
+  }
+
+  /**
+   * 消した記録の取り消し（2026-08-22 便JF）。ほかの取り消しとまったく同じ作法で、
+   * 出したトーストの文言まで一緒に持つ（別の操作でトーストが差し替わったら一緒に消える）。
+   */
+  const [undoRecordDelete, setUndoRecordDelete] = useState<
+    | { kind: 'recipe'; recipeId: number; log: CookedLog; date: string; title: string; message: string }
+    | { kind: 'detached'; record: DetachedCookedRecord; date: string; title: string; message: string }
+    | null
+  >(null)
+  const undoRecordDeleteActive =
+    undoRecordDelete != null && undoRecordDelete.message === message
+  const runUndoRecordDelete = async () => {
+    if (!undoRecordDelete) return
+    if (undoRecordDelete.kind === 'detached') {
+      await restoreDetachedRecord(undoRecordDelete.record)
+    } else {
+      await addCookedLog(undoRecordDelete.recipeId, undoRecordDelete.log)
+    }
+    setUndoRecordDelete(null)
+    setMessage(
+      fillRecordText(
+        ja.mealPlan.pastRecordDeleteUndoneToast,
+        undoRecordDelete.date,
+        undoRecordDelete.title,
+      ),
+    )
   }
 
   /**
@@ -6642,6 +6753,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
           setUndoSuggest(null)
           setUndoAssign(null)
           setUndoRecord(null)
+          setUndoRecordDelete(null)
         }}
         actionLabel={
           undoCookedActive ||
@@ -6649,7 +6761,8 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
           undoRemoveActive ||
           undoSuggestActive ||
           undoAssignActive ||
-          undoRecordActive
+          undoRecordActive ||
+          undoRecordDeleteActive
             ? ja.common.undo
             : undefined
         }
@@ -6666,7 +6779,9 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                     ? () => void runUndoAssign()
                     : undoRecordActive
                       ? () => void runUndoRecord()
-                      : undefined
+                      : undoRecordDeleteActive
+                        ? () => void runUndoRecordDelete()
+                        : undefined
         }
       />
 
@@ -8041,9 +8156,12 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
       <div className="mt-[var(--space-sm)] flex justify-end gap-[var(--space-sm)]">
         {/* 2026-08-08 便DX(オーナー指示「『すべて畳む』の隣に『すべてロック』ボタンも」)。
             表示中の7日分をまとめて掛け外しする。7日とも3食に鍵が掛かっていれば「すべて解除」になる。
-            2026-08-19 便IF・⑪: 過去だけの週では出さない（判断は logic/mealPlan.ts の
-            planShowWeekLock。機能そのものは消していない） */}
-        {showWeekLock && (
+            2026-08-19 便IF・⑪で「過去だけの週では出さない」としていたが、
+            2026-08-22 便JF で**どの週でも出す**に巻き戻した（理由は logic/mealPlan.ts の
+            planShowWeekLock を消したところに書いてある。オーナー原文「ロックボタンは芯では
+            ないだけで、結果としてあることに意味が出ました。」）。
+            すぐ左の「まとめて空にする」は表示している週の**全日（過ぎた日を含む）**を
+            消す対象にしているので、過去だけの週でこそ鍵が要る */}
         <button
           type="button"
           data-testid="lock-all"
@@ -8062,7 +8180,6 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
             labels={[ja.mealPlan.lockAllButton, ja.mealPlan.lockAllReleaseButton]}
           />
         </button>
-        )}
         <button
           type="button"
           onClick={() => setAllDaysFolded(!allDaysCollapsed)}
@@ -8227,7 +8344,6 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
               {/* 2026-08-22 便IZ: 「編集／完了」と「鍵」を1つの組にする。
                   狭い画面で折り返すとき、2つ一緒に次の行へ移って右に揃う
                   （片方だけが次の行の左端に取り残される、をしない） */}
-              {(!dayCollapsed || showWeekLock) && (
               <span className="ml-auto flex shrink-0 items-center gap-3">
               {!dayCollapsed && (
                 <button
@@ -8259,10 +8375,10 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
               )}
               {/* 日ごとのロック: その日の朝食・昼食・夕食をまとめて掛け外しする。
                   3食とも掛かっているときだけ閉じた鍵になる(表示していない食事も数える)。
-                  2026-08-19 便IF・⑪: 過去だけの週では出さない（「すべてロック」と同じ判断）。
-                  今週のように過去日と未来日が混ざる週では、過ぎた日のカードにも出したまま
-                  ＝同じ週の中で日によって鍵が消える／現れることをしない */}
-              {showWeekLock && (
+                  2026-08-19 便IF・⑪で「過去だけの週では出さない」としていたが、
+                  2026-08-22 便JF で**どの週でも出す**に巻き戻した（「すべてロック」と同じ判断。
+                  理由は logic/mealPlan.ts の planShowWeekLock を消したところに書いてある）。
+                  畳んでいる日にも出す＝日付だけの行からでも、その日が確定済みかを読める */}
               <button
                 type="button"
                 data-testid="day-lock"
@@ -8282,9 +8398,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
               >
                 {dayLocked ? <Lock size={18} aria-hidden /> : <LockOpen size={18} aria-hidden />}
               </button>
-              )}
               </span>
-              )}
             </h2>
             {/* 2026-08-10 便FD(オーナー実機「『全て開く』すると、下へスクロールする。
                 今日の日づけすらスルーされる」): 曜日カードは開いても画面を動かさない。
@@ -8375,6 +8489,14 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                         onNavigate={rememberWeekReturn}
                         // 2026-08-09 便EQ: カードはレシピ詳細のまま、記録の中身への入口を下に足す
                         onOpenDetail={() => setLogDetail(entry)}
+                        // 記録の削除は**編集モードのときだけ**渡す（2026-08-22 便JF・
+                        // オーナー追加指示「削除ボタンも入れて」）。渡さなければボタンは出ない
+                        // ＝通常表示は今までどおり、記録のカードが並ぶだけ
+                        onDelete={
+                          dayEditing && dayEditKind === 'record'
+                            ? () => void deletePastCookedRecord(date, entry)
+                            : undefined
+                        }
                         // 削除済みレシピの記録には行き先が無いので、カードそのものを記録の小窓にする
                         // (2026-08-16 便GZ。'below' のままだと押せないレシピ詳細へのリンクになる)
                         detailAs={entry.detachedRecordId != null ? 'card' : 'below'}

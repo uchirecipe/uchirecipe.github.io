@@ -24911,35 +24911,40 @@ Aみりん 大さじ1
     )
   }
 
-  // --- ⑪ 過去だけの週でロックのボタンを出すか(planShowWeekLock) ---
-  // 過去日は予定のグリッドそのものが出ない＝手で足す・変える・消すができない。
-  // 自動でまとめて動かす操作(提案・先週コピー)も過去日を初めから対象外にしている。
-  // よって「過去だけの週」では鍵の掛けようが無い。今日・未来日が1日でも混ざる週では出す。
+  // --- ⑪ 週タブの鍵をどの週で出すか ---
+  // 2026-08-19 便IF・⑪では「過去だけの週では出さない」としていた（当時は過ぎた日の鍵に
+  // 守るものが無かったため）。2026-08-22 便JF でその前提が2つとも崩れたので**巻き戻した**:
+  //   ①「まとめて空にする」は**表示している週の全日（過ぎた日を含む）**を消す対象にしており、
+  //     鍵はそれを止める唯一の手段だった＝過去だけの週では、消せるのに守れなかった
+  //   ②過ぎた日にも編集モードが付き、作った記録を後から足せるようになった
+  // オーナー原文（2026-08-22）「ロックボタンは芯ではないだけで、結果としてあることに意味が
+  // 出ました。「今のまま」というのは、ロックボタンがある状態ですか？」
+  //
+  // 判断の関数（planShowWeekLock）は**消した**。どの週でも出すので、常に true を返す関数を
+  // 残すと「出さない週がある」と読み違える。ここでは「出す・出さないを日付で分けていないこと」を
+  // 画面の側で見張る（実際に出ることは e2e の JFLOCK-06 が測る）。
   {
     eq(
-      'IF-11 ロックのボタンを出すかを決める関数がある（無ければ以下は測れていない）',
-      typeof mealPlanLogicIF.planShowWeekLock === 'function',
+      'IF-11(便JFで巻き戻し) 鍵を出すかを日付で分ける関数は残っていない',
+      typeof mealPlanLogicIF.planShowWeekLock,
+      'undefined',
+    )
+    const mealPlanPageSrcIF = readFileSync(
+      path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'src/pages/MealPlanPage.tsx'),
+      'utf-8',
+    )
+    eq(
+      'IF-11(便JFで巻き戻し) 画面側にも「過去だけの週では出さない」の分岐が残っていない',
+      /showWeekLock/.test(mealPlanPageSrcIF),
+      false,
+    )
+    // 見張りそのものが動いているか（掴み損ねて素通りの合格に倒れない）
+    eq(
+      'IF-11 前提: 鍵のボタンそのものは画面に残っている',
+      /data-testid="day-lock"/.test(mealPlanPageSrcIF) &&
+        /data-testid="lock-all"/.test(mealPlanPageSrcIF),
       true,
     )
-    const planShowWeekLock =
-      typeof mealPlanLogicIF.planShowWeekLock === 'function'
-        ? mealPlanLogicIF.planShowWeekLock
-        : () => '(関数が無い)'
-    // 月末・年またぎ・月初・うるう日の4通り。実行日がいつでも同じ結論になる
-    const cases = [
-      ['月末をまたぐ', '2026-08-31'],
-      ['年をまたぐ', '2026-12-31'],
-      ['月初', '2026-03-01'],
-      ['うるう日', '2028-02-29'],
-    ]
-    for (const [name, today] of cases) {
-      const past7 = Array.from({ length: 7 }, (_, i) => shiftDate(today, i - 7))
-      const withToday = Array.from({ length: 7 }, (_, i) => shiftDate(today, i - 3))
-      const future7 = Array.from({ length: 7 }, (_, i) => shiftDate(today, i + 1))
-      eq(`IF-11 ${name}: 過去だけの週では出さない`, planShowWeekLock(past7, today), false)
-      eq(`IF-11 ${name}: 今日を含む週では出す`, planShowWeekLock(withToday, today), true)
-      eq(`IF-11 ${name}: 未来だけの週では出す`, planShowWeekLock(future7, today), true)
-    }
   }
 
   // --- ④ コピー元の日付期間を文言に差し込む場所があること ---
@@ -27539,6 +27544,86 @@ Aみりん 大さじ1
       'JF-4 選べる字は今までと同じ2つ',
       [ja.mealPlan.weekLayoutCalendar, ja.mealPlan.weekLayoutRolling],
       ['週区切り', '今日から7日間'],
+    )
+  }
+
+  // --- JF-6: 過ぎた日の記録の削除（オーナー追加指示「削除ボタンも入れて」） ---
+  {
+    // ボタンと確認の文言がそろっているか
+    const m = ja.mealPlan
+    eq(
+      'JF-6 削除ボタンの名前がある',
+      typeof m.pastRecordDelete === 'string' && m.pastRecordDelete.length > 0,
+      true,
+    )
+    for (const [name, key] of [
+      ['見出し', 'pastRecordDeleteTitle'],
+      ['消えるもの', 'pastRecordDeleteGone'],
+      ['残るもの', 'pastRecordDeleteKept'],
+      ['押すボタン', 'pastRecordDeleteOk'],
+      ['消したときの知らせ', 'pastRecordDeletedToast'],
+      ['戻したときの知らせ', 'pastRecordDeleteUndoneToast'],
+    ]) {
+      eq(`JF-6 確認と知らせの文言がある（${name}）`, typeof m[key], 'string')
+    }
+    // 規約F: 何が消えて何が残るかを両方書く。件数も入れる
+    eq('JF-6 「消えるもの」に件数が入る', /\{n\}|1件/.test(m.pastRecordDeleteGone ?? ''), true)
+    eq('JF-6 「残るもの」に件数が入る', (m.pastRecordDeleteKept ?? '').includes('{n}'), true)
+    // トーストから1回で戻せるので「元に戻せません」と書かない（書くと画面と食い違う）
+    const deleteTexts = [
+      m.pastRecordDeleteTitle,
+      m.pastRecordDeleteGone,
+      m.pastRecordDeleteKept,
+      m.pastRecordDeletedToast,
+    ].join(' ')
+    eq('JF-6 戻せるので「元に戻せません」とは書かない', /元に戻せません/.test(deleteTexts), false)
+    // 削除は編集モードの中だけ（通常表示は今までどおり記録が並ぶだけ）
+    const delIdx = jfMealPlanSrc.indexOf('data-testid="past-record-delete"')
+    eq('JF-6 過ぎた日の記録に削除の入口がある', delIdx >= 0, true)
+    // 削除のボタンは部品（CookedLogCard）の中にあるので、置き場所ではなく
+    // **出す条件**で見る: ①渡されたときだけ描く ②渡している式が編集モードに掛かっている
+    eq(
+      'JF-6 削除は「渡されたときだけ」出す作りになっている',
+      delIdx >= 0 && /\{onDelete && \(\s*$/m.test(jfMealPlanSrc.slice(Math.max(0, delIdx - 400), delIdx)),
+      true,
+    )
+    // onDelete={...} に渡している式（三項の入れ子があるので、次の属性が始まるまでを丸ごと拾う）
+    const onDeletePass = jfMealPlanSrc.match(/\n\s*onDelete=\{[\s\S]*?\n\s*\}\n/g) ?? []
+    eq(
+      'JF-6 削除を渡している場所は1か所だけ（別の画面からこっそり増えていない）',
+      onDeletePass.length,
+      1,
+    )
+    eq(
+      'JF-6 その1か所は編集モードのときだけ渡している（通常表示には出さない）',
+      onDeletePass.length === 1 &&
+        /dayEditing && dayEditKind === 'record'/.test(onDeletePass[0]) &&
+        /undefined/.test(onDeletePass[0]),
+      true,
+    )
+    eq(
+      'JF-6 消す前に確かめている（確認の窓を通す）',
+      /pastRecordDeleteTitle[\s\S]{0,1200}confirmLabel/.test(jfMealPlanSrc),
+      true,
+    )
+    eq(
+      'JF-6 削除も1回で戻せる（取り消しの控えがある）',
+      /setUndoRecordDelete\(/.test(jfMealPlanSrc) && /undoRecordDeleteActive/.test(jfMealPlanSrc),
+      true,
+    )
+    // 記録の小窓（「記録を見る」）からの削除は今までどおり残す
+    const jfDetailSrc = jfRead('src/components/CookedLogDetailModal.tsx')
+    eq(
+      'JF-6 記録の小窓からの削除は残っている',
+      /deletedRecipeLogDelete/.test(jfDetailSrc),
+      true,
+    )
+    // レシピを消したあとに残っている記録も、消したら戻せる
+    const jfDetachedSrc = jfRead('src/db/detachedLogs.ts')
+    eq(
+      'JF-6 レシピの無い記録も、消す前の姿を控えてから消せる',
+      /restoreDetachedRecord/.test(jfDetachedSrc),
+      true,
     )
   }
 

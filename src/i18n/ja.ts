@@ -1507,6 +1507,24 @@ export const ja = {
     // 過ぎた日の記録は、いまある食材の数を動かさない
     pastRecordPantryNote: '過ぎた日の記録では、食材の在庫は減りません',
     /**
+     * 記録を1件だけ消す（2026-08-22 便JF・オーナー追加指示「削除ボタンも入れて」）。
+     * 編集モードの中だけに出す。押す前に確認の窓を通し（規約F: 何が消えて何が残るかを
+     * 件数つきで両方書く）、消したあとはトーストの「元に戻す」で1回で戻せる。
+     * **「元に戻せません」とは書かない**——戻せるので、書くと画面と食い違う
+     * （レシピ詳細の同じ操作は戻せないので、あちらの文言は今までどおり）。
+     */
+    pastRecordDelete: '記録を削除',
+    pastRecordDeleteAria: '{m}月{d}日の「{title}」の作った記録を削除',
+    pastRecordDeleteTitle: '{m}月{d}日の「{title}」の作った記録を削除します',
+    pastRecordDeleteGoneLabel: '消えるもの',
+    pastRecordDeleteGone: 'この作った記録1件{p}',
+    pastRecordDeleteGonePhoto: '（添えた写真1枚ごと）',
+    pastRecordDeleteKeptLabel: '残るもの',
+    pastRecordDeleteKept: 'レシピ本体と、この日の他の作った記録{n}件',
+    pastRecordDeleteOk: '削除する',
+    pastRecordDeletedToast: '{m}月{d}日の作った記録から「{title}」を削除しました',
+    pastRecordDeleteUndoneToast: '{m}月{d}日の作った記録に「{title}」を戻しました',
+    /**
      * 通常表示で、その日の献立がまだ1品も無いときの1行（2026-08-22 便IV）。
      * 通常表示は空き枠を出さないので、押す場所の名前を書いておかないと行き止まりになる
      * （規約H: 「ここ」ではなくボタンの名前で場所を言う）。
