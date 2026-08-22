@@ -92,6 +92,37 @@ export async function reattachDetachedLogs(): Promise<{ logs: number; recipes: n
  * （レシピ側の記録を1件だけ消せる deleteCookedLog と対になる操作）。
  * まとまりの記録が0件になったら、まとまりの行ごと消す（空の行を残さない）。
  */
+/**
+ * 消す前のまとまりをそのまま控えながら、記録を1件消す（2026-08-22 便JF・削除の取り消し用）。
+ *
+ * 献立の週タブは、消したあとにトーストの「元に戻す」で1回で戻せる作りにしてある。
+ * 記録が最後の1件だったときは**まとまりの行ごと消える**ので、行の番号（id）だけを控えても
+ * 戻せない。控えるのは行まるごとで、戻すときはそれをそのまま入れ直す（restoreDetachedRecord）。
+ * 戻り値は控え。対象が見つからなければ null。
+ */
+export async function deleteDetachedLogWithSnapshot(
+  recordId: number,
+  index: number,
+): Promise<DetachedCookedRecord | null> {
+  return await db.transaction('rw', db.detachedLogs, async () => {
+    const record = await db.detachedLogs.get(recordId)
+    if (!record || !record.logs[index]) return null
+    const snapshot: DetachedCookedRecord = { ...record, logs: [...record.logs] }
+    const logs = record.logs.filter((_, i) => i !== index)
+    if (logs.length === 0) await db.detachedLogs.delete(recordId)
+    else await db.detachedLogs.update(recordId, { logs })
+    return snapshot
+  })
+}
+
+/**
+ * 控えておいたまとまりをそのまま入れ直す（上の取り消し）。
+ * 行ごと消えていても、行の番号（id）まで同じ姿で戻る＝画面が指していた記録の番号がずれない。
+ */
+export async function restoreDetachedRecord(record: DetachedCookedRecord): Promise<void> {
+  await db.detachedLogs.put(record)
+}
+
 export async function deleteDetachedLog(recordId: number, index: number): Promise<void> {
   await db.transaction('rw', db.detachedLogs, async () => {
     const record = await db.detachedLogs.get(recordId)
