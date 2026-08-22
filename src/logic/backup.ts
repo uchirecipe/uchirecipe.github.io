@@ -23,6 +23,7 @@ import type { ConfirmContent } from './confirmContent'
 import { clearCookNaviSession } from './cookNaviSession'
 import { mergeCookedLogLists } from './detachedLogs'
 import { reattachDetachedLogs } from '../db/detachedLogs'
+import { newRecipeUid } from './recipeUid'
 import { ja } from '../i18n/ja'
 
 /**
@@ -48,6 +49,12 @@ import { ja } from '../i18n/ja'
  * 見ておらず、まっさらな端末（同梱の基本レシピが必ずID衝突する）へ読み込むと基本レシピの
  * 記録・写真・お気に入りと7テーブルが1件も戻らないまま「追加◯件・スキップ◯件」と
  * 成功風に表示されていた
+ *
+ * merge で「同じ料理名のレシピが既にあるので本体が入らなかった」品は、読み込んだあとに
+ * 数を知らせて「番号を付けて入れるか」を1回だけ聞く（2026-08-22 便JA・オーナー承認）。
+ * それまでは使い方ページに書いてあるだけで画面が黙っていたため、読み込んだのに入っていない
+ * ことに気づけなかった。判定と番号の付け方は isSameRecipeBody / nextDuplicateTitle /
+ * buildNumberedRecipeCopy、実際に入れるのは importDuplicateTitleRecipes。
  */
 
 interface BackupCookedLog extends Omit<CookedLog, 'photo'> {
@@ -761,6 +768,187 @@ export function resolveMergeRecipeAction(
   return { kind: 'addWithNewId' }
 }
 
+/**
+ * 料理名の末尾に付けた「重複の番号」を見分ける決まり（2026-08-22 便JA）。
+ *
+ * **番号と見なすのは、末尾が数字だけの括弧のときだけ**。
+ * 「レンジ蒸し鶏（自家製サラダチキン）」「卯の花(おからの炒り煮)」「回鍋肉(ホイコーロー)」の
+ * ように、説明を括弧で添えた料理名が実在する（src/db/starters.ts）。括弧を無条件に外すと
+ * これらの料理名が壊れるため、中身が数字だけかどうかで線を引く。
+ *
+ * **読むときは全角の括弧・全角の数字も番号として受ける**。手で「肉じゃが（２）」と付けた人が
+ * いても、そこから「肉じゃが（２）（２）」を作らないため（オーナーの懸念）。
+ */
+const TITLE_NUMBER_SUFFIX = /\s*[（(]\s*([0-9０-９]+)\s*[）)]\s*$/
+
+/**
+ * **付けるときは半角の括弧＋直前に半角スペース**（「肉じゃが (2)」）に統一する。実測の理由:
+ * - 検索語・五十音の並びを作る `toHiragana`（NFKC正規化）は、全角の括弧・数字を半角へ寄せる。
+ *   実測すると「肉じゃが（2）」の検索語は「にくじゃが(2)」になり、**画面に出る料理名と
+ *   索引の文字が食い違う**。半角で持てば両方が同じ文字になる。
+ * - 括弧を外す処理（kana.ts の toPantryKey・priceEstimate）は**材料名専用**で、料理名には
+ *   通していない。しかも全角・半角を同じように落とすので、どちらを選んでもぶつからない
+ *   ＝この点はどちらか一方を選ぶ決め手にならない（実測）。
+ * - 既存の料理名の括弧は「説明」に使っていて括弧の前にスペースが無い。番号は半角スペースを
+ *   挟むので、同じ括弧でも役目が見分けやすい。
+ */
+function withTitleNumber(base: string, count: number): string {
+  return `${base} (${count})`
+}
+
+/** 料理名を「元の名前」と「末尾の番号」に分ける（番号が無ければ1＝1つめとして数える） */
+function splitTitleNumber(title: string): { base: string; number: number } {
+  const trimmed = title.trim()
+  const matched = trimmed.match(TITLE_NUMBER_SUFFIX)
+  if (!matched || matched.index === undefined) return { base: trimmed, number: 1 }
+  const base = trimmed.slice(0, matched.index).trim()
+  // 料理名が番号だけになるときは番号と見なさない（名前を空にしない）
+  if (!base) return { base: trimmed, number: 1 }
+  const digits = matched[1].replace(/[０-９]/g, (ch) => String.fromCharCode(ch.charCodeAt(0) - 0xfee0))
+  const number = Number(digits)
+  return { base, number: Number.isFinite(number) && number > 0 ? number : 1 }
+}
+
+/**
+ * 料理名から末尾の番号を外して「元の名前」を取り出す（純ロジック・DB非依存。2026-08-22 便JA）。
+ * 「肉じゃが (2)」→「肉じゃが」。説明の括弧が付いた料理名は1文字も変えない。
+ */
+export function stripTitleNumber(title: string): string {
+  return splitTitleNumber(title).base
+}
+
+/**
+ * 同じ元の名前を持つ品の中で、いちばん大きい番号の次を付けた料理名を返す
+ * （純ロジック・DB非依存。2026-08-22 便JA）。
+ *
+ * 入れようとしている料理名からも**先に番号を外す**ので、「肉じゃが (2)」を入れるときも
+ * 「肉じゃが (2) (2)」にはならず「肉じゃが (3)」になる（オーナーの懸念）。
+ * 1回の読み込みで同じ名前が続くときは、呼ぶ側が返ってきた名前を existingTitles へ足していけば
+ * (2)(3)(4) と増える（同じ番号を2つ作らない）。
+ */
+export function nextDuplicateTitle(title: string, existingTitles: Iterable<string>): string {
+  const base = stripTitleNumber(title)
+  let max = 1
+  for (const existing of existingTitles) {
+    const split = splitTitleNumber(existing)
+    if (split.base !== base) continue
+    if (split.number > max) max = split.number
+  }
+  return withTitleNumber(base, max + 1)
+}
+
+/**
+ * レシピの「中身」＝ファイルと端末で見くらべる項目（2026-08-22 便JA）。
+ * 同一セットの再取込で内容が変わったかを見る buildUpdatedSetRecipe（RecipeSetContent）と
+ * **同じ項目**にしてある（「レシピ本体の内容」の線引きを2通り持たないため）。
+ * 作った記録・お気に入り・写真・印・番号・日時は「中身」に入れない＝
+ * 同じレシピを別の端末で1回作っただけの品を「入らなかった」と言わないため。
+ */
+const RECIPE_BODY_FIELDS = [
+  'intro',
+  'servings',
+  'cookMinutes',
+  'quickCookMinutes',
+  'effortLevel',
+  'tags',
+  'dishType',
+  'season',
+  'suitableFor',
+  'ingredients',
+  'steps',
+  'quickSteps',
+  'onePoint',
+  'memo',
+  'sourceUrl',
+  'keywords',
+] as const
+
+type RecipeBodyField = (typeof RECIPE_BODY_FIELDS)[number]
+
+/**
+ * 2品のレシピの中身が同じか（純ロジック・DB非依存。2026-08-22 便JA）。
+ *
+ * merge で「同じ料理名が既にある」と判定した品のうち、**中身まで同じもの**は
+ * 入らなくても失うものが無いので、知らせも聞き取りもしない。ここで絞らないと、
+ * 自分のバックアップを「今のデータに追加」で読み直しただけで
+ * 「109品が入りませんでした」と出て、番号付きの複製を勧めることになる。
+ */
+export function isSameRecipeBody(
+  a: Pick<Recipe, RecipeBodyField>,
+  b: Pick<Recipe, RecipeBodyField>,
+): boolean {
+  return RECIPE_BODY_FIELDS.every(
+    (key) => JSON.stringify(a[key] ?? null) === JSON.stringify(b[key] ?? null),
+  )
+}
+
+/**
+ * 「番号を付けて入れる」で足す1品を組み立てる（純ロジック・DB非依存。2026-08-22 便JA）。
+ *
+ * 変えるもの:
+ * - 料理名 … 番号を付ける（nextDuplicateTitle）。検索語も新しい料理名で作り直す
+ * - 印(uid) … 端末で使われていなければファイル側のをそのまま引き継ぐ（レシピを消しても
+ *   残っている記録が結び直せる）。使われていれば新しい印にする（同じ印が2品に付くと
+ *   結び直しの相手が一意に決まらなくなる）
+ * - 作った記録 … 入れない。この読み込みで**同じ料理名の品へ既に足してある**
+ *   （mergeRecipeUserData）ので、ここでも入れると同じ日の記録が2件に増える
+ * - 基本レシピ・配布セットの目印(isStarter/sourceSetId/sourceSetName) … 外して
+ *   ふつうの登録レシピにする。付けたままだと「基本レシピを入れ直す」が
+ *   **同梱の品名と一致しない基本レシピ**として黙って削除する（db/starters.ts planStarterReload）
+ * - 端末の番号(id) … 付けない（端末が振り直す）
+ *
+ * 変えないもの: 材料・手順・メモ・写真・タグなどレシピ本体の内容と、お気に入り・作成日時。
+ */
+export function buildNumberedRecipeCopy(
+  incoming: Recipe,
+  existingTitles: Iterable<string>,
+  usedUids: ReadonlySet<string>,
+  makeUid: () => string = newRecipeUid,
+): Recipe {
+  const {
+    id: _fileId,
+    isStarter: _isStarter,
+    sourceSetId: _sourceSetId,
+    sourceSetName: _sourceSetName,
+    ...rest
+  } = incoming
+  const title = nextDuplicateTitle(incoming.title, existingTitles)
+  const incomingUid = incoming.uid?.trim() || undefined
+  return {
+    ...rest,
+    title,
+    uid: incomingUid && !usedUids.has(incomingUid) ? incomingUid : makeUid(),
+    cookedLogs: [],
+    searchWords: buildSearchWords(
+      title,
+      rest.ingredients,
+      rest.tags,
+      rest.keywords,
+      rest.steps,
+      rest.dishType,
+    ),
+  }
+}
+
+/**
+ * 「同じ料理名のレシピが既にあるので入らなかった品」を、番号を付けて入れるか聞く窓
+ * （2026-08-22 便JA）。聞くのは**1回だけ**で、品ごとには聞かない。
+ */
+export function buildDuplicateTitleConfirm(count: number): ConfirmContent {
+  const t = ja.settings
+  const n = String(count)
+  return {
+    title: t.backupImportDuplicateTitle.replace('{n}', n),
+    body: t.backupImportDuplicateBody,
+    bullets: [
+      { label: t.backupImportDuplicateAddLabel, text: t.backupImportDuplicateAdd.replace('{n}', n) },
+      { label: t.backupImportDuplicateKeptLabel, text: t.backupImportDuplicateKept },
+    ],
+    notes: [t.backupImportDuplicateNote],
+    confirmLabel: t.backupImportDuplicateOk,
+  }
+}
+
 /** 「作った記録」の照合キー（日付＋メモ）。同じ日に複数回作った記録もメモが違えば別件として残る */
 function cookedLogKey(log: Pick<CookedLog, 'date' | 'note'>): string {
   return `${log.date}\n${log.note ?? ''}`
@@ -919,6 +1107,13 @@ export interface ImportResult {
   excluded: number
   /** merge時のみ: 取り込みの内訳（結果表示に出す。2026-07-30 便CJ/C1） */
   mergeDetail?: MergeImportDetail
+  /**
+   * merge時のみ: 同じ料理名のレシピが既にあったため本体が入らなかった品のうち、
+   * **中身まで同じではないもの**（2026-08-22 便JA）。呼び出し側（SettingsPage）が件数を知らせ、
+   * 「番号を付けて入れるか」を聞いてから importDuplicateTitleRecipes へ渡す。
+   * ここでは入れない＝「いいえ」のときの振る舞いが今までと1文字も変わらないようにするため
+   */
+  duplicateTitleRecipes?: Recipe[]
 }
 
 /**
@@ -1037,6 +1232,8 @@ export async function importBackup(
   // merge: 今のデータは1件も消さず、「今のデータに無いもの」だけを足す（非破壊マージ）
   let added = 0
   let skipped = 0
+  // 同じ料理名が既にあって本体が入らなかった品（中身が違うものだけ。2026-08-22 便JA）
+  const duplicateTitleRecipes: Recipe[] = []
   const detail: MergeImportDetail = {
     recipesAdded: 0,
     recipesRenumbered: 0,
@@ -1103,6 +1300,16 @@ export async function importBackup(
           // 同じ料理が既にある: 本体は上書きせず、ファイル側の記録・お気に入り・写真だけ足す
           const target = await db.recipes.get(action.targetId)
           if (target) {
+            // 「同じ料理名で、中身が違うので入らなかった」品を控えておく（2026-08-22 便JA）。
+            // 料理名が違う品（印だけが一致して名前を変えてある品）は、そもそも名前がぶつかって
+            // いないのでここでは数えない。中身まで同じ品も、入らなくても失うものが無いので数えない。
+            // 見るのは**足す前の** target なので、この読み込みで足した記録の分で判定が動くことはない
+            if (
+              target.title.trim() === recipe.title.trim() &&
+              !isSameRecipeBody(target, recipe)
+            ) {
+              duplicateTitleRecipes.push(recipe)
+            }
             const merged = mergeRecipeUserData(target, recipe)
             // 印を持っていない今のレシピには、ファイル側の印を引き継ぐ（規則2）。
             // これを書かないと、レシピを削除しても残った記録が結び直せないまま残る
@@ -1240,7 +1447,40 @@ export async function importBackup(
   )
   // 追加で読み込んだレシピにも、残っている記録のつながりを戻す（2026-08-16 便GZ・印の一致のみ）
   await reattachDetachedLogs()
-  return { added, updated: 0, skipped, excluded: 0, mergeDetail: detail }
+  return { added, updated: 0, skipped, excluded: 0, mergeDetail: detail, duplicateTitleRecipes }
+}
+
+/**
+ * 「同じ料理名のレシピが既にあるので入らなかった品」を、番号を付けて入れる（2026-08-22 便JA）。
+ * importBackup（merge）が返した duplicateTitleRecipes を、利用者が「入れる」と答えたときだけ渡す。
+ *
+ * **もとからある品には一切触らない**（消さない・上書きしない・料理名も変えない）。
+ * 番号は端末にある同じ元の名前の品を全部見て、いちばん大きい番号の次から採る。
+ * 1回で複数入れるときも、入れた名前をその場で照合表へ足すので (2)(3)(4) と続く。
+ * 入れた品数を返す（画面がそのまま結果に出す＝黙って終わらせない）。
+ */
+export async function importDuplicateTitleRecipes(recipes: readonly Recipe[]): Promise<number> {
+  if (recipes.length === 0) return 0
+  let added = 0
+  await db.transaction('rw', db.recipes, async () => {
+    const titles = new Set<string>()
+    const uids = new Set<string>()
+    // toArray()ではなくeach()で1件ずつ読む（写真つきのレシピを全件メモリに抱えないため）
+    await db.recipes.each((row) => {
+      titles.add(row.title.trim())
+      if (row.uid) uids.add(row.uid)
+    })
+    for (const recipe of recipes) {
+      const copy = buildNumberedRecipeCopy(recipe, titles, uids)
+      titles.add(copy.title.trim())
+      if (copy.uid) uids.add(copy.uid)
+      await db.recipes.add(copy)
+      added++
+    }
+  })
+  // 入れた品の印に当たる「レシピの無い記録」があれば結び直す（2026-08-16 便GZ・印の一致のみ）
+  await reattachDetachedLogs()
+  return added
 }
 
 /**

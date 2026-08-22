@@ -267,6 +267,10 @@ import {
   selectedRecipesFileName,
   isAbortError,
 } from '../src/logic/fileSave.ts'
+// 同じ料理名の品に番号を付けて入れる道具（2026-08-22 便JA）。名前を1つずつ import せず
+// まとめて受け取るのは、**関数が無いときに import ごと落ちて他の節の結果まで消えるのを避ける**ため
+// （IZ-1 と同じ「掴めていないことを先に赤で言う」作法。下の JA-0 が有無そのものを測る）
+import * as backupLogic from '../src/logic/backup.ts'
 import { formatFileSize } from '../src/logic/fileSize.ts'
 import {
   sortResults,
@@ -27130,6 +27134,178 @@ Aみりん 大さじ1
   // 目印が見つからないのに「44px未満は0件でした」と緑にしない（掴めていないことを先に赤で言う）
   eq('IZ-1 週タブの操作を1つも取りこぼさずに掴めた', izNotFound, [])
   eq('IZ-1 週タブで献立を触る操作は、すべて44pxの押せる面を持つ', izMissing, [])
+}
+
+// ---------- JA-0〜JA-6: 同じ料理名のレシピを、番号を付けて入れる（2026-08-22 便JA） ----------
+// オーナー原文「◯件入らなかったお知らせ→それでも入れるか聞く→はいで（２）、（３）...、とつけて入れる。
+// いいえで重複して入れない。」／「懸念、『肉じゃが（２）』を重複で入れると、『肉じゃが（３）』ではなく
+// 『肉じゃが（２）（２）』になりそう。」
+// ここで測るのは「利用者が確かめたいこと」＝①同じ番号を2つ作らないこと ②もともと括弧のある
+// 料理名を壊さないこと ③中身が同じだけの品を「入らなかった」と言わないこと。
+{
+  const jaTools = ['stripTitleNumber', 'nextDuplicateTitle', 'isSameRecipeBody', 'buildNumberedRecipeCopy', 'buildDuplicateTitleConfirm']
+  eq(
+    'JA-0 番号を付けて入れる道具がそろっている',
+    jaTools.filter((name) => typeof backupLogic[name] !== 'function'),
+    [],
+  )
+  // 道具が無いときは全ケースを「(未実装)」で落とす（import ごと落ちて他の節まで消えないように）
+  const strip = (t) => backupLogic.stripTitleNumber?.(t) ?? '(未実装)'
+  const next = (t, titles) => backupLogic.nextDuplicateTitle?.(t, titles) ?? '(未実装)'
+  const sameBody = (a, b) => backupLogic.isSameRecipeBody?.(a, b) ?? '(未実装)'
+
+  // --- JA-1: 料理名の末尾に付けた番号だけを外す ---
+  eq('JA-1 半角の番号を外す', strip('肉じゃが (2)'), '肉じゃが')
+  eq('JA-1 全角の括弧で書かれた番号も外す', strip('肉じゃが（2）'), '肉じゃが')
+  eq('JA-1 全角の数字で書かれた番号も外す', strip('肉じゃが（２）'), '肉じゃが')
+  eq('JA-1 スペースなしの番号も外す', strip('肉じゃが(2)'), '肉じゃが')
+  eq('JA-1 番号が付いていない料理名はそのまま', strip('肉じゃが'), '肉じゃが')
+  // 実在する品名（src/db/starters.ts）。末尾が数字だけの括弧ではないので番号とは見なさない
+  for (const title of [
+    'レンジ蒸し鶏（自家製サラダチキン）',
+    '卯の花(おからの炒り煮)',
+    '回鍋肉(ホイコーロー)',
+    'きんぴら（金平）ごぼう',
+  ]) {
+    eq(`JA-1 説明の括弧が付いた「${title}」を壊さない`, strip(title), title)
+  }
+  eq('JA-1 括弧の中に数字以外が混ざっていたら番号ではない', strip('カレー (2人分)'), 'カレー (2人分)')
+  eq('JA-1 料理名が番号だけになるときは外さない', strip('(2)'), '(2)')
+
+  // --- JA-2: 次の番号の決め方（オーナーの懸念の本体） ---
+  eq('JA-2 同じ料理名が1品あるなら (2)', next('肉じゃが', ['肉じゃが']), '肉じゃが (2)')
+  eq('JA-2 (2)まであるなら (3)', next('肉じゃが', ['肉じゃが', '肉じゃが (2)']), '肉じゃが (3)')
+  eq(
+    'JA-2 入れる品が「肉じゃが (2)」でも「肉じゃが (2) (2)」にはしない（オーナーの懸念）',
+    next('肉じゃが (2)', ['肉じゃが', '肉じゃが (2)']),
+    '肉じゃが (3)',
+  )
+  eq(
+    'JA-2 端末側が全角の番号で入っていても数として読む',
+    next('肉じゃが', ['肉じゃが', '肉じゃが（２）']),
+    '肉じゃが (3)',
+  )
+  eq('JA-2 番号が飛んでいたら、いちばん大きい番号の次', next('肉じゃが', ['肉じゃが', '肉じゃが (5)']), '肉じゃが (6)')
+  eq('JA-2 別の料理名は数に入れない', next('肉じゃが', ['肉じゃが', '肉じゃがコロッケ (3)']), '肉じゃが (2)')
+  eq(
+    'JA-2 説明の括弧が付いた料理名にも番号を足せる',
+    next('レンジ蒸し鶏（自家製サラダチキン）', ['レンジ蒸し鶏（自家製サラダチキン）']),
+    'レンジ蒸し鶏（自家製サラダチキン） (2)',
+  )
+  {
+    // 1回の読み込みで同じ料理名が3品あるとき、(2)(3)(4) と続くこと（同じ番号を2つ作らない）
+    const titles = new Set(['肉じゃが'])
+    const made = []
+    for (let i = 0; i < 3; i++) {
+      const title = next('肉じゃが', titles)
+      made.push(title)
+      titles.add(title)
+    }
+    eq('JA-2 1回の読み込みで同じ料理名が続いても番号が増える', made, ['肉じゃが (2)', '肉じゃが (3)', '肉じゃが (4)'])
+    eq('JA-2 同じ番号を2つ作らない', new Set(made).size, made.length)
+  }
+
+  // --- JA-3: 「入らなかった」と言う相手を、中身が違う品だけに絞る ---
+  const jaRecipe = (over = {}) => ({
+    title: '肉じゃが',
+    servings: 2,
+    effortLevel: 'normal',
+    tags: ['和食'],
+    ingredients: [{ name: 'じゃがいも', amount: '3', unit: '個' }],
+    steps: [{ text: '煮る' }],
+    isFavorite: false,
+    cookedLogs: [],
+    searchWords: [],
+    createdAt: 1,
+    updatedAt: 1,
+    ...over,
+  })
+  eq('JA-3 中身が同じなら「入らなかった」と言わない', sameBody(jaRecipe(), jaRecipe()), true)
+  eq(
+    'JA-3 番号・印・作った記録・お気に入り・写真・日時の違いは中身の違いにしない',
+    sameBody(
+      jaRecipe(),
+      jaRecipe({ id: 9, uid: 'u-file', isFavorite: true, cookedLogs: [{ date: '2026-01-01' }], createdAt: 99, updatedAt: 99 }),
+    ),
+    true,
+  )
+  eq(
+    'JA-3 材料が違えば中身が違う',
+    sameBody(jaRecipe(), jaRecipe({ ingredients: [{ name: '牛肉', amount: '200', unit: 'g' }] })),
+    false,
+  )
+  eq('JA-3 手順が違えば中身が違う', sameBody(jaRecipe(), jaRecipe({ steps: [{ text: '焼く' }] })), false)
+  eq('JA-3 メモが違えば中身が違う', sameBody(jaRecipe(), jaRecipe({ memo: '冷蔵で2日' })), false)
+  eq('JA-3 分量の人数が違えば中身が違う', sameBody(jaRecipe(), jaRecipe({ servings: 4 })), false)
+
+  // --- JA-4: 番号を付けて入れる品の中身 ---
+  {
+    const copy =
+      backupLogic.buildNumberedRecipeCopy?.(
+        jaRecipe({
+          id: 7,
+          uid: 'u-file',
+          isStarter: true,
+          sourceSetId: 'kintore',
+          sourceSetName: '高たんぱくごはん',
+          cookedLogs: [{ date: '2026-01-01' }],
+        }),
+        new Set(['肉じゃが']),
+        new Set(),
+        () => 'u-new',
+      ) ?? {}
+    eq('JA-4 番号を付けた料理名で入る', copy.title, '肉じゃが (2)')
+    eq('JA-4 ファイル側の番号は引き継がない（端末の番号は端末が振る）', Object.hasOwn(copy, 'id'), false)
+    eq(
+      'JA-4 基本レシピ・配布セットの目印は外す（「基本レシピを入れ直す」で黙って消えるのを防ぐ）',
+      [copy.isStarter, copy.sourceSetId, copy.sourceSetName],
+      [undefined, undefined, undefined],
+    )
+    eq('JA-4 端末で使われていない印はそのまま引き継ぐ', copy.uid, 'u-file')
+    eq('JA-4 作った記録は足さない（同じ料理名の品へ足したものと二重にしない）', copy.cookedLogs, [])
+    eq('JA-4 番号を付けた料理名で検索できる', (copy.searchWords ?? []).includes('にくじゃが (2)'), true)
+    eq('JA-4 材料・手順はファイルの内容が入る', copy.ingredients, jaRecipe().ingredients)
+    const copyUsed =
+      backupLogic.buildNumberedRecipeCopy?.(
+        jaRecipe({ uid: 'u-file' }),
+        new Set(['肉じゃが']),
+        new Set(['u-file']),
+        () => 'u-new',
+      ) ?? {}
+    eq(
+      'JA-4 端末で使われている印は付け直す（同じ印が2品に付くと記録の結び直しが壊れる）',
+      copyUsed.uid,
+      'u-new',
+    )
+  }
+
+  // --- JA-5: 聞き方（1回だけ・件数を言う・何が変わらないかを言う） ---
+  {
+    const ask = backupLogic.buildDuplicateTitleConfirm?.(3) ?? {}
+    const askText = typeof ask.title === 'string' ? confirmContentText(ask) : ''
+    eq('JA-5 見出しに件数が入る', /3品/.test(ask.title ?? ''), true)
+    eq('JA-5 今のレシピが変わらないことを言っている', /変わらない|そのまま/.test(askText), true)
+    // 窓の文（confirmContentText）にはボタンの言葉が入らないので、ボタンは別に測る
+    eq('JA-5 押すと何が起きるかがボタンの言葉で分かる', (ask.confirmLabel ?? '').includes('番号'), true)
+    eq('JA-5 番号の付け方が具体例で分かる', /\(2\)/.test(askText) && /\(3\)/.test(askText), true)
+  }
+
+  // --- JA-6: 読み込みの流れに繋がっているか（画面を立ち上げずに形だけ測る） ---
+  {
+    const jaRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
+    const backupSrc = readFileSync(path.join(jaRoot, 'src/logic/backup.ts'), 'utf-8')
+    const settingsSrc = readFileSync(path.join(jaRoot, 'src/pages/SettingsPage.tsx'), 'utf-8')
+    eq(
+      'JA-6 「追加」の結果に、入らなかった品を返している',
+      /duplicateTitleRecipes/.test(backupSrc),
+      true,
+    )
+    eq(
+      'JA-6 設定画面が、入らなかった品を受けて聞いてから入れている',
+      /buildDuplicateTitleConfirm[\s\S]{0,400}importDuplicateTitleRecipes/.test(settingsSrc),
+      true,
+    )
+  }
 }
 
 // ---------- 結果 ----------

@@ -3230,6 +3230,25 @@ export const ja = {
     backupImportMergeResultLogsPhoto: '写真{p}枚',
     backupImportMergeResultTables: '在庫・買い物メモ・献立・価格・日付メモ・献立テンプレートを合わせて{t}件足しました',
     backupImportMergeResultNothing: '足すものはありませんでした（ファイルの内容はすべて今のデータに入っています）',
+    // 同じ料理名のレシピが既にあって本体が入らなかった品の知らせと聞き取り（2026-08-22 便JA・
+    // オーナー承認）。それまでは使い方ページに書いてあるだけで画面は黙っていたため、
+    // 読み込んだのに入っていないことに気づけなかった。**聞くのは1回だけ**（品ごとには聞かない）
+    backupImportDuplicateTitle: '同じ料理名のレシピが既にあるため、{n}品が入りませんでした',
+    backupImportDuplicateBody: '料理名の後ろに (2) (3) を付けて、別のレシピとして足せます。',
+    backupImportDuplicateAddLabel: '足すもの',
+    backupImportDuplicateAdd: 'ファイルの{n}品（材料・手順・メモ・写真）',
+    backupImportDuplicateKeptLabel: '変わらないもの',
+    backupImportDuplicateKept: '今あるレシピ（料理名も内容もそのままです）',
+    // 番号を付けた品に記録を入れない理由を、利用者が探さずに済むよう1行だけ添える
+    // （記録は同じ読み込みの中で、同じ料理名の今あるレシピへ足してある）
+    backupImportDuplicateNote: '「作った記録」は、今あるレシピに足したままにします。',
+    backupImportDuplicateOk: '番号を付けて入れる',
+    // 入れたときも、入れなかったときも結果に1行残す（窓は消えるので、画面に事実を残す）
+    backupImportDuplicateAdded: '番号を付けて{n}品を足しました',
+    backupImportDuplicateDeclined: '{n}品は入れませんでした',
+    // 番号を付けて入れるところだけが失敗したとき(端末の空き容量など)。読み込み自体は終わって
+    // いるので、読み直しを促す文言(backupImportError)は出さない
+    backupImportDuplicateError: '番号を付けて入れられませんでした',
     backupImportError: 'ファイルを読み込めませんでした。うちレシピのバックアップファイルか確認してください',
     priceMasterTitle: '食材と価格',
     priceMasterDescription: '頻出食材の目安価格を登録・編集できます。材料に価格を入れていないレシピの概算食費に使われます',

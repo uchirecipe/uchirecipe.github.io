@@ -46,6 +46,8 @@ import {
   countReplaceImpact,
   buildReplaceConfirm,
   buildMergeConfirm,
+  buildDuplicateTitleConfirm,
+  importDuplicateTitleRecipes,
   buildUndoReplaceConfirm,
   savePreImportSnapshot,
   restorePreImportSnapshot,
@@ -795,6 +797,31 @@ export default function SettingsPage() {
       // 約束しているので、成立しなかった事実を出さないと約束を破ったままになる
       if (mode === 'replace' && !snapshotSaved) lines.push(ja.settings.replaceSnapshotFailed)
       setImportResultLines(lines)
+      // 同じ料理名のレシピが既にあって本体が入らなかった品(2026-08-22 便JA)。
+      // 件数を知らせて「番号を付けて入れるか」を**1回だけ**聞く。読み込みの結果はもう画面に
+      // 出しているので、窓を閉じたあとも何が起きたかが残る。窓には自前の目印を付ける
+      // (e2eの自動押しは既定の目印だけを見るので、他の検証の「追加」を勝手に増やさない)
+      const pending = result.duplicateTitleRecipes ?? []
+      if (pending.length > 0) {
+        const answered = await confirm({
+          ...buildDuplicateTitleConfirm(pending.length),
+          testId: 'confirm-duplicate-title',
+        })
+        let numberedLine: string
+        if (answered) {
+          try {
+            const numbered = await importDuplicateTitleRecipes(pending)
+            numberedLine = ja.settings.backupImportDuplicateAdded.replace('{n}', String(numbered))
+          } catch {
+            // ファイルの読み込み自体はもう終わっているので、外側のcatchへ回して
+            // 「ファイルを読み込めませんでした」と言わせない(読み直しを促すと重複が増える)
+            numberedLine = ja.settings.backupImportDuplicateError
+          }
+        } else {
+          numberedLine = ja.settings.backupImportDuplicateDeclined.replace('{n}', String(pending.length))
+        }
+        setImportResultLines([...lines, numberedLine])
+      }
     } catch {
       setImportResultLines([ja.settings.backupImportError])
     } finally {

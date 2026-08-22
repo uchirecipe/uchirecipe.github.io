@@ -17496,6 +17496,306 @@ try {
     }
   }
 
+
+  // --- JA-DUP-01(2026-08-22 便JA): 「今のデータに追加」で、同じ料理名のレシピが黙って入らない件。
+  // オーナー原文「◯件入らなかったお知らせ→それでも入れるか聞く→はいで（２）、（３）...、とつけて
+  // 入れる。いいえで重複して入れない。」／「懸念、『肉じゃが（２）』を重複で入れると、
+  // 『肉じゃが（３）』ではなく『肉じゃが（２）（２）』になりそう。」
+  // 実DBで守るのは5つ:
+  //  ①入らなかった品があれば、件数を出して「番号を付けて入れるか」を1回だけ聞く
+  //  ②「はい」で番号が付いて入る／もとからある品は料理名も材料も変わらない
+  //  ③1回の読み込みで同じ名前が2品あっても番号が続く／「(2) (2)」にならない（オーナーの懸念）
+  //  ④中身まで同じ品では聞かない（自分のバックアップを読み直しただけで窓を出さない）
+  //  ⑤「いいえ」なら1品も増えない（今までと同じ振る舞い） ---
+  currentCheck = 'JA-DUP-01'
+  {
+    const jdBrowser = await chromium.launch()
+    const JD_BASE = 'E2E重複肉じゃが'
+    // 説明の括弧が付いた料理名（実在する品名の形。番号を外す処理がこれを壊さないこと）
+    const JD_PAREN = 'E2Eレンジ蒸し鶏（自家製サラダチキン）'
+    /** 端末に入っているこの検証のレシピを読む（料理名で並べる） */
+    const jdRead = (page) =>
+      page.evaluate(async () => {
+        const req = indexedDB.open('uchi-recipe')
+        const idb = await new Promise((resolve, reject) => {
+          req.onsuccess = () => resolve(req.result)
+          req.onerror = () => reject(req.error)
+        })
+        const rows = await new Promise((resolve, reject) => {
+          const r = idb.transaction('recipes', 'readonly').objectStore('recipes').getAll()
+          r.onsuccess = () => resolve(r.result)
+          r.onerror = () => reject(r.error)
+        })
+        idb.close()
+        return rows
+          .filter((r) => typeof r.title === 'string' && r.title.startsWith('E2E'))
+          .map((r) => ({
+            title: r.title,
+            uid: r.uid,
+            starter: r.isStarter === true,
+            setId: r.sourceSetId,
+            first: r.ingredients?.[0]?.name ?? '',
+            logs: (r.cookedLogs ?? []).length,
+            words: r.searchWords ?? [],
+          }))
+          .sort((a, b) => (a.title < b.title ? -1 : a.title > b.title ? 1 : 0))
+      })
+    /** ファイルの1品ぶんの形（中身は呼ぶ側が差し替える） */
+    const jdRecipe = (over) => ({
+      servings: 2,
+      effortLevel: 'normal',
+      tags: [],
+      isFavorite: false,
+      cookedLogs: [],
+      searchWords: ['e2e'],
+      createdAt: 1700000000000,
+      updatedAt: 1700000000000,
+      ...over,
+    })
+    /** 「今のデータに追加」でファイルを読み込む（ファイル選択後の確認は仕掛けの自動押しに任せる） */
+    const jdImport = async (page, recipes) => {
+      const [chooser] = await Promise.all([
+        page.waitForEvent('filechooser'),
+        page.getByRole('button', { name: '今のデータに追加' }).click(),
+      ])
+      await chooser.setFiles({
+        name: 'uchi-recipe-backup-ja.json',
+        mimeType: 'application/json',
+        buffer: Buffer.from(
+          JSON.stringify({ app: 'uchi-recipe', version: 1, exportedAt: '2026-08-22T00:00:00.000Z', recipes }),
+          'utf-8',
+        ),
+      })
+    }
+    /**
+     * 入らなかった品の窓（自前の目印なので仕掛けの自動押しは触らない）。
+     * timeout を短くしすぎない＝写真の無い小さなファイルでも読み込みに数百msかかるため
+     */
+    const jdWindow = (page) => page.locator('[data-testid="confirm-duplicate-title"]')
+    try {
+      const jdCtx = await jdBrowser.newContext()
+      const jdPage = await jdCtx.newPage()
+      jdPage.on('pageerror', (err) => {
+        if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+        errors.push(`[pageerror@JA-DUP-01] ${err.message}`)
+      })
+      await jdPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await jdPage.waitForTimeout(1800) // 初回シード完了待ち(まっさらなプロファイル)
+      // 端末側の2品を直接入れる（Dexieを通さないので、このあと必ず読み込み直す＝禁じ手⑥）
+      const jdIds = await jdPage.evaluate(
+        async ([base, paren]) => {
+          const req = indexedDB.open('uchi-recipe')
+          const idb = await new Promise((resolve, reject) => {
+            req.onsuccess = () => resolve(req.result)
+            req.onerror = () => reject(req.error)
+          })
+          const add = (row) =>
+            new Promise((resolve, reject) => {
+              const tx = idb.transaction('recipes', 'readwrite')
+              const r = tx.objectStore('recipes').add(row)
+              tx.oncomplete = () => resolve(r.result)
+              tx.onerror = () => reject(tx.error)
+            })
+          const common = {
+            servings: 2,
+            effortLevel: 'normal',
+            tags: [],
+            isFavorite: false,
+            cookedLogs: [],
+            searchWords: ['e2e'],
+            createdAt: 1700000000000,
+            updatedAt: 1700000000000,
+          }
+          const baseId = await add({
+            ...common,
+            uid: 'u-jd-mine',
+            title: base,
+            ingredients: [{ name: '牛こま切れ肉', amount: '200', unit: 'g' }],
+            steps: [{ text: '今の端末の手順' }],
+          })
+          const parenId = await add({
+            ...common,
+            uid: 'u-jd-paren',
+            title: paren,
+            ingredients: [{ name: '鶏むね肉', amount: '1', unit: '枚' }],
+            steps: [{ text: '今の端末の手順' }],
+          })
+          idb.close()
+          return { baseId, parenId }
+        },
+        [JD_BASE, JD_PAREN],
+      )
+      await jdPage.goto(`${BASE}/#/settings?section=backup`, { waitUntil: 'networkidle' })
+      await jdPage.reload({ waitUntil: 'networkidle' }) // 生書き込みを画面へ届かせる（禁じ手⑥）
+      await jdPage.waitForTimeout(1500)
+      const jdBefore = await jdRead(jdPage)
+      check('JA-DUP-01 前提: 端末に2品を入れられた', jdBefore.length === 2, JSON.stringify(jdBefore))
+
+      // ---- ①②④: 中身が違う2品は聞く／中身が同じ1品は数に入れない ----
+      await jdImport(jdPage, [
+        jdRecipe({
+          id: jdIds.baseId,
+          uid: 'u-jd-file-a',
+          title: JD_BASE,
+          // 基本レシピの目印を付けたまま渡す（番号を付けた品では外れていること＝②の裏取り）
+          isStarter: true,
+          ingredients: [{ name: '豚こま切れ肉', amount: '200', unit: 'g' }],
+          steps: [{ text: 'ファイル側の手順A' }],
+          cookedLogs: [{ date: '2026-01-05', note: 'E2Eファイル側の記録' }],
+        }),
+        jdRecipe({
+          id: jdIds.baseId,
+          uid: 'u-jd-file-same',
+          title: JD_BASE,
+          // 端末にある品と中身がそっくり同じ＝入らなくても失うものが無いので数に入れない
+          ingredients: [{ name: '牛こま切れ肉', amount: '200', unit: 'g' }],
+          steps: [{ text: '今の端末の手順' }],
+        }),
+        jdRecipe({
+          id: jdIds.parenId,
+          uid: 'u-jd-file-p',
+          title: JD_PAREN,
+          ingredients: [{ name: '鶏もも肉', amount: '1', unit: '枚' }],
+          steps: [{ text: 'ファイル側の手順P' }],
+        }),
+      ])
+      await jdWindow(jdPage).waitFor({ state: 'visible', timeout: 15000 })
+      const jdAskText = (await jdWindow(jdPage).textContent()).replaceAll('​', '')
+      check(
+        'JA-DUP-01① 入らなかった品数を出して聞く（中身まで同じ品は数に入れない）',
+        /2品/.test(jdAskText) && !/3品/.test(jdAskText),
+        jdAskText,
+      )
+      check(
+        'JA-DUP-01① 押すと何が起きるかがボタンの言葉で分かる',
+        (await jdPage.locator('[data-testid="confirm-duplicate-title-ok"]').innerText()).includes('番号'),
+        await jdPage.locator('[data-testid="confirm-duplicate-title-ok"]').innerText(),
+      )
+      await jdPage.locator('[data-testid="confirm-duplicate-title-ok"]').click()
+      await jdPage.waitForTimeout(1500)
+      const jdAfter1 = await jdRead(jdPage)
+      const jdTitles1 = jdAfter1.map((r) => r.title)
+      check(
+        'JA-DUP-01② 番号を付けた品が入る（説明の括弧が付いた料理名も壊さない）',
+        jdTitles1.includes(`${JD_BASE} (2)`) && jdTitles1.includes(`${JD_PAREN} (2)`),
+        JSON.stringify(jdTitles1),
+      )
+      const jdOriginal = jdAfter1.find((r) => r.title === JD_BASE)
+      check(
+        'JA-DUP-01② もとからある品は料理名も材料も変えない',
+        jdOriginal?.first === '牛こま切れ肉',
+        JSON.stringify(jdOriginal),
+      )
+      const jdCopy = jdAfter1.find((r) => r.title === `${JD_BASE} (2)`)
+      check(
+        'JA-DUP-01② 番号を付けた品にはファイル側の材料が入る',
+        jdCopy?.first === '豚こま切れ肉',
+        JSON.stringify(jdCopy),
+      )
+      check(
+        'JA-DUP-01② 番号を付けた品は基本レシピ扱いにしない（「基本レシピを入れ直す」で消えないように）',
+        jdCopy?.starter === false,
+        JSON.stringify(jdCopy),
+      )
+      check(
+        'JA-DUP-01② 番号を付けた品では作った記録を二重にしない（記録は今ある品へ足してある）',
+        jdCopy?.logs === 0 && jdOriginal?.logs === 1,
+        JSON.stringify([jdCopy?.logs, jdOriginal?.logs]),
+      )
+      check(
+        'JA-DUP-01② 番号を付けた料理名で検索できる（検索語を作り直している）',
+        (jdCopy?.words ?? []).some((w) => w.includes('(2)')),
+        JSON.stringify(jdCopy?.words),
+      )
+      const jdBody1 = (await jdPage.textContent('body')).replaceAll('​', '')
+      check(
+        'JA-DUP-01② 何品を足したかを画面に残す',
+        /番号を付けて2品/.test(jdBody1),
+        jdBody1.slice(jdBody1.indexOf('新しく足したレシピは'), jdBody1.indexOf('新しく足したレシピは') + 160),
+      )
+
+      // ---- ④: 中身まで同じ品しか無いファイルでは聞かない（黙って読み込みが終わる） ----
+      await jdImport(jdPage, [
+        jdRecipe({
+          id: jdIds.baseId,
+          uid: 'u-jd-file-same2',
+          title: JD_BASE,
+          ingredients: [{ name: '牛こま切れ肉', amount: '200', unit: 'g' }],
+          steps: [{ text: '今の端末の手順' }],
+        }),
+      ])
+      await jdPage.waitForTimeout(2000)
+      check(
+        'JA-DUP-01④ 中身まで同じ品しか無いときは聞かない（読み直しただけで窓を出さない）',
+        (await jdWindow(jdPage).count()) === 0,
+        await jdWindow(jdPage).first().textContent().catch(() => ''),
+      )
+
+      // ---- ③: 「肉じゃが (2)」を入れ直しても「肉じゃが (2) (2)」にしない ----
+      // 1回の読み込みで同じ元の名前の品が2つあるので、番号が (3)(4) と続くことも同時に見る
+      await jdImport(jdPage, [
+        jdRecipe({
+          // ①で入れた「(2)」の品と印が一致する＝同じ品の書き換え版が届いた場面
+          uid: 'u-jd-file-a',
+          title: `${JD_BASE} (2)`,
+          ingredients: [{ name: '合いびき肉', amount: '200', unit: 'g' }],
+          steps: [{ text: 'ファイル側の手順A2' }],
+        }),
+        jdRecipe({
+          id: jdIds.baseId,
+          uid: 'u-jd-file-b',
+          title: JD_BASE,
+          ingredients: [{ name: '鶏ひき肉', amount: '200', unit: 'g' }],
+          steps: [{ text: 'ファイル側の手順B' }],
+        }),
+      ])
+      await jdWindow(jdPage).waitFor({ state: 'visible', timeout: 15000 })
+      await jdPage.locator('[data-testid="confirm-duplicate-title-ok"]').click()
+      await jdPage.waitForTimeout(1500)
+      const jdTitles2 = (await jdRead(jdPage)).map((r) => r.title)
+      const jdBaseTitles = jdTitles2.filter((t) => t.startsWith(JD_BASE))
+      check(
+        'JA-DUP-01③ 番号の付いた品を入れ直しても「(2) (2)」にならない（オーナーの懸念）',
+        jdBaseTitles.every((t) => !/\(\d+\)\s*\(\d+\)$/.test(t)),
+        JSON.stringify(jdBaseTitles),
+      )
+      check(
+        'JA-DUP-01③ 1回の読み込みで同じ名前が2品あっても番号が続く',
+        jdBaseTitles.includes(`${JD_BASE} (3)`) && jdBaseTitles.includes(`${JD_BASE} (4)`),
+        JSON.stringify(jdBaseTitles),
+      )
+      check(
+        'JA-DUP-01③ 同じ料理名を2つ作らない',
+        new Set(jdBaseTitles).size === jdBaseTitles.length,
+        JSON.stringify(jdBaseTitles),
+      )
+
+      // ---- ⑤: 「いいえ」なら1品も増えない ----
+      const jdCountBefore = (await jdRead(jdPage)).length
+      await jdImport(jdPage, [
+        jdRecipe({
+          id: jdIds.baseId,
+          uid: 'u-jd-file-c',
+          title: JD_BASE,
+          ingredients: [{ name: '豚バラ肉', amount: '200', unit: 'g' }],
+          steps: [{ text: 'ファイル側の手順C' }],
+        }),
+      ])
+      await jdWindow(jdPage).waitFor({ state: 'visible', timeout: 15000 })
+      await jdPage.locator('[data-testid="confirm-duplicate-title-cancel"]').click()
+      await jdPage.waitForTimeout(1200)
+      check(
+        'JA-DUP-01⑤ 「やめる」を選ぶと1品も増えない',
+        (await jdRead(jdPage)).length === jdCountBefore,
+        JSON.stringify((await jdRead(jdPage)).map((r) => r.title)),
+      )
+      const jdBody3 = (await jdPage.textContent('body')).replaceAll('​', '')
+      check('JA-DUP-01⑤ 入れなかったことも画面に残す（黙って終わらせない）', /1品は入れませんでした/.test(jdBody3))
+    } finally {
+      await jdBrowser.close()
+    }
+  }
+
   // --- FILESAVE-01(2026-07-17バックアップ改修 修正2+3): 保存先選択+前回の場所に上書き。
   // 実ブラウザのFile System Access APIはネイティブのOS保存ダイアログを伴うため、Playwrightの
   // headless chromiumでは`showSaveFilePicker`自体が存在しない(=既定では非対応ブラウザ扱いになる。
@@ -30531,9 +30831,16 @@ try {
               evRow('消えるもの')?.[1]?.includes('1件も消えません'),
               evRow('消えるもの')?.[1],
             )
+            // 2026-08-22 便JA: 振る舞いが「黙って入らない」から「入らなかった品に番号を付けて
+            // 入れるか聞く」に変わった。**語の組み合わせ**で測る（1文の書き写しは禁じ手②）
             check(
-              'MULTIDEV-01(g-2) 「今のデータに追加」では同じ料理名のレシピが今の内容のまま',
-              evRow('同じ料理名のレシピ')?.[1] === '今の内容のまま',
+              'MULTIDEV-01(g-2) 「今のデータに追加」で今あるレシピの内容が変わらないと書いてある',
+              (evRow('同じ料理名のレシピ')?.[1] ?? '').includes('今の内容のまま'),
+              evRow('同じ料理名のレシピ')?.[1],
+            )
+            check(
+              'MULTIDEV-01(g-2) 同じ料理名でも番号を付けて足せると書いてある',
+              (evRow('同じ料理名のレシピ')?.[1] ?? '').includes('番号'),
               evRow('同じ料理名のレシピ')?.[1],
             )
           }
@@ -30550,8 +30857,11 @@ try {
             ['iPhone・iPadでブラウザとホーム画面のデータが分かれる', ['iPhone', 'ホーム画面', '分かれ']],
             ['クラウドに置いても同期ではない', 'クラウドに置いても、同期にはなりません'],
             ['クラウドのファイルを自動で読み書きしない', '自動で読み書きすることはありません'],
-            ['「今のデータに追加」では同じ料理名のレシピが変わらない', '同じ料理名のレシピは今の内容のまま'],
-            ['「今のデータに追加」では書き換えた材料・手順が入らない', '書き換えた材料や手順は入りません'],
+            ['「今のデータに追加」では同じ料理名のレシピが変わらない', ['同じ料理名のレシピ', '今の内容のまま']],
+            ['「今のデータに追加」では書き換えた材料・手順が入らない', ['書き換えた材料', '手順', '入りません']],
+            // 2026-08-22 便JA: 入らなかった品を知らせて聞くようになったので、その2点を足す
+            ['入らなかった品があると知らせて聞くことを書いている', ['入らなかった品', '聞かれます']],
+            ['番号を付けても今あるレシピは変わらないことを書いている', ['番号', '今あるレシピ', 'そのまま']],
             ['バックアップファイルに解錠コードが含まれる', 'バックアップファイルにはPro版の解錠コードが含まれます'],
             ['クラウドの共有設定の注意', 'リンクを知っている人が開ける共有設定にしないでください'],
             ['定期的な書き出しの目安', '目安は月に1回'],
