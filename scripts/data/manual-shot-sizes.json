@@ -1,7 +1,11 @@
 {
   "recipe-cards": {
     "w": 780,
-    "h": 1092
+    "h": 1088
+  },
+  "day-suggest": {
+    "w": 780,
+    "h": 1148
   },
   "nav-tabs": {
     "w": 780,
@@ -10,6 +14,10 @@
   "search": {
     "w": 780,
     "h": 912
+  },
+  "recipes-filter": {
+    "w": 780,
+    "h": 1054
   },
   "register-tabs": {
     "w": 780,
@@ -29,7 +37,7 @@
   },
   "paste": {
     "w": 780,
-    "h": 924
+    "h": 964
   },
   "url-import": {
     "w": 780,
@@ -37,7 +45,15 @@
   },
   "plan-day-buttons": {
     "w": 780,
-    "h": 1280
+    "h": 900
+  },
+  "select-for-today": {
+    "w": 780,
+    "h": 868
+  },
+  "plan-week-suggest": {
+    "w": 780,
+    "h": 428
   },
   "plan-week-nutrition-open": {
     "w": 780,
@@ -45,7 +61,11 @@
   },
   "plan-week-day": {
     "w": 780,
-    "h": 844
+    "h": 744
+  },
+  "plan-week-day-edit": {
+    "w": 780,
+    "h": 1156
   },
   "cost-week": {
     "w": 780,
@@ -95,9 +115,33 @@
     "w": 780,
     "h": 828
   },
+  "settings-kitchen": {
+    "w": 780,
+    "h": 904
+  },
   "cooknavi": {
     "w": 780,
     "h": 926
+  },
+  "cooknavi-finish": {
+    "w": 780,
+    "h": 424
+  },
+  "cooknavi-reorder": {
+    "w": 780,
+    "h": 736
+  },
+  "cooknavi-reorder-undo": {
+    "w": 780,
+    "h": 448
+  },
+  "cooknavi-session": {
+    "w": 780,
+    "h": 186
+  },
+  "cooknavi-session-others": {
+    "w": 780,
+    "h": 284
   },
   "backup-export": {
     "w": 780,
@@ -114,45 +158,5 @@
   "plan-week-nutrition-row": {
     "w": 780,
     "h": 136
-  },
-  "cooknavi-session": {
-    "w": 780,
-    "h": 148
-  },
-  "cooknavi-session-others": {
-    "w": 780,
-    "h": 224
-  },
-  "select-for-today": {
-    "w": 780,
-    "h": 870
-  },
-  "settings-kitchen": {
-    "w": 780,
-    "h": 904
-  },
-  "cooknavi-finish": {
-    "w": 780,
-    "h": 424
-  },
-  "cooknavi-reorder": {
-    "w": 780,
-    "h": 736
-  },
-  "cooknavi-reorder-undo": {
-    "w": 780,
-    "h": 448
-  },
-  "day-suggest": {
-    "w": 780,
-    "h": 1148
-  },
-  "recipes-filter": {
-    "w": 780,
-    "h": 1054
-  },
-  "plan-week-suggest": {
-    "w": 780,
-    "h": 1282
   }
 }
