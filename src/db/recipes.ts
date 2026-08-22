@@ -1,6 +1,6 @@
 import { db } from './db'
 import { defaultSettings } from './types'
-import type { CookedLog, Recipe, RecipeInput } from './types'
+import type { CookedLog, PhotoFocus, Recipe, RecipeInput } from './types'
 import { buildSearchWords, SEARCH_INDEX_VERSION, searchIndexNeedsRebuild } from '../logic/kana'
 import { exclusionRecordFor } from '../logic/backup'
 import { archiveIdsForDetached, archiveIdsForRecipe } from '../logic/cookedArchive'
@@ -264,6 +264,26 @@ export async function toggleFavorite(id: number): Promise<void> {
     const recipe = await db.recipes.get(id)
     if (!recipe) return
     await db.recipes.update(id, { isFavorite: !recipe.isFavorite })
+  })
+}
+
+/**
+ * 写真の見える範囲だけを書き換える（2026-08-22 便JK）。
+ *
+ * レシピ詳細の写真から直接決められるようにするための1点更新で、
+ * **料理名・材料・手順・作った記録・更新日時には触らない**（お気に入りの切り替えと同じ流儀）。
+ * undefined を渡すと項目ごと外す＝中央に戻る（値を持たない状態＝いままでどおりに戻せる）。
+ */
+export async function updatePhotoFocus(
+  id: number,
+  focus: PhotoFocus | undefined,
+): Promise<void> {
+  await db.transaction('rw', db.recipes, async () => {
+    const recipe = await db.recipes.get(id)
+    if (!recipe) return
+    // undefined を書くと、読むときは「未設定」と同じ＝中央に戻る。
+    // 書き出すファイルにも載らない（JSON は値が undefined の項目を落とすため）
+    await db.recipes.update(id, { photoFocus: focus })
   })
 }
 

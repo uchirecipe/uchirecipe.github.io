@@ -14,6 +14,7 @@ import {
   CheckCircle2,
   Trash2,
   ClipboardPaste,
+  Crop,
   RotateCcw,
   Globe,
 } from 'lucide-react'
@@ -23,6 +24,7 @@ import type {
   IconKey,
   Ingredient,
   MealSlot,
+  PhotoFocus,
   RecipeInput,
   Season,
   Step,
@@ -61,7 +63,9 @@ import { MAX_SERVINGS, MIN_SERVINGS, clampServings, isServingsInRange } from '..
 import { buildSingleDeleteConfirm } from '../logic/recipeDelete'
 import { needsReplaceConfirm, photoReplacePlan, replaceConfirmTargets } from '../logic/replaceConfirm'
 import type { PhotoReplacePlan } from '../logic/replaceConfirm'
+import { photoObjectPosition, toStoredPhotoFocus } from '../logic/photoFocus'
 import { usePhotoUrl } from '../components/usePhotoUrl'
+import PhotoFocusModal from '../components/PhotoFocusModal'
 import Collapse from '../components/Collapse'
 import SwapLabel from '../components/SwapLabel'
 import BackHeader from '../components/BackHeader'
@@ -404,6 +408,14 @@ function RecipeFormInner() {
   const [title, setTitle] = useState('')
   const [intro, setIntro] = useState('')
   const [photo, setPhoto] = useState<Blob>()
+  /**
+   * 写真の見える範囲（2026-08-22 便JK）。写真そのものと同じ扱いで持つ
+   * （下書き＝FormDraft には入れない。写真が下書きに入っていないため、
+   *   位置だけ残しても指す先の写真が無い）。**写真を入れ替えたら中央に戻す**
+   *   ＝別の写真で決めた位置を、新しい写真に当てない
+   */
+  const [photoFocus, setPhotoFocus] = useState<PhotoFocus>()
+  const [photoFocusOpen, setPhotoFocusOpen] = useState(false)
   const [servings, setServings] = useState(2)
   const [cookMinutes, setCookMinutes] = useState('')
   const [effortLevel, setEffortLevel] = useState<EffortLevel>('normal')
@@ -712,11 +724,13 @@ function RecipeFormInner() {
       // 基準は上で保存済みレシピの内容にしてあるので、復元した内容は
       // 「未保存の変更」として正しく扱われる(自動保存も離脱警告も効く)
       setPhoto(recipe.photo)
+      setPhotoFocus(recipe.photoFocus)
       return
     }
     setTitle(recipe.title)
     setIntro(recipe.intro ?? '')
     setPhoto(recipe.photo)
+    setPhotoFocus(recipe.photoFocus)
     setServings(recipe.servings)
     setCookMinutes(recipe.cookMinutes != null ? String(recipe.cookMinutes) : '')
     setEffortLevel(recipe.effortLevel)
@@ -899,6 +913,8 @@ function RecipeFormInner() {
       const resized = await resizePhoto(blob)
       if (generation !== urlImportGenerationRef.current) return
       setPhoto(resized)
+      // 取り込んだ写真に入れ替わったので見える範囲は中央に戻す(2026-08-22 便JK)
+      setPhotoFocus(undefined)
       // 写真を新しく取得できたら、それまでアイコン優先だったとしても取り込んだ写真を見せる
       // (onPhotoSelectedと同じ扱い。2026-07-16 Fable裁定docs/30 裁定2の状態対応を踏襲)
       setShowIconInsteadOfPhoto(false)
@@ -1219,6 +1235,9 @@ function RecipeFormInner() {
     if (!file) return
     try {
       setPhoto(await resizePhoto(file))
+      // 写真が入れ替わったら見える範囲は中央に戻す(2026-08-22 便JK)。
+      // 前の写真で決めた場所は、新しい写真では別のところを指してしまう
+      setPhotoFocus(undefined)
       // 写真を新しく取得できたら、それまでアイコン優先(showIconInsteadOfPhoto)だったとしても
       // 撮った/選んだ写真を見せる(2026-07-16 Fable裁定docs/30 裁定2の状態対応)
       setShowIconInsteadOfPhoto(false)
@@ -1472,6 +1491,9 @@ function RecipeFormInner() {
         title,
         intro: intro.trim() || undefined,
         photo,
+        // 中央のままなら値を持たせない(2026-08-22 便JK)＝調整していないレシピは
+        // 書き出すファイルの中身もいままでと変わらない
+        photoFocus: photo ? toStoredPhotoFocus(photoFocus) : undefined,
         servings,
         cookMinutes: cookMinutes.trim() ? Number(cookMinutes) : undefined,
         effortLevel,
@@ -1654,6 +1676,7 @@ function RecipeFormInner() {
       dishType: loadedRecipe.dishType,
     })
     setPhoto(loadedRecipe.photo)
+    setPhotoFocus(loadedRecipe.photoFocus)
   }
 
   // 「基本レシピを入れ直す」(reloadStarterRecipes/buildUpdatedStarterRecipe)と同じ対応表を使う:
@@ -1688,6 +1711,7 @@ function RecipeFormInner() {
       dishType: def.dishType,
     })
     setPhoto(loadedRecipe.photo)
+    setPhotoFocus(loadedRecipe.photoFocus)
   }
 
   const performReset = () => {
@@ -2456,6 +2480,8 @@ function RecipeFormInner() {
           <img
             src={photoUrl}
             alt={title || ja.form.photoLabel}
+            // 詳細画面・レシピ一覧と同じ1つの値で描く(2026-08-22 便JK)
+            style={{ objectPosition: photoObjectPosition(photoFocus) }}
             className="mt-1 aspect-video w-full rounded-md object-cover shadow-sm"
           />
         ) : (
@@ -2522,15 +2548,42 @@ function RecipeFormInner() {
             </span>
           </button>
         </div>
+        {/* 見える範囲の調整(2026-08-22 便JK)。写真を見せている状態のときだけ出す
+            ＝アイコンを画像にしているレシピには出さない(調整するものが無い) */}
+        {photo && !showIconInsteadOfPhoto && (
+          <button
+            type="button"
+            data-testid="photo-focus-open-form"
+            onClick={() => setPhotoFocusOpen(true)}
+            className="mt-2 flex min-h-[var(--tap-min)] w-full items-center justify-center gap-1 rounded-md border border-edge bg-surface text-sm font-bold text-accent-ink shadow-sm"
+          >
+            <Crop size={16} aria-hidden />
+            {ja.photoFocus.open}
+          </button>
+        )}
         {photo && (
           <button
             type="button"
-            onClick={() => setPhoto(undefined)}
+            onClick={() => {
+              setPhoto(undefined)
+              setPhotoFocus(undefined)
+            }}
             className="mt-2 text-sm text-warning underline"
           >
             {ja.form.photoRemove}
           </button>
         )}
+        <PhotoFocusModal
+          open={photoFocusOpen}
+          photo={photo}
+          title={title || ja.form.photoLabel}
+          focus={photoFocus}
+          onApply={(next) => {
+            setPhotoFocus(next)
+            setPhotoFocusOpen(false)
+          }}
+          onClose={() => setPhotoFocusOpen(false)}
+        />
 
         {/* アイコングリッド(折りたたみ配下。旧・独立「アイコン」セクションをここへ移設) */}
         <Collapse open={iconPickerOpen}>

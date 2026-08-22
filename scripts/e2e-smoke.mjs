@@ -443,6 +443,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import net from 'node:net'
 import path from 'node:path'
+import zlib from 'node:zlib'
 // 文言は src/i18n/ja.ts の1か所から読む（規約H。画面の字を書き写して二重管理しない）
 import { ja } from '../src/i18n/ja.ts'
 // 栄養の顔ぶれ・名前は表示側の1か所(便HU・⑯)から読む（画面の字を書き写さない）
@@ -905,6 +906,55 @@ const newContextWithFirstSetupNotice = async (browserInstance, options) => {
     }
   }, FIRST_SETUP_NOTICE_SEEN_KEY)
   return ctx
+}
+
+/**
+ * 検査用のPNGを作る（2026-08-22 便JK）。写真の「見える範囲」は**大きさのある写真**でないと
+ * 測れない（1x1の点だと画面に1pxでしか出ず、なぞる面も持てない）。
+ * 上下・左右で色が違う縞にしてあるので、切り取り位置が変わったことを絵でも確かめられる。
+ */
+function makeTestPng(width, height) {
+  const crcTable = []
+  for (let n = 0; n < 256; n++) {
+    let c = n
+    for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1
+    crcTable[n] = c >>> 0
+  }
+  const crc32 = (buf) => {
+    let c = 0xffffffff
+    for (const b of buf) c = crcTable[(c ^ b) & 0xff] ^ (c >>> 8)
+    return (c ^ 0xffffffff) >>> 0
+  }
+  const chunk = (type, data) => {
+    const len = Buffer.alloc(4)
+    len.writeUInt32BE(data.length)
+    const body = Buffer.concat([Buffer.from(type, 'ascii'), data])
+    const crc = Buffer.alloc(4)
+    crc.writeUInt32BE(crc32(body))
+    return Buffer.concat([len, body, crc])
+  }
+  const ihdr = Buffer.alloc(13)
+  ihdr.writeUInt32BE(width, 0)
+  ihdr.writeUInt32BE(height, 4)
+  ihdr[8] = 8 // 1色8ビット
+  ihdr[9] = 2 // RGB
+  const raw = Buffer.alloc((width * 3 + 1) * height)
+  for (let y = 0; y < height; y++) {
+    const rowStart = y * (width * 3 + 1)
+    raw[rowStart] = 0 // フィルタなし
+    for (let x = 0; x < width; x++) {
+      const at = rowStart + 1 + x * 3
+      raw[at] = Math.round((x / Math.max(1, width - 1)) * 255)
+      raw[at + 1] = Math.round((y / Math.max(1, height - 1)) * 255)
+      raw[at + 2] = (Math.floor(y / 8) + Math.floor(x / 8)) % 2 === 0 ? 40 : 220
+    }
+  }
+  return Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    chunk('IHDR', ihdr),
+    chunk('IDAT', zlib.deflateSync(raw)),
+    chunk('IEND', Buffer.alloc(0)),
+  ])
 }
 
 const browser = await chromium.launch()
@@ -48621,6 +48671,382 @@ try {
       )
     } finally {
       await jjBrowser.close()
+    }
+  }
+
+
+  // ==========================================================================================
+  // JKPHOTO-01〜03: 写真の見える範囲（2026-08-22 便JK）
+  //
+  // オーナー原文（最初の指摘）:
+  //   「画像の中心がずれている。設定からも直せない。一覧よりも詳細画面が気になりやすいが、
+  //     一覧もよくみたらちゃんとずれてる。」
+  // それを踏まえた返答（これが作るものの指示）:
+  //   「画像の中心ズレについて、画像のサイズの真ん中ではなく、画像の中で被写体が真ん中に
+  //     写っていない、ということです。これは自動ではどうにもできない部分だと思うので、
+  //     ゆーざーが見える範囲を微調整（トリミングっぽい感じ）できたら嬉しい、ということです。」
+  //
+  // 測ること:
+  //   JKPHOTO-01 … 写真の無いレシピには入口を出さない／写真を入れると詳細の写真の中に入口が出る／
+  //                 指で押せる大きさ（44px）／なぞって決めると詳細の写真の切り取り位置が変わる／
+  //                 **料理名の位置が1pxも動かない**（オーナー指示）／端末に値が残る
+  //   JKPHOTO-02 … **同じ1つの値がレシピ一覧のカードにも効く**（同じ写真を2回調整させない）／
+  //                 「中央に戻す」で値ごと消える／**写真を入れ替えたら中央に戻る**
+  //   JKPHOTO-03 … 書き出したファイルに値が入り、読み込み先でも同じ値で戻る
+  //
+  // 画面は390×844（オーナーの実機幅）で測る。
+  // ==========================================================================================
+  currentCheck = 'JKPHOTO-01'
+  {
+    const jkPortrait = makeTestPng(240, 420) // 縦写真: 詳細（16:9）で上下が大きく落ちる
+    const jkLandscape = makeTestPng(420, 240) // 横写真: レシピ一覧のマス（1:1）で左右が大きく落ちる
+    const jkBrowser = await chromium.launch()
+    let jkExportedJson = ''
+    try {
+      const jkContext = await jkBrowser.newContext({
+        viewport: { width: 390, height: 844 },
+        acceptDownloads: true,
+      })
+      const jkPage = await jkContext.newPage()
+      jkPage.on('pageerror', (err) => {
+        if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+        errors.push(`[pageerror@JKPHOTO] ${err.message}`)
+      })
+      jkPage.on('dialog', (dialog) => dialog.accept())
+
+      await jkPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await jkPage.waitForTimeout(1800) // 初回シード完了待ち
+      await jkPage.getByText('肉じゃが', { exact: true }).first().click()
+      await jkPage.waitForTimeout(600)
+      const jkRecipeId = Number(jkPage.url().match(/#\/recipes\/(\d+)/)?.[1])
+      check('JKPHOTO-01 前提: 調整するレシピのidを取得できた', Number.isInteger(jkRecipeId), `id=${jkRecipeId}`)
+
+      // ① 写真の無いレシピでは、入口を1つも出さない（代わり絵には調整するものが無い）
+      check(
+        'JKPHOTO-01 写真の無いレシピには見える範囲の入口を出さない',
+        (await jkPage.locator('[data-testid="photo-focus-open"]').count()) === 0,
+      )
+
+      // ② 編集画面から写真を入れる。写真を入れた時点で編集画面にも入口が出る
+      await jkPage.goto(`${BASE}/#/recipes/${jkRecipeId}/edit`, { waitUntil: 'networkidle' })
+      await jkPage.waitForTimeout(700)
+      check(
+        'JKPHOTO-01 写真を入れる前は編集画面にも入口を出さない',
+        (await jkPage.locator('[data-testid="photo-focus-open-form"]').count()) === 0,
+      )
+      await jkPage
+        .locator('input[type="file"]:not([capture])')
+        .setInputFiles({ name: 'jk-portrait.png', mimeType: 'image/png', buffer: jkPortrait })
+      await jkPage.waitForTimeout(700)
+      check(
+        'JKPHOTO-01 写真を入れると編集画面に見える範囲の入口が出る',
+        await jkPage.locator('[data-testid="photo-focus-open-form"]').isVisible(),
+      )
+      // 編集画面の入口も、詳細と同じ窓を開いて同じように決められる（開く→やめる→開き直す まで見る）
+      await jkPage.locator('[data-testid="photo-focus-open-form"]').click()
+      await jkPage.waitForTimeout(400)
+      check(
+        'JKPHOTO-01 編集画面の入口からも同じ窓が開く',
+        await jkPage.locator('[data-testid="photo-focus-modal"]').isVisible(),
+      )
+      await jkPage.getByRole('button', { name: 'やめる', exact: true }).click()
+      await jkPage.waitForTimeout(400)
+      check(
+        'JKPHOTO-01 「やめる」で窓が閉じ、編集画面はそのまま残る',
+        (await jkPage.locator('[data-testid="photo-focus-modal"]').count()) === 0 &&
+          (await jkPage.locator('[data-testid="photo-focus-open-form"]').isVisible()),
+      )
+      await jkPage.getByRole('button', { name: '保存する' }).click()
+      await jkPage.waitForTimeout(900)
+
+      // ③ 詳細画面の入口。写真の中に重なっているので、下に並ぶ料理名の位置は動かない
+      const jkOpen = jkPage.locator('[data-testid="photo-focus-open"]')
+      check('JKPHOTO-01 写真のあるレシピの詳細に見える範囲の入口が出る', await jkOpen.isVisible())
+      const jkOpenBox = await jkOpen.boundingBox()
+      check(
+        'JKPHOTO-01 入口は指で押せる大きさ（44px以上）',
+        jkOpenBox != null && jkOpenBox.width >= 44 && jkOpenBox.height >= 44,
+        `box=${JSON.stringify(jkOpenBox)}`,
+      )
+      const jkTitleBefore = await jkPage.locator('h1').first().boundingBox()
+      const jkHeroPosBefore = await jkPage.evaluate(() => {
+        const img = document.querySelector('img.aspect-video')
+        return img ? getComputedStyle(img).objectPosition : null
+      })
+
+      // ④ 窓を開いて、写真の中の見せたい場所をなぞって決める
+      await jkOpen.click()
+      await jkPage.waitForTimeout(400)
+      check(
+        'JKPHOTO-01 入口を押すと見える範囲の窓が開く',
+        await jkPage.locator('[data-testid="photo-focus-modal"]').isVisible(),
+      )
+      const jkPicker = jkPage.locator('[data-testid="photo-focus-picker"] img')
+      const jkPickerBox = await jkPicker.boundingBox()
+      check(
+        'JKPHOTO-01 なぞる面が指で扱える大きさ（44px以上）',
+        jkPickerBox != null && jkPickerBox.width >= 44 && jkPickerBox.height >= 44,
+        `box=${JSON.stringify(jkPickerBox)}`,
+      )
+      // 押した場所がそのまま「見せたい場所」になる。押してから引きずって細かく詰める
+      await jkPage.mouse.move(
+        jkPickerBox.x + jkPickerBox.width * 0.2,
+        jkPickerBox.y + jkPickerBox.height * 0.8,
+      )
+      await jkPage.mouse.down()
+      await jkPage.mouse.move(
+        jkPickerBox.x + jkPickerBox.width * 0.3,
+        jkPickerBox.y + jkPickerBox.height * 0.2,
+        { steps: 8 },
+      )
+      await jkPage.mouse.up()
+      await jkPage.waitForTimeout(300)
+      const jkPreviewPos = await jkPage.evaluate(() => {
+        const detail = document.querySelector('[data-testid="photo-focus-preview-detail"]')
+        const list = document.querySelector('[data-testid="photo-focus-preview-list"]')
+        return {
+          detail: detail ? getComputedStyle(detail).objectPosition : null,
+          list: list ? getComputedStyle(list).objectPosition : null,
+        }
+      })
+      check(
+        'JKPHOTO-01 なぞると出来上がりの見本（詳細・一覧）が同じ値で動く',
+        jkPreviewPos.detail != null && jkPreviewPos.detail === jkPreviewPos.list && jkPreviewPos.detail !== jkHeroPosBefore,
+        `見本=${JSON.stringify(jkPreviewPos)} 直す前=${jkHeroPosBefore}`,
+      )
+
+      await jkPage.locator('[data-testid="photo-focus-apply"]').click()
+      await jkPage.waitForTimeout(600)
+      check(
+        'JKPHOTO-01 決めると窓が閉じる',
+        (await jkPage.locator('[data-testid="photo-focus-modal"]').count()) === 0,
+      )
+      const jkHeroPosAfter = await jkPage.evaluate(() => {
+        const img = document.querySelector('img.aspect-video')
+        return img ? getComputedStyle(img).objectPosition : null
+      })
+      check(
+        'JKPHOTO-01 詳細の写真の切り取り位置が実際に変わる',
+        jkHeroPosAfter != null && jkHeroPosAfter !== jkHeroPosBefore,
+        `直す前=${jkHeroPosBefore} 直した後=${jkHeroPosAfter}`,
+      )
+
+      // ⑤ 料理名の位置は1pxも動かない（入口を足しても、いまの並びを崩さない）
+      const jkTitleAfter = await jkPage.locator('h1').first().boundingBox()
+      check(
+        'JKPHOTO-01 調整の前後で料理名の位置が動かない',
+        jkTitleBefore != null &&
+          jkTitleAfter != null &&
+          Math.abs(jkTitleBefore.x - jkTitleAfter.x) < 0.5 &&
+          Math.abs(jkTitleBefore.y - jkTitleAfter.y) < 0.5,
+        `前=${JSON.stringify(jkTitleBefore)} 後=${JSON.stringify(jkTitleAfter)}`,
+      )
+
+      // ⑥ 端末に値が残る（レシピごと・写真そのものは書き換えない）
+      const readFocus = (targetPage, id) =>
+        targetPage.evaluate(
+          (recipeId) =>
+            new Promise((resolve, reject) => {
+              const req = indexedDB.open('uchi-recipe')
+              req.onsuccess = () => {
+                const idb = req.result
+                const getReq = idb.transaction('recipes', 'readonly').objectStore('recipes').get(recipeId)
+                getReq.onsuccess = () => {
+                  const recipe = getReq.result
+                  resolve({
+                    focus: recipe?.photoFocus ?? null,
+                    photoSize: recipe?.photo?.size ?? 0,
+                    title: recipe?.title ?? null,
+                  })
+                }
+                getReq.onerror = () => reject(getReq.error)
+              }
+              req.onerror = () => reject(req.error)
+            }),
+          id,
+        )
+      const jkSaved = await readFocus(jkPage, jkRecipeId)
+      check(
+        'JKPHOTO-01 決めた見える範囲がレシピに保存される（0〜100の割合2つ）',
+        jkSaved.focus != null &&
+          Math.abs(jkSaved.focus.x - 30) <= 3 &&
+          Math.abs(jkSaved.focus.y - 20) <= 3,
+        `saved=${JSON.stringify(jkSaved.focus)}`,
+      )
+      check(
+        'JKPHOTO-01 写真そのものは残っている（見せ方だけを覚えている）',
+        jkSaved.photoSize > 0,
+        `photoSize=${jkSaved.photoSize}`,
+      )
+
+      // ---- JKPHOTO-02: 同じ値がレシピ一覧にも効く / 中央に戻せる / 写真を入れ替えたら中央 ----
+      currentCheck = 'JKPHOTO-02'
+      await jkPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await jkPage.waitForTimeout(900)
+      const jkCardPos = await jkPage.evaluate((recipeId) => {
+        const link = document.querySelector(`a[href="#/recipes/${recipeId}"]`)
+        const img = link?.querySelector('img')
+        return img ? getComputedStyle(img).objectPosition : null
+      }, jkRecipeId)
+      check(
+        'JKPHOTO-02 レシピ一覧のカードにも詳細と同じ1つの値が効く',
+        jkCardPos != null && jkCardPos === jkHeroPosAfter,
+        `一覧=${jkCardPos} 詳細=${jkHeroPosAfter}`,
+      )
+
+      // 「中央に戻す」→ 値ごと消える（未設定＝いままでどおり中央に戻せる）
+      await jkPage.goto(`${BASE}/#/recipes/${jkRecipeId}`, { waitUntil: 'networkidle' })
+      await jkPage.waitForTimeout(700)
+      await jkPage.locator('[data-testid="photo-focus-open"]').click()
+      await jkPage.waitForTimeout(400)
+      await jkPage.locator('[data-testid="photo-focus-reset"]').click()
+      await jkPage.waitForTimeout(200)
+      check(
+        'JKPHOTO-02 中央に戻したあとは「中央に戻す」がもう押せない（すでに中央だから）',
+        await jkPage.locator('[data-testid="photo-focus-reset"]').isDisabled(),
+      )
+      await jkPage.locator('[data-testid="photo-focus-apply"]').click()
+      await jkPage.waitForTimeout(600)
+      const jkReset = await readFocus(jkPage, jkRecipeId)
+      check(
+        'JKPHOTO-02 中央に戻すと値ごと消える（未設定＝中央に戻る）',
+        jkReset.focus == null,
+        `saved=${JSON.stringify(jkReset.focus)}`,
+      )
+      const jkHeroPosReset = await jkPage.evaluate(() => {
+        const img = document.querySelector('img.aspect-video')
+        return img ? getComputedStyle(img).objectPosition : null
+      })
+      check(
+        'JKPHOTO-02 中央に戻すと切り取り位置も最初と同じに戻る',
+        jkHeroPosReset === jkHeroPosBefore,
+        `最初=${jkHeroPosBefore} 戻したあと=${jkHeroPosReset}`,
+      )
+
+      // もう一度調整してから、写真を別のものに入れ替える → 中央に戻る
+      await jkPage.locator('[data-testid="photo-focus-open"]').click()
+      await jkPage.waitForTimeout(400)
+      const jkPicker2 = await jkPage.locator('[data-testid="photo-focus-picker"] img').boundingBox()
+      await jkPage.mouse.click(
+        jkPicker2.x + jkPicker2.width * 0.5,
+        jkPicker2.y + jkPicker2.height * 0.1,
+      )
+      await jkPage.waitForTimeout(200)
+      await jkPage.locator('[data-testid="photo-focus-apply"]').click()
+      await jkPage.waitForTimeout(600)
+      check(
+        'JKPHOTO-02 前提: 入れ替える前に見える範囲が入っている',
+        (await readFocus(jkPage, jkRecipeId)).focus != null,
+      )
+      await jkPage.goto(`${BASE}/#/recipes/${jkRecipeId}/edit`, { waitUntil: 'networkidle' })
+      await jkPage.waitForTimeout(700)
+      await jkPage
+        .locator('input[type="file"]:not([capture])')
+        .setInputFiles({ name: 'jk-landscape.png', mimeType: 'image/png', buffer: jkLandscape })
+      await jkPage.waitForTimeout(700)
+      await jkPage.getByRole('button', { name: '保存する' }).click()
+      await jkPage.waitForTimeout(900)
+      check(
+        'JKPHOTO-02 写真を入れ替えたら見える範囲は中央に戻る（前の写真の位置を当てない）',
+        (await readFocus(jkPage, jkRecipeId)).focus == null,
+        `saved=${JSON.stringify((await readFocus(jkPage, jkRecipeId)).focus)}`,
+      )
+
+      // ---- JKPHOTO-03: 書き出し／読み込みで値が失われない ----
+      currentCheck = 'JKPHOTO-03'
+      await jkPage.goto(`${BASE}/#/recipes/${jkRecipeId}`, { waitUntil: 'networkidle' })
+      await jkPage.waitForTimeout(700)
+      await jkPage.locator('[data-testid="photo-focus-open"]').click()
+      await jkPage.waitForTimeout(400)
+      const jkPicker3 = await jkPage.locator('[data-testid="photo-focus-picker"] img').boundingBox()
+      await jkPage.mouse.click(
+        jkPicker3.x + jkPicker3.width * 0.8,
+        jkPicker3.y + jkPicker3.height * 0.6,
+      )
+      await jkPage.waitForTimeout(200)
+      await jkPage.locator('[data-testid="photo-focus-apply"]').click()
+      await jkPage.waitForTimeout(600)
+      const jkBeforeExport = await readFocus(jkPage, jkRecipeId)
+      check(
+        'JKPHOTO-03 前提: 書き出す前に見える範囲が入っている',
+        jkBeforeExport.focus != null,
+        `saved=${JSON.stringify(jkBeforeExport.focus)}`,
+      )
+
+      await jkPage.goto(`${BASE}/#/settings`, { waitUntil: 'networkidle' })
+      await jkPage.waitForTimeout(500)
+      await jkPage.getByRole('button', { name: 'バックアップ', exact: true }).click()
+      await jkPage.waitForTimeout(300)
+      const [jkDownload] = await Promise.all([
+        jkPage.waitForEvent('download'),
+        jkPage.getByRole('button', { name: 'ファイルに書き出す' }).click(),
+      ])
+      jkExportedJson = readFileSync(await jkDownload.path(), 'utf-8')
+      const jkExported = JSON.parse(jkExportedJson)
+      const jkExportedRecipe = (jkExported.recipes ?? []).find((r) => r.title === jkBeforeExport.title)
+      check(
+        'JKPHOTO-03 書き出したファイルに見える範囲が入っている',
+        JSON.stringify(jkExportedRecipe?.photoFocus) === JSON.stringify(jkBeforeExport.focus),
+        `ファイル=${JSON.stringify(jkExportedRecipe?.photoFocus)} 端末=${JSON.stringify(jkBeforeExport.focus)}`,
+      )
+      // 調整していないレシピには値が付かない（既存のレシピの書き出しの中身は変わらない）
+      const jkUntouched = (jkExported.recipes ?? []).filter((r) => r.title !== jkBeforeExport.title)
+      check(
+        'JKPHOTO-03 調整していないレシピには見える範囲の項目が付かない',
+        jkUntouched.length > 0 && jkUntouched.every((r) => r.photoFocus === undefined),
+        `付いてしまった品=${JSON.stringify(jkUntouched.filter((r) => r.photoFocus !== undefined).map((r) => r.title))}`,
+      )
+
+      // まっさらな別の端末へ読み込んで、同じ値で戻ることを確かめる
+      const jkDstContext = await jkBrowser.newContext({ viewport: { width: 390, height: 844 } })
+      const jkDstPage = await jkDstContext.newPage()
+      jkDstPage.on('pageerror', (err) => {
+        if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+        errors.push(`[pageerror@JKPHOTO-03(読み込み先)] ${err.message}`)
+      })
+      jkDstPage.on('dialog', (dialog) => dialog.accept())
+      await jkDstPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await jkDstPage.waitForTimeout(1800)
+      await jkDstPage.goto(`${BASE}/#/settings`, { waitUntil: 'networkidle' })
+      await jkDstPage.waitForTimeout(500)
+      await jkDstPage.getByRole('button', { name: 'バックアップ', exact: true }).click()
+      await jkDstPage.waitForTimeout(300)
+      const jkChooser = await clickReplaceImport(jkDstPage)
+      await jkChooser.setFiles({
+        name: 'uchi-recipe-backup.json',
+        mimeType: 'application/json',
+        buffer: Buffer.from(jkExportedJson, 'utf-8'),
+      })
+      await jkDstPage.waitForTimeout(1200)
+      const jkRestored = await jkDstPage.evaluate(
+        (title) =>
+          new Promise((resolve, reject) => {
+            const req = indexedDB.open('uchi-recipe')
+            req.onsuccess = () => {
+              const idb = req.result
+              const all = idb.transaction('recipes', 'readonly').objectStore('recipes').getAll()
+              all.onsuccess = () => {
+                const hit = all.result.find((r) => r.title === title)
+                resolve({ focus: hit?.photoFocus ?? null, photoSize: hit?.photo?.size ?? 0 })
+              }
+              all.onerror = () => reject(all.error)
+            }
+            req.onerror = () => reject(req.error)
+          }),
+        jkBeforeExport.title,
+      )
+      check(
+        'JKPHOTO-03 読み込み先でも同じ見える範囲で戻る',
+        JSON.stringify(jkRestored.focus) === JSON.stringify(jkBeforeExport.focus),
+        `読み込み先=${JSON.stringify(jkRestored.focus)} 書き出し元=${JSON.stringify(jkBeforeExport.focus)}`,
+      )
+      check(
+        'JKPHOTO-03 読み込み先でも写真そのものが戻っている',
+        jkRestored.photoSize > 0,
+        `photoSize=${jkRestored.photoSize}`,
+      )
+    } finally {
+      await jkBrowser.close()
     }
   }
 
