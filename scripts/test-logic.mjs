@@ -23369,6 +23369,56 @@ Aみりん 大さじ1
     }
     eq('IK-4 図が名指ししている画面の言葉を拾えている（0件なら見張りが壊れている）', figNames.length > 0, true)
     eq('IK-4 図の説明・題が名指ししている画面の言葉が ja.ts に実在する', figMissing, [])
+
+    // --- JB-1 / JB-2: 撮ると宣言したカットが、黙って撮られないまま終わらない（2026-08-22 便JB） ---
+    //
+    // 発端: 週タブの通常表示から「主菜」の字が消えた（便IV）ため、撮影スクリプトが
+    // `main section, main li` を「主菜」で絞って掴んでいた plan-week-day が**どの日にも
+    // 当たらなくなった**。掴めないと `if (await weekDayCard.count())` に入らないので、
+    // crop が呼ばれず、警告も失敗も出ないまま**その1枚だけ古い絵が残った**
+    // （38枚撮れて plan-week-day だけ更新されない。司令部が実際に撮り直して発覚）。
+    //
+    // IK-1〜IK-4 は「ページ・カット名・控えの3つがそろっているか」を見るので、
+    // **前と同じ名前の古い webp が置いてある**この壊れ方は素通りする。
+    // ここでは撮影スクリプトの**書き方そのもの**を掃く:
+    //   JB-1 … 掴めなかったときに黙って飛ぶ形（`if (…count()) { crop(…) }` で else も
+    //          missShot も無いもの）が1つも無い
+    //   JB-2 … SHOT_NAMES と、実際に切り出している名前が1対1
+    //          （宣言だけして誰も撮らない・宣言していない名前で撮る、のどちらも作らせない）
+    const shotLines = shotsRaw.split('\n')
+    const CROP_CALL = /\bcrop(?:Range|Rect|PanelTop)?\(\s*page,\s*'([a-z0-9-]+)'/g
+    const silentSkips = []
+    for (let i = 0; i < shotLines.length; i++) {
+      const opened = shotLines[i].match(/^(\s*)if \(.*\.count\(\).*\{\s*$/)
+      if (!opened) continue
+      const indent = opened[1]
+      // if から、else / else if の連鎖の終わりまでを1つの塊として読む
+      let end = i + 1
+      while (end < shotLines.length) {
+        if (shotLines[end].startsWith(`${indent}}`)) {
+          if (/^\s*\}\s*else\b/.test(shotLines[end])) {
+            end += 1
+            continue
+          }
+          break
+        }
+        end += 1
+      }
+      const chain = shotLines.slice(i, Math.min(end + 1, shotLines.length)).join('\n')
+      const shotsHere = [...new Set([...chain.matchAll(CROP_CALL)].map((m) => m[1]))]
+      if (shotsHere.length === 0) continue
+      if (chain.includes('missShot(')) continue
+      silentSkips.push(
+        `scripts/shots-manual.mjs:${i + 1} 掴めなかったときに ${shotsHere.join('・')} が黙って飛ぶ`,
+      )
+    }
+    eq('JB-1 撮影スクリプトを行で読めている（0行なら見張りが壊れている）', shotLines.length > 100, true)
+    eq('JB-1 掴めなかったときにカットが黙って飛ぶ形が1つも無い', silentSkips, [])
+
+    const cropped = [...new Set([...shotsRaw.matchAll(CROP_CALL)].map((m) => m[1]))]
+    eq('JB-2 撮影スクリプトが切り出している名前を拾えている（0件なら見張りが壊れている）', cropped.length > 0, true)
+    eq('JB-2 宣言したカットは、すべて実際に切り出している', shotNames.filter((n) => !cropped.includes(n)), [])
+    eq('JB-2 切り出している名前は、すべて宣言したカット', cropped.filter((n) => !shotNames.includes(n)), [])
   }
 
   // ---- 規則⑦: 意味を担う語がひらがなで書かれていない（2026-08-21 便IM・規約H-2） ----------

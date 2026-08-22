@@ -82,11 +82,14 @@ const manifest = {}
 // 2026-08-20 便IK: 'plan-week-suggest'（週の「献立を提案」）と 'recipes-filter'
 // （レシピ一覧の絞り込み）を足した。どちらもこの数日で並びが変わったのに図が1枚も無く、
 // 使い方ページが「上から順に」「見出しの横にあり」と**見た目を言葉で書いていた**場所
+// 2026-08-22 便JB: 'plan-week-day-edit' を足した。週タブの曜日カードが
+// 「通常表示（絵と料理名だけ）」と「編集モード」の2つの姿になった（便IV）ので、
+// 1枚では説明できなくなった。plan-week-day は通常表示の絵として残す
 const SHOT_NAMES = [
   'recipe-cards', 'day-suggest', 'nav-tabs', 'search', 'recipes-filter',
   'register-tabs', 'ingredient-rows', 'bulk-input', 'register-detail', 'paste', 'url-import',
   'plan-day-buttons', 'select-for-today', 'plan-week-suggest',
-  'plan-week-nutrition-open', 'plan-week-day', 'cost-week',
+  'plan-week-nutrition-open', 'plan-week-day', 'plan-week-day-edit', 'cost-week',
   'plan-month', 'plan-month-photo', 'shopping', 'pantry',
   'detail-photo', 'nutrition-open', 'share', 'logs',
   'cookmode-voice', 'cookmode', 'timer', 'settings-kitchen', 'cooknavi',
@@ -177,6 +180,22 @@ async function save(png, name) {
   if (ONLY.size && sizes.length === ONLY.size) throw new AllRequestedDone()
 }
 
+/**
+ * 撮る前提が整わなかったときに使う(2026-08-22 便JB)。
+ *
+ * それまでは `if (await 何か.count()) { await crop(...) }` の形で、掴めなければ
+ * **何も言わずに次へ進んでいた**。撮影は最後まで走り切り「38枚撮れました」と出るのに、
+ * そのカットだけ古い絵が残る＝いちばん気づけない壊れ方になる(2026-08-22 に
+ * plan-week-day が実際にこれで1枚だけ古いまま残り、司令部が撮り直して発覚した)。
+ *
+ * 撮れなかったカットの名前をここに残し、report() が必ず失敗として終わらせる。
+ */
+function missShot(name, why) {
+  if (!want(name)) return
+  failures.push(name)
+  console.warn(`  ⚠ ${name} 撮れず: ${why}`)
+}
+
 /** 要素の位置(ビューポート基準)を測る */
 const rectOf = (loc) =>
   loc.first().evaluate((n) => {
@@ -237,6 +256,9 @@ async function cropInner(page, name, loc, opts = {}) {
     fullWidth = true,
   } = opts
   const el = loc.first()
+  // 掴めていないなら、待たずにその場で落とす(2026-08-22 便JB)。
+  // 待ちに入ると既定10秒を無駄にするうえ、失敗の理由が「時間切れ」に化けて読み取れなくなる
+  if (!(await loc.count())) throw new Error('撮ろうとしたものが画面に無い')
   await assertNotBlockedByWindow(loc)
   await el.scrollIntoViewIfNeeded()
   await wait(page, 250)
@@ -272,6 +294,9 @@ async function cropRange(page, name, topLoc, bottomLoc, opts = {}) {
 
 async function cropRangeInner(page, name, topLoc, bottomLoc, opts = {}) {
   const { padX = 8, padTop = 8, padBottom = 8, top = 16, fullWidth = true } = opts
+  // 上端・下端のどちらかが掴めていないなら、待たずにその場で落とす(2026-08-22 便JB)
+  if (!(await topLoc.count())) throw new Error('切り出しの上端にするものが画面に無い')
+  if (!(await bottomLoc.count())) throw new Error('切り出しの下端にするものが画面に無い')
   await assertNotBlockedByWindow(topLoc)
   await topLoc.first().scrollIntoViewIfNeeded()
   await wait(page, 250)
@@ -355,21 +380,44 @@ async function cropPanelTop(page, name, panelLoc, bottomLoc, opts = {}) {
   }
 }
 
-/** 撮影結果のまとめ表示と、manual.html の width/height を直すときの控えの書き出し */
+/**
+ * 撮影結果のまとめ表示と、manual.html の width/height を直すときの控えの書き出し。
+ *
+ * 2026-08-22 便JB: **撮ると宣言したカットが1枚でも欠けたら、ここで失敗として終わる**。
+ * それまでは撮れなかったカットを警告1行で流し、終了コード0で終えていたので、
+ * 「38枚撮れて1枚だけ古い絵のまま」に誰も気づけなかった。
+ */
 function report() {
-  if (failures.length) console.log(`\n⚠ 撮影できなかったもの: ${failures.join(', ')}`)
   const total = sizes.reduce((s, [, n]) => s + n, 0)
   console.log(`\n合計 ${sizes.length}枚 / ${(total / 1024).toFixed(1)}KB`)
   console.log('\n--- manifest (manual.html の width/height 用) ---')
   console.log(JSON.stringify(manifest, null, 0))
   // manual.html の <img width height> を直すときの控え(公開物には含めない)。
-  // 部分撮り直し(ONLY)のときは、撮っていないぶんの控えを消さないよう既存の内容に上書きする
+  // 撮っていないカットの控えは残す(部分撮り直しのため)が、SHOT_NAMES から消えたカットは落とす
+  // (残すと使い方ページとの1対1が崩れ、test-logic.mjs の IK-1 が赤くなる)
   const file = path.join(ROOT, 'scripts/data/manual-shot-sizes.json')
-  let merged = manifest
-  if (ONLY.size && fs.existsSync(file)) {
-    merged = { ...JSON.parse(fs.readFileSync(file, 'utf8')), ...manifest }
+  const prev = fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')) : {}
+  const merged = {}
+  for (const name of SHOT_NAMES) {
+    const size = manifest[name] ?? prev[name]
+    if (size) merged[name] = size
   }
   fs.writeFileSync(file, JSON.stringify(merged, null, 2) + '\n')
+
+  // 撮ると宣言したぶん(ONLY未指定なら SHOT_NAMES 全部)がそろっているか。
+  // failures は「撮れなかった」だけでなく「撮る前提が整わなかった」(missShot)も入る＝
+  // 絵は出来ていても中身が本文と食い違うものを通さない
+  const missing = SHOT_NAMES.filter((name) => want(name) && !manifest[name])
+  const broken = [...new Set(failures)]
+  if (missing.length || broken.length) {
+    if (missing.length)
+      console.error(`\n✗ 撮ると宣言したのに撮れなかったカット(${missing.length}枚): ${missing.join(', ')}`)
+    if (broken.length) console.error(`✗ 撮影に失敗した・前提が整わなかったカット: ${broken.join(', ')}`)
+    console.error('  そのカットの絵は古いまま残っています。掴み方を直してから撮り直してください')
+    process.exitCode = 1
+    return
+  }
+  console.log(`\n✓ 撮ると宣言した${SHOT_NAMES.filter((name) => want(name)).length}枚がすべてそろいました`)
 }
 
 /** 登録画面を「かんたん」タブの初期状態で開き直す(同じハッシュへのgotoでは再マウントされないため) */
@@ -572,6 +620,8 @@ try {
     await cropPanelTop(page, 'recipes-filter', filterPanel, tagMatchRow)
     await page.getByRole('button', { name: '絞り込み', exact: true }).first().click()
     await wait(page, 600)
+  } else {
+    missShot('recipes-filter', 'レシピ一覧に「絞り込み」のボタンが無い')
   }
 
   // ======== 登録画面 ========
@@ -614,9 +664,7 @@ try {
 
   // 「まとめて入力」: 見出し「まとめて入力」から「材料に追加」まで、パネルを丸ごと切る
   const bulkPanel = page.getByPlaceholder(/まとめて入力|豚こま/).first().locator('xpath=../..')
-  if (await bulkPanel.count()) {
-    await crop(page, 'bulk-input', bulkPanel, { top: 140, padTop: 12, padBottom: 12 })
-  }
+  await crop(page, 'bulk-input', bulkPanel, { top: 140, padTop: 12, padBottom: 12 })
 
   // 「くわしく」タブの項目
   await page.getByText('くわしく', { exact: true }).first().click()
@@ -631,6 +679,9 @@ try {
     // 入力直後のままだと欄に青い枠(フォーカスの印)が残るので外してから撮る
     await intro.blur()
     await wait(page, 300)
+  } else {
+    // 撮れてはしまうが、本文が説明している「●が付く」「例文が入っている」絵にならない
+    missShot('register-detail', '「ひとこと説明」の欄が無く、中身の入った絵にできない')
   }
   await page.evaluate(() => window.scrollTo(0, 0))
   await wait(page, 300)
@@ -664,9 +715,9 @@ try {
     // 説明文・URL欄・「写真も取り込む」・「読み込む」まで縦に丸ごと入れる
     //(この切り出しが他のカットのトリミング基準。2026-08-02 オーナー指示)
     const urlPanel = page.locator('input[type="url"], input[inputmode="url"]').first().locator('xpath=..')
-    if (await urlPanel.count()) {
-      await crop(page, 'url-import', urlPanel, { top: 96, padTop: 12, padBottom: 12 })
-    }
+    await crop(page, 'url-import', urlPanel, { top: 96, padTop: 12, padBottom: 12 })
+  } else {
+    missShot('url-import', '登録画面に「URLから取り込む」の見出しが無い')
   }
 
   // ======== 献立 ========
@@ -682,6 +733,8 @@ try {
   if (await dayTab.count()) {
     await dayTab.click()
     await wait(page, 700)
+  } else {
+    missShot('select-for-today', '献立の画面に「日」のタブが無い')
   }
 
   // 「今日の献立を探す」からレシピ一覧が選択モードで開くところ(2026-08-13 便FY)。
@@ -699,17 +752,23 @@ try {
     // 1枚目の当たり判定を横取りするため、座標を使う操作は避ける)
     const cardButtons = page.locator('main a[href*="/recipes/"]:not([href$="/new"])')
     const overlays = page.locator('main button.absolute.inset-0[aria-pressed]')
+    let picked = 0
     for (const i of [0, 1]) {
       if ((await overlays.count()) > i) {
         await overlays.nth(i).evaluate((el) => el.click())
         await wait(page, 300)
+        picked += 1
       }
     }
+    // 2026-08-22 便JB: 1枚も選べていないと「選んだカードに印が付く」絵にならない
+    if (picked < 2) missShot('select-for-today', `選択の印を付けられたカードが${picked}枚しかない`)
     const addToToday = page.locator('[data-testid="add-selected-to-today"]')
-    if ((await selectBanner.count()) && (await addToToday.count())) {
-      // 検索まどの帯が画面上部に貼り付く(2026-08-09 便ET)ので、帯の高さ(66px)より下に置く
-      await cropRange(page, 'select-for-today', selectBanner, cardButtons.first(), { top: 72 })
-    }
+    // 検索まどの帯が画面上部に貼り付く(2026-08-09 便ET)ので、帯の高さ(66px)より下に置く
+    await cropRange(page, 'select-for-today', selectBanner, cardButtons.first(), { top: 72 })
+    if (!(await addToToday.count()))
+      missShot('select-for-today', '件数入りの決定ボタン（画面の下）が出ていない')
+  } else {
+    missShot('select-for-today', '「今日の献立を探す」のボタンが「日」の画面に無い')
   }
 
   // 「週」タブ: まとめて献立を立てる → 1日ぶんのカード + 栄養行
@@ -733,10 +792,8 @@ try {
     .filter({
       has: page.getByRole('button', { name: `${ja.mealPlan.weekGroupTemplateTitle}を開く` }),
     })
-  if ((await weekDisplayGroup.count()) && (await weekTemplateGroup.count())) {
-    // 「日」「週」「月」の帯が画面上部に貼り付くので、上端は帯の高さ(54px)より下に置く
-    await cropRange(page, 'plan-week-suggest', weekDisplayGroup, weekTemplateGroup, { top: 64 })
-  }
+  // 「日」「週」「月」の帯が画面上部に貼り付くので、上端は帯の高さ(54px)より下に置く
+  await cropRange(page, 'plan-week-suggest', weekDisplayGroup, weekTemplateGroup, { top: 64 })
 
   // 2026-08-08 便DW: 「今日から7日間」は折りたたみグループ「表示のしかた」の中にあり、
   // 既定では畳まれている(2026-08-03 便DJ)。先に見出しを押して開かないとボタンを掴めない。
@@ -782,26 +839,73 @@ try {
     await cropRect(page, 'plan-week-nutrition-open', { x: 0, y: 50, width: VIEW.width, height: 508 })
     await toggleEl.click()
     await wait(page, 600)
+  } else {
+    missShot('plan-week-nutrition-open', '曜日カードに「この日の献立の栄養」の行が1つも無い')
   }
-  // 1日ぶんのカード(主菜・副菜が入った状態)
-  // 主菜と副菜の両方が埋まっている日を選ぶ(一品ものの日だと副菜が空欄のまま載る)
-  // 2026-08-08 便DW: 「主菜」「副菜」だけの絞り込みでは、説明文に「主菜と副菜でまとめて
-  // 入れます」を持つ「献立を提案」グループを掴んでしまっていた(実際に取り違えが起きた)。
-  // 曜日カードにしか無い「この日のメモ」を条件に足して、日のカードだけに絞る
-  const weekDayCards = page
-    .locator('main section, main li')
-    .filter({ hasText: /主菜/ })
-    .filter({ hasText: 'この日のメモ' })
-  const filledWeekDayCards = weekDayCards
-    .filter({ hasText: /副菜/ })
-    .filter({ hasNotText: 'レシピを選ぶ' })
-  const weekDayCard = (await filledWeekDayCards.count())
-    ? filledWeekDayCards.first()
-    : weekDayCards.first()
-  if (await weekDayCard.count()) {
+  // ======== 1日ぶんのカード: 通常表示と編集モードの2枚(2026-08-22 便JB) ========
+  // 2026-08-22 便IV で週タブの曜日カードは2つの姿になった。
+  //  通常表示 … 入っている品を「絵と料理名だけ」のカードで並べる(押すとレシピ詳細へ)。
+  //             役割・人数・引き直し・外す・追加は出ない。鍵の掛かった食事にだけ印が出る
+  //  編集モード … 見出しの行の「編集」を押した日だけ、今までの1品ごとの操作が全部出る
+  // 1枚では両方を説明できないので、**同じ日のカードを2枚**撮る(日付も品も同じにして、
+  // 「同じカードの2つの姿」だと読み手が結び付けられるようにする)。
+  //
+  // 掴み方も変えた。直す前は「主菜」の字と「この日のメモ」で絞っていたが、通常表示から
+  // 「主菜」が消えたので**どの日にも当たらなくなり、1枚だけ古い絵が残っていた**。
+  // 曜日カードは section[data-date] なので、それをそのまま掴む(文字ではなく構造で掴む)
+  const weekDayCards = page.locator('main section[data-date]')
+  // 主菜と副菜の2品が入っていて、かつ「今日」ではない日を選ぶ。
+  //  ・2品 … 一品ものの日だとカードが1枚しか写らず、副菜の話ができない
+  //  ・今日以外 … 今日のカードだけ囲み線が太く、栄養の数え方の1行も増える(便EU)
+  //  ・野菜量が2桁g以上 … カードには栄養の1行も写る。「野菜約0g」の日が当たると、
+  //    §5が説明している野菜量の見え方の例として使えない(引いた品で毎回変わるので、
+  //    条件に合う日が無ければ2品の日で妥協する＝撮れないことにはしない)
+  const weekDayIndex = await weekDayCards.evaluateAll((cards) => {
+    const ok = (el, needVegetables) => {
+      const text = el.textContent ?? ''
+      if (el.querySelectorAll('[data-testid="plan-row"]').length < 2) return false
+      if (!el.querySelector('[data-testid="week-day-edit"]')) return false
+      if (text.includes('今日')) return false
+      return needVegetables ? /野菜約[1-9]\d+g/.test(text) : true
+    }
+    const rich = cards.findIndex((el) => ok(el, true))
+    return rich >= 0 ? rich : cards.findIndex((el) => ok(el, false))
+  })
+  if (weekDayIndex < 0) {
+    missShot('plan-week-day', '2品入っている今日以外の曜日カードが無い')
+    missShot('plan-week-day-edit', '2品入っている今日以外の曜日カードが無い')
+  } else {
+    const weekDayCard = weekDayCards.nth(weekDayIndex)
     // 2026-08-10 便FJ: 「日」「週」「月」の帯が画面上部に貼り付く(2026-08-09 便ET)ので、
     // カードの上端は帯の高さ(54px)より下に置く(40pxのままだとカードの上に帯の切れ端が写る)
-    await crop(page, 'plan-week-day', weekDayCard, { top: 64, maxHeight: 500 })
+    //
+    // ---- 編集モード ----
+    // 先に編集モードを撮る。鍵を掛けると編集の操作が全部止まる(便EA)ので、
+    // 鍵の印を入れる通常表示より前に済ませる
+    await weekDayCard.locator('[data-testid="week-day-edit"]').click()
+    await wait(page, 900)
+    // 実測562px(390×844・夕食だけ・2品)。カードが丸ごと入る高さで切る(トリミング基準)
+    await crop(page, 'plan-week-day-edit', weekDayCard, { top: 64, maxHeight: 640 })
+    await weekDayCard.locator('[data-testid="week-day-edit"]').click()
+    await wait(page, 600)
+
+    // ---- 通常表示 ----
+    // その日に鍵を掛けてから撮る。通常表示で唯一出る操作の印が鍵なので、
+    // 掛かっていない絵だと「鍵の掛かった食事は印が出る」を図で言えない。
+    // 撮り終えたら外す(このあとの概算食費・「日」の画面に鍵を持ち越さない)
+    const weekDayLock = weekDayCard.locator('[data-testid="day-lock"]')
+    const lockedForShot = (await weekDayLock.count()) > 0
+    if (lockedForShot) {
+      await weekDayLock.click()
+      await wait(page, 900)
+    } else {
+      missShot('plan-week-day', '曜日カードに日ごとの鍵が無く、鍵の印を入れた絵にできない')
+    }
+    await crop(page, 'plan-week-day', weekDayCard, { top: 64, maxHeight: 560 })
+    if (lockedForShot) {
+      await weekDayLock.click()
+      await wait(page, 700)
+    }
   }
   // 表示している週の概算食費
   const costRow = page.getByRole('button', { name: /表示している週の概算食費/ }).first()
@@ -811,6 +915,8 @@ try {
     await crop(page, 'cost-week', costRow, { top: 200, padTop: 12, extraBottom: 190 })
     await costRow.click()
     await wait(page, 500)
+  } else {
+    missShot('cost-week', '「表示している週の概算食費」の行が週の画面に無い')
   }
 
   // 「日」タブ: 献立が決まっている日の「今日の献立」(2026-08-18 便HL)。
@@ -823,9 +929,7 @@ try {
   const todaySection = page
     .locator('section')
     .filter({ has: page.getByRole('heading', { name: '今日の献立' }) })
-  if (await todaySection.count()) {
-    await crop(page, 'plan-day-buttons', todaySection.first(), { top: 64, maxHeight: 640 })
-  }
+  await crop(page, 'plan-day-buttons', todaySection.first(), { top: 64, maxHeight: 640 })
 
   // 「月」タブ: 献立をまとめて提案 → 今月のカレンダー
   await page.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
@@ -836,9 +940,13 @@ try {
   if (await fillMonth.count()) {
     await fillMonth.click()
     await wait(page, 900)
-    // 規約Fの確認の窓（「この月のまだ決まっていない◯日分に、主菜と副菜を自動で入れます」）を通す
-    await pressConfirmWindow(page, '入れる')
+    // 規約Fの確認の窓（「この月のまだ決まっていない◯日分に、主菜と副菜を自動で入れます」）を通す。
+    // 2026-08-22 便JB: 通せなかったら黙って進まない(カレンダーが空のまま撮れてしまう)
+    if (!(await pressConfirmWindow(page, '入れる')))
+      missShot('plan-month', '「献立をまとめて提案」の確認の窓を通せず、カレンダーが埋まらない')
     await wait(page, 2500)
+  } else {
+    missShot('plan-month', '月の画面に「献立をまとめて提案」のボタンが無い')
   }
   await wait(page, 6500) // 結果トーストが自動で消えるのを待つ
   // 2026-08-08 便DW(オーナー指摘「献立月ページサンプルが実際の画面と違う」): カレンダーの
@@ -865,6 +973,8 @@ try {
     await crop(page, 'plan-month-photo', cell, { top: 130, padTop: 26, padBottom: 6, extraBottom: 210 })
     await page.getByRole('button', { name: '次の月' }).click()
     await wait(page, 1200)
+  } else {
+    missShot('plan-month-photo', '月の画面に「前の月」のボタンが無い')
   }
 
   // ======== 買い物メモ ========
@@ -892,6 +1002,8 @@ try {
   if (await addConfirmed.count()) {
     await addConfirmed.click()
     await wait(page, 1400)
+  } else {
+    missShot('shopping', '「買い物メモに追加」を押せず、売り場順に並んだ絵にならない')
   }
   await wait(page, 6500) // 追加トーストが消えるのを待つ
   await page.evaluate(() => window.scrollTo(0, 0))
@@ -905,9 +1017,7 @@ try {
   await page.evaluate(() => window.scrollTo(0, 0))
   await wait(page, 400)
   const pantryGroup = page.getByText('肉・魚介', { exact: true }).first()
-  if (await pantryGroup.count()) {
-    await crop(page, 'pantry', pantryGroup, { top: 110, padTop: 12, extraBottom: 380 })
-  }
+  await crop(page, 'pantry', pantryGroup, { top: 110, padTop: 12, extraBottom: 380 })
 
   // ======== レシピ詳細(写真つき) ========
   await page.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
@@ -919,6 +1029,8 @@ try {
   // 「食数の設定」「台所の器具」の初回の案内(2026-08-13 便GE)は、レシピ詳細を初めて開いたときに
   // 1回だけ出る。撮影用の端末は毎回まっさらなので必ずここで出て、以降の操作を全部ふさぐ
   // (2026-08-15 便GN で撮り直したときに実際に止まった)。閉じると次からは出ない
+  // (2026-08-22 便JB: これは「出たら閉じる」もので、出ないのが正しい場合もある＝
+  //  撮る前提ではないので、ここだけは飛ばしてよい形のまま残す)
   const firstSetupDismiss = page.locator('[data-testid="first-setup-notice-dismiss"]')
   if (await firstSetupDismiss.count()) {
     await firstSetupDismiss.click()
@@ -941,6 +1053,8 @@ try {
     await cropRect(page, 'nutrition-open', { x: 0, y: 58, width: VIEW.width, height: 470 })
     await nutEl.click()
     await wait(page, 500)
+  } else {
+    missShot('nutrition-open', 'レシピ詳細に「栄養価の概算を詳しく見る」の行が無い')
   }
 
   // 共有(シェアする内容)
@@ -959,6 +1073,8 @@ try {
       await page.keyboard.press('Escape')
       await wait(page, 500)
     }
+  } else {
+    missShot('share', '「シェアする内容」の窓が開かない')
   }
 
   // ======== 作った記録 ========
@@ -1014,6 +1130,8 @@ try {
   if (await micBtn.count()) {
     await micBtn.first().click()
     await wait(page, 800)
+  } else {
+    missShot('cookmode-voice', '調理中モードに「声で操作」のボタンが無く、案内の出た絵にできない')
   }
   const voiceHintBottom = await page.evaluate(() => {
     const overlay = document.querySelector('div.fixed.inset-0.z-50')
@@ -1036,22 +1154,24 @@ try {
   if (await timerBtn.count()) {
     await timerBtn.first().click()
     await wait(page, 1400)
+  } else {
+    missShot('timer', '「タイマー開始」のある手順まで進めなかった')
   }
   const adjust = page.locator('[aria-label*="のタイマーを調整"]')
   if (await adjust.count()) {
     await adjust.first().click()
     await wait(page, 1000)
+  } else {
+    missShot('timer', '動いているタイマーの「調整」を押せない')
   }
   const timerDialog = page.getByRole('dialog', { name: 'タイマーを調整' })
-  if (await timerDialog.count()) {
-    // 2026-08-08 便DW: 調整の窓に「このタイマーを消音」「手順◯を開く」が増えた
-    // (2026-08-03 実機FB③④)ので、maxHeight 290 では下が切れる。窓が丸ごと入る高さにする
-    // (トリミング基準=説明しているパネルを縦に丸ごと収める)
-    // 2026-08-10 便FJ: 窓に「一時停止」が増えて背が高くなり(2026-08-10 便FC)、上に8pxの
-    // 余白を取ると、窓の後ろにある「残り時間はアプリを閉じても続きます…」の案内が
-    // 1行だけ途中で切れて写り込む。窓の上端ちょうどから切り出す
-    await crop(page, 'timer', timerDialog, { top: 40, padTop: 0, maxHeight: 560 })
-  }
+  // 2026-08-08 便DW: 調整の窓に「このタイマーを消音」「手順◯を開く」が増えた
+  // (2026-08-03 実機FB③④)ので、maxHeight 290 では下が切れる。窓が丸ごと入る高さにする
+  // (トリミング基準=説明しているパネルを縦に丸ごと収める)
+  // 2026-08-10 便FJ: 窓に「一時停止」が増えて背が高くなり(2026-08-10 便FC)、上に8pxの
+  // 余白を取ると、窓の後ろにある「残り時間はアプリを閉じても続きます…」の案内が
+  // 1行だけ途中で切れて写り込む。窓の上端ちょうどから切り出す
+  await crop(page, 'timer', timerDialog, { top: 40, padTop: 0, maxHeight: 560 })
   const stopTimer = timerDialog.getByRole('button', { name: 'タイマーを消す' })
   if (await stopTimer.count()) {
     await stopTimer.first().click()
@@ -1070,10 +1190,8 @@ try {
   await page.goto(`${BASE}/#/settings?section=kitchen`, { waitUntil: 'networkidle' })
   await wait(page, 1800)
   const kitchenSection = page.locator('#kitchen-section')
-  if (await kitchenSection.count()) {
-    // タブの帯が画面の上に貼り付いているので、欄の見出しがその下に来る位置まで送ってから切る
-    await crop(page, 'settings-kitchen', kitchenSection, { top: 110, padTop: 10, padBottom: 10 })
-  }
+  // タブの帯が画面の上に貼り付いているので、欄の見出しがその下に来る位置まで送ってから切る
+  await crop(page, 'settings-kitchen', kitchenSection, { top: 110, padTop: 10, padBottom: 10 })
 
   // ======== 並行調理ナビ ========
   // 今日の献立を「肉じゃが」「ほうれん草のおひたし」の2品だけにしてから開く。
@@ -1135,6 +1253,10 @@ try {
   if (await makePlan.count()) {
     await makePlan.click()
     await wait(page, 1600)
+  } else {
+    // 段取りが無ければ、このあとの並行調理ナビのカットはどれも撮れない
+    for (const name of ['cooknavi', 'cooknavi-finish', 'cooknavi-reorder', 'cooknavi-reorder-undo'])
+      missShot(name, '並行調理ナビに「段取りを作る」のボタンが無い')
   }
   // どの待ちの帯を撮るか(2026-08-09 便EU)。
   // 使い方ページ§9の本文が触れているのは「タイマーを始める」と「手順ごとに出る材料と分量」の
@@ -1171,7 +1293,10 @@ try {
   } else if (await waitCard.count()) {
     await crop(page, 'cooknavi', waitCard, { top: 60, padBottom: 12, extraBottom: 220 })
   } else {
-    await cropRect(page, 'cooknavi', { x: 0, y: 60, width: VIEW.width, height: 300 })
+    // 2026-08-22 便JB: 待ちの帯が1つも無いときに画面の上から300pxを当てずっぽうで切っていた。
+    // 本文が説明している「タイマーを始める」も「手順ごとの材料」も写らない絵になるので、
+    // それらしい嘘の絵を作らずに撮れなかったことにする
+    missShot('cooknavi', '「待ち時間」の帯が段取りの中に1つも無い')
   }
 
   // ======== できあがりの目安(2026-08-15 便GN) ========
@@ -1179,11 +1304,7 @@ try {
   // 丸ごと切る。**手で並べ替える前**に撮る(並べ替えたあとは分数が灰色になるため、
   // 自動で組んだ並びのときの見え方をここで写す)
   const finishPanel = page.locator('[data-testid="navi-finish-times"]')
-  if (await finishPanel.count()) {
-    await crop(page, 'cooknavi-finish', finishPanel, { top: 72, padTop: 4, padBottom: 6 })
-  } else {
-    console.warn('  ⚠ できあがりの目安の枠が見つかりませんでした')
-  }
+  await crop(page, 'cooknavi-finish', finishPanel, { top: 72, padTop: 4, padBottom: 6 })
 
   // ======== 段取りの並べ替え(2026-08-15 便GN) ========
   // 使い方ページ§9の「段取りの順番を自分で変える」の2枚。
@@ -1217,13 +1338,9 @@ try {
       await wait(page, 500)
     }
     const movedCard = page.locator('main ol > li').first()
-    if (await movedCard.count()) {
-      await crop(page, 'cooknavi-reorder', movedCard, { top: 72, padTop: 8, padBottom: 8 })
-    }
+    await crop(page, 'cooknavi-reorder', movedCard, { top: 72, padTop: 8, padBottom: 8 })
     const reorderState = page.locator('[data-testid="navi-reorder-state"]')
-    if (await reorderState.count()) {
-      await crop(page, 'cooknavi-reorder-undo', reorderState, { top: 72, padTop: 8, padBottom: 8 })
-    }
+    await crop(page, 'cooknavi-reorder-undo', reorderState, { top: 72, padTop: 8, padBottom: 8 })
     // 撮り終えたら自動の並びに戻す(このあとの調理中モードのカットに並べ替えを持ち込まない)。
     // 「自動の並びに戻す」は確認の窓が開くので、押した回数ぶん1つずつ戻す
     for (let i = 0; i < reorderFrom; i++) {
@@ -1235,7 +1352,8 @@ try {
       await wait(page, 500)
     }
   } else {
-    console.warn('  ⚠ 印の出る並びを作れませんでした（同じ品の2つめの手順が見つからない）')
+    for (const name of ['cooknavi-reorder', 'cooknavi-reorder-undo'])
+      missShot(name, '印の出る並びを作れなかった（同じ品の2つめの手順が見つからない）')
   }
 
   // ======== 並行調理ナビの調理中モード(2026-08-11 便FK) ========
@@ -1243,6 +1361,8 @@ try {
   // 色を言って別の品の手順に移る)の図。上の cooknavi は2品で固定してあるので、
   // ここで3品目を足してから撮る = 上のカットの絵は変えない。
   const naviRepick = page.getByRole('button', { name: 'レシピを選び直す' })
+  if (!(await naviRepick.count()))
+    missShot('cooknavi-session-others', '「レシピを選び直す」が無く、3品目を足せない')
   if (await naviRepick.count()) {
     await naviRepick.click()
     await wait(page, 800)
@@ -1260,7 +1380,10 @@ try {
     }
   }
   const sessionStart = page.locator('[data-testid="cook-session-start"]')
-  if (await sessionStart.count()) {
+  if (!(await sessionStart.count())) {
+    for (const name of ['cooknavi-session', 'cooknavi-session-others'])
+      missShot(name, '段取りを調理中モードで開くボタンが無い')
+  } else {
     await sessionStart.click()
     await wait(page, 900)
     // 「他の品の次の手順」に**完成した品と、まだ手順の残っている品が並ぶ**ところまで進める。
@@ -1279,8 +1402,10 @@ try {
       await next.click()
       await wait(page, 220)
     }
+    // 2026-08-22 便JB: 届かなかったら警告で流さない。本文と alt が「完成の印」と
+    // 「色の名前が2つ」を説明している以上、届いていない絵は中身の違う絵になる
     if (!reached) {
-      console.warn('  ⚠ 調理中モードで「完成」と残りの手順が並ぶ位置に届きませんでした（図の説明と食い違わないか確認すること）')
+      missShot('cooknavi-session-others', '「完成」と残りの手順が並ぶ位置まで進められなかった')
     }
     // 上部: ✕ / 最初の手順へ / 料理名 / 段取り◯/◯ / 声で操作・読み上げ。
     // 2026-08-11 便FO: 声で使える言葉の案内は「声で操作」をONにしている間だけ出るようにしたので、
@@ -1296,6 +1421,8 @@ try {
         width: VIEW.width,
         height: sessionHeaderHeight + 10,
       })
+    } else {
+      missShot('cooknavi-session', '調理中モードの上部の帯の高さを測れなかった')
     }
     // 下部: 他の品の次の手順(色の名前・完成の印)。枠が丸ごと入る高さで切る
     const othersPanel = page.locator('[data-testid="cook-session-others"]')
@@ -1308,6 +1435,8 @@ try {
         width: VIEW.width,
         height: Math.min(VIEW.height - othersY, Math.round(othersRect.h + 12)),
       })
+    } else {
+      missShot('cooknavi-session-others', '「他の品の次の手順」の枠が出ていない')
     }
     const sessionClose = page.locator('[data-testid="cook-session-close"]')
     if (await sessionClose.count()) {
@@ -1321,16 +1450,13 @@ try {
   await wait(page, 2000)
   const exportBtn = page.getByRole('button', { name: 'ファイルに書き出す' }).first()
   const photoCheck = page.getByText(/「作った記録」の写真もバックアップに含める/).first()
-  if ((await photoCheck.count()) && (await exportBtn.count())) {
-    await cropRange(page, 'backup-export', photoCheck, exportBtn, { top: 120, padBottom: 14 })
-  } else if (await exportBtn.count()) {
-    await crop(page, 'backup-export', exportBtn, { top: 300, padTop: 14, padBottom: 14 })
-  }
+  // 2026-08-22 便JB: 写真のチェックが無いときにボタンだけを切る逃げ道をやめた。
+  // alt が「チェック（OFF）と説明文の下に『ファイルに書き出す』」と書いている以上、
+  // チェックの写っていない絵は中身の違う絵になる
+  await cropRange(page, 'backup-export', photoCheck, exportBtn, { top: 120, padBottom: 14 })
   const importBtn = page.getByRole('button', { name: /今のデータに追加/ }).first()
   const replaceBtn = page.getByRole('button', { name: /データを上書き/ }).first()
-  if ((await importBtn.count()) && (await replaceBtn.count())) {
-    await cropRange(page, 'backup-import', importBtn, replaceBtn, { top: 160, padBottom: 110 })
-  }
+  await cropRange(page, 'backup-import', importBtn, replaceBtn, { top: 160, padBottom: 110 })
 
   // ======== 無料版での栄養の見え方(カロリー + 野菜量) ========
   // ここまではPro解錠で撮っている。§5「無料で見られるのはカロリーと野菜量です」に載せる
@@ -1363,9 +1489,7 @@ try {
   await page.locator('main a[href*="/recipes/"]:not([href$="/new"])').first().click()
   await wait(page, 1500)
   const freeNut = page.getByRole('button', { name: '栄養価の概算を詳しく見る' })
-  if (await freeNut.count()) {
-    await crop(page, 'nutrition-row', freeNut, { top: 300, padTop: 10, padBottom: 10 })
-  }
+  await crop(page, 'nutrition-row', freeNut, { top: 300, padTop: 10, padBottom: 10 })
   await page.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
   await wait(page, 1500)
   const weekTab2 = page.getByRole('button', { name: '週', exact: true })
@@ -1379,9 +1503,9 @@ try {
     const freeDayRow = (await richFreeDayRows.count())
       ? richFreeDayRows.first()
       : freeDayRows.first()
-    if (await freeDayRow.count()) {
-      await crop(page, 'plan-week-nutrition-row', freeDayRow, { top: 300, padTop: 10, padBottom: 10 })
-    }
+    await crop(page, 'plan-week-nutrition-row', freeDayRow, { top: 300, padTop: 10, padBottom: 10 })
+  } else {
+    missShot('plan-week-nutrition-row', '献立の画面に「週」のタブが無い')
   }
 
   report()
