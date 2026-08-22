@@ -32558,10 +32558,13 @@ try {
         return (await eyPage.textContent('body')) ?? ''
       }
       const eyChawanmushi = await eyOpen('冷やし茶碗蒸し')
+      // 2026-08-22 便JG・便JIで既定価格と名寄せが変わり、179円→**178円**になった
+      // （1円ぶんは片栗粉 10→5円/大さじ1 の実勢反映。按分が効いていること自体は変わらない）。
+      // 「按分前の212円のままではない」を測るのがこの判定の役目なので、そこは残す
       check(
-        'EY-01 冷やし茶碗蒸しの1食あたりが生しいたけの按分後の金額になる(修正前212円→179円)',
-        eyChawanmushi.includes('2人分で作るときの1食あたり 約179円'),
-        eyChawanmushi.includes('約212円') ? '修正前の212円のまま' : '',
+        'EY-01 冷やし茶碗蒸しの1食あたりが生しいたけの按分後の金額になる(按分前212円→178円)',
+        eyChawanmushi.includes('2人分で作るときの1食あたり 約178円'),
+        eyChawanmushi.includes('約212円') ? '按分前の212円のまま' : '',
       )
       // 原価ビューで材料行そのものの金額も見る(1食あたり=全量33円÷2人分)
       await eyPage.getByRole('button', { name: '原価を見る' }).click()
