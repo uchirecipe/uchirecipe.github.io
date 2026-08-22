@@ -48125,6 +48125,159 @@ try {
     }
   }
 
+  // --- JHSAFE-01(2026-08-22 便JH): 取り込んだレシピにも安全のめやすが出る ---
+  //
+  // オーナー原文:
+  //   「レンジ温泉卵
+  //    ・卵をレンジ加熱なら、卵黄に爪楊枝で穴を開けないと爆発しそう」
+  //
+  // 根は1品の話ではない。同梱の基本レシピには CLAUDE.md D-④ の安全注記が原稿に入っているのに、
+  // URL・文章から取り込んだレシピには1つも付かない（オーナーの実データ31品では、D-④に
+  // 該当する26品の26品すべてに注記が無かった）。
+  //
+  // 測るのは「利用者が確かめたいこと」:
+  //   ①レンジ加熱の手順に卵がある品を開くと、その手順に注記が出る
+  //   ②注記が出ても、利用者が書いた手順の本文は1文字も変わっていない
+  //   ③危なくない品・同梱の基本レシピには**1件も出ない**（誤検出で毎回出ると読まれなくなる）
+  //   ④料理中に見る画面（調理中モード）でも同じ注記が読める
+  //   ⑤余計だと思う人は設定で消せる（消したあと、同じ場所で戻せる）
+  // 禁じ手よけ: 生のIndexedDBへ書いたあとに必ず読み込み直す／掴むのは data-testid だけで
+  // 並び順・入れ子に依らない／曜日・月替わりに依らない
+  currentCheck = 'JHSAFE-01'
+  {
+    const jhBrowser = await chromium.launch()
+    const jhContext = await jhBrowser.newContext({ viewport: { width: 390, height: 844 } })
+    const jhPage = await jhContext.newPage()
+    jhPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@JHSAFE-01] ${err.message}`)
+    })
+    try {
+      const JH_MICROWAVE_STEP = '器に卵と水を入れ、電子レンジ600Wで50秒加熱する'
+      await jhPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await jhPage.waitForTimeout(2400) // 初回シード完了待ち
+      const jhIds = await jhPage.evaluate(async (stepText) => {
+        const openDb = () =>
+          new Promise((resolve, reject) => {
+            const r = indexedDB.open('uchi-recipe')
+            r.onsuccess = () => resolve(r.result)
+            r.onerror = () => reject(r.error)
+          })
+        const db = await openDb()
+        const P = (req) => new Promise((res, rej) => { req.onsuccess = () => res(req.result); req.onerror = () => rej(req.error) })
+        const store = (name) => db.transaction(name, 'readwrite').objectStore(name)
+        const mk = (title, ingredients, steps, extra) => ({
+          title, servings: 2, effortLevel: 'normal', tags: [], ingredients, steps,
+          isFavorite: false, cookedLogs: [], searchWords: [], isStarter: false,
+          createdAt: Date.now(), updatedAt: Date.now(), ...extra,
+        })
+        // ①取り込み相当（レンジ＋卵）／②同じ材料でもレンジを使わない品／③同梱の基本レシピ
+        const risky = await P(store('recipes').add(mk('E2Eレンジで温泉卵', [{ name: '卵', amount: '1', unit: '個' }], [{ text: stepText }])))
+        const plain = await P(store('recipes').add(mk('E2Eフライパンの卵焼き', [{ name: '卵', amount: '2', unit: '個' }], [{ text: '卵を溶き、フライパンで焼く' }])))
+        const starter = await P(store('recipes').add(mk('E2E同梱のレンジ卵', [{ name: '卵', amount: '1', unit: '個' }], [{ text: stepText }], { isStarter: true })))
+        db.close()
+        return { risky, plain, starter }
+      }, JH_MICROWAVE_STEP)
+      // 生のIndexedDBへ書いたので必ず読み込み直す（Dexieのライブ購読はDexie経由の書き込みしか見ない）
+      await jhPage.goto(`${BASE}/#/recipes/${jhIds.risky}`)
+      await jhPage.reload({ waitUntil: 'networkidle' })
+      await jhPage.waitForTimeout(1400)
+
+      // ① 手順に注記が出る
+      const jhStepNote = jhPage.locator('[data-testid="safety-step-0"]')
+      check('JHSAFE-01 前提: 取り込み相当のレシピを開けた', (await jhPage.textContent('body')).includes('E2Eレンジで温泉卵'))
+      check('JHSAFE-01 レンジ加熱＋卵の手順に安全のめやすが出る', (await jhStepNote.count()) === 1)
+      const jhStepText = ((await jhStepNote.count()) === 1 ? await jhStepNote.textContent() : '').replaceAll('​', '')
+      check(
+        'JHSAFE-01 注記に、穴を開けることが書いてある',
+        jhStepText.includes('穴を開け'),
+        `注記=${jhStepText}`,
+      )
+      check(
+        'JHSAFE-01 注記に見出しが付いていて、利用者が書いた文と区別できる',
+        jhStepText.includes('安全のめやす'),
+        `注記=${jhStepText}`,
+      )
+      // ② 手順の本文は1文字も変わっていない
+      const jhBody = (await jhPage.textContent('body')).replaceAll('​', '')
+      check(
+        'JHSAFE-01 利用者が書いた手順の本文が1文字も変わっていない',
+        jhBody.includes(JH_MICROWAVE_STEP),
+        `本文=${JH_MICROWAVE_STEP}`,
+      )
+      // レシピ全体の注記（半熟・生の卵の対象者案内）はメモの並びに出る
+      const jhRecipeNote = jhPage.locator('[data-testid="safety-recipe"]')
+      check('JHSAFE-01 対象者の案内はレシピ全体の枠に出る', (await jhRecipeNote.count()) === 1)
+      const jhRecipeText = ((await jhRecipeNote.count()) === 1 ? await jhRecipeNote.textContent() : '').replaceAll('​', '')
+      check(
+        'JHSAFE-01 レシピ全体の枠に、誰が添えた文なのかが書いてある',
+        jhRecipeText.includes('アプリが添えた'),
+        `枠=${jhRecipeText}`,
+      )
+
+      // ④ 料理中に見る画面でも同じ注記が読める
+      await jhPage.getByRole('button', { name: '調理中モードで見る' }).click()
+      await jhPage.waitForTimeout(900)
+      const jhFocusNote = jhPage.locator('[data-testid="focus-safety-step-0"]')
+      check('JHSAFE-01 調理中モードでも同じ注記が読める', (await jhFocusNote.count()) === 1)
+      check(
+        'JHSAFE-01 調理中モードの注記も、穴を開けることが書いてある',
+        ((await jhFocusNote.count()) === 1 ? await jhFocusNote.textContent() : '').replaceAll('​', '').includes('穴を開け'),
+      )
+      await jhPage.keyboard.press('Escape')
+      await jhPage.waitForTimeout(500)
+
+      // ③ 危なくない品・同梱の基本レシピには1件も出ない
+      for (const [jhLabel, jhId] of [['レンジを使わない卵料理', jhIds.plain], ['同梱の基本レシピ', jhIds.starter]]) {
+        await jhPage.goto(`${BASE}/#/recipes/${jhId}`)
+        await jhPage.reload({ waitUntil: 'networkidle' })
+        await jhPage.waitForTimeout(1200)
+        check(
+          `JHSAFE-01 ${jhLabel}には手順の注記が1件も出ない`,
+          (await jhPage.locator('[data-testid^="safety-step-"]').count()) === 0,
+        )
+        check(
+          `JHSAFE-01 ${jhLabel}にはレシピ全体の注記も出ない`,
+          (await jhPage.locator('[data-testid="safety-recipe"]').count()) === 0,
+        )
+      }
+
+      // ⑤ 余計だと思う人は設定で消せる（消したあと、同じ場所で戻せる）
+      await jhPage.goto(`${BASE}/#/settings`, { waitUntil: 'networkidle' })
+      await jhPage.waitForTimeout(1200)
+      const jhSwitch = jhPage.getByRole('switch', { name: '安全のめやすを表示する' })
+      check('JHSAFE-01 前提: 設定に入り切りの切り替えがある', (await jhSwitch.count()) === 1)
+      check('JHSAFE-01 既定は表示する側になっている', (await jhSwitch.getAttribute('aria-checked')) === 'true')
+      await jhSwitch.click()
+      await jhPage.waitForTimeout(700)
+      await jhPage.goto(`${BASE}/#/recipes/${jhIds.risky}`)
+      await jhPage.reload({ waitUntil: 'networkidle' })
+      await jhPage.waitForTimeout(1200)
+      check(
+        'JHSAFE-01 切ると、注記がどこにも出なくなる',
+        (await jhPage.locator('[data-testid^="safety-step-"]').count()) === 0 &&
+          (await jhPage.locator('[data-testid="safety-recipe"]').count()) === 0,
+      )
+      check(
+        'JHSAFE-01 切っても、利用者が書いた手順の本文はそのまま残る',
+        (await jhPage.textContent('body')).replaceAll('​', '').includes(JH_MICROWAVE_STEP),
+      )
+      await jhPage.goto(`${BASE}/#/settings`, { waitUntil: 'networkidle' })
+      await jhPage.waitForTimeout(1200)
+      await jhPage.getByRole('switch', { name: '安全のめやすを表示する' }).click()
+      await jhPage.waitForTimeout(700)
+      await jhPage.goto(`${BASE}/#/recipes/${jhIds.risky}`)
+      await jhPage.reload({ waitUntil: 'networkidle' })
+      await jhPage.waitForTimeout(1200)
+      check(
+        'JHSAFE-01 同じ場所で戻せる（押した瞬間に二度と出せなくなる形にしない）',
+        (await jhPage.locator('[data-testid="safety-step-0"]').count()) === 1,
+      )
+    } finally {
+      await jhBrowser.close()
+    }
+  }
+
 } catch (err) {
   ng(`実行中断(${currentCheck})`, err.message)
 } finally {

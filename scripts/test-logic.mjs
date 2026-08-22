@@ -27996,6 +27996,209 @@ Aみりん 大さじ1
   eq('JG-7 読み仮名辞書の版番号も上げてある', READINGS_VERSION >= 7, true)
 }
 
+// ---------- 便JH: 取り込んだレシピには安全注記が1つも付かない（2026-08-22 オーナーの書き溜め） ----
+// オーナー原文:
+//   「レンジ温泉卵
+//    ・卵をレンジ加熱なら、卵黄に爪楊枝で穴を開けないと爆発しそう」
+//
+// 根は1品の話ではない。同梱の基本レシピ（109品）には CLAUDE.md D-④ の安全注記が原稿に
+// 入っているのに、URL・文章から取り込んだレシピには1つも付かない。
+// オーナーの実データ31品を測ると、D-④に該当する26品の**26品すべてに注記が無かった**
+// （同梱109品は該当81品のうち75品に注記あり）。
+//
+// ここで見張るのは次の2つ。**直す前はすべて赤**（safetyNotesFor が無い＝注記が0件）:
+//   ①危険が公に知られている組み合わせでは注記が出る（JH-1〜JH-4）
+//   ②それ以外では**1件も出さない**（JH-5・JH-8）。誤検出で毎回出ると本当に必要なときに読まれない
+// 仕掛けの中身は src/logic/safetyNotes.ts、文言は src/i18n/ja.ts の ja.safety。
+import { safetyNotesFor, stepSafetyNotes, wholeRecipeSafetyNotes } from '../src/logic/safetyNotes.ts'
+{
+  /** 判定に使う最小限の形を組む（材料名と手順本文だけ見る） */
+  const jhRecipe = (title, ings, stepTexts, extra = {}) => ({
+    title,
+    servings: 2,
+    ingredients: ings.map((name) => ({ name })),
+    steps: stepTexts.map((t) => (typeof t === 'string' ? { text: t } : t)),
+    ...extra,
+  })
+  const jhRules = (recipe) => safetyNotesFor(recipe).map((n) => n.rule)
+  /** その手順に付いた注記の決まりの名前 */
+  const jhStepRules = (recipe, i) =>
+    stepSafetyNotes(safetyNotesFor(recipe), i).map((n) => n.rule)
+
+  // --- JH-1: 電子レンジ＋卵。黄身は薄い膜に包まれていて、中の水分が急に沸騰すると破裂する ---
+  // オーナーの実データ「レンジで温泉卵」の手順そのまま（1手順しかないレシピ）
+  const jhOnsen = jhRecipe('レンジで温泉卵', ['卵', '水'], ['器に卵と水を入れ、電子レンジ600Wで50秒加熱する'])
+  eq('JH-1 レンジ加熱の手順に卵があれば、その手順に注記が付く', jhStepRules(jhOnsen, 0), ['microwaveEgg'])
+  eq(
+    'JH-1 注記は手順の本文ではなく、添える文として返る（本文は1文字も変えない）',
+    jhOnsen.steps[0].text,
+    '器に卵と水を入れ、電子レンジ600Wで50秒加熱する',
+  )
+  eq(
+    'JH-1 レンチン・電子レンジ・レンジのどの書き方でも拾う',
+    ['卵をレンジで1分加熱する', '卵をレンチンする', '卵を電子レンジにかける'].map(
+      (t) => jhStepRules(jhRecipe('t', ['卵'], [t]), 0).length,
+    ),
+    [1, 1, 1],
+  )
+
+  // --- JH-2: 電子レンジ＋皮や薄い膜のあるもの。①と同じ理屈で破裂する ---
+  // オーナーの実データ「丸ごと無限ピーマン」の手順そのまま
+  const jhPiman = jhRecipe(
+    '丸ごと無限ピーマン',
+    ['ピーマン', 'ツナ缶'],
+    ['聞こえますか…ピーマンは丸ごとレンチンするのです…', 'ピーマン3～4個を容器にいれラップし600w4分チン…'],
+  )
+  eq('JH-2 皮のある野菜を丸ごとレンジにかける手順に注記が付く', jhStepRules(jhPiman, 0), ['microwaveBurst'])
+  eq(
+    'JH-2 ウインナー・たらこ・栗のように膜のあるものもレンジと同じ手順にあれば拾う',
+    ['ウインナーをレンジで温める', 'たらこをレンジで加熱する', '栗をレンジにかける'].map(
+      (t) => jhStepRules(jhRecipe('t', ['ウインナー'], [t]), 0),
+    ),
+    [['microwaveBurst'], ['microwaveBurst'], ['microwaveBurst']],
+  )
+
+  // --- JH-3: 電子レンジ＋生の肉・魚。火の通りにムラが出て中心が生のまま残りやすい（D-④②） ---
+  // オーナーの実データ「レンジで簡単！本格グリーンカレー」の手順そのまま
+  const jhCurry = jhRecipe(
+    'レンジで簡単！本格グリーンカレー',
+    ['鶏むね肉', '玉ねぎ', 'ココナッツミルク'],
+    [
+      '鶏むね肉は一口大（そぎ切り）に、なすとズッキーニは半月切りにする。',
+      '耐熱容器に切った野菜と鶏むね肉を入れ、フタ又はラップをかけて、600wのレンジで6分加熱する。',
+    ],
+    { servings: 4 },
+  )
+  eq('JH-3 レンジ加熱の手順に生の肉があれば、その手順に火の通りの目安が付く', jhStepRules(jhCurry, 1), ['microwaveRawMeat'])
+  eq('JH-3 レンジを使っていない手順には付かない', jhStepRules(jhCurry, 0), [])
+  eq(
+    'JH-3 火の通りの目安が本文にすでに書いてあれば、二重に言わない',
+    jhStepRules(jhRecipe('t', ['鶏肉'], ['鶏肉をレンジで5分加熱し、中まで火が通ったか確認する']), 0),
+    [],
+  )
+
+  // --- JH-4: レシピ全体に添えるもの（対象者・保存・再加熱。D-④③④⑦の置き場所） ---
+  eq(
+    'JH-4 半熟・生の卵を使うレシピには、対象者の案内がレシピ全体に付く',
+    jhRules(jhRecipe('☆簡単ビビンバ☆', ['温泉卵', '合挽き肉', 'ご飯'], ['丼にご飯を盛り温泉卵をのせて出来上がり'])),
+    ['runnyEgg'],
+  )
+  eq(
+    'JH-4 はちみつを使うレシピには、1歳未満への案内がレシピ全体に付く',
+    jhRules(jhRecipe('ヨーグルトバーク', ['ヨーグルト', 'はちみつ'], ['混ぜて冷凍庫で固める'])),
+    ['honey'],
+  )
+  eq(
+    'JH-4 4人分以上の煮込みには、冷蔵と温め直しの案内がレシピ全体に付く',
+    jhRules(jhRecipe('レンジで簡単！本格グリーンカレー', ['玉ねぎ'], ['煮る'], { servings: 4 })),
+    ['bigBatchStew'],
+  )
+  eq(
+    'JH-4 作り置きと書いてあれば人数分によらず付く',
+    jhRules(jhRecipe('【15分】基本のグリーンカレー【作り置き・大量消費・夏野菜】', ['なす'], ['煮る'], { servings: 2 })),
+    ['bigBatchStew'],
+  )
+  eq(
+    'JH-4 3人分以下の煮込みには付けない（D-④の4人前以上より狭く取らない・広げない）',
+    jhRules(jhRecipe('ハヤシライス', ['牛切り落とし肉'], ['煮る'], { servings: 2 })),
+    [],
+  )
+  eq(
+    'JH-4 レシピ全体の注記は、どの手順にも紐づかない形で返る',
+    wholeRecipeSafetyNotes(safetyNotesFor(jhRecipe('カレー', ['玉ねぎ'], ['煮る'], { servings: 4 }))).map(
+      (n) => n.stepIndex,
+    ),
+    [undefined],
+  )
+
+  // --- JH-5: 出してはいけない形（誤検出で毎回出ると、本当に必要なときに読まれなくなる） ---
+  eq(
+    'JH-5 溶き卵をレンジにかける手順には出さない（膜がすでに壊れていて破裂しない）',
+    jhStepRules(jhRecipe('t', ['卵'], ['溶き卵を耐熱容器に入れ、レンジで1分加熱する']), 0),
+    [],
+  )
+  eq(
+    'JH-5 「オレンジ」を電子レンジと読み違えない',
+    jhStepRules(jhRecipe('t', ['卵', 'オレンジ'], ['卵とオレンジを混ぜる']), 0),
+    [],
+  )
+  eq(
+    'JH-5 電子レンジのオーブン機能で焼く手順には出さない（破裂・加熱ムラの話ではない）',
+    jhStepRules(jhRecipe('t', ['卵'], ['電子レンジのオーブン機能を使い170℃で25分焼く']), 0),
+    [],
+  )
+  eq(
+    'JH-5 本文にすでに穴を開ける指示があれば、二重に言わない',
+    jhStepRules(jhRecipe('t', ['卵'], ['卵の黄身に爪楊枝で穴を開け、レンジで50秒加熱する']), 0),
+    [],
+  )
+  eq(
+    'JH-5 レンジを使わない卵料理には出さない',
+    jhRules(jhRecipe('だし巻き卵', ['卵', 'だし汁'], ['卵を溶き、フライパンで巻きながら焼く'])),
+    [],
+  )
+  eq(
+    'JH-5 同梱の基本レシピには1件も出さない（原稿に注記が入っているので二重に出さない）',
+    safetyNotesFor({ ...jhOnsen, isStarter: true }),
+    [],
+  )
+  eq(
+    'JH-5 「半熟」だけで卵の話でないもの（半熟チーズケーキ）には出さない',
+    jhRules(jhRecipe('半熟チーズケーキ', ['クリームチーズ', '生クリーム'], ['型に流して焼く'])),
+    [],
+  )
+
+  // --- JH-6: 添えるだけで、レシピのデータには何も書き込まない ---
+  {
+    const before = jhRecipe('レンジで温泉卵', ['卵'], [{ text: '卵をレンジで50秒加熱する', memo: '好みで塩をふる' }])
+    const snapshot = JSON.stringify(before)
+    safetyNotesFor(before)
+    eq('JH-6 判定を通してもレシピの中身が1文字も変わらない', JSON.stringify(before), snapshot)
+    eq('JH-6 利用者が書いたメモはそのまま残る', before.steps[0].memo, '好みで塩をふる')
+  }
+
+  // --- JH-7: 文言の作法（D-④: 簡潔な常体1〜2文・必須は「〜こと」・菌名や恐怖をあおる語は書かない） ---
+  {
+    const jhTexts = Object.entries(ja.safety).filter(([k]) => k !== 'title' && k !== 'source')
+    eq('JH-7 文言を読めている（0件なら見張りが壊れている）', jhTexts.length >= 6, true)
+    const jhStyle = []
+    for (const [key, text] of jhTexts) {
+      const plain = text.replace(/​/g, '')
+      if (!/(こと|安心)。$/.test(plain)) jhStyle.push(`${key}: 「〜こと。」「〜と安心。」で終わっていない`)
+      if (plain.split('。').filter(Boolean).length > 2) jhStyle.push(`${key}: 3文以上ある`)
+      if (plain.length > 60) jhStyle.push(`${key}: 60字を超えている（${plain.length}字）`)
+      for (const ng of ['菌', '中毒', '危険', '死', '病気'])
+        if (plain.includes(ng)) jhStyle.push(`${key}: 「${ng}」が入っている`)
+    }
+    eq('JH-7 安全のめやすの文言が D-④ の作法から外れていない', jhStyle, [])
+  }
+
+  // --- JH-8: 同梱109品に当てても、人が書いた注記と食い違わない（誤検出の見張り） ---
+  // 同梱には出さない仕掛けだが、**語の表を広げすぎたら赤くする**ために、あえて当てて数える。
+  // ここに出る8品は、すべて原稿（starters.ts・sets/*.ts）に同じ話の注記が人の手で入っている品。
+  // 表を広げて品が増えたら、その1件ずつが本当に必要かを確かめること（理由なしに増やさない）。
+  {
+    const jhFired = starterDefs
+      .map((r) => ({ title: r.title, rules: safetyNotesFor(r).map((n) => n.rule) }))
+      .filter((r) => r.rules.length > 0)
+    eq('JH-8 同梱レシピを読めている（0品なら見張りが壊れている）', starterDefs.length, 109)
+    eq(
+      'JH-8 同梱109品で注記が出るのは、人が同じ話を書いている8品だけ',
+      jhFired.map((r) => `${r.title}:${r.rules.join('+')}`),
+      [
+        'カレーライス:bigBatchStew',
+        '親子丼:runnyEgg',
+        'だし巻き卵:runnyEgg',
+        '豚汁:bigBatchStew',
+        'クリームシチュー:bigBatchStew',
+        'オムライス:runnyEgg',
+        'エビとブロッコリーの卵炒め:runnyEgg',
+        'フルーツヨーグルトバーク:honey',
+      ],
+    )
+  }
+}
+
 // ---------- 結果 ----------
 console.log(`合格: ${passed}件 / 失敗: ${failures.length}件`)
 for (const f of failures) console.log(`  NG ${f}`)

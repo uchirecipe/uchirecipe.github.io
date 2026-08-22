@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useRef, useState, type TouchEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { MemoText } from './MemoText'
+import SafetyNotes from './SafetyNotes'
+// 安全のめやす（2026-08-22 便JH）。料理をしている最中こそ読める場所に出す
+import { safetyNotesFor, stepSafetyNotes } from '../logic/safetyNotes'
 import {
   X,
   Check,
@@ -124,6 +127,12 @@ export default function FocusMode({ recipe, recipeId, initialStep, onClose, onCo
   // memo側の既出用語=手順本文の語(純粋導出・StrictMode対策)。stepが無い(手順0件)場合は空扱い
   const stepTermSeen = step ? new Set(collectUniqueTerms(step.text).map((c) => c.term)) : new Set<string>()
   const stepTerms = step ? collectUniqueTerms(step.text, step.memo) : []
+  // 安全のめやす（2026-08-22 便JH）。渡されたレシピの手順（時短版を見ているときは時短版）から
+  // 組み立てる。設定で切っていれば1件も出さない。同梱の基本レシピは safetyNotesFor 側で弾く
+  const safetyNotes = useMemo(
+    () => (settings?.safetyNotesOff ? [] : safetyNotesFor(recipe)),
+    [recipe, settings?.safetyNotesOff],
+  )
   const { state: termPopoverState, open: openTerm, close: closeTermPopover } = useTermPopover()
   // 調理中モードは全画面表示で常駐タイマー(TimerBar)を覆い隠してしまうため、
   // 動作中のタイマーをここにも表示する(押しても反応が無いように見える不具合の対策)。
@@ -680,6 +689,13 @@ export default function FocusMode({ recipe, recipeId, initialStep, onClose, onCo
             seen={stepTermSeen}
           />
         )}
+        {/* 安全のめやす（便JH）。手順の本文・利用者のメモは1文字も変えず、その下に別の枠で添える */}
+        <SafetyNotes
+          notes={stepSafetyNotes(safetyNotes, index)}
+          place="step"
+          testId={`focus-safety-step-${index}`}
+          className="mt-[var(--space-sm)] w-full md:max-w-md"
+        />
         {stepTerms.length > 0 && (
           <div className="mt-[var(--space-sm)] w-full rounded-md bg-surface p-[var(--space-sm)] text-sm text-ink-muted md:max-w-md">
             {/* 用語は常時表示にする(2026-07-11オーナー実機フィードバック: タップしないと説明が
