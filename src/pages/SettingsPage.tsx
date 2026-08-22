@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Link, useNavigate, useSearchParams } from 'react-router-dom'
+import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { useLiveQuery } from 'dexie-react-hooks'
 import {
   Plus,
@@ -463,6 +463,8 @@ export default function SettingsPage() {
   const recipeSetFileRef = useRef<HTMLInputElement>(null)
   const [searchParams, setSearchParams] = useSearchParams()
   const navigate = useNavigate()
+  // Pro案内・サンプルデモから飛んだ先に「押す前の画面」を渡すため（2026-08-22 便JF・⑦）
+  const location = useLocation()
   // 元のページへの帰り道(2026-08-02 オーナー指示・便DF)。各ページのPro版の説明などから
   // ?back=<元のパス> 付きで飛んできたときだけ、目次チップの上に「◯◯に戻る」を出す。
   // 直接この画面を開いた場合(タブから等)は元のページが無いので出さない
@@ -2685,7 +2687,11 @@ export default function SettingsPage() {
               </div>
               <p className="mt-[var(--space-sm)]">
                 <Link
-                  to="/month-demo?back=%2Fsettings%3Fsection%3Dpro"
+                  /* 2026-08-22 便JF・⑦: 戻り先を「/settings?section=pro」で決め打ちにしていたので、
+                     ほかの画面のPro案内からここへ来ていた場合、サンプルデモを閉じた時点で
+                     その帰り道（?back=）を落としていた＝設定に着いたまま迷子になっていた。
+                     いま出ている画面のパス（?back= 付きのまま）をそのまま載せる */
+                  to={`/month-demo?back=${encodeURIComponent(location.pathname + location.search)}`}
                   data-testid="settings-month-demo-link"
                   className="text-sm text-accent-ink underline"
                 >

@@ -8,6 +8,7 @@ import { summarizeRecipeDeleteImpact, type RecipeDeleteImpact } from '../logic/r
 import { READINGS_VERSION } from '../logic/ingredientReadings'
 import { newRecipeUid } from '../logic/recipeUid'
 import { detachRecipeLogs } from './detachedLogs'
+import { isOneTapCookedLog } from '../logic/cooked'
 import { tagsWithRemoved } from '../logic/tagRegister'
 
 /** 入力の掃除: 名前が空の材料行・本文が空の手順行は保存しない */
@@ -276,6 +277,28 @@ export async function toggleFavorite(id: number): Promise<void> {
  */
 function sortLogsByDateDesc(logs: CookedLog[]): CookedLog[] {
   return [...logs].sort((a, b) => b.date.localeCompare(a.date))
+}
+
+/**
+ * その日に付けた「ボタン1回の記録」を1件だけ取り消す（2026-08-22 便JF・①）。
+ *
+ * 過ぎた日の編集モードで足した記録を、トーストの「元に戻す」で消すためのもの。
+ * 添字ではなく**日付と中身**で探す（addCookedLog が日付順に並べ直すので、
+ * 足した直後の添字は当てにならない）。メモ・写真を添えた記録は対象にしない
+ * ＝手で書いた記録を巻き込まない（logic/cooked.ts isOneTapCookedLog と同じ歯止め）。
+ * 消せたら true。
+ */
+export async function removeOneTapCookedLog(id: number, date: string): Promise<boolean> {
+  return await db.transaction('rw', db.recipes, async () => {
+    const recipe = await db.recipes.get(id)
+    if (!recipe) return false
+    const index = recipe.cookedLogs.findIndex((log) => isOneTapCookedLog(log, date))
+    if (index < 0) return false
+    await db.recipes.update(id, {
+      cookedLogs: recipe.cookedLogs.filter((_, i) => i !== index),
+    })
+    return true
+  })
 }
 
 /** 「作った！」記録を追加（日付の新しい順に並べ直して保存する） */

@@ -22,6 +22,19 @@ export function isOneTapCookedLog(log: CookedLog, date: string): boolean {
 }
 
 /**
+ * その日に、ボタン1回で付いた記録がもう1件あるか（2026-08-22 便JF・①）。
+ *
+ * 過ぎた日の編集モードから「作った記録を追加」を押したとき、同じ日の同じ料理へ
+ * 二重に付けないための判定。二重記録の歯止めの決め方は「まとめて作った！」
+ * （db/todayList.ts の markRecipesCooked・2026-08-09 便EH）と同じで、
+ * メモ・写真を添えて自分で書いた記録は数えない（同じ料理を2回作った日は、
+ * レシピ詳細の記録フォームから人数・メモつきで付けられる）。
+ */
+export function hasOneTapCookedLog(logs: readonly CookedLog[], date: string): boolean {
+  return logs.some((log) => isOneTapCookedLog(log, date))
+}
+
+/**
  * 直近 days 日以内に「作った」記録があれば true。
  *
  * 2026-07-29 便CI/C08: 以前は cookedLogs[0] の1件だけを見ていたが、addCookedLog が

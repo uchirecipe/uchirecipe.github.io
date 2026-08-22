@@ -650,6 +650,24 @@ const openWeekGroup = async (page, title) => {
  * （×そのものが「整理でないときは出ない／整理にすると出る」ことは DAYORG-01 が受け持つ）。
  * **すでに整理モードなら押さない**＝押す回数を決め打ちしない。ボタンが無い画面では素通りする。
  */
+/**
+ * 週の「表示のしかた」の週の区切り（週区切り／今日から7日間）を選ぶ。
+ *
+ * 2026-08-22 便JF・⑤（オーナー原文「表示のしかたの、週区切りと今日から7日間は、プルダウン」）で
+ * 押し分ける2つのチップからプルダウンになったので、押し方をここ1か所にまとめる
+ * （6か所が同じ2行を書き写していた＝形が変わるたびに6か所を直すことになる）。
+ * 節が畳んであれば先に開く。**選べていなければ false を返す**（黙って合格に倒さない）。
+ */
+const selectWeekLayout = async (page, label) => {
+  await openWeekGroup(page, ja.mealPlan.weekGroupDisplayTitle)
+  const select = page.locator('[data-testid="week-layout"]')
+  if ((await select.count()) === 0) return false
+  await select.first().selectOption({ label })
+  await page.waitForTimeout(600)
+  // 本当にその値になったかまで見る（選べていないのに true を返さない）
+  const wanted = label === '今日から7日間' ? 'rolling' : 'calendar'
+  return (await select.first().inputValue()) === wanted
+}
 const openDayOrganize = async (page) => {
   const toggle = page.locator('[data-testid="day-organize"]')
   if ((await toggle.count()) === 0) return
@@ -670,7 +688,9 @@ const openDayOrganize = async (page) => {
  * **すでに編集モードなら押さない**＝押す回数を決め打ちしない。
  * 編集モードは一度に1日だけなので、別の日を渡すとそちらへ移る（前の日は通常表示に戻る）。
  * 畳んでいる日は切り替えボタンが出ないので、先に開く。
- * 週タブ以外・過ぎた日では false を返す（黙って合格に倒さないよう、呼び出し側で見ること）。
+ * 週タブ以外では false を返す（黙って合格に倒さないよう、呼び出し側で見ること）。
+ * 2026-08-22 便JF・①: 過ぎた日にも編集モードが付いた（中身は「作った記録を追加」で、
+ * 献立の枠は出ない）。この道具は「編集モードに入れたか」だけを返すので、過ぎた日でも true になる。
  */
 const openWeekDayEdit = async (page, date) => {
   const toggle = page.locator(`[data-testid="week-day-toggle"][data-date="${date}"]`)
@@ -7160,7 +7180,7 @@ try {
       await openAllWeekDays(bkPage) // 便ID・⑦: 畳む既定になったので、カードの中を触る前に開く
       await bkPage.waitForTimeout(700)
       await bkOpenGroup('表示のしかた')
-      await bkPage.getByRole('button', { name: '今日から7日間', exact: true }).click()
+      await selectWeekLayout(bkPage, '今日から7日間')
       await bkPage.waitForTimeout(900)
       const bkWeekA = await bkWeekDates()
       check(
@@ -9492,7 +9512,7 @@ try {
       // 表示中の7行すべての曜日が日付と食い違っていた(水曜に「月 2026/07/29 今日」と出る)。
       // このモードは自動テストが1件も無く、ユーザーからも報告されにくい盲点だったので恒久化する
       // 「表示のしかた」グループは上の「まとめて空にする」の検証で既に開いてある(2026-08-03 便DJ)
-      await mpPage.getByRole('button', { name: '今日から7日間', exact: true }).click()
+      await selectWeekLayout(mpPage, '今日から7日間')
       await mpPage.waitForTimeout(500)
       const rollingHeads = await mpPage.evaluate(() => {
         const dow = ['月', '火', '水', '木', '金', '土', '日']
@@ -9558,7 +9578,7 @@ try {
       // 2026-08-03 便DJ: 「表示のしかた」グループは既定で畳まれているので先に開く
       await nbPage.getByRole('button', { name: '表示のしかたを開く' }).click()
       await nbPage.waitForTimeout(200)
-      await nbPage.getByRole('button', { name: '今日から7日間', exact: true }).click()
+      await selectWeekLayout(nbPage, '今日から7日間')
       await nbPage.waitForTimeout(500)
 
       // 何も割り当てていない週にはパネルを出さない(「0kcal」を7日並べない)
@@ -9662,8 +9682,12 @@ try {
       )
       check(
         'NUTRI-DAY-01(docs/60 §1-3-3・便CW-8) 「登録したレシピだけの合計」の但し書きが出る',
-        nbDayOpenText.includes(ja.nutritionBalance.registeredOnlyNote) &&
-          nbDayOpenText.includes('3食のうち夕食だけを登録している場合は'),
+        nbDayOpenText.includes(ja.nutritionBalance.registeredOnlyNote),
+      )
+      check(
+        // 2026-08-22 便JF・④（オーナー原文「『３食のうち〜』→削除。（略）説明し過ぎで邪魔。」）
+        'NUTRI-DAY-01(便JF・④) 「3食のうち夕食だけを〜」の言い換えは出さない',
+        !nbDayOpenText.includes('3食のうち夕食だけを登録している場合は'),
       )
       check(
         'NUTRI-DAY-01(docs/60 §1-3-4) 除外分で下限側に出ることの但し書きが出る',
@@ -9820,7 +9844,7 @@ try {
       // 2026-08-03 便DJ: 「表示のしかた」グループは既定で畳まれているので先に開く
       await npPage.getByRole('button', { name: '表示のしかたを開く' }).click()
       await npPage.waitForTimeout(200)
-      await npPage.getByRole('button', { name: '今日から7日間', exact: true }).click()
+      await selectWeekLayout(npPage, '今日から7日間')
       await npPage.waitForTimeout(500)
       // 2026-08-02 便CW-6の「食事ごとの内訳」は2つ以上の食事に献立がある日にだけ出るので、
       // 既定(夕食のみ)に朝食を足してから献立を立てる
@@ -12227,7 +12251,7 @@ try {
       // 2026-08-03 便DJ: 「表示のしかた」グループは既定で畳まれているので先に開く
       await cwPage.getByRole('button', { name: '表示のしかたを開く' }).click()
       await cwPage.waitForTimeout(200)
-      await cwPage.getByRole('button', { name: '今日から7日間', exact: true }).click()
+      await selectWeekLayout(cwPage, '今日から7日間')
       await cwPage.waitForTimeout(300)
 
       // IndexedDB直書きで先週2日分のsourceと、今週day0の手動配置を仕込む
@@ -45773,23 +45797,32 @@ try {
           `編集モード=${await iwEditOn(iwOtherDate)}`,
         )
       }
-      // 過ぎた日は予定を出さない画面なので、編集の切り替えも出さない
+      // 2026-08-22 便JF・①（オーナー原文「過去の日付の記録も、編集モードで後から記録を
+      // 追加できるようにして。」）: 過ぎた日にも編集の切り替えを出す。
+      // 便IVのときは過ぎた日の編集モードに中身が無かったので出していなかった＝前提が変わった。
+      // 過ぎた日の編集モードで触るのは**作った記録**で、献立の枠は今までどおり出さない
+      // （それは下の JFPAST-01 が測る）
       const iwPastEdit = await iwPage.evaluate(() => {
         const out = []
         for (const s of document.querySelectorAll('section[data-date]')) {
           out.push({
             date: s.getAttribute('data-date'),
             edit: s.querySelectorAll('[data-testid="week-day-edit"]').length,
+            slots: s.querySelectorAll('[data-testid="slot-block"]').length,
           })
         }
         return out
       })
       check(
-        'IVEDIT-03 過ぎた日には編集の切り替えを出さない（予定を出さない画面のため）',
+        'IVEDIT-03 過ぎた日にも編集の切り替えを出す（便JF・①で記録を足せるようになった）',
         // 7日ぶん読めていることを先に見る＝1枚も掴めていないのに every() で素通りしない
+        iwPastEdit.length === 7 && iwPastEdit.every((d) => d.edit === 1),
+        JSON.stringify(iwPastEdit),
+      )
+      check(
+        'IVEDIT-03 過ぎた日には献立の枠を出さない（記録だけを見せる画面のまま）',
         iwPastEdit.length === 7 &&
-          iwPastEdit.filter((d) => d.date < iwToday).every((d) => d.edit === 0) &&
-          iwPastEdit.filter((d) => d.date >= iwToday).every((d) => d.edit === 1),
+          iwPastEdit.filter((d) => d.date < iwToday).every((d) => d.slots === 0),
         JSON.stringify(iwPastEdit),
       )
 
@@ -46656,6 +46689,467 @@ try {
       )
     } finally {
       await izBrowser.close()
+    }
+  }
+
+
+  // --- JFPAST-01: 過ぎた日の編集モードから「作った記録」を後から足せる（便JF・①） ---
+  // 司令部の訂正: 芯は「編集モードのおかげで普段の見え方をシンプルに保てる」こと。
+  // なので**通常表示には入口を1つも出さない**ことと、編集モードで足せることを両方測る。
+  // 週は「前の週」へ1回送って測る＝週区切り(既定)なら曜日に関係なく7日とも過ぎた日になる
+  // （今日が月曜だと今週に過ぎた日が1日も無い。禁じ手①＝曜日の前提を置かない）
+  currentCheck = 'JFPAST-01'
+  {
+    const jaBrowser = await chromium.launch()
+    const jaContext = await jaBrowser.newContext({ viewport: { width: 390, height: 844 } })
+    const jaPage = await jaContext.newPage()
+    jaPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@JFPAST-01] ${err.message}`)
+    })
+    try {
+      await jaPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+      await jaPage.waitForTimeout(2400) // 初回シード完了待ち
+      await jaPage.getByRole('button', { name: '週', exact: true }).click()
+      await jaPage.waitForTimeout(900)
+      await jaPage.getByRole('button', { name: '前の週', exact: true }).click()
+      await openAllWeekDays(jaPage)
+      await jaPage.waitForTimeout(700)
+      // 掴む日は「画面に出ている日のうち今日より前のもの」＝並び順にも曜日にも依らない
+      const jaPastDate = await jaPage.evaluate(() => {
+        const d = new Date()
+        const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+        const dates = [...document.querySelectorAll('section[data-date]')].map((el) =>
+          el.getAttribute('data-date'),
+        )
+        return dates.find((x) => x && x < today) ?? null
+      })
+      check('JFPAST-01 前提: 過ぎた日のカードを掴めた', jaPastDate !== null, `date=${jaPastDate}`)
+      const jaCard = jaPage.locator(`section[data-date="${jaPastDate}"]`)
+      const jaAdd = jaCard.locator('[data-testid="past-record-add"]')
+      check(
+        'JFPAST-01 通常表示には「作った記録を追加」を出さない（普段の見え方は今までどおり）',
+        (await jaAdd.count()) === 0,
+        `入口=${await jaAdd.count()}件`,
+      )
+      const jaEditBtn = jaCard.locator('[data-testid="week-day-edit"]')
+      check(
+        'JFPAST-01 過ぎた日にも編集モードの切り替えがある',
+        (await jaEditBtn.count()) === 1,
+        `編集ボタン=${await jaEditBtn.count()}件`,
+      )
+      await jaEditBtn.first().click()
+      await jaPage.waitForTimeout(500)
+      check(
+        'JFPAST-01 編集モードにすると「作った記録を追加」が出る',
+        (await jaAdd.count()) === 1 && (await jaAdd.first().isVisible()),
+        `入口=${await jaAdd.count()}件`,
+      )
+      check(
+        'JFPAST-01 その入口は指で押せる大きさ(44px以上)',
+        Math.round((await jaAdd.first().boundingBox())?.height ?? 0) >= 44,
+        `高さ=${Math.round((await jaAdd.first().boundingBox())?.height ?? 0)}px`,
+      )
+      // 過ぎた日は献立の枠を出さない（今までの決めごとを編集モードでも崩さない）
+      check(
+        'JFPAST-01 過ぎた日の編集モードでも、献立の枠は出さない',
+        (await jaCard.locator('[data-testid="slot-block"]').count()) === 0,
+        `枠=${await jaCard.locator('[data-testid="slot-block"]').count()}件`,
+      )
+      const jaLogsBefore = await jaCard.locator('[data-testid="cooked-log-card"]').count()
+      await jaAdd.first().click()
+      await jaPage.waitForTimeout(700)
+      check(
+        'JFPAST-01 レシピを選ぶ一覧が開く',
+        (await jaPage.locator('[data-testid="recipe-picker"]').count()) === 1,
+      )
+      await jaPage.locator('[data-testid="recipe-picker"] [data-testid="picker-item"]').first().click()
+      await jaPage.waitForTimeout(1000)
+      const jaLogsAfter = await jaCard.locator('[data-testid="cooked-log-card"]').count()
+      check(
+        'JFPAST-01 選んだ料理が、その日の「作った記録」に増える',
+        jaLogsAfter === jaLogsBefore + 1,
+        `前=${jaLogsBefore}件 後=${jaLogsAfter}件`,
+      )
+      const jaUndo = jaPage.getByRole('button', { name: '元に戻す', exact: true })
+      check(
+        'JFPAST-01 足したあとのトーストから1回で戻せる',
+        (await jaUndo.count()) === 1,
+        `元に戻す=${await jaUndo.count()}件`,
+      )
+      await jaUndo.first().click()
+      await jaPage.waitForTimeout(900)
+      check(
+        'JFPAST-01 「元に戻す」で足した記録が消える',
+        (await jaCard.locator('[data-testid="cooked-log-card"]').count()) === jaLogsBefore,
+        `戻したあと=${await jaCard.locator('[data-testid="cooked-log-card"]').count()}件`,
+      )
+    } finally {
+      await jaBrowser.close()
+    }
+  }
+
+  // --- JFMARK-02: 記録がある日の印の大きさ（②）と、過ぎた日の面の色（③） ---
+  currentCheck = 'JFMARK-02'
+  {
+    const jbBrowser = await chromium.launch()
+    const jbContext = await jbBrowser.newContext({ viewport: { width: 390, height: 844 } })
+    const jbPage = await jbContext.newPage()
+    jbPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@JFMARK-02] ${err.message}`)
+    })
+    /** 2つの色（'rgb(r, g, b)'）のコントラスト比。WCAGの式そのまま */
+    const jbContrast = (a, b) => {
+      const lum = (css) => {
+        const [r, g, bl] = (css.match(/\d+(\.\d+)?/g) ?? [0, 0, 0]).slice(0, 3).map(Number)
+        const ch = (v) => {
+          const s = v / 255
+          return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4
+        }
+        return 0.2126 * ch(r) + 0.7152 * ch(g) + 0.0722 * ch(bl)
+      }
+      const l1 = lum(a)
+      const l2 = lum(b)
+      return Math.round(((Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05)) * 100) / 100
+    }
+    try {
+      await jbPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+      await jbPage.waitForTimeout(2400)
+      // 過ぎた日に記録を仕込む（生のIndexedDBへ書いたので必ず読み込み直す・禁じ手⑥）
+      const jbSeed = await jbPage.evaluate(
+        () =>
+          new Promise((resolve, reject) => {
+            const d = new Date()
+            d.setDate(d.getDate() - 8) // 「前の週」に必ず入る日（曜日に依らない）
+            const date = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+            const req = indexedDB.open('uchi-recipe')
+            req.onsuccess = () => {
+              const tx = req.result.transaction('recipes', 'readwrite')
+              const store = tx.objectStore('recipes')
+              const g = store.getAll()
+              g.onsuccess = () => {
+                const r = g.result.find((x) => x.title === 'カレーライス')
+                if (!r) {
+                  reject(new Error('カレーライスが見つからない'))
+                  return
+                }
+                r.cookedLogs = [{ date }, ...(r.cookedLogs ?? [])]
+                store.put(r)
+              }
+              tx.oncomplete = () => resolve(date)
+              tx.onerror = () => reject(tx.error)
+            }
+            req.onerror = () => reject(req.error)
+          }),
+      )
+      await jbPage.reload({ waitUntil: 'networkidle' })
+      await jbPage.waitForTimeout(1400)
+      await jbPage.getByRole('button', { name: '週', exact: true }).click()
+      await jbPage.waitForTimeout(900)
+      // 仕込んだ日のカードが出る週まで送る（前後どちらへも送れる形にする）
+      for (let i = 0; i < 4; i++) {
+        if ((await jbPage.locator(`section[data-date="${jbSeed}"]`).count()) > 0) break
+        const shown = await jbPage.locator('section[data-date]').first().getAttribute('data-date')
+        await jbPage.locator(`button[aria-label="${shown && jbSeed < shown ? '前の週' : '次の週'}"]`).click()
+        await jbPage.waitForTimeout(700)
+      }
+      check(
+        'JFMARK-02 前提: 記録を仕込んだ過ぎた日のカードを出せる',
+        (await jbPage.locator(`section[data-date="${jbSeed}"]`).count()) > 0,
+        `仕込んだ日=${jbSeed}`,
+      )
+      // 印は畳んでいる日にだけ出る。過ぎた日の既定は「畳む」なので、そのまま測る
+      const jbMark = jbPage.locator(`[data-testid="week-day-mark"][data-date="${jbSeed}"][data-mark="cooked"]`)
+      check(
+        'JFMARK-02 前提: 記録がある日の印を掴めた',
+        (await jbMark.count()) === 1,
+        `印=${await jbMark.count()}件`,
+      )
+      const jbMarkBox = await jbMark.locator('svg').first().boundingBox()
+      check(
+        'JFMARK-02 記録の印は16px以上（直す前は14px。一段階だけ上げる）',
+        Math.round(jbMarkBox?.width ?? 0) >= 16 && Math.round(jbMarkBox?.height ?? 0) >= 16,
+        `印の大きさ=${Math.round(jbMarkBox?.width ?? 0)}×${Math.round(jbMarkBox?.height ?? 0)}px`,
+      )
+      const jbMarkStroke = await jbMark.locator('svg').first().evaluate((el) => el.getAttribute('stroke-width'))
+      check(
+        'JFMARK-02 線も一段階だけ太くする（直す前は2）',
+        Number(jbMarkStroke) > 2,
+        `stroke-width=${jbMarkStroke}`,
+      )
+      // ③ 過ぎた日の面の色。今日以降のカードと違い、文字の色は変えていないこと
+      /**
+       * 面の色は color-mix で作っているので、getComputedStyle は oklab(...) のまま返す
+       * （rgb に解いてくれない）。ブラウザ自身に1px塗らせて実際の色を読み出す
+       * ＝2026-08-02 便CY と同じ測り方（近似の計算を自分で書かない）。
+       */
+      const jbResolve = (page, css) =>
+        page.evaluate((value) => {
+          const canvas = document.createElement('canvas')
+          canvas.width = 1
+          canvas.height = 1
+          const ctx = canvas.getContext('2d')
+          ctx.fillStyle = value
+          ctx.fillRect(0, 0, 1, 1)
+          const [r, g, b] = ctx.getImageData(0, 0, 1, 1).data
+          return `rgb(${r}, ${g}, ${b})`
+        }, css)
+      const jbRead = async (date) => {
+        const raw = await jbPage
+          .locator(`section[data-date="${date}"]`)
+          .first()
+          .evaluate((el) => {
+            const h = el.querySelector('h2')
+            return {
+              bg: getComputedStyle(el).backgroundColor,
+              title: h ? getComputedStyle(h).color : null,
+            }
+          })
+        return {
+          bg: await jbResolve(jbPage, raw.bg),
+          title: raw.title ? await jbResolve(jbPage, raw.title) : null,
+        }
+      }
+      const jbPast = await jbRead(jbSeed)
+      // 先の日のカードは「次の週」へ送って読む（今日が何曜日でも必ず全日が先の日になる）
+      await jbPage.locator('button[aria-label="次の週"]').click()
+      await jbPage.waitForTimeout(700)
+      await jbPage.locator('button[aria-label="次の週"]').click()
+      await jbPage.waitForTimeout(700)
+      const jbFutureDate = await jbPage.locator('section[data-date]').first().getAttribute('data-date')
+      const jbFuture = await jbRead(jbFutureDate)
+      check(
+        'JFMARK-02 前提: 過ぎた日と先の日のカードを両方測れた',
+        jbPast.bg !== null && jbFuture.bg !== null && jbPast.title !== null,
+        JSON.stringify({ jbPast, jbFuture }),
+      )
+      check(
+        'JFMARK-02 過ぎた日の面の色は、先の日のカードと違う（一段階変える）',
+        jbPast.bg !== jbFuture.bg,
+        `過ぎた日=${jbPast.bg} / 先の日=${jbFuture.bg}`,
+      )
+      check(
+        'JFMARK-02 文字の色は薄くしない（過ぎた日も先の日と同じ）',
+        jbPast.title === jbFuture.title,
+        `過ぎた日=${jbPast.title} / 先の日=${jbFuture.title}`,
+      )
+      check(
+        'JFMARK-02 過ぎた日の面でも日付が読める(AA 4.5:1以上)',
+        jbContrast(jbPast.title, jbPast.bg) >= 4.5,
+        `コントラスト比=${jbContrast(jbPast.title, jbPast.bg)}:1（文字=${jbPast.title} 面=${jbPast.bg}）`,
+      )
+      // 「押せないように見えない」＝過ぎた日のカードの押せるものが、面の上で読めること
+      await jbPage.locator('button[aria-label="前の週"]').click()
+      await jbPage.waitForTimeout(700)
+      await jbPage.locator('button[aria-label="前の週"]').click()
+      await jbPage.waitForTimeout(700)
+      await openAllWeekDays(jbPage)
+      await jbPage.waitForTimeout(500)
+      const jbEdit = jbPage.locator(`section[data-date="${jbSeed}"] [data-testid="week-day-edit"]`)
+      const jbEditColor = await jbResolve(
+        jbPage,
+        await jbEdit.first().evaluate((el) => getComputedStyle(el).color),
+      )
+      check(
+        'JFMARK-02 過ぎた日の「編集」が面の上で読める(AA 4.5:1以上＝押せるものが押せるように見える)',
+        jbContrast(jbEditColor, jbPast.bg) >= 4.5,
+        `コントラスト比=${jbContrast(jbEditColor, jbPast.bg)}:1（文字=${jbEditColor} 面=${jbPast.bg}）`,
+      )
+    } finally {
+      await jbBrowser.close()
+    }
+  }
+
+  // --- JFUI-03: 「表示のしかた」の週の区切りはプルダウン（便JF・⑤） ---
+  currentCheck = 'JFUI-03'
+  {
+    const jcBrowser = await chromium.launch()
+    const jcContext = await jcBrowser.newContext({ viewport: { width: 390, height: 844 } })
+    const jcPage = await jcContext.newPage()
+    jcPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@JFUI-03] ${err.message}`)
+    })
+    try {
+      await jcPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+      await jcPage.waitForTimeout(2400)
+      await jcPage.getByRole('button', { name: '週', exact: true }).click()
+      await jcPage.waitForTimeout(900)
+      await openWeekGroup(jcPage, ja.mealPlan.weekGroupDisplayTitle)
+      await jcPage.waitForTimeout(500)
+      const jcSelect = jcPage.locator('[data-testid="week-layout"]')
+      check(
+        'JFUI-03 週の区切りの選び方がプルダウンになっている',
+        (await jcSelect.count()) === 1 &&
+          (await jcSelect.first().evaluate((el) => el.tagName.toLowerCase())) === 'select',
+        `見つかった数=${await jcSelect.count()}`,
+      )
+      const jcOptions = await jcSelect.first().evaluate((el) =>
+        [...el.querySelectorAll('option')].map((o) => o.textContent?.trim()),
+      )
+      check(
+        'JFUI-03 選べるのは今までと同じ2つ',
+        JSON.stringify(jcOptions) === JSON.stringify(['週区切り', '今日から7日間']),
+        `選べる字=${JSON.stringify(jcOptions)}`,
+      )
+      check(
+        'JFUI-03 プルダウンは指で押せる大きさ(44px以上)',
+        Math.round((await jcSelect.first().boundingBox())?.height ?? 0) >= 44,
+        `高さ=${Math.round((await jcSelect.first().boundingBox())?.height ?? 0)}px`,
+      )
+      // 選ぶと本当に切り替わる（先頭の日付が今日になる）
+      await jcSelect.first().selectOption({ label: '今日から7日間' })
+      await jcPage.waitForTimeout(1000)
+      const jcFirst = await jcPage.locator('section[data-date]').first().getAttribute('data-date')
+      const jcToday = await jcPage.evaluate(() => {
+        const d = new Date()
+        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+      })
+      check(
+        'JFUI-03 「今日から7日間」を選ぶと先頭が今日になる',
+        jcFirst === jcToday,
+        `先頭=${jcFirst} 今日=${jcToday}`,
+      )
+      check(
+        'JFUI-03 選んだ字がプルダウンに残る',
+        (await jcSelect.first().inputValue()) === 'rolling',
+        `値=${await jcSelect.first().inputValue()}`,
+      )
+      // 押して選ぶ形が残っていない（チップの2択に戻っていない）
+      check(
+        'JFUI-03 2つのボタンを押し分ける形は残っていない',
+        (await jcPage.getByRole('button', { name: '週区切り', exact: true }).count()) === 0,
+      )
+    } finally {
+      await jcBrowser.close()
+    }
+  }
+
+  // --- JFASSIGN-04: 「◯食に入れる」のあとに戻せる（便JF・⑥） ---
+  currentCheck = 'JFASSIGN-04'
+  {
+    const jdBrowser = await chromium.launch()
+    const jdContext = await jdBrowser.newContext({ viewport: { width: 390, height: 844 } })
+    const jdPage = await jdContext.newPage()
+    jdPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@JFASSIGN-04] ${err.message}`)
+    })
+    try {
+      await jdPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+      await jdPage.waitForTimeout(2400)
+      // 「レシピ一覧から選択中」に1品だけ置く（生のIndexedDBへ書いたので読み込み直す・禁じ手⑥）
+      await jdPage.evaluate(
+        () =>
+          new Promise((resolve, reject) => {
+            const req = indexedDB.open('uchi-recipe')
+            req.onsuccess = () => {
+              const idb = req.result
+              const g = idb.transaction('recipes', 'readonly').objectStore('recipes').getAll()
+              g.onsuccess = () => {
+                const r = g.result.find((x) => x.title === '肉じゃが')
+                if (!r) {
+                  reject(new Error('肉じゃがが見つからない'))
+                  return
+                }
+                const wtx = idb.transaction('todayList', 'readwrite')
+                wtx.objectStore('todayList').add({ recipeId: r.id, addedAt: Date.now() })
+                wtx.oncomplete = () => resolve(undefined)
+                wtx.onerror = () => reject(wtx.error)
+              }
+              g.onerror = () => reject(g.error)
+            }
+            req.onerror = () => reject(req.error)
+          }),
+      )
+      await jdPage.reload({ waitUntil: 'networkidle' })
+      await jdPage.waitForTimeout(1400)
+      check(
+        'JFASSIGN-04 前提: 「レシピ一覧から選択中」に1品ある',
+        ((await jdPage.locator('[data-testid="day-picked"]').textContent()) ?? '').includes('肉じゃが'),
+      )
+      await jdPage.getByRole('button', { name: '朝食に入れる', exact: true }).first().click()
+      await jdPage.waitForTimeout(900)
+      // 戻したあとは「今週の献立の予定」の節ごと消えるので、無いときも測れる形にする
+      const jdPlanned = async () => {
+        const node = jdPage.locator('[data-testid="day-planned"]')
+        if ((await node.count()) === 0) return false
+        return ((await node.first().textContent()) ?? '').includes('肉じゃが')
+      }
+      check('JFASSIGN-04 「朝食に入れる」で今週の献立の予定に入る', await jdPlanned())
+      const jdUndo = jdPage.getByRole('button', { name: '元に戻す', exact: true })
+      check(
+        'JFASSIGN-04 入れたあとのトーストに「元に戻す」が出る',
+        (await jdUndo.count()) === 1,
+        `元に戻す=${await jdUndo.count()}件`,
+      )
+      await jdUndo.first().click()
+      await jdPage.waitForTimeout(1000)
+      check('JFASSIGN-04 「元に戻す」で今週の献立の予定から消える', (await jdPlanned()) === false)
+      check(
+        'JFASSIGN-04 戻すと「レシピ一覧から選択中」に残る（選んだこと自体は消さない）',
+        ((await jdPage.locator('[data-testid="day-picked"]').textContent()) ?? '').includes('肉じゃが'),
+      )
+    } finally {
+      await jdBrowser.close()
+    }
+  }
+
+  // --- JFBACK-05: Pro案内から飛んだ先の「戻る」で、押す前の画面に帰る（便JF・⑦） ---
+  currentCheck = 'JFBACK-05'
+  {
+    const jeBrowser = await chromium.launch()
+    const jeContext = await jeBrowser.newContext({ viewport: { width: 390, height: 844 } })
+    const jePage = await jeContext.newPage()
+    jePage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@JFBACK-05] ${err.message}`)
+    })
+    try {
+      await jePage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+      await jePage.waitForTimeout(2400)
+      // 献立の「月」→ Pro案内 → 設定 → 戻る で献立へ帰る
+      await jePage.getByRole('button', { name: '月', exact: true }).click()
+      await jePage.waitForTimeout(900)
+      await jePage.getByRole('link', { name: ja.mealPlan.monthProGateLink }).first().click()
+      await jePage.waitForTimeout(1200)
+      check('JFBACK-05 献立のPro案内から設定が開く', jePage.url().includes('#/settings'), `url=${jePage.url()}`)
+      const jeBack = jePage.locator('[data-testid="settings-back"]')
+      check(
+        'JFBACK-05 設定に「献立に戻る」が出る',
+        (await jeBack.count()) === 1 && ((await jeBack.first().textContent()) ?? '').includes('献立'),
+        `戻るボタン=${(await jeBack.count()) === 1 ? await jeBack.first().textContent() : 'なし'}`,
+      )
+      // その設定画面からサンプルデモへ入り、閉じたときに**帰り道を持ったまま**設定へ戻る
+      await jePage.locator('[data-testid="settings-month-demo-link"]').first().click()
+      await jePage.waitForTimeout(1400)
+      check(
+        'JFBACK-05 設定からサンプルデモが開く',
+        jePage.url().includes('#/month-demo'),
+        `url=${jePage.url()}`,
+      )
+      await jePage.locator('[data-testid="month-demo-close"]').first().click()
+      await jePage.waitForTimeout(1200)
+      check(
+        'JFBACK-05 サンプルデモを閉じると設定へ戻る',
+        jePage.url().includes('#/settings'),
+        `url=${jePage.url()}`,
+      )
+      check(
+        'JFBACK-05 戻った設定にも「献立に戻る」が残っている（帰り道を落とさない）',
+        (await jePage.locator('[data-testid="settings-back"]').count()) === 1,
+        `url=${jePage.url()}`,
+      )
+      await jePage.locator('[data-testid="settings-back"]').first().click()
+      await jePage.waitForTimeout(1200)
+      check(
+        'JFBACK-05 「献立に戻る」で押す前の献立へ帰る',
+        jePage.url().includes('#/meal-plan'),
+        `url=${jePage.url()}`,
+      )
+    } finally {
+      await jeBrowser.close()
     }
   }
 

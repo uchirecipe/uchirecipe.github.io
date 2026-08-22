@@ -284,10 +284,14 @@ export default function NutritionBalancePanel({
             </button>
             <Collapse open={notesOpen}>
               <div className="mt-[var(--space-sm)] space-y-0.5 text-xs text-ink-muted">
-                <p>{ja.nutritionBalance.registeredOnlyMealNote}</p>
+                {/* 2026-08-22 便JF・④: 「3食のうち夕食だけを登録している場合は〜」は消した
+                    （オーナー原文「説明し過ぎで邪魔」）。すぐ上に畳まずに出している
+                    「合計に入っているのは、献立に登録したレシピだけです」で足りている */}
                 {/* 除外した材料の分は合計に入っていない＝この数字は下限側であることの明示
-                    （docs/60 §1-3-4: レシピ詳細と同じ方向の但し書きを日・週の合計にも出す） */}
-                <p>{ja.nutrition.excludedDirectionNote}</p>
+                    （docs/60 §1-3-4: レシピ詳細と同じ方向の但し書きを日・週の合計にも出す）。
+                    2026-08-22 便JF・④: この画面には材料の一覧そのものが無いので、
+                    どこで中身を見られるかを添えたほうの文を使う */}
+                <p>{ja.nutrition.excludedDirectionNoteTotal}</p>
                 <p className="font-bold">{ja.nutritionBalance.vegetableCountNote}</p>
                 <p>{ja.nutrition.estimateNote}</p>
                 {/* 成分値の出典と「めやす」の出典は必ず別行にする（docs/60 §1-1。2つの出典を混ぜない）。

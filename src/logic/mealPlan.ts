@@ -416,6 +416,25 @@ export function planToggleDayEdit(current: string | null, date: string): string 
 }
 
 /**
+ * その日の編集モードで何を触るか（2026-08-22 便JF・①）。
+ *
+ * オーナー原文: 「過去の日付の記録も、編集モードで後から記録を追加できるようにして。」
+ * ／同日の訂正: 「編集モード追加で、普段の見え方をシンプルにするのが芯です」
+ *
+ *  ・過ぎた日 … 'record'（作った記録を後から足す）
+ *      過ぎた日のカードは予定を出さず作った記録だけを見せる画面なので（便BS・タスク2）、
+ *      編集モードで触るのも記録のほう。予定の枠は編集モードでも出さない
+ *      ＝「過ぎた日は作った記録だけが残る」という画面ぜんぶの決めごとを崩さない。
+ *  ・今日と先の日 … 'plan'（献立を組む。便IVからの編集モードそのまま）
+ *
+ * 今日は引数で受け取る＝曜日・月替わりの前提を持たない（CLAUDE.md 禁じ手①）。
+ */
+export type DayEditKind = 'plan' | 'record'
+export function planDayEditKind(date: string, today: string): DayEditKind {
+  return isPastDate(date, today) ? 'record' : 'plan'
+}
+
+/**
  * 週タブの通常表示に並べる1品（2026-08-22 便IV）。
  *
  * オーナー原文: 「週献立は、通常表示はレシピカード（レシピ名と画像のみ）のみ

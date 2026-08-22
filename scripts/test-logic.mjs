@@ -25942,9 +25942,15 @@ Aみりん 大さじ1
     // --- 献立の「週」 ---
     // 表示起点の切替は「見え方の好み」で、既定（週区切り）のままでも週の中身は全部読める。
     // 「表示のしかた」の見出しの横は表示する食事のチップで埋まっており、
-    // そこへ同じ形のチップをもう2つ足すと、2組のチップが並んでどちらがどちらか読めなくなる
+    // そこへ選び方をもう1つ出すと、同じ場所に2種類の選び方が並んでどちらがどちらか読めなくなる。
+    // 2026-08-22 便JF・⑤: 2つのチップからプルダウンにした（欄の名前 weekLayoutLabel が増えた）
+    'ja.mealPlan.weekLayoutLabel': '表示起点の切替は見え方の好み。既定のままでも週の中身は全部読める',
     'ja.mealPlan.weekLayoutCalendar': '表示起点の切替は見え方の好み。既定のままでも週の中身は全部読める',
     'ja.mealPlan.weekLayoutRolling': '表示起点の切替は見え方の好み。既定のままでも週の中身は全部読める',
+    // 2026-08-22 便JF・①: 過ぎた日に作った記録を後から足す入口。曜日カードを開いて
+    // 「編集」を押した先にある＝畳んでいるカードから触れないのは「畳む」機能そのもの。
+    // 押す入口（曜日カードの「編集」）は畳んでいない日には必ず見出しの行に出ている
+    'ja.mealPlan.pastRecordAdd': '曜日カードを開いて「編集」を押した先の操作。畳んだ日の中身が見えないのは畳む機能そのもの',
     // 2026-08-22 便IV（オーナー原文「「表示のしかた」の折りたたんだ表示には、空にする項目を
     // 入れないで」）: 週の献立をまとめて消す操作は**しまう側**。毎日押すものではなく、
     // 訂正の原文が名指しした「初心者が使わないような機能」に当たる。
@@ -27378,6 +27384,180 @@ Aみりん 大さじ1
     eq(
       'JA-6 設定画面が、入らなかった品を受けて聞いてから入れている',
       /buildDuplicateTitleConfirm[\s\S]{0,400}importDuplicateTitleRecipes/.test(settingsSrc),
+      true,
+    )
+  }
+}
+
+
+// ==========================================================================================
+// JF-1〜JF-5: オーナーの書き溜め7件（2026-08-22 便JF）
+// 献立の週タブ（過ぎた日の編集モード・チェックマーク・過ぎた日の面の色・表示のしかたのプルダウン）、
+// 記録の栄養の文言、日タブの「◯食に入れる」の取り消し、Pro案内からの帰り道。
+// ==========================================================================================
+{
+  const jfRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
+  const jfRead = (rel) => readFileSync(path.join(jfRoot, rel), 'utf-8')
+  const jfMealPlanSrc = jfRead('src/pages/MealPlanPage.tsx')
+
+  // --- JF-1: 過ぎた日の編集モードは「作った記録を足す」（①） ---
+  {
+    const mealPlanLogicJF = await import('../src/logic/mealPlan.ts')
+    const planDayEditKind = mealPlanLogicJF.planDayEditKind
+    eq('JF-1 前提: planDayEditKind がある（無ければ以下は測れていない）', typeof planDayEditKind, 'function')
+    if (typeof planDayEditKind === 'function') {
+      // 日付は「今日」を引数で渡す＝曜日・月替わりの前提を置かない（禁じ手①）
+      eq('JF-1 過ぎた日の編集は「作った記録」を足す編集', planDayEditKind('2026-08-21', '2026-08-22'), 'record')
+      eq('JF-1 今日の編集は献立の編集', planDayEditKind('2026-08-22', '2026-08-22'), 'plan')
+      eq('JF-1 先の日の編集は献立の編集', planDayEditKind('2026-08-23', '2026-08-22'), 'plan')
+      // 月替わり・年またぎでも同じ（文字列比較なので桁が繰り上がっても崩れない）
+      eq('JF-1 月をまたいだ過ぎた日も記録の編集', planDayEditKind('2026-07-31', '2026-08-01'), 'record')
+      eq('JF-1 年をまたいだ過ぎた日も記録の編集', planDayEditKind('2025-12-31', '2026-01-01'), 'record')
+    }
+    // 記録を足す入口は**編集モードの中だけ**に置く（司令部の訂正: 通常表示は今までどおり）。
+    // 画面のどこに置いたかではなく「編集モードの分岐の中にあるか」で見る
+    const jfAddIdx = jfMealPlanSrc.indexOf('data-testid="past-record-add"')
+    eq('JF-1 過ぎた日に「作った記録を追加」の入口がある', jfAddIdx >= 0, true)
+    if (jfAddIdx >= 0) {
+      // その入口を出している式が dayEditing（編集モード）に掛かっていること。
+      // 直前2000字の中に dayEditing が出ていなければ、通常表示に置かれている疑いがある
+      const jfBefore = jfMealPlanSrc.slice(Math.max(0, jfAddIdx - 2000), jfAddIdx)
+      eq('JF-1 その入口は編集モードの中にある（通常表示には出さない）', /dayEditing/.test(jfBefore), true)
+    }
+  }
+
+  // --- JF-2: 記録の栄養の文言3つ（④） ---
+  {
+    eq(
+      'JF-2 過ぎた日の数え方の1行は「作った記録から計算しています」',
+      ja.nutritionBalance.basisNoteActual,
+      '作った記録から計算しています',
+    )
+    eq(
+      'JF-2 「3食のうち夕食だけを〜」の説明は無くす（説明し過ぎ）',
+      Object.hasOwn(ja.nutritionBalance, 'registeredOnlyMealNote'),
+      false,
+    )
+    const jfPanelSrc = jfRead('src/components/NutritionBalancePanel.tsx')
+    eq(
+      'JF-2 栄養パネルからも「3食のうち〜」を出していない',
+      /registeredOnlyMealNote/.test(jfPanelSrc),
+      false,
+    )
+    // 「計算に含めていない材料」は画面に出ている名前。地の文と混ざって主語が消えていたので
+    // 鉤括弧で囲って主語にする（司令部裁定・直しの芯）
+    eq(
+      'JF-2 除外の但し書きは「計算に含めていない材料」を鉤括弧で主語にする',
+      ja.nutrition.excludedDirectionNote.startsWith('「計算に含めていない材料」は'),
+      true,
+    )
+    eq(
+      'JF-2 献立の栄養では、どこで中身を見られるかを添える',
+      typeof ja.nutrition.excludedDirectionNoteTotal === 'string' &&
+        ja.nutrition.excludedDirectionNoteTotal.startsWith('「計算に含めていない材料（') &&
+        ja.nutrition.excludedDirectionNoteTotal.includes('）」は'),
+      true,
+    )
+    eq(
+      'JF-2 献立の栄養パネルは、添え書き付きのほうを使う',
+      /excludedDirectionNoteTotal/.test(jfPanelSrc),
+      true,
+    )
+    // レシピ詳細の栄養は、一覧のすぐ下に出るので添え書きの要らない側を使ったまま
+    const jfTeaserSrc = jfRead('src/components/NutritionTeaser.tsx')
+    eq(
+      'JF-2 レシピ詳細は添え書きの無いほうを使う（一覧のすぐ下なので行き先を書かない）',
+      /excludedDirectionNote\b/.test(jfTeaserSrc) && !/excludedDirectionNoteTotal/.test(jfTeaserSrc),
+      true,
+    )
+  }
+
+  // --- JF-3: Pro案内からの帰り道（⑦） ---
+  {
+    // レシピの登録・編集の画面から飛んだときも、その画面の名前で帰り道を出す。
+    // /recipes/ の先頭一致に巻き込まれて「レシピに戻る」になっていないこと
+    const jfNew = resolveBackTarget('/recipes/new')
+    const jfEdit = resolveBackTarget('/recipes/12/edit')
+    eq('JF-3 レシピの登録画面へ帰れる', jfNew?.label, 'レシピの登録に戻る')
+    eq('JF-3 レシピの登録画面の戻り先は入力していた画面そのもの', jfNew?.to, '/recipes/new')
+    eq('JF-3 レシピの編集画面へ帰れる', jfEdit?.label, 'レシピの編集に戻る')
+    eq('JF-3 レシピ詳細の帰り道は今までどおり', resolveBackTarget('/recipes/12')?.label, 'レシピに戻る')
+    eq('JF-3 レシピ一覧の帰り道は今までどおり', resolveBackTarget('/recipes')?.label, 'レシピ一覧に戻る')
+    // 案内の側: いま出ている画面のパスを載せる（決め打ちの文字列を書かない）
+    const jfFormSrc = jfRead('src/pages/RecipeFormPage.tsx')
+    eq(
+      'JF-3 登録上限のPro案内が、いまの画面を戻り先に載せている',
+      /settingsLinkWithBack\('\/settings\?section=pro', location\.pathname \+ location\.search\)/.test(
+        jfFormSrc,
+      ),
+      true,
+    )
+    eq(
+      'JF-3 登録上限のPro案内に、戻り先の無いリンクが残っていない',
+      /to="\/settings\?section=pro"/.test(jfFormSrc),
+      false,
+    )
+    const jfSettingsSrc = jfRead('src/pages/SettingsPage.tsx')
+    eq(
+      'JF-3 設定のサンプルデモが、決め打ちでなくいまの画面を戻り先に載せている',
+      !/back=%2Fsettings%3Fsection%3Dpro/.test(jfSettingsSrc) &&
+        /month-demo\?back=\$\{encodeURIComponent\(location\.pathname \+ location\.search\)\}/.test(
+          jfSettingsSrc,
+        ),
+      true,
+    )
+    eq(
+      'JF-3 献立のサンプルデモも決め打ちをやめている',
+      !/to="\/month-demo\?back=\/meal-plan"/.test(jfMealPlanSrc),
+      true,
+    )
+    eq(
+      'JF-3 予算の設定案内にも帰り道を付けている',
+      /settingsLinkWithBack\(\s*'\/settings\?section=budget'/.test(jfMealPlanSrc),
+      true,
+    )
+    eq(
+      'JF-3 予算の設定案内に、戻り先の無いリンクが残っていない',
+      /to="\/settings\?section=budget"/.test(jfMealPlanSrc),
+      false,
+    )
+  }
+
+  // --- JF-4: 表示のしかたはプルダウン（⑤） ---
+  {
+    eq(
+      'JF-4 プルダウンの名前がある',
+      typeof ja.mealPlan.weekLayoutLabel === 'string' && ja.mealPlan.weekLayoutLabel.length > 0,
+      true,
+    )
+    eq(
+      'JF-4 週の表示のしかたがプルダウンになっている',
+      /<select[\s\S]{0,400}data-testid="week-layout"[\s\S]{0,400}<option/.test(jfMealPlanSrc),
+      true,
+    )
+    eq(
+      'JF-4 選べる字は今までと同じ2つ',
+      [ja.mealPlan.weekLayoutCalendar, ja.mealPlan.weekLayoutRolling],
+      ['週区切り', '今日から7日間'],
+    )
+  }
+
+  // --- JF-5: 「◯食に入れる」の取り消し（⑥） ---
+  {
+    eq(
+      'JF-5 「◯食に入れる」の取り消しの控えがある',
+      /setUndoAssign\(/.test(jfMealPlanSrc),
+      true,
+    )
+    eq(
+      'JF-5 その取り消しがトーストの「元に戻す」につながっている',
+      /undoAssignActive/.test(jfMealPlanSrc) && /runUndoAssign/.test(jfMealPlanSrc),
+      true,
+    )
+    eq(
+      'JF-5 取り消したことを知らせる文言がある',
+      typeof ja.mealPlan.planMismatchAssignUndoneToast === 'string' &&
+        ja.mealPlan.planMismatchAssignUndoneToast.includes('{title}'),
       true,
     )
   }

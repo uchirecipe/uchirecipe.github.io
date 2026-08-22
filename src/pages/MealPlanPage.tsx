@@ -30,7 +30,7 @@ import {
   Printer,
   ImageDown,
 } from 'lucide-react'
-import { listRecipes } from '../db/recipes'
+import { listRecipes, addCookedLog, removeOneTapCookedLog } from '../db/recipes'
 import { useSettings, updateSettings } from '../db/settings'
 import { usePriceEntries } from '../db/prices'
 import { usePantryItems } from '../db/pantry'
@@ -117,6 +117,7 @@ import {
   planClearMealSlots,
   planShowWeekLock,
   planToggleDayEdit,
+  planDayEditKind,
   planViewRows,
   WEEK_GROUP_DEFAULT_OPEN,
   PLAN_QUICK_MINUTES_OPTIONS,
@@ -132,6 +133,8 @@ import type {
 // 食数の範囲ガード(1〜20)はレシピの人数分と同じものを使う(2026-08-03 便DJ)。
 // 実効食数・既定の食数の判定も同じ場所に集約してある(2026-08-03 便DK)
 import { clampServings, effectiveMealServings, defaultMealServings } from '../logic/servings'
+// 同じ日の同じ料理に二重の記録を付けない歯止め（2026-08-22 便JF・①。「まとめて作った！」と同じ）
+import { hasOneTapCookedLog } from '../logic/cooked'
 // 買い物リストの範囲えらび(2026-08-08 便EA)。集計に入れる枠の判定と、範囲の言い表しは
 // logic/shopping.ts の純関数に置いてある(scripts/test-logic.mjs で固定)
 import {
@@ -603,7 +606,9 @@ function CookedLogCard({
   const openDetailAria = ja.cookedDetail.openAria.replace('{title}', recipe.title)
   const asButton = !readOnly && onOpenDetail != null && detailAs === 'card'
   return (
-    <li>
+    // 検査用の目印（2026-08-22 便JF）。その日の記録が何件並んでいるかを、
+    // クラス名や入れ子の段数ではなくこの目印で数える
+    <li data-testid="cooked-log-card">
       <RecipeCard
         recipe={recipe}
         density="small"
@@ -3187,9 +3192,16 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
     entryId?: number
     extraLocalId?: string
   } | null>(null)
-  // ピッカーは週の枠(pickerTarget)への割り当て専用。空状態の「今日の献立を探す」は2026-07-24
+  /**
+   * 過ぎた日の編集モードで開く「作った記録を追加」のレシピ選び（2026-08-22 便JF・①）。
+   * 献立の枠へ入れる pickerTarget とは別に持つ＝枠（食事・役割）の無い選び方だから。
+   * 出す一覧・絞り込みはまったく同じものを使い回す（選ぶ画面をアプリの中で2つに割らない）。
+   */
+  const [recordPickDate, setRecordPickDate] = useState<string | null>(null)
+  // ピッカーは週の枠(pickerTarget)への割り当てと、過ぎた日の記録(recordPickDate)の2つで使う。
+  // 空状態の「今日の献立を探す」は2026-07-24
   // 便BN・タスク1でレシピ一覧タブへの遷移に変更したため、旧「今日の献立ピッカー」モードは廃止した
-  const pickerOpen = pickerTarget != null
+  const pickerOpen = pickerTarget != null || recordPickDate != null
   /**
    * 「おまかせで献立を組む」でいま組んである献立のレシピID（2026-08-17 便HI）。
    * **まだ今日の献立には入っていない**＝押すたびにここが入れ替わり、見比べられる。
@@ -3327,6 +3339,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
 
   const closePicker = () => {
     setPickerTarget(null)
+    setRecordPickDate(null)
   }
 
   const openPicker = (
@@ -3343,6 +3356,13 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
   }
 
   const pickRecipe = async (recipeId: number) => {
+    // 過ぎた日の「作った記録を追加」から開いたとき（2026-08-22 便JF・①）
+    if (recordPickDate) {
+      const date = recordPickDate
+      setRecordPickDate(null)
+      await addPastCookedRecord(date, recipeId)
+      return
+    }
     if (!pickerTarget) return
     const { date, slot, role, entryId, extraLocalId } = pickerTarget
     if (entryId != null) {
@@ -3365,6 +3385,63 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
       if (extraLocalId) removeExtraRowState(date, slot, extraLocalId)
     }
     setPickerTarget(null)
+  }
+
+  /**
+   * 過ぎた日に「作った記録」を後から足す（2026-08-22 便JF・①）。
+   *
+   * 記録する食数は、ボタン1回の「作った！」とまったく同じ決め方
+   * （logic/servings.ts effectiveMealServings ＝ 設定「食数の設定」の人数、
+   * 無ければレシピに登録されている人数分。2026-08-10 便FF）。
+   *
+   * **食材の在庫には触らない**（設定「作った！で在庫を1段階下げる」がONでも下げない）。
+   * 在庫は「いま家にある物」の記録なので、何日も前に作った分をいま引くと、
+   * そのあいだに買い足した分まで減らしてしまう。設定がONの人には、押す前に読める場所で
+   * そう書いておく（pastRecordPantryNote・規約F）。
+   *
+   * 同じ日に同じ料理の「ボタン1回の記録」がもう付いているときは足さない
+   * （「まとめて作った！」と同じ歯止め＝logic/cooked.ts hasOneTapCookedLog）。
+   */
+  const fillRecordText = (text: string, date: string, title: string) =>
+    text
+      .replace('{m}', String(Number(date.slice(5, 7))))
+      .replace('{d}', String(Number(date.slice(8, 10))))
+      .replace('{title}', title)
+
+  const addPastCookedRecord = async (date: string, recipeId: number) => {
+    const recipe = recipeById.get(recipeId)
+    if (!recipe) return
+    if (hasOneTapCookedLog(recipe.cookedLogs, date)) {
+      setMessage(fillRecordText(ja.mealPlan.pastRecordAlready, date, recipe.title))
+      return
+    }
+    await addCookedLog(recipeId, {
+      date,
+      servings: effectiveMealServings(undefined, householdServings, recipe.servings),
+    })
+    const toast = fillRecordText(ja.mealPlan.pastRecordAddedToast, date, recipe.title)
+    setMessage(toast)
+    setUndoRecord({ recipeId, date, title: recipe.title, message: toast })
+  }
+
+  /**
+   * 足した記録の取り消し（2026-08-22 便JF・①）。ほかの取り消しと同じ作法で、
+   * 出したトーストの文言まで一緒に持つ（別の操作でトーストが差し替わったら一緒に消える）。
+   */
+  const [undoRecord, setUndoRecord] = useState<{
+    recipeId: number
+    date: string
+    title: string
+    message: string
+  } | null>(null)
+  const undoRecordActive = undoRecord != null && undoRecord.message === message
+  const runUndoRecord = async () => {
+    if (!undoRecord) return
+    await removeOneTapCookedLog(undoRecord.recipeId, undoRecord.date)
+    setUndoRecord(null)
+    setMessage(
+      fillRecordText(ja.mealPlan.pastRecordUndoneToast, undoRecord.date, undoRecord.title),
+    )
   }
 
   /**
@@ -3820,15 +3897,62 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
     // 日タブの「◯食に入れる」も、鍵の掛かった食事には入れない(2026-08-08 便EA)
     if (blockedByLock(today, slot, 'add')) return
     const role: MealRole = isMainDish(recipe) ? 'main' : 'side'
+    // 入れる前のその食事の姿を控える（2026-08-22 便JF・⑥）。
+    // 主菜として入れると既にあった主菜を置き換えることがあるので、「足した行を消す」だけでは
+    // 押す前に戻らない。id とレシピの組を控えて、戻すときに両方（消す・戻す）を行う
+    const before = (todayEntries ?? [])
+      .filter((e) => e.slot === slot && e.id != null)
+      .map((e) => ({ id: e.id!, recipeId: e.recipeId }))
     const result = await assignMealEntryByRole(today, slot, recipe.id!, role)
+    const toast = (result === 'duplicate'
+      ? ja.mealPlan.planMismatchAlready
+      : ja.mealPlan.planMismatchAssigned
+    )
+      .replace('{slot}', ja.mealPlan.slot[slot])
+      .replace('{role}', ja.mealPlan.role[role])
+      .replace('{title}', recipe.title)
+    setMessage(toast)
+    // すでに入っていたとき（duplicate）は何も変えていないので、戻すものが無い
+    if (result !== 'duplicate') {
+      setUndoAssign({ slot, before, title: recipe.title, message: toast })
+    }
+  }
+
+  /**
+   * 「◯食に入れる」の取り消し（2026-08-22 便JF・⑥・オーナー原文
+   * 「レシピ一覧から選択中のレシピを「朝食に入れる」などしたあとに戻るトーストがでない。」）。
+   *
+   * 「作った！」（undoCooked）・「レシピを選び直した」（undoPick）・「×で外した」（undoRemove）・
+   * 「サイコロ」（undoSuggest）とまったく同じ作法で、出したトーストの文言まで一緒に持つ
+   * ＝別の操作でトーストが差し替わったら、この取り消しも一緒に消える。
+   *
+   * 戻すのは**今週の献立の予定に入れた分だけ**。「レシピ一覧から選択中」の行（今日の献立）は
+   * 触らない＝押す前とまったく同じ「選んであるが、まだどの食事にも入れていない」状態に戻る。
+   */
+  const [undoAssign, setUndoAssign] = useState<{
+    slot: MealSlot
+    before: { id: number; recipeId: number }[]
+    title: string
+    message: string
+  } | null>(null)
+  const undoAssignActive = undoAssign != null && undoAssign.message === message
+  const runUndoAssign = async () => {
+    if (!undoAssign) return
+    const { slot, before } = undoAssign
+    const beforeById = new Map(before.map((e) => [e.id, e.recipeId]))
+    const current = (todayEntries ?? []).filter((e) => e.slot === slot && e.id != null)
+    for (const entry of current) {
+      const previous = beforeById.get(entry.id!)
+      // 押す前に無かった行＝この操作で足した行なので外す
+      if (previous == null) await removeMealEntry(entry.id!)
+      // 押す前からあった行のレシピが変わっていた＝置き換わったので元の料理へ戻す
+      else if (previous !== entry.recipeId) await updateMealEntryRecipe(entry.id!, previous)
+    }
+    setUndoAssign(null)
     setMessage(
-      (result === 'duplicate'
-        ? ja.mealPlan.planMismatchAlready
-        : ja.mealPlan.planMismatchAssigned
-      )
+      ja.mealPlan.planMismatchAssignUndoneToast
         .replace('{slot}', ja.mealPlan.slot[slot])
-        .replace('{role}', ja.mealPlan.role[role])
-        .replace('{title}', recipe.title),
+        .replace('{title}', undoAssign.title),
     )
   }
 
@@ -6516,9 +6640,16 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
           setUndoPick(null)
           setUndoRemove(null)
           setUndoSuggest(null)
+          setUndoAssign(null)
+          setUndoRecord(null)
         }}
         actionLabel={
-          undoCookedActive || undoPickActive || undoRemoveActive || undoSuggestActive
+          undoCookedActive ||
+          undoPickActive ||
+          undoRemoveActive ||
+          undoSuggestActive ||
+          undoAssignActive ||
+          undoRecordActive
             ? ja.common.undo
             : undefined
         }
@@ -6531,7 +6662,11 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                 ? () => void runUndoRemove()
                 : undoSuggestActive
                   ? () => void runUndoSuggest()
-                  : undefined
+                  : undoAssignActive
+                    ? () => void runUndoAssign()
+                    : undoRecordActive
+                      ? () => void runUndoRecord()
+                      : undefined
         }
       />
 
@@ -7574,7 +7709,10 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                 {/* サンプルデモ(2026-08-02 便DC)。1回だけのお試しとは別枠で、記録がまだ少ない人も
                     お試しを使い切った人も、見本の1か月分が入った月の画面をここから何度でも開ける */}
                 <Link
-                  to="/month-demo?back=/meal-plan"
+                  /* 2026-08-22 便JF・⑦: 戻り先を「/meal-plan」で決め打ちにしていたので、
+                     見ていた月やタブの状態を落として献立の初期表示へ帰していた。
+                     すぐ下のPro案内と同じく、いま出ている画面のパスをそのまま載せる */
+                  to={`/month-demo?back=${encodeURIComponent(location.pathname + location.search)}`}
                   data-testid="month-demo-link"
                   className="mt-[var(--space-sm)] inline-flex items-center justify-center rounded-md border border-accent bg-surface px-4 py-3 font-bold text-accent-ink shadow-sm"
                 >
@@ -7627,29 +7765,25 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
         <Collapse open={weekGroupOpen.display}>
           <>
             {/* 週の表示起点の切替(2026-07-24 便BH-3・タスク3): 従来の週区切り⇄今日を先頭に7日間。
-                既定は週区切り・選択は記憶する */}
-            <div className="mt-[var(--space-sm)] flex gap-[var(--space-sm)]">
-              <button
-                type="button"
-                onClick={() => setWeekLayout(false)}
-                aria-pressed={!rollingWeek}
-                className={chipClass(!rollingWeek)}
-                style={chipStyle(!rollingWeek)}
+                既定は週区切り・選択は記憶する。
+                2026-08-22 便JF・⑤(オーナー原文「表示のしかたの、週区切りと今日から7日間は、
+                プルダウン」): 押し分ける2つのチップをやめてプルダウンにした。
+                同じ節の中に「表示する食事」「まとめて空にする」の**押して選ぶチップ**が並んでおり、
+                そちらは複数選べる（何個でも押せる）のに、この2つは片方しか選べない。
+                同じ形で並べていたので、押してみるまで違いが分からなかった。
+                見た目は「献立を提案」のプルダウン(select-control)と同じものを使う */}
+            <label className="mt-[var(--space-sm)] block">
+              <span className="text-sm font-bold text-ink-muted">{ja.mealPlan.weekLayoutLabel}</span>
+              <select
+                data-testid="week-layout"
+                value={rollingWeek ? 'rolling' : 'calendar'}
+                onChange={(e) => setWeekLayout(e.target.value === 'rolling')}
+                className="select-control mt-1 w-full"
               >
-                <ChipCheck on={!rollingWeek} />
-                {ja.mealPlan.weekLayoutCalendar}
-              </button>
-              <button
-                type="button"
-                onClick={() => setWeekLayout(true)}
-                aria-pressed={rollingWeek}
-                className={chipClass(rollingWeek)}
-                style={chipStyle(rollingWeek)}
-              >
-                <ChipCheck on={rollingWeek} />
-                {ja.mealPlan.weekLayoutRolling}
-              </button>
-            </div>
+                <option value="calendar">{ja.mealPlan.weekLayoutCalendar}</option>
+                <option value="rolling">{ja.mealPlan.weekLayoutRolling}</option>
+              </select>
+            </label>
             {/* 2つの表示の違いを一言で示す(2026-07-29 便CD/MP-14)。名前だけでは意味が分からず
                 3体が切替自体を触っていなかった */}
             <p className="mt-1 text-xs text-ink-muted">{ja.mealPlan.weekLayoutHint}</p>
@@ -7963,12 +8097,16 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
               : null
           const dayLocked = isDayMealLocked(lockedKeys, date)
           /**
-           * この日を編集モードで出すか（2026-08-22 便IV）。
-           * 過ぎた日は予定そのものを出さない画面なので、編集モードにも入れない
-           * （切り替えボタンも出さない＝押しても何も変わらないボタンを置かない）。
+           * この日の編集モードで何を触るか（2026-08-22 便IV → 便JF・①で過ぎた日にも広げた）。
+           *  ・今日と先の日 … 'plan'  … 献立を組む（便IVからの編集モードそのまま）
+           *  ・過ぎた日 …… 'record' … 作った記録を後から足す
+           * オーナー原文（便JF・①）「過去の日付の記録も、編集モードで後から記録を追加できるように
+           * して。」／同日の訂正「編集モード追加で、普段の見え方をシンプルにするのが芯です」。
+           * 足す入口は**編集モードの中だけ**に置く＝過ぎた日の普段の見え方は今までどおり
+           * （作った記録のカードが並ぶだけ）。
            */
-          const dayEditable = !isPastDate(date, today)
-          const dayEditing = dayEditable && weekEditDate === date
+          const dayEditKind = planDayEditKind(date, today)
+          const dayEditing = weekEditDate === date
           return (
           <section
             key={date}
@@ -7984,6 +8122,22 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                 ? 'border-2 border-accent bg-surface'
                 : 'border border-edge bg-surface'
             }`}
+            /* 2026-08-22 便JF・③（オーナー原文「過去の日付は、１段階色を変えるとわかりやすいかも。
+               押せないように見えないように注意。」）。
+               直す前は7日とも同じカード面（実測 rgb(255,253,248)＝--surface）で、過ぎた日か
+               これからの日かは日付を読むまで分からなかった。
+               ・変えるのは**面の色だけ**（司令部裁定）。文字・アイコン・枠の色はそのまま
+                 ＝押せるものは今までと同じ濃さで読める（「押せないように見えない」）
+               ・新しい色は増やさず、既にある文字色（--text-muted）をカード面（--surface）へ
+                 6%だけ混ぜる。5テーマとも自動で追従する（--slot-bg-* と同じ手）
+               ・className の bg-surface は**残す**。カード面の上での文字用アクセントの
+                 切り替え（index.css「文字用アクセントの面別スコープ」）がこのクラスで効いており、
+                 外すとブラウンだけリンクの色が変わってしまう */
+            style={
+              dayEditKind === 'record'
+                ? { background: 'color-mix(in oklab, var(--text-muted) 6%, var(--surface))' }
+                : undefined
+            }
           >
             {/* 2026-08-08 便DX(オーナー指示「献立日付の右」): 日付の行に日ごとのロックを置く。
                 折りたたみボタンの入れ子にはできないので、見出しの行を flex にして
@@ -8041,7 +8195,17 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                       data-mark="cooked"
                       className="inline-flex shrink-0 items-center"
                     >
-                      <CheckCircle2 size={14} className="text-accent-ink" aria-hidden />
+                      {/* 2026-08-22 便JF・②（オーナー原文「記録がある日のチェックマークを
+                          もう少しちょこっっとだけ目立つようにして。」）: 実測14×14px・線の太さ2
+                          （lucideの既定）だったものを、16×16px・線の太さ2.5にする。
+                          色は変えない＝面とのコントラスト比（ライトで5.73:1）はそのまま
+                          ＝「一段階だけ」の範囲に収める */}
+                      <CheckCircle2
+                        size={16}
+                        strokeWidth={2.5}
+                        className="text-accent-ink"
+                        aria-hidden
+                      />
                       <span className="sr-only">{ja.mealPlan.weekDayCookedMark}</span>
                     </span>
                   )}
@@ -8063,18 +8227,22 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
               {/* 2026-08-22 便IZ: 「編集／完了」と「鍵」を1つの組にする。
                   狭い画面で折り返すとき、2つ一緒に次の行へ移って右に揃う
                   （片方だけが次の行の左端に取り残される、をしない） */}
-              {((dayEditable && !dayCollapsed) || showWeekLock) && (
+              {(!dayCollapsed || showWeekLock) && (
               <span className="ml-auto flex shrink-0 items-center gap-3">
-              {dayEditable && !dayCollapsed && (
+              {!dayCollapsed && (
                 <button
                   type="button"
                   data-testid="week-day-edit"
                   data-date={date}
                   onClick={() => setWeekEditDate((prev) => planToggleDayEdit(prev, date))}
                   aria-pressed={dayEditing}
+                  /* 読み上げの名前は、その日の編集モードで触るものを言う（便JF・①）。
+                     過ぎた日は献立ではなく作った記録を触るので、同じ「編集」でも名乗りを変える */
                   aria-label={(dayEditing
                     ? ja.mealPlan.weekDayEditOffAria
-                    : ja.mealPlan.weekDayEditOnAria
+                    : dayEditKind === 'record'
+                      ? ja.mealPlan.weekDayRecordEditOnAria
+                      : ja.mealPlan.weekDayEditOnAria
                   ).replace('{date}', date.replaceAll('-', '/'))}
                   className={`inline-flex min-h-11 shrink-0 items-center gap-1 rounded-sm border px-3 py-2 text-sm font-bold ${
                     dayEditing
@@ -8134,7 +8302,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                 切り替えは見出しの行の「編集」で、一度に1日だけ（他の日は通常表示のまま）。
                 通常表示で献立が1品も無い日は、押す場所の名前を1行で書く
                 （空き枠を出さないので、書かないと行き止まりになる） */}
-            {dayEditable && (
+            {dayEditKind === 'plan' && (
               <div className="mt-[var(--space-sm)] space-y-[var(--space-sm)]">
                 {dayEditing ? (
                   visibleSlots.map((slot) => renderSlotEditor(date, slot))
@@ -8158,6 +8326,36 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                 その日の「作った記録」(cookedLogs日付一致)を写真付きの薄いカードで表示する。
                 達成しなかった予定は上のグリッドごと消えているので、ここが過去日の主役になる。
                 記録が無い過去日は控えめな空案内だけ出す */}
+            {/* 過ぎた日の編集モードだけに出す「作った記録を追加」（2026-08-22 便JF・①）。
+                通常表示には出さない＝過ぎた日のカードは今までどおり
+                「作った記録が並ぶだけ」の見え方を保つ（司令部の訂正・オーナー原文
+                「編集モード追加で、普段の見え方をシンプルにするのが芯です」）。
+                押すと献立の枠と同じレシピ一覧が開き、選んだ料理をその日の記録に足す。
+                献立の枠（朝食・昼食・夕食）は編集モードでも出さない＝
+                「過ぎた日は作った記録だけが残る」という画面ぜんぶの決めごとを崩さない */}
+            {dayEditKind === 'record' && dayEditing && (
+              <div className="mt-[var(--space-sm)]">
+                <button
+                  type="button"
+                  data-testid="past-record-add"
+                  data-date={date}
+                  onClick={() => {
+                    setRecordPickDate(date)
+                    setPickerQuery('')
+                  }}
+                  className="flex min-h-11 w-full items-center justify-center gap-2 rounded-md border border-accent bg-surface py-3 font-bold text-accent-ink shadow-sm"
+                >
+                  <Plus size={18} aria-hidden />
+                  {ja.mealPlan.pastRecordAdd}
+                </button>
+                {/* 在庫を下げる設定がONの人にだけ、押す前に読める場所で違いを書く（規約F） */}
+                {settings?.cookedReflectPantry && (
+                  <p data-testid="past-record-pantry-note" className="mt-1 text-xs text-ink-muted">
+                    {ja.mealPlan.pastRecordPantryNote}
+                  </p>
+                )}
+              </div>
+            )}
             {isPastDate(date, today) &&
               (shownLogsOf(date).length > 0 ? (
                 <div className="mt-[var(--space-sm)]">
@@ -8338,7 +8536,12 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                 <div className="mt-1">
                   <p className="text-sm text-ink-muted">{ja.mealPlan.budgetNotSet}</p>
                   <Link
-                    to="/settings?section=budget"
+                    /* 2026-08-22 便JF・⑦: 飛んだ先の設定に帰り道が無く、下のタブで別の画面へ
+                       移るしかなかった（Pro案内と同じ作りへそろえる） */
+                    to={settingsLinkWithBack(
+                      '/settings?section=budget',
+                      location.pathname + location.search,
+                    )}
                     className="mt-1 inline-block rounded-sm border border-edge bg-app px-3 py-2 text-sm font-bold text-accent-ink shadow-sm"
                   >
                     {ja.mealPlan.budgetSetLink}

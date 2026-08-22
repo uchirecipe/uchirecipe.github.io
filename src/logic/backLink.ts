@@ -22,6 +22,11 @@ import { ja } from '../i18n/ja'
  */
 const BACK_TARGETS: { match: (pathname: string) => boolean; label: () => string }[] = [
   // 長いパスから先に判定する（/recipes より /recipes/ が先）
+  // 2026-08-22 便JF・⑦: レシピの登録・編集の画面は /recipes/new・/recipes/:id/edit なので、
+  // /recipes/ の先頭一致より**先に**判定する。後ろに置くと「レシピに戻る」と名乗って
+  // レシピ詳細へ帰るように読めるが、実際に帰るのは書きかけの入力画面
+  { match: (p) => p === '/recipes/new', label: () => ja.backLink.recipeNew },
+  { match: (p) => p.startsWith('/recipes/') && p.endsWith('/edit'), label: () => ja.backLink.recipeEdit },
   { match: (p) => p.startsWith('/recipes/'), label: () => ja.backLink.recipeDetail },
   { match: (p) => p.startsWith('/recipes'), label: () => ja.backLink.recipes },
   { match: (p) => p.startsWith('/meal-plan'), label: () => ja.backLink.mealPlan },
