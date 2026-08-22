@@ -109,3 +109,26 @@ export function collectUniqueTerms(...texts: (string | undefined)[]): CookingTer
   }
   return result
 }
+
+/**
+ * 用語の説明文を「最初の一文」と「その下に並べる箇条書き」に分ける（2026-08-22 便JJ）。
+ *
+ * 用語辞書（src/data/cookingTerms.ts）は、箇条書きの区切りに「｜」を使っている。
+ * オーナー実機報告（原文）:
+ *   「電子レンジとか、調理中モードでの説明が、箇条書きの内容なのに箇条書きの改行が
+ *     されていない。読みづらい。文字の塊にしか見えないので、私がユーザーなら絶対読まない。」
+ * 実測（2026-08-22）: 用語の窓（components/TermPopover）は「｜」を改行に直してから
+ * 箇条書きとして描いていたのに、調理中モード（components/FocusMode）は説明文を
+ * そのまま1行で描いていた＝画面によって同じ説明の読みやすさが違っていた。
+ * 分け方をここに1つだけ持ち、どちらの画面も同じ規則で描く。
+ */
+export function splitTermDescription(description: string): { lead: string; details: string } {
+  const [lead = '', ...rest] = description.split('｜')
+  return { lead: lead.trim(), details: rest.map((line) => line.trim()).filter(Boolean).join('\n') }
+}
+
+/** 用語の説明文を、そのまま MemoText へ渡せる形（「｜」を改行にした全文）にする */
+export function termDescriptionLines(description: string): string {
+  const { lead, details } = splitTermDescription(description)
+  return details ? `${lead}\n${details}` : lead
+}

@@ -27,7 +27,7 @@ import { useSettings, updateSettings } from '../db/settings'
 import { deriveDoneLabel } from '../logic/timerLabel'
 import { findTimeTokens, formatRemaining, isMinutesShownInText } from '../logic/time'
 import { sortTimersForDisplay, stepTimerKey, timerRemainingSeconds, timerAdjustAria} from '../logic/timerOrder'
-import { collectUniqueTerms } from '../logic/termSplit'
+import { collectUniqueTerms, splitTermDescription } from '../logic/termSplit'
 import { buildIngredientNames } from '../logic/ingredientSpans'
 import {
   pickVoiceResumeTarget,
@@ -709,13 +709,25 @@ export default function FocusMode({ recipe, recipeId, initialStep, onClose, onCo
                 見た目が同化していたため、mt-[var(--space-sm)]でメモとの間を通常のgapより
                 広めに離し、bg-surfaceの薄い面色+角丸+paddingで「用語説明の区画」を
                 視覚的に独立させる */}
-            {stepTerms.slice(0, 3).map((term) => (
-              <p key={term.term} className="ja-phrase text-left leading-snug">
-                <span className="font-bold text-ink">{term.term}</span>
-                {ja.term.definitionSeparator}
-                {renderJaUnits(term.description)}
-              </p>
-            ))}
+            {/* 2026-08-22 便JJ・オーナー実機報告（原文）:「電子レンジとか、調理中モードでの説明が、
+                箇条書きの内容なのに箇条書きの改行がされていない。読みづらい。文字の塊にしか
+                見えないので、私がユーザーなら絶対読まない。」
+                用語辞書は箇条書きの区切りに「｜」を使っており、用語の小窓（TermPopover）は
+                改行に直して描いていたのに、ここだけ1行のまま描いていた。同じ規則
+                （logic/termSplit の splitTermDescription）で分け、箇条書きは MemoText に任せる */}
+            {stepTerms.slice(0, 3).map((term) => {
+              const { lead, details } = splitTermDescription(term.description)
+              return (
+                <div key={term.term} className="text-left">
+                  <p className="ja-phrase leading-snug">
+                    <span className="font-bold text-ink">{term.term}</span>
+                    {ja.term.definitionSeparator}
+                    {renderJaUnits(lead)}
+                  </p>
+                  {details && <MemoText text={details} className="leading-snug" />}
+                </div>
+              )
+            })}
             {/* 4語目以降は面積を取りすぎるため、従来どおりタップ式のチップに残す */}
             {stepTerms.length > 3 && (
               <p className="mt-1 text-left">

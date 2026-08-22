@@ -418,6 +418,8 @@ import {
   planFlattenedStarterTopUp,
 } from '../src/db/starters.ts'
 import { isDashiIngredientName, DASHI_RECIPE_TITLE } from '../src/logic/dashiLink.ts'
+import { splitTermDescription, termDescriptionLines } from '../src/logic/termSplit.ts'
+import { COOKING_TERMS } from '../src/data/cookingTerms.ts'
 import {
   extractRecipeFromHtml,
   extractServings,
@@ -28583,6 +28585,65 @@ import { safetyNotesFor, stepSafetyNotes, wholeRecipeSafetyNotes } from '../src/
     eq('JJ-7 貼り付け取り込みでも1件目に残らない', parseRecipeText(jjPasted).steps, [
       'ピーマン3〜4個を容器にいれラップし600w4分チン',
     ])
+  }
+
+  // --- JJ-8: 用語の説明の箇条書きが、どの画面でも同じように行に分かれる ---
+  //
+  // オーナー原文（レンジ温泉卵）:「電子レンジとか、調理中モードでの説明が、箇条書きの内容なのに
+  //   箇条書きの改行がされていない。読みづらい。文字の塊にしか見えないので、私がユーザーなら
+  //   絶対読まない。」
+  // 実測（2026-08-22・直す前）: 用語の小窓（components/TermPopover）は「｜」を改行に直してから
+  // 箇条書きとして描いていたのに、調理中モード（components/FocusMode）は説明文をそのまま
+  // 1行で描いていた（「｜」がそのまま文字として出て、5項目が1つの塊になっていた）。
+  {
+    const jjMicrowave = COOKING_TERMS.find((t) => t.term === '電子レンジ')
+    eq('JJ-8 前提: 用語「電子レンジ」の説明は箇条書き（「｜」区切り）で持っている', jjMicrowave?.description.includes('｜'), true)
+    const jjSplit = splitTermDescription(jjMicrowave.description)
+    eq('JJ-8 最初の一文と、その下の箇条書きに分かれる', [
+      jjSplit.lead.includes('｜'),
+      jjSplit.details.split('\n').length,
+      jjSplit.details.split('\n').every((line) => line.startsWith('・')),
+    ], [false, 4, true])
+    eq(
+      'JJ-8 まるごと渡す形（用語の小窓）でも「｜」は1つも残らない',
+      termDescriptionLines(jjMicrowave.description).includes('｜'),
+      false,
+    )
+    eq(
+      'JJ-8 事実は1つも落ちていない（分けても中身は元の説明と同じ）',
+      termDescriptionLines(jjMicrowave.description).split('\n').join('｜'),
+      jjMicrowave.description,
+    )
+    // 箇条書きを持たない用語は今までどおり1行のまま
+    eq('JJ-8 箇条書きの無い用語は分けない', splitTermDescription('油をひかずに炒って水分を飛ばすこと'), {
+      lead: '油をひかずに炒って水分を飛ばすこと',
+      details: '',
+    })
+    // 辞書全体で「｜」が本文に残らないこと（新しい用語を足したときの取りこぼし防止）
+    eq(
+      'JJ-8 辞書のどの用語も「｜」が本文に残らない形で描ける',
+      COOKING_TERMS.filter((t) => termDescriptionLines(t.description).includes('｜')).map((t) => t.term),
+      [],
+    )
+    // 説明文を「｜」の分け方を通さずに画面へ流している場所が無いか（この見張りが、
+    // 調理中モードだけ1行のままだった形をそのまま掴む）。新しい画面が同じ書き方を
+    // 増やしたときにも赤くなる
+    {
+      const jjRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
+      const jjFiles = []
+      for (const dir of ['src/components', 'src/pages']) {
+        for (const name of readdirSync(path.join(jjRoot, dir))) {
+          if (name.endsWith('.tsx')) jjFiles.push(path.join(dir, name))
+        }
+      }
+      const jjRaw = jjFiles.filter((rel) => {
+        const src = readFileSync(path.join(jjRoot, rel), 'utf-8')
+        // 「term.description」を、splitTermDescription / termDescriptionLines を通さずに描いている
+        return /\{\s*(?:renderJaUnits\()?\w*[Tt]erm\.description\)?\s*\}/.test(src)
+      })
+      eq('JJ-8 用語の説明を、分け方を通さずにそのまま描いている画面が無い', jjRaw, [])
+      eq('JJ-8 見張りが対象のファイルを掴めている', jjFiles.length > 20, true)
+    }
   }
 }
 
