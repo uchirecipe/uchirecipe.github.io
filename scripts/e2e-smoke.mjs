@@ -2661,10 +2661,12 @@ try {
     'REFRESH-APP-01 「アプリの表示を修復する」ボタンが見える(2026-07-17文言変更)',
     (await page.textContent('body')).includes('アプリの表示を修復する'),
   )
+  // 2026-08-22 便JJ: 文言はオーナー指示で書き換わる（「だけです」「はそのまま残ります」を外した）ので、
+  // 書き写さずに ja.ts から読む（禁じ手②の文字列べた書きを避ける）
   check(
     'REFRESH-APP-01 説明文に「消えるもの」「残るもの」の内訳がある(修正4)',
-    (await page.textContent('body')).includes('消えるもの: 画面の一時ファイルだけです') &&
-      (await page.textContent('body')).includes('残るもの: レシピ・価格・設定・解錠コードなど'),
+    (await page.textContent('body')).includes(ja.settings.refreshAppWhatIsCleared) &&
+      (await page.textContent('body')).includes(ja.settings.refreshAppWhatRemains),
   )
   {
     // 2026-08-20 便IJ: 153字の1文を3行に分けたので、文言を書き写した判定は落ちた（禁じ手②）。
@@ -2677,6 +2679,17 @@ try {
       'REFRESH-APP-01 ブラウザのキャッシュクリアに関する注意(「Cookieと他のサイトデータ」)がある(修正4)',
       ja.settings.refreshAppCacheClearWarnings.length >= 2 && refreshMissing.length === 0,
       `画面に無い行=${JSON.stringify(refreshMissing)}`,
+    )
+    // 2026-08-22 便JJ: この注意書きの置き場所は「バックアップを取る」カード。
+    // 「困ったとき」(修復)の隣に置くと「修復するとCookieと他サイトのデータが消える」と読める、
+    // というオーナー指摘への手当て。どこに出ていても通る判定にはせず、置き場所そのものを見る
+    const jjWarnInBackup = await page
+      .locator('#backup-section [data-testid="cache-clear-warnings"]')
+      .count()
+    check(
+      'JJWARN-01 ブラウザのデータ削除の注意は「バックアップを取る」カードにある(修復の隣ではない)',
+      jjWarnInBackup === 1,
+      `#backup-section 内の件数=${jjWarnInBackup}`,
     )
   }
   check(
@@ -16818,6 +16831,10 @@ try {
       await arPage.goto(`${BASE}/#/settings?section=backup`, { waitUntil: 'networkidle' })
       await arPage.reload({ waitUntil: 'networkidle' })
       await arPage.waitForTimeout(1500)
+      // 2026-08-22 便JJ: 「古い記録の書き出し（アーカイブ）」は既定で畳んである（オーナー指示）。
+      // 中身を見る節は、必ず先に開いてから測る（「機種変更するときは」と同じ作法）
+      await arPage.locator('[data-testid="archive-toggle"]').first().click()
+      await arPage.waitForTimeout(600)
       const arCount = await arPage.locator('[data-testid="archive-target-count"]').textContent()
       check(
         'ARCHIVE-01 既定(1か月より前)で古い記録2件・写真1枚が対象になる',
@@ -17142,6 +17159,10 @@ try {
       await a2Page.goto(`${BASE}/#/settings?section=backup`, { waitUntil: 'networkidle' })
       await a2Page.reload({ waitUntil: 'networkidle' })
       await a2Page.waitForTimeout(1500)
+      // 2026-08-22 便JJ: 「古い記録の書き出し（アーカイブ）」は既定で畳んである（オーナー指示）。
+      // 中身を見る節は、必ず先に開いてから測る（「機種変更するときは」と同じ作法）
+      await a2Page.locator('[data-testid="archive-toggle"]').first().click()
+      await a2Page.waitForTimeout(600)
 
       const a2Count = (await a2Page.locator('[data-testid="archive-target-count"]').textContent()).replace(/​/g, '')
       check(
@@ -40653,6 +40674,10 @@ try {
 
       // --- FW-03: 古い記録の書き出し（4つの疑問すべてに画面で答える） ---
       currentCheck = 'FW-03'
+      // 2026-08-22 便JJ: 「古い記録の書き出し（アーカイブ）」は既定で畳んである（オーナー指示）。
+      // 中身を見る節は、必ず先に開いてから測る（「機種変更するときは」と同じ作法）
+      await fwPage.locator('[data-testid="archive-toggle"]').first().click()
+      await fwPage.waitForTimeout(600)
       const fwArchiveText = (
         (await fwPage.locator('#archive-section').innerText().catch(() => '')) ?? ''
       ).replace(/\u200B/g, '')
@@ -44978,6 +45003,13 @@ try {
         await bkMoveToggle.first().click()
         await ngPage.waitForTimeout(800)
       }
+      // 2026-08-22 便JJ: 「古い記録の書き出し（アーカイブ）」も畳んであるので開く
+      const bkArchiveToggle = ngPage.locator('[data-testid="archive-toggle"]')
+      check('BKFACT-01 前提: 「古い記録の書き出し（アーカイブ）」を開ける', (await bkArchiveToggle.count()) >= 1)
+      if ((await bkArchiveToggle.count()) >= 1) {
+        await bkArchiveToggle.first().click()
+        await ngPage.waitForTimeout(800)
+      }
       const bkText = ngClean(await ngPage.locator('#section-backup').innerText().catch(() => ''))
       // 説明ページへ送ってはいけない事実（知らないと機種変更でデータを失う）。文言は ja から読む
       const BK_MUST = [
@@ -48471,6 +48503,123 @@ try {
       await jpBrowser.close()
     }
   }
+
+  // --- JJSET-01 / JJFORM-02(2026-08-22 便JJ): オーナーの書き溜めで直した画面まわり ---
+  //
+  // 測るのは「利用者が確かめたいこと」:
+  //   JJSET-01 設定 … ①「古い記録の書き出し（アーカイブ）」が畳んであり、押すと開いて中身が出る
+  //                    ②ブラウザのデータ削除の注意が「困ったとき」ではなくバックアップの欄にある
+  //                    ③「困ったとき」の消えるもの／残るもの／更新との使い分けが直した文で出る
+  //   JJFORM-02 レシピの編集 … 「くわしく」の区画の名前と、季節・時間帯・検索キーワードの説明。
+  //                    「優先されます」と書いていないこと（実装は候補から外す側）
+  // 禁じ手よけ: 文言は ja.ts から読む（書き写さない）／要素はどこにあっても掴める data-testid と
+  //             見出しの名前で掴む／曜日・月替わりに依らない
+  currentCheck = 'JJSET-01'
+  {
+    const jjBrowser = await chromium.launch()
+    try {
+      const jjContext = await jjBrowser.newContext({ viewport: { width: 390, height: 844 } })
+      const jjPage = await jjContext.newPage()
+      jjPage.on('pageerror', (err) => {
+        if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+        errors.push(`[pageerror@JJ] ${err.message}`)
+      })
+      await jjPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await jjPage.waitForTimeout(1800)
+      await jjPage.goto(`${BASE}/#/settings?section=backup`, { waitUntil: 'networkidle' })
+      await jjPage.waitForTimeout(1200)
+
+      const jjToggle = jjPage.locator('[data-testid="archive-toggle"]')
+      check('JJSET-01 「古い記録の書き出し（アーカイブ）」の開閉ボタンがある', (await jjToggle.count()) === 1)
+      check(
+        'JJSET-01 見出しに「アーカイブ」が入っている（ファイル名と説明の呼び名に画面がつながる）',
+        (await jjToggle.first().innerText()).replaceAll('​', '').includes('アーカイブ'),
+        (await jjToggle.first().innerText()).replaceAll('​', ''),
+      )
+      check(
+        'JJSET-01 既定では畳んである（たまにしか触らない機能なので開いて待たない）',
+        (await jjToggle.first().getAttribute('aria-expanded')) === 'false' &&
+          (await jjPage.locator('[data-testid="archive-file-facts"]').count()) === 0,
+      )
+      await jjToggle.first().click()
+      await jjPage.waitForTimeout(700)
+      const jjArchiveText = (await jjPage.locator('#archive-section').innerText()).replaceAll('​', '')
+      check(
+        'JJSET-01 押すと開いて、説明とアーカイブファイルの読みかたが出る',
+        (await jjToggle.first().getAttribute('aria-expanded')) === 'true' &&
+          (await jjPage.locator('[data-testid="archive-file-facts"]').count()) === 1 &&
+          jjArchiveText.includes(ja.settings.archiveDescription.replaceAll('​', '')),
+        jjArchiveText.slice(0, 80),
+      )
+      await jjToggle.first().click()
+      await jjPage.waitForTimeout(700)
+      check(
+        'JJSET-01 もう一度押すと畳める',
+        (await jjPage.locator('[data-testid="archive-file-facts"]').count()) === 0,
+      )
+
+      // ②ブラウザのデータ削除の注意の置き場所（オーナー原文「ここに注意書きがあると、
+      //   修復＝クッキーと他サイトのデータを削除、捉えられます」）
+      const jjWarnBackup = await jjPage.locator('#backup-section [data-testid="cache-clear-warnings"]').count()
+      const jjWarnAll = await jjPage.locator('[data-testid="cache-clear-warnings"]').count()
+      check(
+        'JJSET-01 ブラウザのデータ削除の注意は「バックアップを取る」カードの中にだけある',
+        jjWarnBackup === 1 && jjWarnAll === 1,
+        `バックアップの中=${jjWarnBackup} 画面全体=${jjWarnAll}`,
+      )
+      const jjRefreshBtn = jjPage.getByRole('button', { name: ja.settings.refreshAppButton })
+      check('JJSET-01 前提: 「アプリの表示を修復する」は今までどおりある', (await jjRefreshBtn.count()) >= 1)
+
+      // ③「困ったとき」の3行（文言は ja から読む）
+      const jjBody = (await jjPage.textContent('body')).replaceAll('​', '')
+      check(
+        'JJSET-01 「消えるもの」は言い切らない書き方で出ている',
+        jjBody.includes(ja.settings.refreshAppWhatIsCleared) &&
+          !/画面の一時ファイルだけです/.test(jjBody),
+      )
+      check(
+        'JJSET-01 「残るもの」は「画面の一時ファイル以外のすべてのデータ」で出ている',
+        jjBody.includes(ja.settings.refreshAppWhatRemains) &&
+          ja.settings.refreshAppWhatRemains.includes('画面の一時ファイル以外'),
+      )
+      check(
+        'JJSET-01 更新との使い分けは「お使いください」で終わる',
+        jjBody.includes(ja.settings.refreshAppVsUpdateNote) &&
+          ja.settings.refreshAppVsUpdateNote.endsWith('をお使いください'),
+      )
+
+      // --- JJFORM-02: レシピの編集「くわしく」 ---
+      currentCheck = 'JJFORM-02'
+      await jjPage.goto(`${BASE}/#/recipes/new`, { waitUntil: 'networkidle' })
+      await jjPage.waitForTimeout(1200)
+      const jjDetailTab = jjPage.getByRole('tab', { name: ja.form.formTabDetail, exact: true })
+      check('JJFORM-02 前提: 「くわしく」タブを開ける', (await jjDetailTab.count()) >= 1)
+      if ((await jjDetailTab.count()) >= 1) {
+        await jjDetailTab.first().click()
+        await jjPage.waitForTimeout(800)
+      }
+      const jjForm = (await jjPage.textContent('body')).replaceAll('​', '')
+      check(
+        'JJFORM-02 区画の見出しが「献立提案・検索に必要な設定」になっている',
+        jjForm.includes(ja.form.detailSectionPlanning) && !jjForm.includes('献立・検索に使う'),
+      )
+      check(
+        'JJFORM-02 季節の説明に「優先」と書いていない（実装は候補から外す側）',
+        jjForm.includes(ja.form.seasonDescription) && !/優先/.test(ja.form.seasonDescription),
+      )
+      check(
+        'JJFORM-02 時間帯の説明に「優先」と書いていない',
+        jjForm.includes(ja.form.suitableForDescription) && !/優先/.test(ja.form.suitableForDescription),
+      )
+      check(
+        'JJFORM-02 検索キーワードの説明から「検索したときだけ効きます」が消えている',
+        jjForm.includes(ja.form.keywordsDescription) && !/検索したときだけ効きます/.test(jjForm),
+      )
+    } finally {
+      await jjBrowser.close()
+    }
+  }
+
 
 } catch (err) {
   ng(`実行中断(${currentCheck})`, err.message)

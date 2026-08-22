@@ -505,6 +505,9 @@ export default function SettingsPage() {
   const [replaceUndoAvailable, setReplaceUndoAvailable] = useState(false)
   // バックアップタブ「機種変更するときは」の折りたたみ開閉(2026-07-17設定ゼロベース裁定#5)
   const [moveGuideOpen, setMoveGuideOpen] = useState(false)
+  // 「古い記録の書き出し（アーカイブ）」は、機種変更と同じで一部の人がたまにしか触らない機能
+  // なので既定は畳んでおく（2026-08-22 便JJ・オーナー指示）
+  const [archiveOpen, setArchiveOpen] = useState(false)
   // Pro版の機能説明の折りたたみ（2026-08-09 便EO: <details>から共通の折りたたみへ）
   const [proFeaturesOpen, setProFeaturesOpen] = useState(false)
   // 「最新の状態にする」を押してから結果が出るまで（2026-08-09 便ER）。
@@ -1969,6 +1972,26 @@ export default function SettingsPage() {
                 </p>
               </>
             )}
+            {/* ブラウザの設定でデータを消すときの注意(2026-08-22 便JJ・オーナー指摘)。
+                オーナー原文:「『ブラウザの設定から〜全て消えます』など注意３点→修復ではクッキーと
+                他サイトのデータを削除するのですか？ここに注意書きがあると、修復＝クッキーと
+                他サイトのデータを削除、捉えられます。全て消えるからバックアップが必要なので
+                あれば、違う場所に必要な注意書きでは？」
+                → 「困ったとき」(アプリの表示を修復する)から、この「バックアップを取る」カードへ移した。
+                修復はキャッシュとService Workerしか触らないので、その隣に置くと
+                「修復するとCookieが消える」と読めてしまう。バックアップが要る理由そのものなので
+                ここが置き場所として正しい */}
+            <ul
+              data-testid="cache-clear-warnings"
+              className="mt-[var(--space-md)] space-y-1"
+            >
+              {ja.settings.refreshAppCacheClearWarnings.map((line) => (
+                <li key={line} className="flex items-start gap-1 text-xs font-bold text-warning">
+                  <TriangleAlert size={14} className="mt-0.5 shrink-0" aria-hidden />
+                  {line}
+                </li>
+              ))}
+            </ul>
             {/* 詳しい説明は使い方ページに任せる(2026-08-12 便FW・オーナー指示
                 「詳しくは説明リンクつけとけばいい」)。行き先は「バックアップと機種変更」の節で、
                 保存先・容量の目安・読み込みの2種類・機種変更の手順までまとまっている。
@@ -2131,8 +2154,25 @@ export default function SettingsPage() {
               目的は端末容量の軽量化。書き出し→(ファイルを確かめてから)削除の2段階で、
               1つのボタンにまとめない(保存に失敗したまま消えると控えが無くなるため) */}
           <section id="archive-section" className={`${sectionCls} scroll-mt-24`}>
-            <h2 className="font-bold">{ja.settings.archiveTitle}</h2>
-            <p className="mt-1 text-sm text-ink-muted">{ja.settings.archiveDescription}</p>
+            {/* 2026-08-22 便JJ・オーナー指示（原文）:「『古い記録の書き出し』→『古い記録の書き出し
+                （アーカイブ）』にして、折りたたんで。機種変のように、一部の人がたまにしか触らない
+                機能のため。」開閉ボタンの作りは、すぐ上の「機種変更するときは」と同じにそろえる */}
+            <button
+              type="button"
+              data-testid="archive-toggle"
+              onClick={() => setArchiveOpen((v) => !v)}
+              aria-expanded={archiveOpen}
+              className="-my-[10px] flex w-full items-center justify-between gap-2 py-[10px] text-left font-bold"
+            >
+              {ja.settings.archiveToggle}
+              <ChevronDown
+                size={18}
+                className={`shrink-0 text-ink-muted transition-transform ${archiveOpen ? 'rotate-180' : ''}`}
+                aria-hidden
+              />
+            </button>
+            <Collapse open={archiveOpen}>
+            <p className="mt-[var(--space-md)] text-sm text-ink-muted">{ja.settings.archiveDescription}</p>
 
             {/* アーカイブファイルの中身と読みかた（2026-08-20 便IJ・①。オーナー原文
                 「アーカイブが一覧のみになるのは注意書きはありますか？写真の拡大もできないし、
@@ -2371,6 +2411,7 @@ export default function SettingsPage() {
                 {ja.settings.archiveDetailLink}
               </a>
             </p>
+            </Collapse>
           </section>
 
           {/* ⑤アプリの更新(2026-08-09 便ER): 新しいバージョンが出ていないか確かめ、あればその場で
@@ -2453,19 +2494,6 @@ export default function SettingsPage() {
               <RefreshCw size={18} aria-hidden />
               {ja.settings.refreshAppButton}
             </button>
-            {/* 修正4: ブラウザ自体のキャッシュクリア機能を使う場合の注意
-                (「Cookieと他のサイトデータ」を消すとIndexedDBごと消える事故の再発防止) */}
-            <ul
-              data-testid="cache-clear-warnings"
-              className="mt-[var(--space-md)] space-y-1"
-            >
-              {ja.settings.refreshAppCacheClearWarnings.map((line) => (
-                <li key={line} className="flex items-start gap-1 text-xs font-bold text-warning">
-                  <TriangleAlert size={14} className="mt-0.5 shrink-0" aria-hidden />
-                  {line}
-                </li>
-              ))}
-            </ul>
           </section>
 
           {/* 三重の網の(c): 置き換え直後に1回だけ出す「元に戻す」バナー

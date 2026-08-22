@@ -689,7 +689,7 @@ try {
     page,
     'register-detail',
     page.getByText('くわしく', { exact: true }).first(),
-    page.getByText('献立・検索に使う', { exact: true }).first(),
+    page.getByText('献立提案・検索に必要な設定', { exact: true }).first(),
     { top: 64, padBottom: 12 },
   )
 

@@ -476,14 +476,41 @@ export function extractImageUrl(image: unknown, baseUrl?: string): string | unde
   }
 }
 
-const BULLET_PREFIX = /^[・･\-–—*●○◎▪•‣＊※◇☆★\s　]+/
+/**
+ * 行頭の飾り(中黒・ハイフン・注釈の印)と、合わせ調味料の印(☆★◎○●◇◆■□▲△▼▽)をまとめたもの。
+ * 名前の本体を取り出すときはこれを全部落とす。
+ */
+const LEADING_DECORATION = /^[・･\-–—*▪•‣＊※☆★◎○●◇◆■□▲△▼▽\s　]+/
+/** 飾りだけで本体を持たない行(「○」「・・・」など)。材料にしない */
+const DECORATION_ONLY_LINE = /^[・･\-–—*▪•‣＊※☆★◎○●◇◆■□▲△▼▽\s　]*$/
+/** 合わせ調味料の印(「○醤油」の○)。落とさずに1文字だけ名前の先頭へ残す */
+const SEASONING_MARK_HEAD = /^([☆★◎○●◇◆■□▲△▼▽])[\s　]*/
+/** 印にならない、ただの行頭の飾りだけ */
+const PLAIN_BULLET_PREFIX = /^[・･\-–—*▪•‣＊※\s　]+/
+
+/**
+ * 行頭の飾りを落とす。ただし**合わせ調味料の印は1文字だけ残す**(2026-08-22 便JJ)。
+ *
+ * 直したこと: 楽天レシピの「○醤油 大さじ1」のように、取り込み元が記号で
+ * 「まとめて計量する組」を示していても、ここで○ごと捨てていたため、アプリ側の組の判定
+ * (src/logic/parseRecipeText.ts の assignSeasoningGroupsByMark)に印が1つも届かず、
+ * 合わせ調味料の色分けが付かなかった。英字の印(「A水」)は group として持ち回っていたので
+ * 味の素パークのレシピだけ色が付き、「できているものとできていないものがある」状態だった
+ * (オーナー実機報告)。組にするかどうかの判断はアプリ側の規則に任せ、ここでは印を消さないだけにする。
+ */
+function stripLeadingDecoration(text: string): string {
+  if (DECORATION_ONLY_LINE.test(text)) return ''
+  const body = text.replace(LEADING_DECORATION, '')
+  const mark = text.replace(PLAIN_BULLET_PREFIX, '').match(SEASONING_MARK_HEAD)
+  return mark ? mark[1] + body : body
+}
 
 // 材料欄の区切り線だけの行(「ーーーーーーーーーー」「＝＝＝＝」等)。記号のみが3文字以上続く行を
 // 材料として取り込まないための判定(2026-07-28 便BX/C15・楽天レシピ実測)
 const SEPARATOR_ONLY_LINE = /^[ー―‐−–—\-_＿=＝~〜～*＊・･.．\s　]{3,}$/
 
 // 「Ａ水」「B砂糖」「A「ほんだし®」」のように、合わせ調味料のグループ記号(A/B等の単一英字)が
-// 区切りなしで名前の先頭にくっついているケース(味の素パーク実測)。BULLET_PREFIXの記号(☆★○等)と違い
+// 区切りなしで名前の先頭にくっついているケース(味の素パーク実測)。LEADING_DECORATIONの記号(☆★○等)と違い
 // 英字は普通の食材名の一部でもありうるため、「1文字の大文字英字の直後が日本語(かな/カナ/漢字)か
 // 開き括弧・引用符」という、グループ記号として使われる時の典型形に絞って剥がす
 // (誤って"L-〇〇"のような英字混じりの実在の食材名を壊さないため2文字以上・小文字は対象外)。
@@ -509,10 +536,10 @@ function collapseSpacedMixedFraction(text: string): string {
  * 「名前 空白/中黒 分量」の形が大半のため、末尾の空白・記号区切りを優先的に分量境界とみなす)。
  */
 export function splitIngredientAmount(raw: string): NormalizedIngredient {
-  const cleaned = cleanText(raw).replace(BULLET_PREFIX, '').trim()
+  const cleaned = stripLeadingDecoration(cleanText(raw)).trim()
   if (!cleaned) return { name: '' }
   // 材料欄の区切り線(「ーーーーーーーーーー」楽天レシピ実測)は材料ではない(2026-07-28 便BX/C15)。
-  // BULLET_PREFIXは半角ハイフンやダッシュは落とすが全角長音符(U+30FC)を含まないため、
+  // LEADING_DECORATIONは半角ハイフンやダッシュは落とすが全角長音符(U+30FC)を含まないため、
   // 区切り行がそのまま材料名になり、保存後の材料表・買い物リストにも残っていた。
   // 記号だけで3文字以上続く行に限定し、実在の材料名を巻き込まない
   if (SEPARATOR_ONLY_LINE.test(cleaned)) return { name: '' }
@@ -620,9 +647,30 @@ function splitInstructionBlob(text: string): string[] {
  */
 const SAFE_STEP_MARKER = /[①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳]|[[［][0-9０-９]{1,2}[\]］]/g
 
-/** 要素の先頭に付いた番号マーカー(①/1./[1]/(1))を1個だけ剥がす。直後が助詞なら参照なので剥がさない */
+/**
+ * 行の**先頭**に付いた「両側を括弧で囲んだ番号」(【１】(1)（２）〔3〕)。
+ *
+ * 2026-08-22 便JJ・オーナー実機報告:
+ *   「３つのスパイスバターチキンカレー ・元の文の手順番号がそのまま残ってる」
+ * 実測（S&B・味の素パーク）: 手順が「【１】ポリ袋に鶏肉…」「（１）豚肉はひと口大に切る。」で
+ * 始まっており、アプリが自分で振る番号と二重に並んでいた。STEP_MARKER は「1.」「1）」のように
+ * **後ろだけ**に区切りが付く形しか知らず、開き括弧の分だけ位置がずれて先頭と見なせていなかった。
+ *
+ * 先頭に限るのは、本文の中の同じ形（「さらに【１】を汁ごと加え」）が**前の手順への参照**で、
+ * 消すと文が壊れるため。先頭でも直後が助詞なら参照なので剥がさない（下の共通ガード）。
+ * 中身は数字だけに限る＝合わせ調味料の【Ａ】【Ｂ】は対象外。
+ */
+const LEADING_BRACKET_STEP_NUMBER = /^[（(【〔[［][0-9０-９]{1,2}[）)】〕\]］]/
+
+/** 要素の先頭に付いた番号マーカー(①/1./[1]/(1)/【1】)を1個だけ剥がす。直後が助詞なら参照なので剥がさない */
 function stripLeadingStepMarker(text: string): string {
   const trimmed = text.trim()
+  const bracket = trimmed.match(LEADING_BRACKET_STEP_NUMBER)
+  if (bracket) {
+    const rest = trimmed.slice(bracket[0].length).trim()
+    if (!rest || STEP_MARKER_FOLLOWED_BY_PARTICLE.test(rest)) return trimmed
+    return rest
+  }
   STEP_MARKER.lastIndex = 0
   const m = STEP_MARKER.exec(trimmed)
   if (!m || m.index !== 0) return trimmed

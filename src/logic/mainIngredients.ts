@@ -1,4 +1,8 @@
-import { isKnownSeasoningName, isOptionalAmount } from './seasoningDictionary'
+import {
+  isGarnishOrSpiceName,
+  isKnownSeasoningName,
+  isOptionalAmount,
+} from './seasoningDictionary'
 
 /**
  * 一覧カードの主要食材チップに、調味料（しょうゆ・みりん・少々・適量など）ばかりが
@@ -76,15 +80,27 @@ export function normalizeIngredientChipLabel(name: string): string {
 export function pickDisplayIngredientChips<
   T extends { name: string; amount: string; unit: string },
 >(ingredients: readonly T[], count = 3): { name: string }[] {
-  const candidates = pickMainIngredients(ingredients, count * 3)
   const seen = new Set<string>()
   const chips: { name: string }[] = []
-  for (const ing of candidates) {
-    const label = normalizeIngredientChipLabel(ing.name)
-    if (!label || seen.has(label)) continue
+  const add = (name: string) => {
+    const label = normalizeIngredientChipLabel(name)
+    if (!label || seen.has(label)) return
     seen.add(label)
     chips.push({ name: label })
-    if (chips.length >= count) break
   }
-  return chips
+  for (const ing of pickMainIngredients(ingredients, count * 3)) {
+    add(ing.name)
+    if (chips.length >= count) return chips.slice(0, count)
+  }
+  // 主要食材だけでは枠が埋まらないときに限り、薬味・香辛料で埋める（2026-08-22 便JJ）。
+  // オーナー原文（ペペロンチーノ）:「写真の食材チップが、スパゲッティとゆで汁のみ。
+  // にんにくと唐辛子が出ているのが自然。」
+  // 主要食材が3つある料理の見え方は1つも変えない（埋めるのは空いた枠だけ）。
+  // 水・油・粉・だしは埋めに使わない＝料理を言い当てない名前で枠を埋めない。
+  for (const ing of ingredients) {
+    if (chips.length >= count) break
+    if (!isGarnishOrSpiceName(ing.name)) continue
+    add(ing.name)
+  }
+  return chips.slice(0, count)
 }

@@ -2588,7 +2588,7 @@ function RecipeFormInner() {
 
       <div hidden={activeTab !== 'detail'}>
       {/* セクション見出し(2026-07-28 便BW/C-10): 任意項目が縦に長く並ぶため、
-          「このレシピについて」「献立・検索に使う」「書き残す」の3区分に分ける。
+          「このレシピについて」「献立提案・検索に必要な設定」「書き残す」の3区分に分ける。
           欄そのものの統合・並べ替えはしていない(既存の入力・保存ロジックは不変) */}
       <h2 className={sectionHeadingCls}>{ja.form.detailSectionAbout}</h2>
 
