@@ -2,6 +2,7 @@
 import { Link } from 'react-router-dom'
 import {
   Clock,
+  Crop,
   Heart,
   TriangleAlert,
   CalendarCheck2,
@@ -24,6 +25,7 @@ import { ingredientColorToken } from '../logic/ingredientColor'
 import { pickDisplayIngredientChips } from '../logic/mainIngredients'
 import type { CardDensity } from '../logic/cardDensity'
 import { cardPartsFor, type CardPartKey, type CardPlace } from '../logic/cardParts'
+import { photoObjectPosition } from '../logic/photoFocus'
 import { ja } from '../i18n/ja'
 import { usePhotoUrl } from './usePhotoUrl'
 
@@ -111,21 +113,50 @@ export function RecipePlaceholder({
  * 画面ごとに自前で出し分けを書くと、そこから「その画面だけのカード」が生まれてきた
  * （2026-08-19 便HW。scripts/test-logic.mjs の HW-1 が、共通部品の外に出し分けが無いことを見張る）。
  */
-export function RecipeHeroPhoto({ recipe }: { recipe: Recipe }) {
+export function RecipeHeroPhoto({
+  recipe,
+  onAdjustPhoto,
+}: {
+  recipe: Recipe
+  /**
+   * 「見える範囲」を決める窓を開く（2026-08-22 便JK）。渡したときだけ、写真の右下に
+   * 入口の丸ボタンを重ねる。**写真の無いレシピ・アイコン優先のレシピでは何も出さない**
+   * （代わり絵には調整するものが無いため）。
+   * 写真の中に重ねるので、**料理名・材料の位置は1pxも動かない**（オーナー指示）。
+   */
+  onAdjustPhoto?: () => void
+}) {
   const photoUrl = usePhotoUrl(recipe.photo)
   const [broken, setBroken] = useState(false)
   useEffect(() => setBroken(false), [photoUrl])
   const showPhoto = photoUrl && !recipe.showIconInsteadOfPhoto && !broken
-  return showPhoto ? (
-    <img
-      src={photoUrl}
-      alt={recipe.title}
-      onError={() => setBroken(true)}
-      className="aspect-video w-full object-cover"
-    />
-  ) : (
-    <div className="aspect-video w-full">
-      <RecipePlaceholder recipe={recipe} iconSize={56} />
+  if (!showPhoto) {
+    return (
+      <div className="aspect-video w-full">
+        <RecipePlaceholder recipe={recipe} iconSize={56} />
+      </div>
+    )
+  }
+  return (
+    <div className="relative">
+      <img
+        src={photoUrl}
+        alt={recipe.title}
+        onError={() => setBroken(true)}
+        style={{ objectPosition: photoObjectPosition(recipe.photoFocus) }}
+        className="aspect-video w-full object-cover"
+      />
+      {onAdjustPhoto && (
+        <button
+          type="button"
+          onClick={onAdjustPhoto}
+          data-testid="photo-focus-open"
+          aria-label={ja.photoFocus.openAria}
+          className="tap-target absolute bottom-2 right-2 flex h-11 w-11 items-center justify-center rounded-full border border-edge bg-surface/90 text-accent-ink shadow-md"
+        >
+          <Crop size={20} aria-hidden />
+        </button>
+      )}
     </div>
   )
 }
@@ -384,6 +415,9 @@ export default function RecipeCard({
           onError={() => setPhotoBroken(true)}
           // 記録の一覧のように件数の上限が無い一覧でも、画面外の写真をデコードさせない
           loading="lazy"
+          // 見える範囲（2026-08-22 便JK）。詳細画面と**同じ1つの値**を使う＝
+          // 同じ写真を2回調整させない。未設定のレシピは '50% 50%'＝いままでどおり中央
+          style={{ objectPosition: photoObjectPosition(recipe.photoFocus) }}
           className="h-full w-full object-cover"
         />
       ) : (

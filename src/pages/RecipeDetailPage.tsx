@@ -19,7 +19,7 @@ import {
   X,
 } from 'lucide-react'
 import { db } from '../db/db'
-import { addCookedLog, toggleFavorite } from '../db/recipes'
+import { addCookedLog, toggleFavorite, updatePhotoFocus } from '../db/recipes'
 import { lowerPantryLevelsForCooked } from '../db/pantry'
 import { useSettings, updateSettings } from '../db/settings'
 import {
@@ -74,6 +74,7 @@ import CookedLogModal from '../components/CookedLogModal'
 import CookedLogEditor from '../components/CookedLogEditor'
 import TodaySlotModal from '../components/TodaySlotModal'
 import ShareModal, { type ShareSelection } from '../components/ShareModal'
+import PhotoFocusModal from '../components/PhotoFocusModal'
 import CustomTimerModal from '../components/CustomTimerModal'
 import FocusMode from '../components/FocusMode'
 import SafetyNotes from '../components/SafetyNotes'
@@ -416,6 +417,13 @@ export default function RecipeDetailPage() {
   // 写真を大きく見ているあいだ、後ろのレシピ詳細は動かさない（2026-08-16 便HE）
   useScrollLock(viewingLogPhoto != null)
 
+  /**
+   * 写真の見える範囲を決める窓（2026-08-22 便JK）。オーナー原文
+   * 「ゆーざーが見える範囲を微調整（トリミングっぽい感じ）できたら嬉しい」。
+   * 決めた値はその場でレシピに書く＝編集画面を通さずに直せる（お気に入りと同じ）。
+   */
+  const [photoFocusOpen, setPhotoFocusOpen] = useState(false)
+
   // シェア(2026-07-16 裁定3: インライン2ボタン→選択モーダルに変更)
   const [shareOpen, setShareOpen] = useState(false)
   const [shareMessage, setShareMessage] = useState('')
@@ -747,7 +755,12 @@ export default function RecipeDetailPage() {
       {/* 写真（無い場合・アイコン優先の場合はプレースホルダー）。
           出し分けは共通部品（components/RecipeCard の RecipeHeroPhoto）に置いてある
           ＝アプリ全体で「写真か代わり絵か」の決め方が1か所（2026-08-19 便HW） */}
-      <RecipeHeroPhoto recipe={recipe} />
+      <RecipeHeroPhoto
+        recipe={recipe}
+        // 入口は写真の中（右下）に重ねる＝下に並ぶ料理名・材料の位置は動かない。
+        // 写真が無い／アイコン優先のレシピでは共通部品側が出さない（2026-08-22 便JK）
+        onAdjustPhoto={() => setPhotoFocusOpen(true)}
+      />
 
       <div className="px-[var(--space-md)] pt-[var(--space-md)]">
         {/* タイトル（編集・お気に入りは上部のsticky ヘッダーに常時表示） */}
@@ -1500,6 +1513,19 @@ export default function RecipeDetailPage() {
         message={shareMessage}
         onShare={(kind, selection) => void runShare(kind, selection)}
         onClose={() => setShareOpen(false)}
+      />
+      {/* 写真の見える範囲（2026-08-22 便JK）。写真そのものは書き換えず、
+          「どこを見せるか」だけをレシピに覚える＝何度でも直せる・中央にも戻せる */}
+      <PhotoFocusModal
+        open={photoFocusOpen}
+        photo={recipe.photo}
+        title={recipe.title}
+        focus={recipe.photoFocus}
+        onApply={(next) => {
+          void updatePhotoFocus(id, next)
+          setPhotoFocusOpen(false)
+        }}
+        onClose={() => setPhotoFocusOpen(false)}
       />
       <CustomTimerModal
         open={customTimerOpen}

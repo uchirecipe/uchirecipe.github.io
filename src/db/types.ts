@@ -114,6 +114,16 @@ export interface DetachedCookedRecord {
   detachedAt: number
 }
 
+/**
+ * 写真の「見える範囲」（2026-08-22 便JK）。写真のどこを見せるかを指す1点で、
+ * x・y とも 0〜100 の割合（CSS の object-position と同じ意味。50/50＝中央）。
+ * 意味と計算は logic/photoFocus.ts にまとめてある。
+ */
+export interface PhotoFocus {
+  x: number
+  y: number
+}
+
 /** レシピ本体（IndexedDB に保存される形） */
 export interface Recipe {
   id?: number
@@ -138,6 +148,18 @@ export interface Recipe {
   intro?: string
   /** 長辺1200pxに縮小済みの写真 */
   photo?: Blob
+  /**
+   * 写真の見える範囲（任意・2026-08-22 便JK）。**未設定＝中央**（このフィールドが無い
+   * 既存のレシピ・既存のバックアップは、いままでと同じ見え方のまま読める＝移行の処理は要らない）。
+   *
+   * オーナー原文「画像の中で被写体が真ん中に写っていない」「ゆーざーが見える範囲を微調整
+   * （トリミングっぽい感じ）できたら嬉しい」。**写真そのものは切らない**ので、
+   * 何度でも直せる／中央に戻せる。写真を入れ替えたときは中央へ戻す（別の写真の位置は使えないため）。
+   *
+   * この1つの値で詳細画面（16:9）とレシピ一覧のマス（1:1）の両方を決める
+   * ＝同じ写真を2回調整させない（司令部の裁定）。
+   */
+  photoFocus?: PhotoFocus
   servings: number
   cookMinutes?: number
   effortLevel: EffortLevel
@@ -1012,6 +1034,7 @@ export type RecipeInput = Pick<
   | 'title'
   | 'intro'
   | 'photo'
+  | 'photoFocus'
   | 'servings'
   | 'cookMinutes'
   | 'effortLevel'

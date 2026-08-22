@@ -507,6 +507,17 @@ import {
   countDetachedLogs,
   detachedPhotoBytes,
 } from '../src/logic/detachedLogs.ts'
+// 便JK: 写真の見える範囲（2026-08-22 オーナー「ゆーざーが見える範囲を微調整
+// （トリミングっぽい感じ）できたら嬉しい」）
+import {
+  PHOTO_FOCUS_CENTER,
+  clampPhotoFocus,
+  isPhotoFocusCentered,
+  movePhotoFocus,
+  photoObjectPosition,
+  photoVisibleRect,
+  toStoredPhotoFocus,
+} from '../src/logic/photoFocus.ts'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
@@ -28644,6 +28655,180 @@ import { safetyNotesFor, stepSafetyNotes, wholeRecipeSafetyNotes } from '../src/
       eq('JJ-8 用語の説明を、分け方を通さずにそのまま描いている画面が無い', jjRaw, [])
       eq('JJ-8 見張りが対象のファイルを掴めている', jjFiles.length > 20, true)
     }
+  }
+}
+
+// ==========================================================================================
+// JK-1〜JK-5: 写真の見える範囲（2026-08-22 便JK）
+//
+// オーナー原文（最初の指摘）:
+//   「画像の中心がずれている。設定からも直せない。一覧よりも詳細画面が気になりやすいが、
+//     一覧もよくみたらちゃんとずれてる。」
+// それを踏まえた返答（これが作るものの指示）:
+//   「画像の中心ズレについて、画像のサイズの真ん中ではなく、画像の中で被写体が真ん中に
+//     写っていない、ということです。これは自動ではどうにもできない部分だと思うので、
+//     ゆーざーが見える範囲を微調整（トリミングっぽい感じ）できたら嬉しい、ということです。」
+//
+// 直す前の状態: 切り抜き位置は写真つき22品すべて中央（50% 50%）で、位置を動かすコードは
+// 1行も無かった。つまり「被写体が中央に写っていない写真」は、利用者にはどうにもできなかった。
+//
+// 何を見張るか:
+//   JK-1 … 見える範囲の計算が、ブラウザの object-fit: cover と同じ答えを出すこと
+//          （実データ22品の実寸で確かめる。詳細＝16:9、レシピ一覧のマス＝1:1）
+//   JK-2 … 保存する値の作法（中央なら値を持たない・範囲外は端で止まる・小数は整数に丸める）
+//   JK-3 … 書き出し／読み込みが、レシピの項目を丸ごと持っていく形のままであること
+//          （持っていく項目を並べる形に変えると、新しい項目が黙って落ちる）
+//   JK-4 … 見え方の値を作っているのは logic/photoFocus.ts だけ（画面での直書きが無い）
+//   JK-5 … 共通のカード部品では、写真を切って出す <img> がもれなく見える範囲を受け取ること
+//          （**レシピ一覧の絵と詳細の大きな絵の両方**がこの部品にあるので、片方だけ効く形にならない）
+// ==========================================================================================
+{
+  // ---- JK-1: 見える範囲の計算 ------------------------------------------------------------
+  const round4 = (r) => ({
+    left: Math.round(r.left * 10000) / 10000,
+    top: Math.round(r.top * 10000) / 10000,
+    width: Math.round(r.width * 10000) / 10000,
+    height: Math.round(r.height * 10000) / 10000,
+  })
+  const DETAIL = 16 / 9 // レシピ詳細の大きな絵
+  const LIST = 1 // レシピ一覧のマス
+
+  // 縦写真（実データ: 900x1600）。詳細では高さの31.6%しか見えない＝上下が68.4%落ちる
+  eq(
+    'JK-1 縦写真は詳細（16:9）で上下が落ち、中央では落ちる分が上下に半分ずつ',
+    round4(photoVisibleRect(900, 1600, DETAIL, undefined)),
+    { left: 0, top: 0.3418, width: 1, height: 0.3164 },
+  )
+  eq(
+    'JK-1 いちばん上を見せると、見える範囲は写真の上端から始まる',
+    round4(photoVisibleRect(900, 1600, DETAIL, { x: 50, y: 0 })).top,
+    0,
+  )
+  eq(
+    'JK-1 いちばん下を見せると、見える範囲の下端が写真の下端にそろう',
+    round4(photoVisibleRect(900, 1600, DETAIL, { x: 50, y: 100 })),
+    { left: 0, top: 0.6836, width: 1, height: 0.3164 },
+  )
+  // 横写真（実データ: 1200x630）。レシピ一覧のマスでは幅の52.5%しか見えない＝左右が47.5%落ちる
+  eq(
+    'JK-1 横写真はレシピ一覧のマス（1:1）で左右が落ちる',
+    round4(photoVisibleRect(1200, 630, LIST, undefined)),
+    { left: 0.2375, top: 0, width: 0.525, height: 1 },
+  )
+  eq(
+    'JK-1 いちばん左を見せると、見える範囲は写真の左端から始まる',
+    round4(photoVisibleRect(1200, 630, LIST, { x: 0, y: 50 })).left,
+    0,
+  )
+  // 正方形（実データ: 400x400 ほか11品）。一覧では1ドットも落ちない＝横に動かしても何も変わらない
+  eq(
+    'JK-1 正方形の写真はレシピ一覧のマスでは落ちない',
+    round4(photoVisibleRect(400, 400, LIST, undefined)),
+    { left: 0, top: 0, width: 1, height: 1 },
+  )
+  eq(
+    'JK-1 落ちる分が無い向きは、値を変えても見える範囲が動かない',
+    round4(photoVisibleRect(400, 400, LIST, { x: 0, y: 100 })),
+    round4(photoVisibleRect(400, 400, LIST, { x: 100, y: 0 })),
+  )
+  eq(
+    'JK-1 正方形の写真は詳細（16:9）では上下が43.8%落ちる',
+    round4(photoVisibleRect(400, 400, DETAIL, undefined)).height,
+    0.5625,
+  )
+  // ちょうど16:9の写真（実データ: 880x495）はどちらの向きにも落ちない
+  eq(
+    'JK-1 ちょうど16:9の写真は詳細で1ドットも落ちない',
+    round4(photoVisibleRect(880, 495, DETAIL, { x: 0, y: 100 })),
+    { left: 0, top: 0, width: 1, height: 1 },
+  )
+  // 壊れた値（写真の寸法が読めない等）でも写真全体を返す＝画面が真っ白にならない
+  eq('JK-1 寸法が読めないときは写真全体を見える範囲にする', round4(photoVisibleRect(0, 0, DETAIL, { x: 10, y: 10 })), {
+    left: 0,
+    top: 0,
+    width: 1,
+    height: 1,
+  })
+
+  // ---- JK-2: 保存する値の作法 ------------------------------------------------------------
+  eq('JK-2 未設定は中央として読む', clampPhotoFocus(undefined), PHOTO_FOCUS_CENTER)
+  eq('JK-2 未設定の見え方は中央（既存のレシピの見え方を変えない）', photoObjectPosition(undefined), '50% 50%')
+  eq('JK-2 中央のままなら値を持たせない', toStoredPhotoFocus({ x: 50, y: 50 }), undefined)
+  eq('JK-2 調整したら値を持つ', toStoredPhotoFocus({ x: 50, y: 18 }), { x: 50, y: 18 })
+  eq('JK-2 範囲の外は端で止まる', clampPhotoFocus({ x: -40, y: 180 }), { x: 0, y: 100 })
+  eq('JK-2 小数は整数に丸める（保存する値を1%刻みにそろえる）', clampPhotoFocus({ x: 33.4, y: 66.6 }), { x: 33, y: 67 })
+  eq('JK-2 数でない値が入っても中央に倒す', clampPhotoFocus({ x: Number.NaN, y: Number.NaN }), PHOTO_FOCUS_CENTER)
+  eq('JK-2 中央かどうかを見分けられる', [isPhotoFocusCentered(undefined), isPhotoFocusCentered({ x: 50, y: 49 })], [true, false])
+  eq('JK-2 矢印キーぶん動かしても範囲の外には出ない', movePhotoFocus({ x: 1, y: 99 }, -2, 2), { x: 0, y: 100 })
+  eq('JK-2 見え方の文字列は割合で出す', photoObjectPosition({ x: 20, y: 80 }), '20% 80%')
+
+  // ---- JK-3: 書き出し／読み込みが項目を丸ごと持っていく形のままか --------------------------
+  // 実際に値が往復することは e2e（JKPHOTO-03）で本物のファイルを書き出して確かめている。
+  // ここでは「持っていく項目を並べる形（allow-list）に書き換えられていないか」を見張る
+  // ＝新しい項目を足した人が backup.ts を直し忘れても、黙って落ちることが起きない形を守る
+  {
+    const jkRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
+    const jkBackup = readFileSync(path.join(jkRoot, 'src/logic/backup.ts'), 'utf-8')
+    eq(
+      'JK-3 書き出しは写真と記録以外を丸ごと持っていく（項目を並べる形になっていない）',
+      jkBackup.includes('const { photo, cookedLogs, ...rest } = recipe'),
+      true,
+    )
+    eq(
+      'JK-3 読み込みも写真と記録以外を丸ごと戻す',
+      jkBackup.includes('const { photoBase64, photoType, cookedLogs, ...rest } = backup'),
+      true,
+    )
+  }
+
+  // ---- JK-4: 見え方の値を作るのは1か所だけ ------------------------------------------------
+  {
+    const jkRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
+    const jkSrc = path.join(jkRoot, 'src')
+    const listFiles = (dir) => {
+      const out = []
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const full = path.join(dir, entry.name)
+        if (entry.isDirectory()) out.push(...listFiles(full))
+        else if (entry.name.endsWith('.tsx') || entry.name.endsWith('.ts')) out.push(full)
+      }
+      return out.sort()
+    }
+    const jkFiles = listFiles(jkSrc).map((full) => ({
+      rel: path.relative(jkRoot, full).split(path.sep).join('/'),
+      src: readFileSync(full, 'utf-8'),
+    }))
+    eq('JK-4 走査できたファイルがある（0件なら見張りが壊れている）', jkFiles.length > 50, true)
+    // object-position を使う画面は、必ず logic/photoFocus.ts の値を通す
+    // （「50% 20%」のような直書きが増えると、レシピごとの調整が効かない場所が生まれる）
+    const jkDirect = jkFiles
+      .filter(({ rel, src }) => rel !== 'src/logic/photoFocus.ts' && /objectPosition\s*:/.test(src))
+      .filter(({ src }) => !src.includes("from '../logic/photoFocus'"))
+      .map(({ rel }) => rel)
+    eq('JK-4 見え方の値を画面で直書きしているところが無い', jkDirect, [])
+    const jkUsers = jkFiles.filter(({ src }) => /objectPosition\s*:/.test(src)).map(({ rel }) => rel)
+    eq('JK-4 見え方を渡している画面を掴めている（0件なら見張りが壊れている）', jkUsers.length > 0, true)
+  }
+
+  // ---- JK-5: 共通のカード部品では、切って出す写真がもれなく見える範囲を受け取る --------------
+  // レシピ一覧の絵（thumb）と詳細の大きな絵（RecipeHeroPhoto）はどちらもこの1つの部品にある。
+  // 片方だけに付いている状態＝「詳細では直せるのに一覧は中央のまま」を赤にする
+  {
+    const jkRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
+    const cardSrc = readFileSync(path.join(jkRoot, 'src/components/RecipeCard.tsx'), 'utf-8')
+    const imgTags = []
+    let at = cardSrc.indexOf('<img')
+    while (at >= 0) {
+      const end = cardSrc.indexOf('/>', at)
+      if (end < 0) break
+      imgTags.push(cardSrc.slice(at, end + 2))
+      at = cardSrc.indexOf('<img', end)
+    }
+    eq('JK-5 カード部品の写真を掴めている（0件なら見張りが壊れている）', imgTags.length >= 2, true)
+    const cropped = imgTags.filter((tag) => tag.includes('object-cover'))
+    eq('JK-5 切って出している写真が2つ以上ある（一覧の絵と詳細の大きな絵）', cropped.length >= 2, true)
+    const missing = cropped.filter((tag) => !tag.includes('objectPosition')).length
+    eq('JK-5 切って出す写真はすべて見える範囲を受け取っている', missing, 0)
   }
 }
 

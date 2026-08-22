@@ -2,6 +2,7 @@ import type { Recipe } from '../db/types'
 import { ja } from '../i18n/ja'
 import { formatAmountUnit, scaleAmount } from './amount'
 import { resolveIconKey } from './icon'
+import { clampPhotoFocus } from './photoFocus'
 
 /**
  * SNSシェア:
@@ -301,7 +302,17 @@ export async function generateShareCard(recipe: Recipe, opts: ShareOptions): Pro
     const scale = Math.max(width / bitmap.width, imageHeight / bitmap.height)
     const drawW = bitmap.width * scale
     const drawH = bitmap.height * scale
-    ctx.drawImage(bitmap, (width - drawW) / 2, (imageHeight - drawH) / 2, drawW, drawH)
+    // どこを見せるかは画面と同じ1つの値で決める（2026-08-22 便JK）。
+    // 未設定のレシピは 50/50＝いままでどおり中央。(width - drawW) は負の値なので、
+    // 割合0で左端そろえ・100で右端そろえ・50で中央になる（CSSのobject-positionと同じ）
+    const focus = clampPhotoFocus(recipe.photoFocus)
+    ctx.drawImage(
+      bitmap,
+      (width - drawW) * (focus.x / 100),
+      (imageHeight - drawH) * (focus.y / 100),
+      drawW,
+      drawH,
+    )
     bitmap.close()
   }
 
