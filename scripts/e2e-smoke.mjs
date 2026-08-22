@@ -32567,9 +32567,13 @@ try {
       await eyPage.getByRole('button', { name: '原価を見る' }).click()
       await eyPage.waitForTimeout(500)
       const eyRow = await eyPage.locator('li', { hasText: '生しいたけ' }).first().textContent()
+      // 2026-08-22 便JG: 行の金額の意味が「1食あたり(全量÷登録人数)」から
+      // **「いま画面に出ている分量ぶん」**へ変わった（オーナー「原価が、人数分の表示に合わせて
+      // 計算されていない。人数の増減で数値が変わらない」＝同じ行の中で分量と金額が別の人数を
+      // 指していた）。2人分表示なので 17円×2人分＝約33円が正しい
       check(
-        'EY-01 材料行「生しいたけ」の1食あたり原価が約17円(修正前は1パック満額100円÷2人分の50円)',
-        (eyRow ?? '').includes('約17円'),
+        'EY-01 材料行「生しいたけ」の原価が、出ている分量ぶん(2人分)の約33円',
+        (eyRow ?? '').includes('約33円'),
         String(eyRow),
       )
 
@@ -33128,8 +33132,9 @@ try {
       await faPage.waitForTimeout(500)
       const faNabeRow = await faPage.locator('li', { hasText: 'しいたけ' }).first().textContent()
       check(
-        'FA-1 材料行「しいたけ」の1食あたり原価が約17円(旧150円/6枚なら約25円)',
-        (faNabeRow ?? '').includes('約17円'),
+        // 2026-08-22 便JG: 上のEY-01と同じ理由で、行の金額は「出ている分量ぶん」になった
+        'FA-1 材料行「しいたけ」の原価が、出ている分量ぶん(4人分)の約67円',
+        (faNabeRow ?? '').includes('約67円'),
         String(faNabeRow),
       )
     } finally {
