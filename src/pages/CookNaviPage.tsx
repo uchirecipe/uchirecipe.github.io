@@ -554,7 +554,7 @@ function IngredientsPanel({ recipes }: { recipes: NaviRecipeIngredients[] }) {
       <Collapse open={open}>
         <div
           data-testid="navi-ingredients-panel"
-          className="mt-[var(--space-sm)] rounded-md border border-edge bg-surface p-[var(--space-md)] shadow-sm"
+          className="mt-[var(--space-sm)] rounded-md border border-edge bg-surface p-[var(--space-md)]"
         >
           <p className="text-sm font-bold text-ink-muted">
             {ja.cookNavi.ingredientsPanelTitle.replace('{n}', String(recipes.length))}
@@ -1885,7 +1885,7 @@ export default function CookNaviPage() {
                 {timeline && (
                   <section ref={timelineRef} className="mt-[var(--space-lg)]">
                     {/* 凡例 */}
-                    <div className="rounded-md border border-edge bg-surface p-[var(--space-md)] shadow-sm">
+                    <div className="rounded-md border border-edge bg-surface p-[var(--space-md)]">
                       <p className="text-sm font-bold text-ink-muted">
                         {ja.cookNavi.legendTitle.replace('{n}', String(timeline.recipes.length))}
                       </p>
@@ -2008,7 +2008,7 @@ export default function CookNaviPage() {
                     {finishTimes.length > 0 && (
                       <div
                         data-testid="navi-finish-times"
-                        className="mt-[var(--space-sm)] rounded-md border border-edge bg-surface p-[var(--space-md)] shadow-sm"
+                        className="mt-[var(--space-sm)] rounded-md border border-edge bg-surface p-[var(--space-md)]"
                       >
                         <p className="text-sm font-bold text-ink-muted">
                           {ja.cookNavi.finishTitle}
@@ -2084,7 +2084,7 @@ export default function CookNaviPage() {
                     {isSequential && (
                       <div
                         data-testid="navi-no-parallel"
-                        className="mt-[var(--space-sm)] rounded-md border border-edge bg-surface p-[var(--space-md)] shadow-sm"
+                        className="mt-[var(--space-sm)] rounded-md border border-edge bg-surface p-[var(--space-md)]"
                       >
                         <p className="ja-phrase font-bold">
                           {(timeline.limitedByEquipment
@@ -2167,7 +2167,7 @@ export default function CookNaviPage() {
                     {pulls.length > 0 && (
                       <div
                         data-testid="navi-reorder-state"
-                        className="mt-[var(--space-sm)] rounded-md border border-edge bg-surface p-[var(--space-md)] shadow-sm"
+                        className="mt-[var(--space-sm)] rounded-md border border-edge bg-surface p-[var(--space-md)]"
                       >
                         {/* 戻す手立てを**この欄の先頭**に置く（2026-08-14 便GL）。
                             便GJ では説明・印のまとめの下に置いていたので、1回戻して印が消えた

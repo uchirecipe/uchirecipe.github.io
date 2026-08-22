@@ -905,7 +905,7 @@ export default function TodaySuggestPanel({
   )
 
   return (
-    <section className="rounded-md border border-edge bg-surface p-[var(--space-md)] shadow-sm">
+    <section className="rounded-md border border-edge bg-surface p-[var(--space-md)]">
       {/* 見出し。畳める日は見出しそのものが開け閉めのボタンになる（2026-08-17 便HI）。
           畳んでいても節の名前は「今日なに作る？」のまま＝同じものを日によって違う名前で呼ばない
           （旧「もう1品さがす」の小さいリンクを置き換えた） */}

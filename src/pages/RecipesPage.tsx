@@ -2204,9 +2204,14 @@ export default function RecipesPage() {
           (バッジを隠して揃えるのではなく、揃えた高さの中に全部を出す) */}
       <div
         className={
+          /* 2026-08-22 便JE（オーナー原文「週献立の日ごとカードとレシピ一覧のカードの間隔を
+             開けるのも見やすかった。」）: カード同士の縦の間隔を、カードの中の余白（8px）より
+             広い16px（--space-md）にする。近いものほど1つのまとまりに見えるので、
+             中より外が狭いと一覧全体が地続きの帯に見える。
+             **横の間隔は8pxのまま**＝カードの幅が縮まないので、料理名に残る幅は1pxも減らない */
           recipeListLayout === 'list'
-            ? 'mt-[var(--space-md)] flex flex-col gap-[var(--space-sm)]'
-            : 'mt-[var(--space-md)] grid grid-cols-2 gap-[var(--space-sm)] [grid-auto-rows:1fr]'
+            ? 'mt-[var(--space-md)] flex flex-col gap-[var(--space-md)]'
+            : 'mt-[var(--space-md)] grid grid-cols-2 gap-x-[var(--space-sm)] gap-y-[var(--space-md)] [grid-auto-rows:1fr]'
         }
       >
         {results?.map(({ recipe, usedCount, wantedCount }) => {
@@ -2261,7 +2266,9 @@ export default function RecipesPage() {
                   onClick={() => toggleSelected(recipe.id!)}
                   aria-pressed={selected}
                   aria-label={recipe.title}
-                  className={`absolute inset-0 z-10 rounded-md border-2 ${
+                  /* 2026-08-22 便JE: 覆いの角丸はカードと同じ --radius-card
+                     （カードより丸い覆いが載ると、選んでいる間だけ角が二重に見える） */
+                  className={`absolute inset-0 z-10 rounded-card border-2 ${
                     selected ? 'border-accent bg-accent/15' : 'border-transparent bg-transparent'
                   }`}
                 >

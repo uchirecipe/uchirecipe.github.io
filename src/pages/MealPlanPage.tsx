@@ -1258,8 +1258,9 @@ function MonthDayCell({
   onClick: () => void
 }) {
   const photoUrl = usePhotoUrl(coverPhoto)
+  // 2026-08-22 便JE: 同じ形が並ぶカード＝角丸は --radius-card（rounded-card）
   const base =
-    'relative flex aspect-square flex-col items-center justify-center overflow-hidden rounded-sm border text-sm'
+    'relative flex aspect-square flex-col items-center justify-center overflow-hidden rounded-card border text-sm'
   // メモありの印(A-2)。どの表示モード・写真の有無に関わらず同じ位置(右上)に同じ大きさの点を出す。
   // 写真の上でも沈まないよう周りに細い縁を付ける。今日のセルだけは背景がアクセント色で塗り
   // つぶされている(点が同色で消える)ため、色を反転させる
@@ -1318,10 +1319,10 @@ function MonthDayCell({
         onClick={onClick}
         aria-label={ariaLabel}
         // baseのjustify-centerとぶつからないよう、数字セルはここで独立したクラス列を組む
-        className={`relative flex aspect-square flex-col items-center justify-between overflow-hidden rounded-sm border py-1 text-sm ${tone}`}
+        className={`relative flex aspect-square flex-col items-center justify-between overflow-hidden rounded-card border py-1 text-sm ${tone}`}
       >
         {isToday && (
-          <span className="absolute inset-0 rounded-sm ring-2 ring-inset ring-accent" aria-hidden />
+          <span className="absolute inset-0 rounded-card ring-2 ring-inset ring-accent" aria-hidden />
         )}
         {/* 作った記録の印(便CH/C3)。メモの点と同じ「小さな印」の作法で、位置だけ左上に分ける */}
         {hasLog && (
@@ -1366,7 +1367,7 @@ function MonthDayCell({
         <img src={photoUrl} alt="" className="absolute inset-0 h-full w-full object-cover" />
         {inRange && <span className="absolute inset-0 bg-accent/40" aria-hidden />}
         {isToday && (
-          <span className="absolute inset-0 rounded-sm ring-2 ring-inset ring-accent" aria-hidden />
+          <span className="absolute inset-0 rounded-card ring-2 ring-inset ring-accent" aria-hidden />
         )}
         <span
           className={`absolute left-0.5 top-0.5 rounded-sm px-1 text-xs font-bold ${
@@ -5604,7 +5605,9 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
             // 色（面を塗る／塗らない）・文字サイズ（16px／12px）・密度（高い行／低い行）の3つで差を付ける。
             // 空き行の「押せる」見た目（破線＋Plusアイコン＋アクセント色。便BH-3タスク5）は維持し、
             // 食事ごとの地色（SLOT_TONE・便CW-1）にも手を入れない
-            className="flex min-h-11 w-full min-w-0 items-center gap-1 truncate rounded-sm border border-dashed border-accent/40 px-2 py-1.5 text-left text-xs font-bold text-accent-ink"
+            /* 2026-08-22 便JE: 空いている行は、埋まっている行のレシピカード（小）と
+               同じ並びに出るので、角丸も同じ --radius-card にそろえる */
+            className="flex min-h-11 w-full min-w-0 items-center gap-1 truncate rounded-card border border-dashed border-accent/40 px-2 py-1.5 text-left text-xs font-bold text-accent-ink"
           >
             <Plus size={16} className="shrink-0" aria-hidden />
             <span className="min-w-0 flex-1 truncate">{ja.mealPlan.emptyAssign}</span>
@@ -5791,8 +5794,10 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
         data-slot={slot}
         data-locked={slotLocked ? 'true' : undefined}
         // 囲み・地色・左の帯は編集モードとまったく同じ（便CW-1のSLOT_TONE）。
-        // モードを切り替えても、どの食事の枠かの見分け方が変わらないようにする
-        className="rounded-md border border-l-4 p-[var(--space-sm)]"
+        // モードを切り替えても、どの食事の枠かの見分け方が変わらないようにする。
+        // 2026-08-22 便JE（オーナー指示「外側の『夕食』などのカードも同様に」）:
+        // 外側の曜日カードと同じ --radius-card にそろえる＝外より中のほうが丸い状態を作らない
+        className="rounded-card border border-l-4 p-[var(--space-sm)]"
         style={{
           background: slotLocked ? SLOT_TONE[slot].lockedBg : SLOT_TONE[slot].bg,
           borderColor: slotLocked ? 'var(--accent)' : 'var(--border)',
@@ -5901,7 +5906,8 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
         data-testid="slot-block"
         data-slot={slot}
         data-locked={slotLocked ? 'true' : undefined}
-        className="rounded-md border border-l-4 p-[var(--space-sm)]"
+        // 2026-08-22 便JE: 角丸は通常表示の枠と同じ --radius-card（入れ子でそろえる）
+        className="rounded-card border border-l-4 p-[var(--space-sm)]"
         style={{
           // ロック中は地色を薄め、囲みをアクセント色にする(便DX・オーナー指示
           // 「鍵アイコン+わずかな面の差」)。薄くする向きなので、地色に載る補足文字の
@@ -6568,7 +6574,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
               「今日の献立を探す」は下（「今日なに作る？」の下）へ移してある＝
               空のときの唯一の入口を失わせない */}
           {dayHasPlan && (
-            <section className="mt-[var(--space-md)] rounded-md border border-edge bg-surface p-[var(--space-md)] shadow-sm">
+            <section className="mt-[var(--space-md)] rounded-md border border-edge bg-surface p-[var(--space-md)]">
               {/* 見出しの横に「整理」（2026-08-20 便IG・①）。作法は食材の在庫の
                   「整理」ボタン（components/PantryBoard）にそろえる＝同じ位置（見出しの右）・
                   同じ名前（整理／完了）・同じ見た目（ONで塗り・OFFで枠）。
@@ -6938,7 +6944,17 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                 特に栄養と食費が何の数値か」への対応として、見出しを目に見える形で出し、
                 選んだモードでカレンダーに何が出るのかをボタンのすぐ下に1行で添える
                 (従来はカレンダーの下に、数字モードのときだけ凡例を出していた) */}
-            <div className="mt-[var(--space-md)]">
+            {/* 2026-08-22 便JE・②（オーナー確定「①：面でまとめる。月も同じように。」）:
+                月の設定パート（カレンダーに出す情報の選択／レシピの写真は使わない／期間で絞る）を
+                1枚の面（.setup-panel）にまとめ、中は仕切り線で分ける。
+                直す前は入れ物が無く、操作が地の上に直接並んでいたので、どこまでが設定で
+                どこからがカレンダーなのかが読み取れなかった。
+                **月の移動（前の月／今月へ戻る／次の月）はこの面に入れていない**＝
+                カレンダーそのものを動かす操作なので、週タブの「週の移動」と同じくカレンダー側に置く。
+                曜日の見出しとカレンダー本体もページの地の上のままなので、
+                面が終わるところがそのまま境目になる */}
+            <div className="setup-panel mt-[var(--space-md)]">
+            <div className="p-[var(--space-sm)]">
               <p id="month-cell-mode-label" className="text-xs font-bold text-ink-muted">
                 {ja.mealPlan.monthCellModeLabel}
               </p>
@@ -7032,8 +7048,11 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
             </div>
 
             {/* 期間の食費と栄養モード(2026-07-17 便AB・docs/35 §5 → 2026-07-28 便CAで改訂)。
-                押すたびにON/OFFを切り替え、切り替え時は選択もリセットする(再度押せば選び直せる) */}
-            <div className="mt-[var(--space-sm)] flex items-center justify-between gap-2">
+                押すたびにON/OFFを切り替え、切り替え時は選択もリセットする(再度押せば選び直せる)。
+                2026-08-22 便JE・②: 押す前の切り替えと、押したあとに開く日付の入力までを
+                設定パートの2つ目の節としてまとめる */}
+            <div className="p-[var(--space-sm)]">
+            <div className="flex items-center justify-between gap-2">
               <button
                 type="button"
                 onClick={toggleCostMode}
@@ -7082,8 +7101,10 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                 </div>
               </div>
             </Collapse>
+            </div>
+            </div>
 
-            <div className="mt-[var(--space-sm)] grid grid-cols-7 gap-1 text-center text-xs font-bold text-ink-muted">
+            <div className="mt-[var(--space-md)] grid grid-cols-7 gap-1 text-center text-xs font-bold text-ink-muted">
               {ja.mealPlan.dow.map((d) => (
                 <div key={d}>{d}</div>
               ))}
@@ -7137,7 +7158,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
             {costMode && rangeStart != null && rangeEnd != null && rangeSummary != null && (
               <div
                 data-testid="range-result-card"
-                className="mt-[var(--space-sm)] rounded-md border border-edge bg-surface p-[var(--space-md)] shadow-sm"
+                className="mt-[var(--space-sm)] rounded-md border border-edge bg-surface p-[var(--space-md)]"
               >
                 <h2 className="text-xs font-bold text-ink-muted">
                   {ja.mealPlan.rangeCostResultTitle}
@@ -7265,7 +7286,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                 価格の但し書きと1人分の内訳はカードの中でさらに畳む。
                 2026-08-07 便DU(オーナー指示): カレンダーの下へ移し、カード自体を折りたたみにした
                 (既定は畳む。理由は monthCostCardOpen の宣言部) */}
-            <section className="mt-[var(--space-md)] rounded-md border border-edge bg-surface p-[var(--space-md)] shadow-sm">
+            <section className="mt-[var(--space-md)] rounded-md border border-edge bg-surface p-[var(--space-md)]">
               {/* 畳んでいるときに出すのは食費の合計1つだけ(2026-08-19 便HV・⑨・オーナー原文
                   「折りたたんだ時に表示する内容も、食費：全部の合計、栄養：カロリーの合計のみにし、
                   現在折りたたみでも見えている部分（と内訳と注記出典）が開いた時に出てくるだけで
@@ -7382,7 +7403,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                 2026-08-19 便HV・⑨(オーナー原文「『この月の栄養から組む』もいらない」):
                 目的モードの「答え合わせ」をこのカードから外した(下の削除メモ参照) */}
             {isNutritionUnlocked(monthUnlocked) && monthSummary.nutrition.dishCount > 0 && (
-                <section className="mt-[var(--space-md)] rounded-md border border-edge bg-surface p-[var(--space-md)] shadow-sm">
+                <section className="mt-[var(--space-md)] rounded-md border border-edge bg-surface p-[var(--space-md)]">
                   {/* 畳んでいるときに出すのはエネルギーの合計1つだけ(2026-08-19 便HV・⑨・
                       オーナー原文「栄養：カロリーの合計のみにし」)。残る7項目・計算できた品数の
                       注記・出典は、カードを開いたときに出る。
@@ -7511,7 +7532,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                     return (
                       <div
                         key={i}
-                        className={`relative flex aspect-square flex-col items-center justify-center overflow-hidden rounded-sm border text-xs ${
+                        className={`relative flex aspect-square flex-col items-center justify-center overflow-hidden rounded-card border text-xs ${
                           isSampleToday
                             ? 'border-accent bg-accent font-bold text-on-accent'
                             : 'border-edge bg-app text-ink-muted'
@@ -7618,7 +7639,15 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
           開いているときの並び（週の区切り → まとめて空にする）は今までと変わらない。
           対象の食事のチップも囲みごと中に入るので、畳んでいる間に見出しの横の
           「表示する食事」と同じ形のチップが2組並ぶこともなくなった（便INが避けていた問題）。 */}
-      <section className="mt-[var(--space-md)] rounded-md border border-edge p-[var(--space-sm)]">
+      {/* 2026-08-22 便JE・①（オーナー確定「①：面でまとめる。月も同じように。」）:
+          設定の3節（表示のしかた／献立を提案／過去の献立・テンプレートから入れる）を
+          1枚の面（.setup-panel＝カード面・外枠1本）にまとめ、中は仕切り線で分ける。
+          直す前は、3節それぞれが下に並ぶ曜日カードと**同じ形の箱**だったので、
+          どこまでが設定でどこからが週の献立なのかが読み取れなかった。
+          週の移動から下（すべて畳む・7日分のカード）はページの地の上のままなので、
+          面が終わるところがそのまま境目になる。面の作り方は src/index.css の .setup-panel */}
+      <div className="setup-panel mt-[var(--space-md)]">
+      <section className="p-[var(--space-sm)]">
         {renderWeekGroupHeader(
           'display',
           ja.mealPlan.weekGroupDisplayTitle,
@@ -7721,7 +7750,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
           ・実行ボタンは見出しの横（便DT-5/6）から**条件の下**へ移した。日タブと同じ場所・同じ見た目
             （塗りつぶし・横いっぱい）にするため。見出しの横に無くなったので、このグループは既定で開く
           ・入れかたは週にしか無い（＝「できることが増えた版」）。並びは便ID・①のまま入れかたが先 */}
-      <section className="mt-[var(--space-md)] rounded-md border border-edge p-[var(--space-sm)]">
+      <section className="p-[var(--space-sm)]">
         {/* 実行ボタンは**見出しの横**（2026-08-22 便IV・オーナー原文「「まとめて献立てを入力」
             ボタンは「献立を提案」の横にして、１列におさめて。」）。
             便DT-5/6が置いていた場所へ戻す。便IF・⑥が「日タブにそろえる」ために条件の下へ移し、
@@ -7811,7 +7840,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
           「まとめてやテンプレートのような初心者が使わないような機能はしまっておく」が
           この節そのものを名指ししている＝畳んだときは見出しだけが残る。
           開いているときの並びは便INの前と同じ（3つのボタン → 説明の1行 → 中身を見る画面への入口）*/}
-      <section className="mt-[var(--space-md)] rounded-md border border-edge p-[var(--space-sm)]">
+      <section className="p-[var(--space-sm)]">
         {renderWeekGroupHeader('template', ja.mealPlan.weekGroupTemplateTitle)}
         <Collapse open={weekGroupOpen.template}>
           <>
@@ -7862,9 +7891,11 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
           </>
         </Collapse>
       </section>
+      </div>
 
       {/* 週の移動。2026-08-07 便DT-3(オーナー指示)で、画面のいちばん上から
-          「すべて畳む」の上へ移した＝7日分のカードのすぐ手前に置く */}
+          「すべて畳む」の上へ移した＝7日分のカードのすぐ手前に置く。
+          2026-08-22 便JE・①: ここから下はページの地の上＝設定の面が終わる位置が境目になる */}
       <div className="mt-[var(--space-md)] flex items-center justify-between gap-2">
         <button
           type="button"
@@ -7940,7 +7971,12 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
           />
         </button>
       </div>
-      <div className="mt-[var(--space-sm)] space-y-[var(--space-sm)]">
+      {/* 2026-08-22 便JE（オーナー原文「週献立の日ごとカードとレシピ一覧のカードの間隔を
+          開けるのも見やすかった。」）: カード同士の間隔（8px）が、カードの中の余白（16px）より
+          **狭かった**。近いものほど1つのまとまりに見えるので、これでは7日分が地続きの帯に見える。
+          外の間隔を中の余白より広く（--space-lg＝24px）して、1日ぶんずつを塊にする。
+          間隔のトークンを差し替えるだけ＝色も影も角丸も足していない */}
+      <div className="mt-[var(--space-sm)] space-y-[var(--space-lg)]">
         {dates.map((date) => {
           const dayCollapsed = isDayFolded(date)
           /**
@@ -7979,7 +8015,9 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
             // scroll-mt-16(64px): 日付を指定して開いたとき・「まとめて献立」の直後に、この枠へ
             // 自動でスクロールする(scrollIntoView)。上部固定の日/週/月タブ(実測54px)の裏に
             // 日付の見出しが潜り込まないよう、その分＋わずかな余白を空ける(2026-08-09 便ET)
-            className={`scroll-mt-16 rounded-md p-[var(--space-md)] shadow-sm ${
+            // 2026-08-22 便JE（オーナー確定）: ②角丸を --radius-card（4px）に、
+            // ⑥読むだけの入れ物なので影を外す
+            className={`scroll-mt-16 rounded-card p-[var(--space-md)] ${
               date === today
                 ? 'border-2 border-accent bg-surface'
                 : 'border border-edge bg-surface'
@@ -8443,7 +8481,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
           </div>
           <Collapse open={pickerControlsOpen}>
             <div className="mt-[var(--space-sm)] max-h-[40vh] overflow-x-hidden overflow-y-auto overscroll-contain px-[var(--space-md)]">
-              <div className="rounded-md border border-edge bg-surface p-[var(--space-md)] shadow-sm">
+              <div className="rounded-md border border-edge bg-surface p-[var(--space-md)]">
                 <p className="text-sm font-bold text-ink-muted">{ja.search.sortTitle}</p>
                 <div className="mt-1 flex flex-wrap gap-[var(--space-sm)]">
                   {PICKER_SORT_OPTIONS.map((o) => (
@@ -8532,7 +8570,8 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                     // 検査用の目印（2026-08-19 便IA）。1画面に何品入るかを測るときに、
                     // クラス名や入れ子の段数ではなく、この目印で1品ぶんを掴む
                     data-testid="picker-item"
-                    className={isSelected ? 'rounded-md bg-accent/10' : undefined}
+                    /* 2026-08-22 便JE: 選択中の下敷きの角丸は、上に載るカードと同じ --radius-card */
+                    className={isSelected ? 'rounded-card bg-accent/10' : undefined}
                   >
                     <RecipeCard
                       recipe={recipe}

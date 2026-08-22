@@ -6162,7 +6162,7 @@ try {
         `wrap=${wuSummary?.wrapCls}`,
       )
       check(
-        'WEEKUI-01(便DP-8) まとめの折りたたみは面を塗らない(曜日カード=面+影と区別)',
+        'WEEKUI-01(便DP-8) まとめの折りたたみは面を塗らない(曜日カード=面と区別。影は2026-08-22 便JEで外した)',
         !!wuSummary &&
           !wuSummary.costCls.includes('bg-surface') &&
           !wuSummary.costCls.includes('shadow-sm') &&
@@ -46658,6 +46658,386 @@ try {
       await izBrowser.close()
     }
   }
+
+  // --- JELINE-02(2026-08-22 便JE): レシピカードの線が、後ろの面と見分けられる（5テーマ） ---
+  //
+  // オーナー原文「レシピカードの線を濃く（太く？）すると、レシピカードが見分けやすいかも」。
+  // 直す前の実測では、レシピカードの枠とカード面の差は **1.02〜1.30:1** しかなかった
+  // （＝並んだカードが何枚あるのかを線から読み取れない）。図形・部品の輪郭の下限とされる
+  // 3:1 を、5テーマすべてで超えているかを見張る。
+  // 測るのは**実際に塗られる色**（color-mix() の計算値は oklab() で返るので、キャンバスに
+  // 1px 塗ってブラウザが本当に描く値を読み出す）。色の値そのものは書かない
+  // ＝「テーマの色を変えたらここも直す」では見張りにならないため。
+  //
+  // 太さは 1px のままであることも一緒に見張る: 枠を 2px にすると、カードの中に残る幅が
+  // 2px 縮んで**料理名の幅が削れる**（オーナーが直させたばかりの箇所）。
+  //
+  // 実測（この節を足した時点。390×844・カード面との比）:
+  //   一覧(大) ライト2.98 / ダーク3.63 / 自動3.63 / ブラウン3.36 / グリーン3.28
+  //   一覧(標準) ライト3.50 / ダーク4.38 / 自動4.38 / ブラウン3.60 / グリーン3.45
+  currentCheck = 'JELINE-02'
+  {
+    const jlLum = (c) => {
+      const f = (v) => {
+        const x = v / 255
+        return x <= 0.03928 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4
+      }
+      return 0.2126 * f(c.r) + 0.7152 * f(c.g) + 0.0722 * f(c.b)
+    }
+    const jlRatio = (a, b) => (Math.max(jlLum(a), jlLum(b)) + 0.05) / (Math.min(jlLum(a), jlLum(b)) + 0.05)
+    const jlHex = (c) => `#${[c.r, c.g, c.b].map((v) => v.toString(16).padStart(2, '0')).join('')}`
+    const jlBrowser = await chromium.launch()
+    try {
+      for (const [jlTheme, jlLabel, jlScheme] of [
+        ['auto', '自動（端末=ダーク）', 'dark'],
+        ['light', 'ライト', 'dark'],
+        ['dark', 'ダーク', 'light'],
+        ['brown', 'ブラウン', 'light'],
+        ['green', 'グリーン', 'dark'],
+      ]) {
+        const jlContext = await jlBrowser.newContext({
+          viewport: { width: 390, height: 844 },
+          colorScheme: jlScheme,
+        })
+        const jlPage = await jlContext.newPage()
+        try {
+          await jlPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+          await jlPage.waitForTimeout(2400)
+          await jlPage.evaluate(async (theme) => {
+            const req = indexedDB.open('uchi-recipe')
+            const idb = await new Promise((resolve, reject) => {
+              req.onsuccess = () => resolve(req.result)
+              req.onerror = () => reject(req.error)
+            })
+            const P = (r) => new Promise((res, rej) => { r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error) })
+            const cur = await P(idb.transaction('settings').objectStore('settings').get(1))
+            await P(idb.transaction('settings', 'readwrite').objectStore('settings').put({ ...(cur || {}), id: 1, theme }))
+            idb.close()
+          }, jlTheme)
+          await jlPage.reload({ waitUntil: 'networkidle' })
+          await jlPage.waitForTimeout(2400)
+
+          for (const [jlWhere, jlSwitchLabel] of [
+            ['一覧（大）', null],
+            ['一覧（標準）', ja.search.layoutToggleToList],
+          ]) {
+            if (jlSwitchLabel) {
+              await jlPage.getByRole('button', { name: jlSwitchLabel }).first().click()
+              await jlPage.waitForTimeout(1000)
+            }
+            const jlSeen = await jlPage.evaluate(() => {
+              const cvs = document.createElement('canvas').getContext('2d')
+              const toRgb = (v) => {
+                cvs.clearRect(0, 0, 1, 1)
+                cvs.fillStyle = v
+                cvs.fillRect(0, 0, 1, 1)
+                const d = cvs.getImageData(0, 0, 1, 1).data
+                return { r: d[0], g: d[1], b: d[2], a: d[3] / 255 }
+              }
+              const mix = (fg, bg) => ({
+                r: Math.round(fg.r * fg.a + bg.r * (1 - fg.a)),
+                g: Math.round(fg.g * fg.a + bg.g * (1 - fg.a)),
+                b: Math.round(fg.b * fg.a + bg.b * (1 - fg.a)),
+                a: 1,
+              })
+              // 透けていない親をさかのぼって、後ろの地色を求める
+              const behindOf = (el) => {
+                let p = el.parentElement
+                while (p) {
+                  const c = toRgb(getComputedStyle(p).backgroundColor)
+                  if (c.a > 0) return c
+                  p = p.parentElement
+                }
+                return { r: 255, g: 255, b: 255, a: 1 }
+              }
+              const card = document.querySelector('[data-testid="recipe-list-card"]')
+              if (!card) return null
+              const cs = getComputedStyle(card)
+              const behind = behindOf(card)
+              const own = toRgb(cs.backgroundColor)
+              return {
+                border: mix(toRgb(cs.borderTopColor), behind),
+                surface: own.a > 0 ? mix(own, behind) : behind,
+                borderWidth: parseFloat(cs.borderTopWidth),
+              }
+            })
+            check(
+              `JELINE-02 [${jlLabel}] ${jlWhere} 前提: レシピカードを掴めた`,
+              jlSeen !== null,
+              JSON.stringify(jlSeen),
+            )
+            if (jlSeen === null) continue
+            check(
+              `JELINE-02 [${jlLabel}] ${jlWhere} 枠が面と見分けられる（3:1以上）`,
+              jlRatio(jlSeen.border, jlSeen.surface) >= 3,
+              `${jlRatio(jlSeen.border, jlSeen.surface).toFixed(2)}:1 枠=${jlHex(jlSeen.border)} 面=${jlHex(jlSeen.surface)}`,
+            )
+            check(
+              `JELINE-02 [${jlLabel}] ${jlWhere} 枠を太くしていない（料理名の幅を削らない）`,
+              jlSeen.borderWidth <= 1,
+              `${jlSeen.borderWidth}px`,
+            )
+          }
+        } finally {
+          await jlContext.close()
+        }
+      }
+    } finally {
+      await jlBrowser.close()
+    }
+  }
+
+  // --- JECARD-01 / JEPART-03 / JEGAP-04(2026-08-22 便JE) ---
+  //
+  // オーナー確定の見た目（原文）:
+  //   「①：面でまとめる。月も同じように。」
+  //   「②：４px。見本では角が消えて見えていたものがあるため、実装時に上手くいかない可能性が心配。
+  //     外側の「夕食」などのカードも同様に。」
+  //   「影なし」「週献立の日ごとカードとレシピ一覧のカードの間隔を開けるのも見やすかった。」
+  //
+  // JECARD-01 … 並ぶカードの角が**直角に戻っていない**こと・全部が同じトークンの値であること・
+  //             入れ子（曜日カード → 夕食などの枠 → レシピカード）で**中のほうが丸い**が無いこと。
+  //             `rounded-card` の登録が外れると角は直角に戻る＝オーナーの心配がそのまま起きるので、
+  //             クラス名ではなく**実際に描かれている角の大きさ**で見張る。
+  // JEPART-03 … 設定パートが**1枚の面**にまとまり、その面の中に週の移動・曜日カード・
+  //             カレンダーが入っていないこと（＝面が終わるところが境目になっている）。
+  //             面の掴み方はクラス名に依らず「地色と枠を持つ、いちばん近い親」で辿る。
+  // JEGAP-04 … カード同士の間隔が、カードの中の余白より広いこと（近いものほど1つの塊に見えるため）。
+  //             レシピ一覧のグリッドは**横の間隔を広げない**（広げるとカードの幅＝料理名の幅が縮む）。
+  //             読むだけの入れ物には影が無く、押せるものには影があること。
+  currentCheck = 'JECARD-01'
+  {
+    const jcBrowser = await chromium.launch()
+    try {
+      const jcContext = await jcBrowser.newContext({ viewport: { width: 390, height: 844 } })
+      const jcPage = await jcContext.newPage()
+      try {
+        await jcPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+        await jcPage.waitForTimeout(2400)
+        const jcToday = await jcPage.evaluate(() => {
+          const d = new Date()
+          const p = (n) => String(n).padStart(2, '0')
+          return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
+        })
+        // 先の日を献立で埋める（過ぎた日は予定を出さない作りなので、次の週で測る）。
+        // 取引はaddごとに開き直す（awaitを挟むと取引が閉じて2件目以降が黙って捨てられる）
+        await jcPage.evaluate(async (today) => {
+          const req = indexedDB.open('uchi-recipe')
+          const idb = await new Promise((res, rej) => { req.onsuccess = () => res(req.result); req.onerror = () => rej(req.error) })
+          const P = (r) => new Promise((res, rej) => { r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error) })
+          const cur = (await P(idb.transaction('settings').objectStore('settings').get(1))) || { id: 1 }
+          await P(idb.transaction('settings', 'readwrite').objectStore('settings').put({
+            ...cur, id: 1, proCode: 'UR-E2E-TEST-ONLY', proActivatedAt: Date.now(),
+          }))
+          const all = await P(idb.transaction('recipes').objectStore('recipes').getAll())
+          const usable = all.filter((r) => (r.ingredients?.length ?? 0) > 3)
+          await P(idb.transaction('mealPlans', 'readwrite').objectStore('mealPlans').clear())
+          const put = (v) => P(idb.transaction('mealPlans', 'readwrite').objectStore('mealPlans').add(v))
+          for (let i = 1; i <= 14; i++) {
+            const d = new Date(today)
+            d.setDate(d.getDate() + i)
+            const p = (n) => String(n).padStart(2, '0')
+            const date = `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
+            await put({ date, slot: 'dinner', recipeId: usable[(i * 2) % usable.length].id, role: 'main' })
+            await put({ date, slot: 'dinner', recipeId: usable[(i * 2 + 1) % usable.length].id, role: 'side' })
+          }
+          idb.close()
+        }, jcToday)
+        await jcPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+        await jcPage.reload({ waitUntil: 'networkidle' })
+        await jcPage.waitForTimeout(2200)
+        await jcPage.getByRole('button', { name: '週', exact: true }).first().click()
+        await jcPage.waitForTimeout(1600)
+        await jcPage.getByRole('button', { name: ja.mealPlan.nextWeek }).first().click()
+        await jcPage.waitForTimeout(1400)
+        await openAllWeekDays(jcPage)
+        await jcPage.waitForTimeout(600)
+
+        // 画面の中で測る道具（クラス名に依らず、実際に描かれている値と親子関係で見る）
+        const jcProbe = `(() => {
+          const radius = (el) => (el ? parseFloat(getComputedStyle(el).borderTopLeftRadius) : null)
+          const shadow = (el) => (el ? getComputedStyle(el).boxShadow : null)
+          const cvs = document.createElement('canvas').getContext('2d')
+          const toRgb = (v) => {
+            cvs.clearRect(0, 0, 1, 1); cvs.fillStyle = v; cvs.fillRect(0, 0, 1, 1)
+            const d = cvs.getImageData(0, 0, 1, 1).data
+            return { r: d[0], g: d[1], b: d[2], a: d[3] / 255 }
+          }
+          /** 「地色と枠を持つ、いちばん近い親」＝その部品が載っている面 */
+          const panelOf = (el) => {
+            let p = el ? el.parentElement : null
+            while (p && p !== document.body) {
+              const cs = getComputedStyle(p)
+              if (toRgb(cs.backgroundColor).a > 0 && parseFloat(cs.borderTopWidth) > 0) return p
+              p = p.parentElement
+            }
+            return null
+          }
+          const byText = (text) =>
+            [...document.querySelectorAll('span, p, button')].find(
+              (e) => (e.textContent || '').replace(/\\u200b/g, '').trim() === text,
+            ) || null
+          return { radius, shadow, panelOf, byText }
+        })()`
+
+        const jcWeek = await jcPage.evaluate(
+          ({ probeSrc, titles, nextWeekAria }) => {
+            // eslint-disable-next-line no-eval
+            const P = eval(probeSrc)
+            const day = document.querySelector('section[data-date]')
+            const slot = day ? day.querySelector('[data-testid="slot-block"]') : null
+            const card = slot ? slot.querySelector('[data-testid="row-recipe"]') : null
+            const days = [...document.querySelectorAll('section[data-date]')]
+            const gap =
+              days.length >= 2
+                ? Math.round(days[1].getBoundingClientRect().top - days[0].getBoundingClientRect().bottom)
+                : null
+            const pad = day ? parseFloat(getComputedStyle(day).paddingTop) : null
+            const panels = titles.map((t) => P.panelOf(P.byText(t)))
+            const nextBtn = document.querySelector(`[aria-label="${nextWeekAria}"]`)
+            return {
+              cardToken: parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--radius-card')),
+              dayRadius: P.radius(day),
+              slotRadius: P.radius(slot),
+              cardRadius: P.radius(card),
+              dayShadow: P.shadow(day),
+              navShadow: P.shadow(nextBtn),
+              gap,
+              pad,
+              panelSame: panels[0] != null && panels.every((p) => p === panels[0]),
+              panelFound: panels.map((p) => p != null),
+              panelHasNav: panels[0] != null && nextBtn != null ? panels[0].contains(nextBtn) : null,
+              panelHasDay: panels[0] != null && day != null ? panels[0].contains(day) : null,
+            }
+          },
+          {
+            probeSrc: jcProbe,
+            titles: [
+              ja.mealPlan.weekGroupDisplayTitle,
+              ja.mealPlan.weekGroupAutoTitle,
+              ja.mealPlan.weekGroupTemplateTitle,
+            ],
+            nextWeekAria: ja.mealPlan.nextWeek,
+          },
+        )
+
+        check(
+          'JECARD-01 前提: 曜日カード・食事の枠・レシピカードを掴めた',
+          jcWeek.dayRadius != null && jcWeek.slotRadius != null && jcWeek.cardRadius != null,
+          JSON.stringify(jcWeek),
+        )
+        check(
+          'JECARD-01 並ぶカードの角が直角に戻っていない',
+          jcWeek.cardToken > 0 && jcWeek.dayRadius > 0 && jcWeek.slotRadius > 0 && jcWeek.cardRadius > 0,
+          `トークン=${jcWeek.cardToken} 曜日カード=${jcWeek.dayRadius} 食事の枠=${jcWeek.slotRadius} レシピカード=${jcWeek.cardRadius}`,
+        )
+        check(
+          'JECARD-01 入れ子（曜日カード→夕食などの枠→レシピカード）の角がそろっている',
+          jcWeek.dayRadius === jcWeek.cardToken &&
+            jcWeek.slotRadius === jcWeek.cardToken &&
+            jcWeek.cardRadius === jcWeek.cardToken,
+          `トークン=${jcWeek.cardToken} 曜日カード=${jcWeek.dayRadius} 食事の枠=${jcWeek.slotRadius} レシピカード=${jcWeek.cardRadius}`,
+        )
+        check(
+          'JEPART-03 週の設定3節が1枚の面にまとまっている',
+          jcWeek.panelSame,
+          `見つかった面=${JSON.stringify(jcWeek.panelFound)}`,
+        )
+        check(
+          'JEPART-03 その面に週の移動と曜日カードは入っていない（面が終わるところが境目）',
+          jcWeek.panelHasNav === false && jcWeek.panelHasDay === false,
+          `週の移動=${jcWeek.panelHasNav} 曜日カード=${jcWeek.panelHasDay}`,
+        )
+        check(
+          'JEGAP-04 曜日カード同士の間隔が、カードの中の余白より広い',
+          jcWeek.gap != null && jcWeek.pad != null && jcWeek.gap > jcWeek.pad,
+          `間隔=${jcWeek.gap}px 中の余白=${jcWeek.pad}px`,
+        )
+        check(
+          'JEGAP-04 読むだけの曜日カードに影が無い／押せる週の移動には影がある',
+          jcWeek.dayShadow === 'none' && jcWeek.navShadow !== 'none',
+          `曜日カード=${jcWeek.dayShadow} 週の移動=${jcWeek.navShadow}`,
+        )
+
+        // --- 月タブ ---
+        currentCheck = 'JEPART-03'
+        await jcPage.getByRole('button', { name: '月', exact: true }).first().click()
+        await jcPage.waitForTimeout(1600)
+        const jcMonth = await jcPage.evaluate(
+          ({ probeSrc, titles }) => {
+            // eslint-disable-next-line no-eval
+            const P = eval(probeSrc)
+            const cell = document.querySelector('button[data-date]')
+            const panels = titles.map((t) => P.panelOf(P.byText(t)))
+            return {
+              cardToken: parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--radius-card')),
+              cellRadius: P.radius(cell),
+              panelSame: panels[0] != null && panels.every((p) => p === panels[0]),
+              panelFound: panels.map((p) => p != null),
+              panelHasCalendar: panels[0] != null && cell != null ? panels[0].contains(cell) : null,
+            }
+          },
+          { probeSrc: jcProbe, titles: [ja.mealPlan.monthCellModeLabel, ja.mealPlan.rangeCostToggle] },
+        )
+        check(
+          'JECARD-01 月のカレンダーのマスの角も同じ値',
+          jcMonth.cellRadius === jcMonth.cardToken && jcMonth.cardToken > 0,
+          `トークン=${jcMonth.cardToken} マス=${jcMonth.cellRadius}`,
+        )
+        check(
+          'JEPART-03 月の設定も1枚の面にまとまっている',
+          jcMonth.panelSame,
+          `見つかった面=${JSON.stringify(jcMonth.panelFound)}`,
+        )
+        check(
+          'JEPART-03 その面にカレンダーは入っていない（面が終わるところが境目）',
+          jcMonth.panelHasCalendar === false,
+          `カレンダー=${jcMonth.panelHasCalendar}`,
+        )
+
+        // --- レシピ一覧 ---
+        currentCheck = 'JEGAP-04'
+        await jcPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+        await jcPage.waitForTimeout(2000)
+        const jcList = await jcPage.evaluate(() => {
+          const cards = [...document.querySelectorAll('[data-testid="recipe-list-card"]')]
+          if (cards.length < 3) return null
+          const box = cards.map((c) => c.getBoundingClientRect())
+          // グリッドは2列。縦の間隔＝1行目の下端と2行目の上端／横の間隔＝左右のカードの隙間
+          const rowGap = Math.round(box[2].top - box[0].bottom)
+          const colGap = Math.round(box[1].left - box[0].right)
+          // カードの「中の余白」＝カードの中でいちばん広く取っている余白
+          const pad = Math.max(
+            0,
+            ...[...cards[0].querySelectorAll('*')].map((e) => parseFloat(getComputedStyle(e).paddingTop) || 0),
+          )
+          return { rowGap, colGap, pad }
+        })
+        check(
+          'JEGAP-04 前提: レシピ一覧のカードを3枚以上掴めた',
+          jcList !== null,
+          JSON.stringify(jcList),
+        )
+        if (jcList !== null) {
+          check(
+            'JEGAP-04 レシピ一覧の縦の間隔が、カードの中の余白より広い',
+            jcList.pad != null && jcList.rowGap > jcList.pad,
+            `縦の間隔=${jcList.rowGap}px 中の余白=${jcList.pad}px`,
+          )
+          check(
+            'JEGAP-04 横の間隔は縦より狭いまま（横を広げるとカードの幅＝料理名の幅が縮む）',
+            jcList.colGap < jcList.rowGap,
+            `横の間隔=${jcList.colGap}px 縦の間隔=${jcList.rowGap}px`,
+          )
+        }
+      } finally {
+        await jcContext.close()
+      }
+    } finally {
+      await jcBrowser.close()
+    }
+  }
+
 
 } catch (err) {
   ng(`実行中断(${currentCheck})`, err.message)

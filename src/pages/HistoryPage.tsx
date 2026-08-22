@@ -166,7 +166,7 @@ export default function HistoryPage() {
       <div className="px-[var(--space-md)] pt-[var(--space-md)]">
         {/* 絞り込み中であることと、その外し方を必ず出す(便CI/C03) */}
         {hasFilter && (
-          <div className="mb-[var(--space-md)] rounded-md border border-edge bg-surface p-[var(--space-sm)] shadow-sm">
+          <div className="mb-[var(--space-md)] rounded-md border border-edge bg-surface p-[var(--space-sm)]">
             <p className="text-sm font-bold">
               {filterRecipe
                 ? ja.history.filteredBy.replace('{title}', filterRecipe.title)

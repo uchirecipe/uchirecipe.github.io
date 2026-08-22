@@ -261,7 +261,9 @@ function TemplateCard({
   return (
     <section
       data-testid="template-card"
-      className="rounded-md border border-edge bg-surface p-[var(--space-md)] shadow-sm"
+      /* 2026-08-22 便JE: 同じ形が並ぶカード＝角丸は --radius-card（rounded-card）。
+         影は外す（押せるものでも行き先のあるカードでもない） */
+      className="rounded-card border border-edge bg-surface p-[var(--space-md)]"
     >
       <label className="block text-sm font-bold text-ink-muted">
         {ja.mealTemplates.nameLabel}

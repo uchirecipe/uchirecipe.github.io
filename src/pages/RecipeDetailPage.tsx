@@ -1209,7 +1209,7 @@ export default function RecipeDetailPage() {
             <h2 className="text-xl font-bold">{ja.detail.onePoint}</h2>
             <MemoText
               text={recipe.onePoint}
-              className="mt-[var(--space-sm)] rounded-md border border-edge bg-surface p-[var(--space-md)] shadow-sm"
+              className="mt-[var(--space-sm)] rounded-md border border-edge bg-surface p-[var(--space-md)]"
               onOpenTerm={openTerm}
             />
           </section>
@@ -1219,7 +1219,7 @@ export default function RecipeDetailPage() {
             <h2 className="text-xl font-bold">{ja.detail.memo}</h2>
             <MemoText
               text={recipe.memo}
-              className="mt-[var(--space-sm)] rounded-md border border-edge bg-surface p-[var(--space-md)] shadow-sm"
+              className="mt-[var(--space-sm)] rounded-md border border-edge bg-surface p-[var(--space-md)]"
               onOpenTerm={openTerm}
             />
           </section>

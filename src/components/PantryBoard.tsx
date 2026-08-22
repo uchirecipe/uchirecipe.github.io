@@ -160,7 +160,7 @@ export default function PantryBoard() {
 
   return (
     <>
-    <section className="mt-[var(--space-md)] rounded-md border border-edge bg-surface p-[var(--space-md)] shadow-sm">
+    <section className="mt-[var(--space-md)] rounded-md border border-edge bg-surface p-[var(--space-md)]">
       <div className="flex items-center justify-between gap-2">
         <h2 className="flex items-center gap-2 text-xl font-bold">
           <Refrigerator size={20} className="text-accent-ink" aria-hidden />

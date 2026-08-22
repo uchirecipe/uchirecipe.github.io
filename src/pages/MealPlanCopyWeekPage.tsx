@@ -359,7 +359,9 @@ export default function MealPlanCopyWeekPage() {
               key={day.date}
               data-testid="copy-source-day"
               data-date={day.date}
-              className="rounded-md border border-edge bg-surface p-[var(--space-sm)] shadow-sm"
+              /* 2026-08-22 便JE: 同じ形が並ぶカード＝角丸は --radius-card（rounded-card）。
+                 読むだけの入れ物なので影は持たせない */
+              className="rounded-card border border-edge bg-surface p-[var(--space-sm)]"
             >
               <h2 className="text-sm font-bold tabular-nums">
                 {dowLabels[dowIndex(day.date)]} {ymd(day.date)}
