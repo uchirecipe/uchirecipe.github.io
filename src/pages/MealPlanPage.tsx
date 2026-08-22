@@ -81,6 +81,7 @@ import {
   toggleMealGenre,
   normalizePlanGenres,
   weekDates,
+  weekStartForDate,
   dowIndex,
   sortMealSlots,
   shiftWeek,
@@ -1633,10 +1634,23 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
   // 「今日を先頭に7日間」表示が設定されている端末では、初回ロード時にweekStartを今日へ合わせる
   // (weekStartの初期値は従来表示前提の月曜始まりのため。ここで1回だけ今日起点へ寄せる)
   const weekModeInitRef = useRef(false)
+  /**
+   * 「?focus=week&date=YYYY-MM-DD」で開いたのに、**表示のしかたの設定がまだ端末から
+   * 届いていなくて**週の起点を決められなかったときの、その日付（2026-08-23 便JL）。
+   * 届いてからこの日付で決め直す＝未取得を「週区切り」と決めつけない。
+   */
+  const pendingWeekStartDateRef = useRef<string | null>(null)
   useEffect(() => {
     if (weekModeInitRef.current) return
     if (settings === undefined) return
     weekModeInitRef.current = true
+    // 日付の指定つきで開かれていたら、その日付を優先する（今日の週へ寄せない）
+    const pending = pendingWeekStartDateRef.current
+    pendingWeekStartDateRef.current = null
+    if (pending) {
+      setWeekStart(weekStartForDate(pending, settings.weekStartsToday === true))
+      return
+    }
     if (settings.weekStartsToday) setWeekStart(today)
   }, [settings, today])
   // 週タブの表示起点を切り替える(選択を設定に記憶し、weekStartを各モードの「現在」に合わせ直す)
@@ -1929,11 +1943,16 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
    * 見え方は変わらない（別の週の日付にも当たらない＝キーが日付だから）。
    *
    * 開く日の決め方は「その日に作った記録があるか」だけ＝今日が何曜日でも何日でも通る
-   * （曜日・月替わりの前提を置かない）。並べる7日は週タブと同じ計算（weekDates）で出す。
+   * （曜日・月替わりの前提を置かない）。
+   *
+   * 並べる7日は**その端末の表示のしかた**（週区切り／今日から7日間）で出す（2026-08-23 便JL。
+   * それまでは表示のしかたに関わらず月曜始まりで出しており、「今日から7日間」で使っている人が
+   * 押すと、見ている7日間の区切りが黙って月曜始まりに変わっていた）。
    */
   const goToWeekOf = (date: string) => {
-    const weekOfDate = weekDates(new Date(`${date}T00:00:00`))
-    setWeekStart(weekOfDate[0])
+    const start = weekStartForDate(date, rollingWeek)
+    const weekOfDate = Array.from({ length: 7 }, (_, i) => shiftDate(start, i))
+    setWeekStart(start)
     setDayFoldOverrides((prev) => {
       const next = { ...prev }
       for (const d of weekOfDate) {
@@ -2604,16 +2623,25 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
     } else if (focus === 'week') {
       const date = searchParams.get('date')
       if (date) {
-        // 「今日から7日間」表示ならその日を先頭に、週区切り表示ならその日を含む週を出す
-        setWeekStart(
-          settings?.weekStartsToday ? date : weekDates(new Date(`${date}T00:00:00`))[0],
-        )
         // 2026-08-21 便IO: 「今日から7日間」表示の初期化（weekModeInitRef）は、あとから設定を
         // 読み終えた時点で週を今日へ寄せ直す。ここで済み扱いにしないと、日付を指定して開いた週が
         // 一瞬で今日の週に戻っていた（月タブの「この週を開く」・買い物メモからの「その日を見る」・
         // 別の週から入れたあとの戻り先が、すべて今日の週に着地していた）。
         // 下の WEEK_RETURN_PARAM の枝は同じ手当てを先にしてある
-        weekModeInitRef.current = true
+        //
+        // 2026-08-23 便JL: **設定がまだ届いていないときは、ここで週を決めない**。
+        // この効果は画面を開いた直後（1回だけ）に走るので、端末から設定を読み終える前のことが
+        // ある。未取得を「週区切り」と読むと、「今日から7日間」で使っている人が
+        // **見ていた週とは別の週**（その日を含む月曜始まりの週）に着地し、そのまま
+        // 「表示している週をまとめて空にする」の対象がずれていた（画面の外の6日が消え、
+        // 見ていた週は消えない）。届いてから決めるのが上の weekModeInitRef の効果。
+        if (settings === undefined) {
+          pendingWeekStartDateRef.current = date
+        } else {
+          // 「今日から7日間」表示ならその日を先頭に、週区切り表示ならその日を含む週を出す
+          setWeekStart(weekStartForDate(date, settings.weekStartsToday === true))
+          weekModeInitRef.current = true
+        }
         setPendingScrollDate(date)
       } else if (searchParams.get(WEEK_RETURN_PARAM) === '1') {
         // 2026-08-07 便DT-2(オーナー指示): レシピ詳細の「戻る」で帰ってきたときは、
@@ -2667,8 +2695,9 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
       },
       { replace: true },
     )
-    // settings は初回描画では未取得のことがある。参照するのは「今日から7日間」表示かどうかだけで、
-    // その場合も weekModeInitRef の初期化が今日を先頭に寄せるため、依存に足して再実行はさせない
+    // この効果は画面を開いた直後の1回だけ（initialFocusRef）。settings は初回描画では未取得の
+    // ことがあるが、未取得なら日付を控えて weekModeInitRef の効果（settings を待つ）へ渡すので、
+    // 依存に足して再実行はさせない（足すと、消したはずの ?focus= をもう一度読むことになる）
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams, setSearchParams])
 

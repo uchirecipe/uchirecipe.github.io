@@ -28832,6 +28832,112 @@ import { safetyNotesFor, stepSafetyNotes, wholeRecipeSafetyNotes } from '../src/
   }
 }
 
+// ==========================================================================================
+// JL: 「日付を指定して週の画面を開く」と、いま使っている表示のしかたが食い違わない
+// （2026-08-23 便JL。e2e WEEKLOCK-BULK が赤になって見つかった実バグの再発防止）
+//
+// 何が起きていたか（実測）:
+//   「今日から7日間」で使っている端末で「別の週から入れる」を実行して週の画面へ戻ると、
+//   戻り先の URL は ?focus=week&date=2026-09-06（＝いま見ていた7日間の初日）なのに、
+//   画面に出る7日間が 2026-08-31〜2026-09-06（その日を含む月曜始まりの週）に化けていた。
+//   原因は、週の起点を決める処理が**設定を端末から読み終える前**に走り、未取得（undefined）を
+//   「週区切り」と決めつけていたこと。しかも同時に「初期化は済み」と印を付けるので、
+//   設定が届いても直らなかった。
+//   結果、「表示している週の夕食をまとめて空にする」が**見ていた週ではない週**を消していた
+//   （見ていた6日は消えず、画面の外の6日が消える）。
+// ==========================================================================================
+{
+  const { weekStartForDate, weekDates } = await import('../src/logic/mealPlan.ts')
+
+  // --- 週の起点の決め方そのもの（表示のしかた別） ---
+  eq(
+    'JL-1 今日から7日間: 指定した日がそのまま7日間の初日',
+    weekStartForDate('2026-09-06', true),
+    '2026-09-06',
+  )
+  eq(
+    'JL-1 週区切り: 指定した日を含む週の月曜が初日',
+    weekStartForDate('2026-09-06', false),
+    '2026-08-31',
+  )
+  // 曜日の決め打ちを置かない: その週のどの曜日を渡しても、週区切りの起点は同じ月曜になり、
+  // 今日から7日間の起点は渡した日そのものになる（日曜・月曜の境目で読み違えない）
+  {
+    const week = weekDates(new Date('2026-09-06T00:00:00')) // 2026-08-31(月)〜2026-09-06(日)
+    eq('JL-1 前提: 見本の週を7日ぶん作れている', week.length, 7)
+    eq(
+      'JL-1 週区切り: 週のどの曜日から開いても起点は同じ月曜',
+      [...new Set(week.map((d) => weekStartForDate(d, false)))],
+      ['2026-08-31'],
+    )
+    eq(
+      'JL-1 今日から7日間: 週のどの曜日から開いてもその日が起点',
+      week.map((d) => weekStartForDate(d, true)),
+      week,
+    )
+  }
+
+  // --- 画面側が「設定が届く前に週を決めてしまう」形に戻っていないこと ---
+  {
+    const jlRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
+    const src = readFileSync(path.join(jlRoot, 'src/pages/MealPlanPage.tsx'), 'utf-8')
+    eq(
+      'JL-2 前提: ?focus=week&date= の枝を掴めている（0件なら見張りが壊れている）',
+      src.includes("const date = searchParams.get('date')"),
+      true,
+    )
+    // 週の起点は純ロジック（weekStartForDate）を通す＝画面側に月曜始まりの計算を書き写さない
+    eq(
+      'JL-2 週の起点は純ロジックで決めている',
+      /setWeekStart\(weekStartForDate\(date, settings\.weekStartsToday === true\)\)/.test(src),
+      true,
+    )
+    eq(
+      'JL-2 設定の未取得を「週区切り」と読む書き方が残っていない',
+      /settings\?\.weekStartsToday \? date :/.test(src),
+      false,
+    )
+    // 設定が未取得のときは、週を決めずに日付だけ控える（＝あとで決め直せる状態にする）
+    const at = src.indexOf('if (settings === undefined) {')
+    eq('JL-2 前提: 設定の未取得を分けている枝がある', at >= 0, true)
+    const elseAt = src.indexOf('} else {', at)
+    eq('JL-2 前提: 設定が届いているときの枝も掴めている', elseAt > at, true)
+    const notLoadedBranch = src.slice(at, elseAt)
+    const loadedBranch = src.slice(elseAt, src.indexOf('setPendingScrollDate(date)', elseAt))
+    eq(
+      'JL-2 設定が未取得なら、その日付を控えるだけにする',
+      notLoadedBranch.includes('pendingWeekStartDateRef.current = date'),
+      true,
+    )
+    eq(
+      'JL-2 設定が未取得のときは「初期化は済み」の印を立てない（届いてから決め直せる）',
+      notLoadedBranch.includes('weekModeInitRef.current = true'),
+      false,
+    )
+    eq(
+      'JL-2 設定が届いているときは、その場で決めて「初期化は済み」にする（今日の週へ戻さない）',
+      loadedBranch.includes('weekModeInitRef.current = true'),
+      true,
+    )
+    // 設定が届いたら、控えた日付で決め直す
+    eq(
+      'JL-2 設定が届いたら、控えた日付を表示のしかたに合わせて決め直す',
+      /const pending = pendingWeekStartDateRef\.current[\s\S]{0,400}setWeekStart\(weekStartForDate\(pending, settings\.weekStartsToday === true\)\)/.test(
+        src,
+      ),
+      true,
+    )
+    // 月タブの「この週を開く」も同じ決め方を通す（表示のしかたを黙って月曜始まりに変えない）
+    eq(
+      'JL-3 月の「この週を開く」も、表示のしかたに合わせて7日間を出す',
+      /const goToWeekOf = \(date: string\) => \{[\s\S]{0,80}const start = weekStartForDate\(date, rollingWeek\)/.test(
+        src,
+      ),
+      true,
+    )
+  }
+}
+
 // ---------- 結果 ----------
 console.log(`合格: ${passed}件 / 失敗: ${failures.length}件`)
 for (const f of failures) console.log(`  NG ${f}`)

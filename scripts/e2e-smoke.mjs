@@ -7388,6 +7388,17 @@ try {
         'WEEKLOCK-BULK(まとめて空) 前提: 消す対象の週の1日に鍵を掛け直した',
         (await bkLockedState(bkLockedC)) === 'true',
       )
+      // 2026-08-23 便JL: **消す前に、画面がまだ同じ週を出していることを断定する**。
+      // 「まとめて空にする」が消すのは「表示している週」なので、ここで週がすり替わっていると
+      // 下の判定は「別の週を消したかどうか」を見ることになる（実際にそうなっていた＝
+      // 「別の週から入れる」から戻ると、今日から7日間の設定が届く前に月曜始まりの週へ
+      // 着地していた）。曜日によっては消したい日がその週に紛れ込んで**緑に化ける**ので、
+      // 日付ではなく「週が変わっていないこと」を測る
+      check(
+        'WEEKLOCK-BULK(まとめて空) 前提: 一括操作から戻っても、表示している週は変わっていない',
+        JSON.stringify(await bkWeekDates()) === JSON.stringify(bkWeekC),
+        `見ていた週=${JSON.stringify(bkWeekC)} / いま出ている週=${JSON.stringify(await bkWeekDates())}`,
+      )
       const bkLockedCBefore = await bkPlanOf(bkLockedC)
       const bkFreeCBefore = await bkPlanOf(bkFreeC)
       check(
