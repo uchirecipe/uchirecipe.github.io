@@ -1,13 +1,18 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Plus, RotateCcw, Search, X } from 'lucide-react'
+import { Plus, RefreshCw, RotateCcw, Search, X } from 'lucide-react'
 import {
   usePriceEntries,
   addPriceEntry,
   updatePriceEntry,
   removePriceEntry,
   restorePriceEntry,
+  restorePriceEntries,
   resetPriceEntryToDefault,
+  pendingPriceRefresh,
+  refreshDefaultPrices,
 } from '../db/prices'
+import { priceRefreshConfirm } from '../logic/priceRefresh'
+import { useConfirm } from '../components/ConfirmProvider'
 import { toHiragana } from '../logic/kana'
 import { isImeConfirmKey } from '../logic/imeKey'
 import { KNOWN_UNITS, decomposeUnit, composeUnit } from '../logic/unitForm'
@@ -79,8 +84,12 @@ export default function IngredientPricesPage() {
   // 次のトーストが出たら取り消しは無効にする(古い1件が戻ってくる混乱を防ぐ)
   const [message, setMessage] = useState('')
   const [undoRemoved, setUndoRemoved] = useState<PriceEntry | null>(null)
+  // 「最新の目安価格に更新する」の取り消し用に、入れ替える前の行をそのまま持っておく
+  // (2026-08-22 便JI)。行削除の取り消しと同じ「変えてから戻せる」形にそろえる
+  const [undoRefreshed, setUndoRefreshed] = useState<PriceEntry[] | null>(null)
   const removeEntry = async (entry: PriceEntry) => {
     await removePriceEntry(entry.id!)
+    setUndoRefreshed(null)
     setUndoRemoved(entry)
     setMessage(ja.priceMaster.removedToast.replace('{name}', entry.name))
   }
@@ -90,6 +99,32 @@ export default function IngredientPricesPage() {
     setUndoRemoved(null)
     await restorePriceEntry(restored)
     setMessage(ja.priceMaster.restoredToast.replace('{name}', restored.name))
+  }
+
+  /**
+   * 「最新の目安価格に更新する」(2026-08-22 便JI・オーナー裁定「1＝A案」)。
+   * 押す前に何件変わるかを出し(規約F)、押したあとに何件変えたかを言い、その場で取り消せる。
+   * 実際にどの行を入れ替えるかは refreshDefaultPrices がトランザクションの中で数え直すので、
+   * 確認を読んでいる間に行を編集しても、その行を巻き込むことはない。
+   */
+  const confirm = useConfirm()
+  const refreshPlan = useMemo(() => pendingPriceRefresh(entries), [entries])
+  const refreshCount = refreshPlan.targets.length
+  const runRefresh = async () => {
+    if (refreshCount === 0) return
+    if (!(await confirm(priceRefreshConfirm(refreshPlan)))) return
+    const result = await refreshDefaultPrices()
+    if (result.updated === 0) return
+    setUndoRemoved(null)
+    setUndoRefreshed(result.previous)
+    setMessage(ja.priceMaster.refreshedToast.replace('{n}', String(result.updated)))
+  }
+  const undoRefresh = async () => {
+    if (!undoRefreshed) return
+    const rows = undoRefreshed
+    setUndoRefreshed(null)
+    await restorePriceEntries(rows)
+    setMessage(ja.priceMaster.refreshUndoneToast)
   }
 
   const commitPrice = async (id: number, raw: string) => {
@@ -134,6 +169,29 @@ export default function IngredientPricesPage() {
         <p className="rounded-sm border border-edge bg-surface px-3 py-2 text-sm text-ink-muted">
           {ja.priceMaster.disclaimer}
         </p>
+
+        {/* 目安価格の入れ替え(2026-08-22 便JI)。はじめから入っている価格の説明のすぐ下に置く
+            ＝この操作が動かすのは、その一文が説明している値だけだから。
+            読み込み中は出さない(0件と最新の見分けが付かないため) */}
+        {entries && entries.length > 0 && (
+          <div className="mt-[var(--space-sm)] flex flex-wrap items-center gap-x-3 gap-y-1">
+            <button
+              type="button"
+              onClick={() => void runRefresh()}
+              disabled={refreshCount === 0}
+              data-testid="price-refresh"
+              className="tap-target inline-flex items-center gap-1 rounded-sm border border-edge bg-surface px-3 py-2 text-sm font-bold text-accent-ink shadow-sm disabled:opacity-40"
+            >
+              <RefreshCw size={14} aria-hidden />
+              {ja.priceMaster.refresh}
+            </button>
+            <p className="text-xs text-ink-muted" data-testid="price-refresh-status">
+              {refreshCount > 0
+                ? ja.priceMaster.refreshAvailable.replace('{n}', String(refreshCount))
+                : ja.priceMaster.refreshUpToDate}
+            </p>
+          </div>
+        )}
 
         {/* 新規追加(2026-07-14 オーナー実機フィードバック: 一覧の下から上へ移動) */}
         <div className="mt-[var(--space-md)] space-y-2 rounded-md border border-edge bg-surface p-[var(--space-sm)]">
@@ -255,9 +313,16 @@ export default function IngredientPricesPage() {
         onClose={() => {
           setMessage('')
           setUndoRemoved(null)
+          setUndoRefreshed(null)
         }}
-        actionLabel={undoRemoved ? ja.common.undo : undefined}
-        onAction={undoRemoved ? () => void undoRemoveEntry() : undefined}
+        actionLabel={undoRemoved || undoRefreshed ? ja.common.undo : undefined}
+        onAction={
+          undoRemoved
+            ? () => void undoRemoveEntry()
+            : undoRefreshed
+              ? () => void undoRefresh()
+              : undefined
+        }
       />
     </div>
   )

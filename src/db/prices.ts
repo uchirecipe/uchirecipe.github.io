@@ -15,6 +15,8 @@ import type {
 } from '../data/priceDefaults'
 import { toHiragana } from '../logic/kana'
 import { normalizeIngredientNameForPrice } from '../logic/priceEstimate'
+import { planPriceRefresh, normalizePriceName } from '../logic/priceRefresh'
+import type { PriceRefreshPlan } from '../logic/priceRefresh'
 
 const collator = new Intl.Collator('ja')
 
@@ -22,9 +24,13 @@ const collator = new Intl.Collator('ja')
  * 重複判定用の正規化: 前後の空白除去・括弧書き除去（normalizeIngredientNameForPrice）に加えて、
  * カタカナ⇄ひらがなの表記ゆれも同一視するため toHiragana を噛ませる
  * （2026-07-15 オーナー実機フィードバック: 「とうふ」と「トウフ」を別々に登録できてしまう）。
+ *
+ * 2026-08-22 便JI: 中身は logic/priceRefresh.ts の normalizePriceName に1本化した
+ * （「最新の目安価格に更新する」の突き合わせと同じキーで見るため。別々に持つと
+ *  「追加のときは同じ食材、更新のときは別の食材」という食い違いが生まれる）。
  */
 function normalizeForDuplicateCheck(name: string): string {
-  return toHiragana(normalizeIngredientNameForPrice(name))
+  return normalizePriceName(name)
 }
 
 /**
@@ -365,6 +371,66 @@ export async function updatePriceEntry(
     updatedAt: Date.now(),
     isDefault: matchesDefault,
   })
+}
+
+/**
+ * いま「最新の目安価格に更新する」を押したら何が変わるかを数える（画面のボタンの出し分け・
+ * 押す前の件数・確認の窓の中身に使う。2026-08-22 便JI）。
+ * entries は usePriceEntries の結果をそのまま渡してよい（読み込み中の undefined も受ける）。
+ */
+export function pendingPriceRefresh(entries: readonly PriceEntry[] | undefined): PriceRefreshPlan {
+  return planPriceRefresh(entries ?? [], PRICE_DEFAULTS)
+}
+
+/** refreshDefaultPrices の結果（updated=入れ替えた件数・previous=取り消し用の入れ替え前の行） */
+export interface PriceRefreshOutcome {
+  updated: number
+  previous: PriceEntry[]
+}
+
+/**
+ * 「投入時の目安のままの行」だけを今の目安価格（PRICE_DEFAULTS）へ入れ替える
+ * （2026-08-22 便JI・オーナー裁定「1＝A案」）。**利用者がボタンを押したときだけ走る**。
+ *
+ * 価格・単位と一緒に defaultPricePerUnit / defaultUnit も新値にするのが要点で、
+ * ここを揃えないと、入れ替えたあとに自分で直して「デフォルトに戻す」を押したとき
+ * また古い値に戻ってしまう（src/data/priceDefaults.ts 冒頭の「かつての既知の限界」の後半）。
+ *
+ * どの行を入れ替えるかは planPriceRefresh が決める。計画は**このトランザクションの中で
+ * 立て直す**（画面が持っていた古い計画で書き換えると、その間に編集した行を壊しうるため）。
+ * 入れ替える前の行はそのまま返すので、呼び出し側は restorePriceEntries で取り消せる。
+ */
+export async function refreshDefaultPrices(): Promise<PriceRefreshOutcome> {
+  return db.transaction('rw', db.prices, async () => {
+    const entries = await db.prices.toArray()
+    const plan = planPriceRefresh(entries, PRICE_DEFAULTS)
+    const byId = new Map(entries.map((entry) => [entry.id, entry]))
+    const previous: PriceEntry[] = []
+    const now = Date.now()
+    for (const target of plan.targets) {
+      const before = byId.get(target.id)
+      if (before) previous.push({ ...before })
+      await db.prices.update(target.id, {
+        pricePerUnit: target.toPricePerUnit,
+        unit: target.toUnit,
+        defaultPricePerUnit: target.toPricePerUnit,
+        defaultUnit: target.toUnit,
+        isDefault: true,
+        updatedAt: now,
+      })
+    }
+    return { updated: plan.targets.length, previous }
+  })
+}
+
+/**
+ * 「最新の目安価格に更新する」を取り消す（2026-08-22 便JI）。入れ替える前の行をそのまま
+ * 書き戻すので、価格・単位だけでなく戻り先（defaultPricePerUnit / defaultUnit）まで元の姿に戻る。
+ * 行削除の取り消し（restorePriceEntry）と同じ「消して（変えて）から戻せる」作法。
+ */
+export async function restorePriceEntries(entries: readonly PriceEntry[]): Promise<void> {
+  if (entries.length === 0) return
+  await db.prices.bulkPut([...entries])
 }
 
 /** 「自分の価格」に上書きした行を、投入時の目安価格・単位に戻す */

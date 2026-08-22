@@ -48120,6 +48120,197 @@ try {
     }
   }
 
+  // --- JIPRICE-01(2026-08-22 便JI): 古い目安価格を持っている端末で「最新の目安価格に更新する」 ---
+  //
+  // オーナー裁定「判断待ち １A ２A」の①。それまでの仕組み（バージョン付きトップアップ移行）は
+  // 「名前がまだ無い食材の追加」しかできず、既に行を持っている端末は目安価格を直しても
+  // 古い値のまま取り残されていた。しかも「デフォルトに戻す」を押しても旧値に戻るだけだった。
+  //
+  // 測るのは「利用者が確かめたいこと」:
+  //   ①古い目安のままの端末で押したら、新しい目安価格に変わる
+  //   ②自分で直した価格は1円も変わらない
+  //   ③押す前に「変わるもの／変わらないもの」が件数つきで読める（規約F）
+  //   ④押したあとに何件変えたかを言う／その場で取り消せる
+  //   ⑤更新したあとに自分で直して「デフォルトに戻す」を押すと、**新しい値**に戻る（②の後半）
+  // 禁じ手よけ: 生のIndexedDBへ書いたら必ず読み込み直す（⑥）／件数は画面の表示から読む（③）／
+  //             行は名前のaria-labelで掴む（④・並び順に依らない）／曜日・月替わりに依らない
+  currentCheck = 'JIPRICE-01'
+  {
+    const jpBrowser = await chromium.launch()
+    try {
+      const jpContext = await jpBrowser.newContext({ viewport: { width: 390, height: 844 } })
+      const jpPage = await jpContext.newPage()
+      jpPage.on('pageerror', (err) => {
+        if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+        errors.push(`[pageerror@JIPRICE-01] ${err.message}`)
+      })
+      try {
+        await jpPage.goto(`${BASE}/#/prices`, { waitUntil: 'networkidle' })
+        await jpPage.waitForTimeout(2600) // 初回シード完了待ち
+
+        // 「古い目安価格を持っている端末」を作る。旧値は 2026-08-22 便JI で直す前の実データ。
+        // 片栗粉だけは「自分で直した行」にして、1円も動かないことを見る
+        const jpSeeded = await jpPage.evaluate(
+          () =>
+            new Promise((resolve, reject) => {
+              const req = indexedDB.open('uchi-recipe')
+              req.onsuccess = () => {
+                const tx = req.result.transaction('prices', 'readwrite')
+                const store = tx.objectStore('prices')
+                const all = store.getAll()
+                const written = []
+                all.onsuccess = () => {
+                  const olds = {
+                    小麦粉: [10, '大さじ1'],
+                    きな粉: [15, '大さじ1'],
+                    バター: [250, '200g'],
+                    片栗粉: [10, '大さじ1'],
+                  }
+                  for (const row of all.result) {
+                    const old = olds[row.name]
+                    if (!old) continue
+                    const isCustom = row.name === '片栗粉'
+                    store.put({
+                      ...row,
+                      pricePerUnit: isCustom ? 777 : old[0],
+                      unit: old[1],
+                      isDefault: !isCustom,
+                      defaultPricePerUnit: old[0],
+                      defaultUnit: old[1],
+                    })
+                    written.push(row.name)
+                  }
+                }
+                all.onerror = () => reject(all.error)
+                tx.oncomplete = () => resolve(written.sort())
+                tx.onerror = () => reject(tx.error)
+              }
+              req.onerror = () => reject(req.error)
+            }),
+        )
+        check(
+          'JIPRICE-01 前提: 旧値を持つ端末を作れた（小麦粉・きな粉・バター＋自分で直した片栗粉）',
+          Array.isArray(jpSeeded) && jpSeeded.length === 4,
+          JSON.stringify(jpSeeded),
+        )
+        // Dexieのライブ購読はDexie経由の書き込みしか見ていないので、必ず読み込み直す（禁じ手⑥）
+        await jpPage.reload({ waitUntil: 'networkidle' })
+        await jpPage.waitForTimeout(1800)
+
+        const jpPrice = (name) => jpPage.getByLabel(`${name}の価格（円）`, { exact: true })
+        const jpValue = async (name) => (await jpPrice(name).inputValue())
+        const jpStatus = () => jpPage.locator('[data-testid="price-refresh-status"]').innerText()
+        const jpButton = jpPage.locator('[data-testid="price-refresh"]')
+
+        check(
+          'JIPRICE-01 前提: 画面が旧値を出している（小麦粉10円・きな粉15円・バター250円）',
+          (await jpValue('小麦粉')) === '10' && (await jpValue('きな粉')) === '15' && (await jpValue('バター')) === '250',
+          `小麦粉=${await jpValue('小麦粉')} きな粉=${await jpValue('きな粉')} バター=${await jpValue('バター')}`,
+        )
+        check('JIPRICE-01 前提: 自分で直した片栗粉は777円', (await jpValue('片栗粉')) === '777')
+
+        // ③押す前に何件変わるかが読める
+        const jpStatusBefore = (await jpStatus()).replaceAll('​', '')
+        check(
+          'JIPRICE-01 押す前に「新しい目安価格が3件あります」と件数が出る（自分で直した片栗粉は数えない）',
+          jpStatusBefore.includes('3'),
+          `状態=${jpStatusBefore}`,
+        )
+        check('JIPRICE-01 更新できるときはボタンを押せる', await jpButton.isEnabled())
+
+        // 確認の窓は仕掛け（installConfirmAutoPress）が出た瞬間に押してしまうので、
+        // 窓そのものを掴まず、貯め口（readConfirms）から出た文言を読む
+        await jpButton.click()
+        await jpPage.waitForTimeout(900)
+        const jpConfirm = (await readConfirms(jpPage)).at(-1) ?? ''
+        check(
+          'JIPRICE-01 確認に「変わるもの」「変わらないもの」が件数つきで両方出る（規約F）',
+          jpConfirm.includes(ja.priceMaster.refreshChangedLabel) &&
+            jpConfirm.includes(ja.priceMaster.refreshKeptLabel) &&
+            jpConfirm.includes('3'),
+          `確認=${jpConfirm}`,
+        )
+        check(
+          'JIPRICE-01 確認に、何が変わるのかが食材名でも出る',
+          jpConfirm.includes('小麦粉'),
+          `確認=${jpConfirm}`,
+        )
+        check(
+          'JIPRICE-01 確認は「よろしいですか？」だけにしない（取り消せることも添える）',
+          jpConfirm.includes(ja.common.undo),
+          `確認=${jpConfirm}`,
+        )
+
+        // ①新しい目安価格に変わる ②自分で直した行は変わらない
+        check(
+          'JIPRICE-01 押したら新しい目安価格になる（小麦粉2円・きな粉7円・バター600円）',
+          (await jpValue('小麦粉')) === '2' && (await jpValue('きな粉')) === '7' && (await jpValue('バター')) === '600',
+          `小麦粉=${await jpValue('小麦粉')} きな粉=${await jpValue('きな粉')} バター=${await jpValue('バター')}`,
+        )
+        check(
+          'JIPRICE-01 自分で直した片栗粉は1円も変わらない',
+          (await jpValue('片栗粉')) === '777',
+          `片栗粉=${await jpValue('片栗粉')}`,
+        )
+        // ④何件変えたかを言う
+        const jpBodyAfter = (await jpPage.textContent('body')).replaceAll('​', '')
+        check(
+          'JIPRICE-01 押したあとに何件変えたかを言う',
+          jpBodyAfter.includes(ja.priceMaster.refreshedToast.replace('{n}', '3')),
+          `本文に「${ja.priceMaster.refreshedToast.replace('{n}', '3')}」が無い`,
+        )
+        const jpStatusAfter = (await jpStatus()).replaceAll('​', '')
+        check(
+          'JIPRICE-01 更新したあとは「すべて最新」になり、ボタンは押せなくなる',
+          jpStatusAfter.includes(ja.priceMaster.refreshUpToDate) && (await jpButton.isDisabled()),
+          `状態=${jpStatusAfter}`,
+        )
+
+        // ④その場で取り消せる
+        await jpPage.getByRole('button', { name: ja.common.undo, exact: true }).click()
+        await jpPage.waitForTimeout(900)
+        check(
+          'JIPRICE-01 「元に戻す」で更新前の値に戻る',
+          (await jpValue('小麦粉')) === '10' && (await jpValue('バター')) === '250',
+          `小麦粉=${await jpValue('小麦粉')} バター=${await jpValue('バター')}`,
+        )
+        check(
+          'JIPRICE-01 取り消しても、自分で直した片栗粉は777円のまま',
+          (await jpValue('片栗粉')) === '777',
+        )
+
+        // もう一度更新して、⑤「デフォルトに戻す」の戻り先まで新しくなっていることを見る
+        await jpButton.click()
+        await jpPage.waitForTimeout(1200)
+        check('JIPRICE-01 もう一度押しても同じ姿になる', (await jpValue('小麦粉')) === '2')
+
+        const jpFlourRow = jpPage.locator('li', { hasText: '小麦粉' }).first()
+        check(
+          'JIPRICE-01 更新しただけの行には「デフォルトに戻す」が出ない（未編集の見え方が変わらない）',
+          !(await jpFlourRow.textContent()).includes(ja.priceMaster.resetToDefault),
+        )
+        await jpPrice('小麦粉').fill('999')
+        await jpPrice('小麦粉').press('Enter')
+        await jpPage.waitForTimeout(600)
+        check(
+          'JIPRICE-01 前提: 自分で直したので「デフォルトに戻す」が出る',
+          (await jpFlourRow.textContent()).includes(ja.priceMaster.resetToDefault),
+        )
+        await jpFlourRow.getByRole('button', { name: ja.priceMaster.resetToDefaultAria.replace('{name}', '小麦粉') }).click()
+        await jpPage.waitForTimeout(700)
+        check(
+          'JIPRICE-01 「デフォルトに戻す」で戻るのは新しい目安価格（2円）＝古い10円に戻らない',
+          (await jpValue('小麦粉')) === '2',
+          `小麦粉=${await jpValue('小麦粉')}`,
+        )
+      } finally {
+        await jpContext.close()
+      }
+    } finally {
+      await jpBrowser.close()
+    }
+  }
+
 } catch (err) {
   ng(`実行中断(${currentCheck})`, err.message)
 } finally {

@@ -106,6 +106,12 @@ import {
   PRICE_DEFAULTS_VERSION as PRICE_DEFAULTS_VERSION_FOR_JG,
   PRICE_DEFAULT_MERGES as PRICE_DEFAULT_MERGES_FOR_JG,
 } from '../src/data/priceDefaults.ts'
+// 便JI: 「最新の目安価格に更新する」の計画づくり（画面にもDexieにも触らない純ロジック）
+import {
+  planPriceRefresh,
+  priceRefreshConfirm,
+  normalizePriceName,
+} from '../src/logic/priceRefresh.ts'
 import {
   buildShoppingCandidates,
   sortShoppingByAisle,
@@ -11313,7 +11319,10 @@ eq('normalizeIngredientNameForPrice 前後空白除去', normalizeIngredientName
     // 動いたのは10行だけ(こしょう「少々」7行・粗びき黒こしょう「少々」3行)で、
     // 登録単位の小さじ1杯まるごと(10円)から「少々」の実量0.3g相当(2円)へ下がった。
     // 塩こしょう(5円/少々)は登録単位が「少々」なので1円も動いていない
-    eq('同梱109品の概算食費の合計(便JG後。便FA後は38,014円/便EY前は38,622円/便BY修正前は48,377円)', grand, 37934)
+    // 2026-08-22 便JI「実勢とずれていた目安価格」の修正で37,934→37,951円(+17円)。
+    // バター250→600円/200gで上がったぶんと、小麦粉10→2円・片栗粉10→5円・きな粉15→7円で
+    // 下がったぶんの差し引き(同梱109品はバターを使う品が少なく、粉物のほうが多い)
+    eq('同梱109品の概算食費の合計(便JI後。便JG後は37,934円/便EY前は38,622円/便BY修正前は48,377円)', grand, 37951)
     const nabe = starterDefs.find((d) => d.title === '寄せ鍋')
     eq(
       '寄せ鍋 1食あたり(便EY後226円→便FAのしいたけ名寄せで217円)',
@@ -11321,7 +11330,8 @@ eq('normalizeIngredientNameForPrice 前後空白除去', normalizeIngredientName
       217,
     )
     const soup = starterDefs.find((d) => d.title.includes('中華風卵スープ'))
-    eq('中華風卵スープ 1食あたり(修正前682円・ごま油「少々」に1Lボトル満額が乗っていた)', Math.round(estimateRecipeCost(soup.ingredients, idx).total / soup.servings), 85)
+    // 2026-08-22 便JI: 片栗粉10→5円/大さじ1(実勢600円/kg)で85→82円
+    eq('中華風卵スープ 1食あたり(修正前682円・ごま油「少々」に1Lボトル満額が乗っていた)', Math.round(estimateRecipeCost(soup.ingredients, idx).total / soup.servings), 82)
     const steamed = starterDefs.find((d) => d.title.includes('レンジ蒸し鶏'))
     eq('レンジ蒸し鶏 1食あたり(修正前48円・鶏むね肉1枚が100g分の90円だった)', Math.round(estimateRecipeCost(steamed.ingredients, idx).total / steamed.servings), 115)
     const teriyaki = starterDefs.find((d) => d.title === '鶏の照り焼き')
@@ -27992,8 +28002,174 @@ Aみりん 大さじ1
     PRICE_DEFAULT_MERGES_FOR_JG.some((m) => m.fromName === '粗びき黒こしょう' && m.toName === '黒こしょう'),
     true,
   )
-  eq('JG-7 版番号を上げてある（上げないと既存の端末に新しい行が届かない）', PRICE_DEFAULTS_VERSION_FOR_JG, 10)
+  // 2026-08-22 便JIで11へ上げたので、ここは「便JGの時点まで上がっている」ことだけを見る
+  eq('JG-7 版番号を上げてある（上げないと既存の端末に新しい行が届かない）', PRICE_DEFAULTS_VERSION_FOR_JG >= 10, true)
   eq('JG-7 読み仮名辞書の版番号も上げてある', READINGS_VERSION >= 7, true)
+}
+
+// ---------- 便JI: 目安価格が古いまま取り残される（2026-08-22 オーナー裁定「１A ２A」） ----------
+// 背景（src/data/priceDefaults.ts 冒頭に元から書いてあった限界）:
+//   「このトップアップ機構は『名前がまだ無い項目の追加』専用であり、既存項目の価格・単位の
+//     『更新』には使われない…『デフォルトに戻す』操作でも、旧デフォルト値に戻るだけで新値には
+//     ならない…既存ユーザー全員に新値を反映する専用の再シード処理は今回は実装していない」
+// オーナー裁定:
+//   1＝A案「再投入の仕組みを作る。『食材と価格』に『最新の目安値に更新する』を置き、
+//           自分で直した値は上書きしない（既定のままの行だけ入れ替える）」
+//   2＝A案「test-price.mjs のピン留めを解いて、実勢に合わせる」
+//
+// ここで測るのは「利用者が確かめたいこと」:
+//   ①古い目安のままの端末で押したら、新しい目安価格に変わる
+//   ②自分で直した価格・自分で追加した食材は1件も変わらない
+//   ③そのあと「デフォルトに戻す」を押しても新しい値に戻る（＝戻り先も追随している）
+//   ④押す前に「変わるもの／変わらないもの」が件数つきで読める（規約F）
+//   ⑤実勢と桁で食い違っていた目安価格が直っている
+{
+  const jiByName = new Map(PRICE_DEFAULTS.map((d) => [d.name, d]))
+  /** 一覧の1行を作る（省いたものは「投入時の目安のまま」の姿になる） */
+  const jiRow = (id, name, pricePerUnit, unit, extra = {}) => ({
+    id,
+    name,
+    pricePerUnit,
+    unit,
+    isDefault: true,
+    defaultPricePerUnit: pricePerUnit,
+    defaultUnit: unit,
+    ...extra,
+  })
+
+  // --- JI-1: 実勢と食い違っていた目安価格を直す（値の根拠は priceDefaults.ts の各行のコメント） ---
+  // 便JGの実測: 小麦粉・片栗粉は10円/大さじ1（＝1,111円/kg）で実勢の約4倍、バターは250円/200gで約半分
+  for (const [name, pricePerUnit, unit] of [
+    ['小麦粉', 2, '大さじ1'],
+    ['片栗粉', 5, '大さじ1'],
+    ['きな粉', 7, '大さじ1'],
+    ['バター', 600, '200g'],
+  ]) {
+    const entry = jiByName.get(name)
+    eq(`JI-1 「${name}」の目安価格が ${pricePerUnit}円/${unit}`, entry && [entry.pricePerUnit, entry.unit], [pricePerUnit, unit])
+  }
+  // 洗って「据え置き」にしたものも、勝手に動かないよう留めておく（根拠は報告と各行のコメント）
+  for (const [name, pricePerUnit] of [
+    ['白いりごま', 15],
+    ['黒いりごま', 15],
+    ['すりごま', 15],
+    ['白みそ', 15],
+    ['レモン汁', 15],
+    ['粉砂糖', 15],
+    ['みそ', 11],
+  ]) {
+    eq(`JI-1 「${name}」は実勢を調べたうえで${pricePerUnit}円のまま`, jiByName.get(name)?.pricePerUnit, pricePerUnit)
+  }
+  // 金額として出たときに実勢どおりか（利用者が見るのは1行の金額なので、そこで測る）
+  {
+    const jiIndex = buildPriceIndex(PRICE_DEFAULTS.map((d) => ({ ...d, isDefault: true })))
+    const jiYen = (name, amount, unit) => estimateIngredientYen({ name, amount, unit }, jiIndex)?.yen ?? null
+    // 目安は「2円/大さじ1」で持つので、100g換算では 2円÷9g×100g=22円（実勢25円に対して丸めのぶん低い。
+    // 単位を「1kg」等の重さにするとレシピの大さじ書きと次元が食い違うため、docs/49 §4と同じく体積で持つ）
+    eq('JI-1 小麦粉100gは22円（実勢250円/kg＝25円に丸めのぶんだけ届かない）', jiYen('小麦粉', '100', 'g'), 22)
+    eq('JI-1 薄力粉と書いても同じ22円', jiYen('薄力粉', '100', 'g'), 22)
+    eq('JI-1 片栗粉大さじ1は5円（実勢600円/kg）', jiYen('片栗粉', '1', '大さじ'), 5)
+    eq('JI-1 バター10gは30円（実勢600円/200g）', jiYen('バター', '10', 'g'), 30)
+    eq('JI-1 有塩バターと書いても同じ30円', jiYen('有塩バター', '10', 'g'), 30)
+  }
+  eq('JI-1 版番号を上げてある（上げないと新しい行が既存の端末に届かない）', PRICE_DEFAULTS_VERSION_FOR_JG, 11)
+
+  // --- JI-2: 古い目安のままの行だけを新しい目安価格に入れ替える ---
+  {
+    const rows = [
+      jiRow(1, '小麦粉', 10, '大さじ1'), // 古い目安のまま → 入れ替える
+      jiRow(2, 'バター', 250, '200g'), // 古い目安のまま → 入れ替える
+      jiRow(3, '玉ねぎ', 50, '1個'), // 既に今の目安と同じ → 触らない
+    ]
+    const plan = planPriceRefresh(rows, PRICE_DEFAULTS)
+    eq(
+      'JI-2 古い目安のままの2件だけが入れ替えの対象になる',
+      plan.targets.map((t) => [t.name, t.fromPricePerUnit, t.toPricePerUnit]),
+      [
+        ['小麦粉', 10, 2],
+        ['バター', 250, 600],
+      ],
+    )
+    eq('JI-2 単位も新しい既定に合わせる', plan.targets.map((t) => [t.fromUnit, t.toUnit]), [
+      ['大さじ1', '大さじ1'],
+      ['200g', '200g'],
+    ])
+    eq('JI-2 既に最新の行は数えるだけで触らない', [plan.keptByUser, plan.alreadyCurrent], [0, 1])
+    // 2回目は0件（押しても押しても同じ姿＝二度押しで壊れない）
+    const after = rows.map((r) => {
+      const t = plan.targets.find((x) => x.id === r.id)
+      return t ? { ...r, pricePerUnit: t.toPricePerUnit, unit: t.toUnit, defaultPricePerUnit: t.toPricePerUnit, defaultUnit: t.toUnit } : r
+    })
+    eq('JI-2 もう一度計画しても0件（最新になった端末では何も起きない）', planPriceRefresh(after, PRICE_DEFAULTS).targets.length, 0)
+  }
+
+  // --- JI-3: 自分で直した価格・自分で追加した食材は1件も触らない（オーナー裁定の核心） ---
+  {
+    const rows = [
+      // 自分で価格を直した行（isDefault=false）。中身が古い既定でも触らない
+      jiRow(1, '小麦粉', 30, '大さじ1', { isDefault: false, defaultPricePerUnit: 10, defaultUnit: '大さじ1' }),
+      // 自分で単位まで変えた行
+      jiRow(2, 'バター', 250, '1箱', { isDefault: false, defaultPricePerUnit: 250, defaultUnit: '200g' }),
+      // 自分で追加した食材（投入時の目安を持たない）
+      { id: 3, name: 'マスカルポーネチーズ', pricePerUnit: 400, unit: '100g', isDefault: false },
+      // isDefaultが未設定の古い行（「自分の価格」として安全側に扱う既存の作法に合わせる）
+      { id: 4, name: '片栗粉', pricePerUnit: 10, unit: '大さじ1' },
+    ]
+    const plan = planPriceRefresh(rows, PRICE_DEFAULTS)
+    eq('JI-3 自分で直した行・自分で追加した行は1件も入れ替えない', plan.targets, [])
+    eq('JI-3 触らない件数として全件を数える（画面が「変わらないもの」を言えるように）', plan.keptByUser, 4)
+  }
+
+  // --- JI-4: 「デフォルトに戻す」の戻り先も新しい値に追随する（②の後半） ---
+  // 追随させないと、更新したあとに自分で直して「デフォルトに戻す」を押すと古い値に戻ってしまう
+  {
+    const rows = [jiRow(1, '小麦粉', 10, '大さじ1')]
+    const targets = planPriceRefresh(rows, PRICE_DEFAULTS).targets
+    eq('JI-4 入れ替え後の値が今の既定と一致する', targets.map((t) => [t.toPricePerUnit, t.toUnit]), [[2, '大さじ1']])
+    // 画面（db/prices.ts）はこの計画を使って price/unit と default 側を同じ値で書く。
+    // 計画そのものが「戻り先に入れる値」を持っていることを固定する（別の値を作らない）
+    eq(
+      'JI-4 計画は戻り先に入れる値を持っている（別の値を作らない）',
+      targets.map((t) => t.toPricePerUnit),
+      [jiByName.get('小麦粉')?.pricePerUnit],
+    )
+  }
+
+  // --- JI-5: 押す前に「変わるもの／変わらないもの」が件数つきで読める（規約F） ---
+  {
+    const rows = [
+      jiRow(1, '小麦粉', 10, '大さじ1'),
+      jiRow(2, '片栗粉', 10, '大さじ1'),
+      jiRow(3, 'きな粉', 15, '大さじ1'),
+      jiRow(4, 'バター', 250, '200g'),
+      jiRow(5, '玉ねぎ', 99, '1個', { isDefault: false, defaultPricePerUnit: 50, defaultUnit: '1個' }),
+    ]
+    const plan = planPriceRefresh(rows, PRICE_DEFAULTS)
+    const content = priceRefreshConfirm(plan)
+    const text = confirmContentText(content).replaceAll('​', '')
+    eq('JI-5 何件変わるかが確認に出る', text.includes('4件'), true)
+    eq('JI-5 変わらないものの件数も出る', text.includes('1件'), true)
+    eq('JI-5 「よろしいですか？」だけにしない（変わるもの・変わらないものを両方書く）', [
+      text.includes(ja.priceMaster.refreshChangedLabel),
+      text.includes(ja.priceMaster.refreshKeptLabel),
+    ], [true, true])
+    eq('JI-5 何が変わるのかを名前でも見せる', text.includes('小麦粉'), true)
+    eq('JI-5 実行側のボタンは何が起きるか分かる動詞にする', content.confirmLabel, ja.priceMaster.refreshConfirmAction)
+    eq('JI-5 取り消せることを添える', text.includes(ja.common.undo), true)
+    // 名前は多くても3件まで（確認の窓が長文にならないように・規約H）
+    const many = Array.from({ length: 20 }, (_, i) => jiRow(i + 1, PRICE_DEFAULTS[i].name, 1, 'x'))
+    const manyText = confirmContentText(priceRefreshConfirm(planPriceRefresh(many, PRICE_DEFAULTS)))
+    eq('JI-5 対象が多くても名前は3件まで＋「ほか」', manyText.includes(ja.priceMaster.refreshMoreNames), true)
+    eq('JI-5 対象が多くても確認の文は200字以内', confirmContentText(priceRefreshConfirm(planPriceRefresh(many, PRICE_DEFAULTS))).length <= 200, true)
+  }
+
+  // --- JI-6: 名前の突き合わせは、かな表記ゆれ込みで既存の作法と同じ ---
+  eq('JI-6 カタカナで持っている行も同じ食材として突き合わせる', normalizePriceName('バター'), normalizePriceName('ばたー'))
+  eq('JI-6 括弧書き・前後の空白は落とす', normalizePriceName('  小麦粉（薄力）  '), normalizePriceName('小麦粉'))
+  {
+    const plan = planPriceRefresh([jiRow(1, 'バター（有塩）', 250, '200g')], PRICE_DEFAULTS)
+    eq('JI-6 括弧書きで持っている行も入れ替えの対象になる', plan.targets.map((t) => t.toPricePerUnit), [600])
+  }
 }
 
 // ---------- 結果 ----------
