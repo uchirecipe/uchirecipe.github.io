@@ -27650,17 +27650,31 @@ Aみりん 大さじ1
     )
     // onDelete={...} に渡している式（三項の入れ子があるので、次の属性が始まるまでを丸ごと拾う）
     const onDeletePass = jfMealPlanSrc.match(/\n\s*onDelete=\{[\s\S]*?\n\s*\}\n/g) ?? []
+    // 2026-08-23 便JN: 月タブの日の窓も週の曜日カードと同じ2モードになったので、
+    // 渡している場所は**2か所**（週の曜日カード・月の日の窓）になった。
+    // 見張りの狙いは変わらない＝「増えていないこと」と「どちらも編集モードのときだけ」
     eq(
-      'JF-6 削除を渡している場所は1か所だけ（別の画面からこっそり増えていない）',
+      'JF-6 削除を渡している場所は2か所だけ（週の曜日カードと月の日の窓。別の画面からこっそり増えていない）',
       onDeletePass.length,
-      1,
+      2,
     )
     eq(
-      'JF-6 その1か所は編集モードのときだけ渡している（通常表示には出さない）',
-      onDeletePass.length === 1 &&
-        /dayEditing && dayEditKind === 'record'/.test(onDeletePass[0]) &&
-        /undefined/.test(onDeletePass[0]),
-      true,
+      'JF-6 どの場所も、渡さない道（undefined）を持っている＝条件付きで出している',
+      onDeletePass.filter((pass) => /undefined/.test(pass)).length,
+      onDeletePass.length,
+    )
+    eq(
+      'JF-6 出す条件は「その日の編集モード」だけ（週＝dayEditing / 月＝dayModalWindow.recordDelete）',
+      onDeletePass
+        .map((pass) =>
+          /dayEditing && dayEditKind === 'record'/.test(pass)
+            ? '週の曜日カード'
+            : /dayModalWindow\.recordDelete/.test(pass)
+              ? '月の日の窓'
+              : `見覚えのない条件: ${pass.trim().slice(0, 60)}`,
+        )
+        .sort(),
+      ['月の日の窓', '週の曜日カード'],
     )
     eq(
       'JF-6 消す前に確かめている（確認の窓を通す）',
@@ -29204,6 +29218,102 @@ import { safetyNotesFor, stepSafetyNotes, wholeRecipeSafetyNotes } from '../src/
   })
   eq('JO-1 引き止めが壊れても画面から出られる', await askBeforeLeave(), true)
   setLeaveGuard(null)
+}
+
+// ==========================================================================================
+// 便JN: 月タブの「日の窓」を、週の曜日カードと同じ2モードにする
+//       （2026-08-23 オーナー原文「献立／月／・見た目を週に寄せて、編集ボタンをつけて。」）
+//
+// 週タブは 2026-08-22 便IV で「通常表示＝写真と料理名だけ／『編集』で1品ごとの操作が出る」に、
+// 便JF で「過ぎた日の編集モードは作った記録を触る／鍵を掛けた日は編集は押せるが中が止まる」に
+// なった。月タブの日の窓だけが**開いた瞬間から全部の操作が出ている**古い形で残っていたので、
+// 同じ決めごとを1か所（monthDayWindowView）に置いて両方から使う。
+//
+// 画面の見え方（料理名で何文字読めるか・押せる大きさ・鍵の止まり方）は e2e の
+// JNVIEW-01／JNEDIT-02／JNLOCK-03／JNPAST-04 が実測で受け持つ。
+// ここでは**日付にも画面にも依らない決めごと**だけを見る。
+// ==========================================================================================
+{
+  const jnLogic = await import('../src/logic/mealPlan.ts')
+  // 読み取りに失敗したら必ず落ちる形にする（「関数が無いので測れませんでした」で素通りしない）
+  eq(
+    'JN-0 月の日の窓の決めごとを読める（無ければ以下は測れていない）',
+    typeof jnLogic.monthDayWindowView,
+    'function',
+  )
+  const { monthDayWindowView, planToggleDayEdit } = jnLogic
+  const JN_TODAY = '2026-08-23'
+  const jnView = (patch) =>
+    monthDayWindowView({ date: JN_TODAY, today: JN_TODAY, editing: false, isDemo: false, ...patch })
+
+  // --- JN-1: 窓を開いた直後は通常表示（週の曜日カードと同じ既定） ---
+  eq('JN-1 今日の窓の既定は通常表示（写真と料理名だけ）', jnView({}).plan, 'view')
+  eq('JN-1 先の日の窓の既定も通常表示', jnView({ date: '2026-09-01' }).plan, 'view')
+  eq('JN-1 通常表示にも「編集」の切り替えは出す', jnView({}).editToggle, true)
+  eq(
+    'JN-1 通常表示には、記録の追加・削除も、カレンダーに出す写真の指名も出さない',
+    [jnView({}).recordAdd, jnView({}).recordDelete, jnView({}).cover],
+    [false, false, false],
+  )
+
+  // --- JN-2: 「編集」を押すと1品ごとの操作の面になる ---
+  eq('JN-2 編集モードでは1品ごとの操作が出る面に変わる', jnView({ editing: true }).plan, 'editor')
+  eq(
+    'JN-2 カレンダーに出す写真の指名は編集モードの中（普段の見え方に足さない）',
+    jnView({ editing: true }).cover,
+    true,
+  )
+  eq(
+    'JN-2 今日・先の日の編集モードで触るのは献立だけ（作った記録の追加・削除は出さない）',
+    [jnView({ editing: true }).recordAdd, jnView({ editing: true }).recordDelete],
+    [false, false],
+  )
+
+  // --- JN-3: 過ぎた日は「作った記録だけが残る」画面のまま（便BS・便JFの決めごとを崩さない） ---
+  const jnPast = (editing) => jnView({ date: '2026-08-22', editing })
+  eq('JN-3 過ぎた日の窓には献立の枠を出さない（通常表示）', jnPast(false).plan, 'none')
+  eq('JN-3 過ぎた日の窓には献立の枠を出さない（編集モードでも）', jnPast(true).plan, 'none')
+  eq('JN-3 過ぎた日にも「編集」は出す（便JF・①で記録を足せるようになった）', jnPast(false).editToggle, true)
+  eq(
+    'JN-3 記録の追加・削除は編集モードの中だけ',
+    [jnPast(false).recordAdd, jnPast(false).recordDelete, jnPast(true).recordAdd, jnPast(true).recordDelete],
+    [false, false, true, true],
+  )
+
+  // --- JN-4: サンプルの1か月は読むだけ（書き込み先が無いので編集の入口を出さない） ---
+  const jnDemo = monthDayWindowView({ date: JN_TODAY, today: JN_TODAY, editing: true, isDemo: true })
+  eq('JN-4 サンプルには「編集」を出さない', jnDemo.editToggle, false)
+  eq('JN-4 サンプルは読むだけの並べ方', jnDemo.plan, 'demo')
+  eq(
+    'JN-4 サンプルでは、編集モードにしても何も触れない',
+    [jnDemo.recordAdd, jnDemo.recordDelete, jnDemo.cover],
+    [false, false, false],
+  )
+  // サンプルの過ぎた日は、本物と同じく「作った記録だけが残る」見え方のまま
+  const jnDemoPast = monthDayWindowView({
+    date: '2026-08-22',
+    today: JN_TODAY,
+    editing: true,
+    isDemo: true,
+  })
+  eq(
+    'JN-4 サンプルの過ぎた日も、献立の枠を出さず編集の入口も出さない',
+    [jnDemoPast.plan, jnDemoPast.editToggle, jnDemoPast.recordAdd],
+    ['none', false, false],
+  )
+
+  // --- JN-5: 切り替えの決め方は週と同じ1か所（同じものを2つ作らない） ---
+  // 窓は1日ぶんしか開かないので「覚えるのは日付1つ」で足りる＝週の planToggleDayEdit をそのまま使う。
+  // 別の日の窓を開けば前の日には当たらないので、開き直すたび必ず通常表示から始まる
+  eq('JN-5 通常表示の窓で押すと、その日が編集モードになる', planToggleDayEdit(null, JN_TODAY), JN_TODAY)
+  eq('JN-5 もう一度押すと通常表示に戻る', planToggleDayEdit(JN_TODAY, JN_TODAY), null)
+  eq(
+    'JN-5 別の日の窓を開いたら、前の日の編集モードは持ち越さない',
+    planToggleDayEdit(JN_TODAY, '2026-08-24') === '2026-08-24' &&
+      monthDayWindowView({ date: JN_TODAY, today: JN_TODAY, editing: false, isDemo: false }).plan ===
+        'view',
+    true,
+  )
 }
 
 // ---------- 結果 ----------
