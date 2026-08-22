@@ -11670,8 +11670,12 @@ try {
       await rcPage.waitForTimeout(300)
       const rcPastText = (await rcPage.textContent('body')) ?? ''
       check(
+        // 2026-08-22 司令部: 文言を**書き写していた**ため、月の期間カードから「過ぎた日なので、」を
+        // 落とした瞬間に落ちた（禁じ手②）。ja.ts から読む形へ。BudouXがゼロ幅スペースを差し込むので
+        // 照合前に外す
         'MEALPLAN-07(便CA③) 過去だけの期間は「作った記録だけで計算」と明示する',
-        rcPastText.includes('過ぎた日なので、作った記録だけで計算しています'),
+        rcPastText.replaceAll('\u200b', '').includes(ja.mealPlan.rangeBasisActualOnly),
+        `期待の文=${ja.mealPlan.rangeBasisActualOnly}`,
       )
       const rcPastTableText = (await rcTable.textContent()) ?? ''
       const rcPastPersonal = Number(
