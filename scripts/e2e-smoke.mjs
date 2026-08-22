@@ -26807,9 +26807,12 @@ try {
         //    ＝カードごと情報を落としたのではなく、**場所で切り替えている**
         await cpPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
         await cpPage.waitForTimeout(1500)
+        // 2026-08-23 司令部: `hasText` は**部分一致**なので、「ハンバーグ」で掴むと
+        // 「鶏ひき肉の豆腐ハンバーグ」にも当たる（並び順が変わった瞬間に別の品を掴んで落ちた）。
+        // 料理名そのものが一致するカードだけを掴む
         const cpListCard = cpPage
           .locator('[data-testid="recipe-list-card"]')
-          .filter({ hasText: cpTitle })
+          .filter({ has: cpPage.getByText(cpTitle, { exact: true }) })
           .first()
         check(
           'CARDPARTS-01 前提: レシピを探す一覧に同じ品のカードがある',
