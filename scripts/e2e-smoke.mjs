@@ -18131,8 +18131,11 @@ try {
         onText ?? '',
       )
       check(
-        'PRICEVIEW-01 「原価を見る」ON: 玉ねぎの行が「約25円」になる(登録単価50円÷登録人数2人分)',
-        (await onionRow.textContent())?.includes('約25円') ?? false,
+        // 2026-08-22 便JG: 材料行の金額は「1食あたり(登録人数で割った固定値)」から
+        // 「いま画面に出ている分量ぶん」へ変えた。肉じゃがは登録2人分で既定表示も2人分なので、
+        // 玉ねぎ1個ぶんの50円がそのまま出る(旧: 50円÷2人分=約25円)
+        'PRICEVIEW-01 「原価を見る」ON: 玉ねぎの行が「約50円」になる(いま出ている分量=1個ぶん)',
+        (await onionRow.textContent())?.includes('約50円') ?? false,
       )
       check(
         'PRICEVIEW-01 「原価を見る」ON: マスタ不一致の材料(水)は「価格なし」になる(登録導線「＋登録」は出ない=非インタラクティブ)',
@@ -18231,8 +18234,8 @@ try {
           (await editButton.getAttribute('aria-pressed')) === 'false',
       )
       check(
-        'PRICEVIEW-01(a) 「原価を見る」表示に戻ると、玉ねぎの按分原価が編集後の価格で再計算される(70÷2人分=約35円)',
-        (await onionRow.textContent())?.includes('約35円') ?? false,
+        'PRICEVIEW-01(a) 「原価を見る」表示に戻ると、玉ねぎの金額が編集後の価格で再計算される(1個ぶん=約70円)',
+        (await onionRow.textContent())?.includes('約70円') ?? false,
       )
 
       // (b) 価格なし→登録→チップ化。「水」に価格が無い状態から「原価を編集」の「＋登録」で新規登録する
@@ -18263,8 +18266,8 @@ try {
       await editButton.click()
       await pvPage.waitForTimeout(300)
       check(
-        'PRICEVIEW-01(b) 登録後「原価を見る」表示で水の行にも按分原価が出る(300ml分3円÷2人分=約2円)',
-        (await waterRow.textContent())?.includes('約2円') ?? false,
+        'PRICEVIEW-01(b) 登録後「原価を見る」表示で水の行にも金額が出る(300ml分=約3円)',
+        (await waterRow.textContent())?.includes('約3円') ?? false,
       )
 
       // ---------- 選択中の「原価を見る」をもう一度押すと「原価を編集」ボタンごと非表示に戻る ----------
@@ -18289,6 +18292,128 @@ try {
       check('PRICEVIEW-01 非表示に戻る: 水の行は使用量(300ml)表示に戻る', (await waterRow.textContent())?.includes('300ml') ?? false)
     } finally {
       await pvBrowser.close()
+    }
+  }
+
+  // --- JGCOST-01(2026-08-22 便JG): レシピ詳細の原価が「いま出ている人数分」に追随することと、
+  // 価格が分からない材料があるときに金額へ印が付くこと。
+  // オーナー原文「原価が、人数分の表示に合わせて計算されていない。人数の増減で数値が変わらない。
+  // 何人分を表示しているの？」「写真下の原価表示は、『価格なし』が複数…ある場合には、
+  // 目安とはいえ実際と大きく異なることを記号でお知らせして欲しい。NG食材の表記と場所の取り合いになる？」。
+  // 肉じゃが(登録2人分・材料8件)で見る。①人数を動かすと材料行の金額と写真下の合計が一緒に動く
+  // ②価格が分かる材料しか無いうちは印が出ない ③「食材と価格」からじゃがいもを消すと印と1行の説明が出る
+  // ④印は金額の文字に添えるだけで、NG食材の札とは別（札を増やして行を折り返させない）---
+  currentCheck = 'JGCOST-01'
+  {
+    const jgBrowser = await chromium.launch()
+    const jgContext = await jgBrowser.newContext()
+    const jgPage = await jgContext.newPage()
+    jgPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@JGCOST-01] ${err.message}`)
+    })
+    try {
+      await jgPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await jgPage.waitForTimeout(1800) // 初回シード完了待ち
+      await jgPage.getByText('肉じゃが', { exact: true }).first().click()
+      await jgPage.waitForTimeout(500)
+
+      const jgIngredients = jgPage.locator('section', {
+        has: jgPage.getByRole('heading', { name: '材料', level: 2 }),
+      })
+      const jgOnionRow = jgIngredients.locator('li', { hasText: '玉ねぎ' })
+      const jgViewButton = jgPage.getByRole('button', { name: /^(原価を見る|材料に戻す)$/ })
+      const jgUp = jgPage.getByRole('button', { name: '人数を増やす' })
+      const jgDown = jgPage.getByRole('button', { name: '人数を減らす' })
+      // 写真下の合計「約◯円」だけを読む（1食あたりの行と混ざらないよう、行の先頭側から取る）
+      const readTotalYen = async () => {
+        const body = (await jgPage.textContent('body')) ?? ''
+        const m = body.match(/約([\d,]+)円/)
+        return m ? Number(m[1].replace(/,/g, '')) : null
+      }
+
+      // ---------- ①人数を動かすと材料行の金額も写真下の合計も一緒に動く ----------
+      await jgViewButton.click()
+      await jgPage.waitForTimeout(300)
+      const jgTotal2 = await readTotalYen()
+      check(
+        'JGCOST-01 既定(登録どおりの2人分)は玉ねぎ1個ぶんの50円',
+        (await jgOnionRow.textContent())?.includes('約50円') ?? false,
+        await jgOnionRow.textContent(),
+      )
+      await jgUp.click()
+      await jgPage.waitForTimeout(300)
+      const jgTotal3 = await readTotalYen()
+      check(
+        'JGCOST-01 3人分にすると玉ねぎの行が1.5倍(約75円)になる',
+        (await jgOnionRow.textContent())?.includes('約75円') ?? false,
+        await jgOnionRow.textContent(),
+      )
+      check(
+        'JGCOST-01 写真下の合計も3人分ぶんに増える',
+        jgTotal2 != null && jgTotal3 != null && jgTotal3 > jgTotal2,
+        `2人分=${jgTotal2} 3人分=${jgTotal3}`,
+      )
+      await jgDown.click()
+      await jgDown.click()
+      await jgPage.waitForTimeout(300)
+      check(
+        'JGCOST-01 1人分にすると玉ねぎの行が半分(約25円)になる',
+        (await jgOnionRow.textContent())?.includes('約25円') ?? false,
+        await jgOnionRow.textContent(),
+      )
+      // 登録どおりの2人分に戻してから、印の検査へ進む
+      await jgUp.click()
+      await jgPage.waitForTimeout(300)
+
+      // ---------- ②価格が分かる材料しか無いうちは印も説明も出ない ----------
+      const jgBeforeBody = (await jgPage.textContent('body')) ?? ''
+      check(
+        'JGCOST-01 価格が全部そろっている品には「価格が分からない材料」の説明が出ない',
+        !jgBeforeBody.includes('価格が分からない材料'),
+      )
+      check(
+        'JGCOST-01 そのときは金額のうしろに印も付かない',
+        !/約[\d,]+円※/.test(jgBeforeBody),
+        jgBeforeBody.slice(0, 200),
+      )
+      const jgTotalBefore = await readTotalYen()
+
+      // ---------- ③「食材と価格」からじゃがいもを消す＝価格が分からない材料が1件できる ----------
+      await jgPage.goto(`${BASE}/#/prices`, { waitUntil: 'networkidle' })
+      await jgPage.waitForTimeout(1000)
+      await jgPage.locator('input[aria-label="食材名で絞り込む"]').fill('じゃがいも')
+      await jgPage.waitForTimeout(400)
+      await jgPage.locator('button[aria-label="この食材を削除"]').first().click()
+      await jgPage.waitForTimeout(500)
+      await jgPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await jgPage.waitForTimeout(800)
+      await jgPage.getByText('肉じゃが', { exact: true }).first().click()
+      await jgPage.waitForTimeout(600)
+      const jgAfterBody = (await jgPage.textContent('body')) ?? ''
+      check(
+        'JGCOST-01 価格が分からない材料が1件できると、金額のうしろに印が付く',
+        /約[\d,]+円※/.test(jgAfterBody),
+        jgAfterBody.slice(0, 300),
+      )
+      check(
+        `JGCOST-01 印の意味が1行で出る（${ja.detail.costPricelessNote.replace('{n}', '1')}）`,
+        jgAfterBody.includes(ja.detail.costPricelessNote.replace('{n}', '1')),
+      )
+      const jgTotalAfter = await readTotalYen()
+      check(
+        'JGCOST-01 その材料の分は合計に1円も入らない(=金額は必ず実際より安く出る)',
+        jgTotalBefore != null && jgTotalAfter != null && jgTotalAfter < jgTotalBefore,
+        `削除前=${jgTotalBefore} 削除後=${jgTotalAfter}`,
+      )
+      // ---------- ④印はNG食材の札と場所を取り合わない（札を増やしていない） ----------
+      check(
+        'JGCOST-01 印のために新しい札(枠付き)を増やしていない＝NG食材の札とは別の見せ方',
+        (await jgPage.getByText('NG食材を含みます').count()) === 0 &&
+          /約[\d,]+円※/.test(jgAfterBody),
+      )
+    } finally {
+      await jgBrowser.close()
     }
   }
 

@@ -1,13 +1,16 @@
 import type { Ingredient } from '../db/types'
 import { leadingRangeAmount, normalizeAmountInput, resolveCalcAmount } from './amount'
 import { stripIngredientDecoration, toHiragana } from './kana'
-import { normalizeUnit, parseUnitQuantity } from './unitGrams'
+import { normalizeUnit, parseUnitQuantity, VOLUME_UNIT_FACTORS } from './unitGrams'
 import { typicalAmountFor } from './amountAssumption'
 // 栄養側の「1枚=◯g」等の目安量(文部科学省 日本食品標準成分表ベース・docs/47監査済み)を
 // 原価の按分にも使うための参照。依存の向きは priceEstimate → nutrition の一方通行で、
 // nutrition側は単位換算の定義を unitGrams.ts から取るため循環importにはならない
 // （2026-07-28 便BY/COST-01。同じ材料の「量」を2つのエンジンが別々に解釈していたのを解消する）。
 import { convertToGrams, isZeroIngredient, matchNutritionFood } from './nutrition'
+// 「価格が分からない材料」のうち主材料はどれか（一覧カードの食材チップと同じ判定を使い回す）。
+// 2026-08-22 便JG。mainIngredients は priceEstimate を読まないので循環importにはならない
+import { pickMainIngredients } from './mainIngredients'
 // 実効食数(枠ごとの食数 > 設定「ふだん作る人数」 > レシピの登録人数分)の判定は1か所に集約する
 // （2026-08-03 便DK。買い物メモの分量と概算食費が違う人数分で計算されないようにするため）
 import { effectiveMealServings } from './servings'
@@ -102,7 +105,63 @@ export function matchPriceEntry(name: string, index: PriceIndexEntry[]): PriceIn
   // 名前の頭に飾り語が付いているだけで1件も当たらなかった（「国産たまねぎ」→ 価格なし）。
   // 当たらなかったときの最後の手当てなので、これまで当たっていた材料の結果は変わらない
   const stripped = stripIngredientDecoration(name)
-  return stripped !== name.trim() ? matchPriceEntryExact(stripped, index) : undefined
+  const strippedHit =
+    stripped !== name.trim() ? matchPriceEntryExact(stripped, index) : undefined
+  if (strippedHit) return strippedHit
+  // それでも当たらなければ、栄養（成分表）の食品名を経由してもう一度探す（2026-08-22 便JG）
+  return matchPriceEntryViaNutritionFood(name, index)
+}
+
+/**
+ * 材料名と食材価格マスタの項目名が「成分表で同じ食品か」を見る（2026-08-22 便JG）。
+ *
+ * 前方一致（材料名がマスタ名で始まる）は「たまねぎ薄切り→たまねぎ」のような書き足しを
+ * 拾うための仕組みだが、**先頭がたまたま一致しただけの別食材**まで拾っていた。
+ * オーナーの実データ31品で実測した誤爆:
+ *   トマトケチャップ120g → 「トマト 60円/1個」 ／ トマト水煮缶 → 「トマト 60円/1個」
+ *   昆布だし → 「昆布 400円/100g」 ／ 塩鮭2切れ → 「塩 1円/小さじ1」
+ * どれも値段が桁で違う。両方が成分表の食品に解決できて、それが**別の食品**なら前方一致を
+ * 認めない（同じ食品なら今までどおり通す）。
+ *
+ * どちらかが成分表に無いときは true を返して従来どおり通す＝この判定で新しく
+ * 「価格なし」に落ちる材料を作らない（同梱109品＋オーナーの31品で実測し、
+ * 通っていた前方一致15件はすべて「同じ食品」で、落ちるのは上の誤爆4件だけだった）。
+ */
+function isSameNutritionFood(ingredientName: string, entryName: string): boolean {
+  const ingredientFood = matchNutritionFood(ingredientName)
+  if (!ingredientFood) return true
+  const entryFood = matchNutritionFood(entryName)
+  if (!entryFood) return true
+  return ingredientFood.id === entryFood.id
+}
+
+/**
+ * 栄養（成分表）の食品名を経由して食材価格マスタを引き直す（2026-08-22 便JG）。
+ *
+ * 【なぜ要るか】同じ食材の書き方ちがいを吸収する表が、栄養と原価で別々だった。
+ * 栄養側は成分表の食品ごとに別名（「スパゲッティ／スパゲティ／マカロニ」「砂糖／上白糖」
+ * 「小麦粉／薄力粉」「長ねぎ／白ねぎ」「酒／料理酒」「えび／むきえび」…）を持っているのに、
+ * 原価側は読み仮名辞書＋前方一致しか持たず、同じ材料が栄養では計算できて原価だけ
+ * 「価格なし」になっていた（オーナー原文「カルボナーラ・スパゲティが原価なし。
+ * ペペロンチーノにはあったのに。表記揺れ？」）。実測ではオーナーの31品で35種が該当した。
+ *
+ * **当たらなかったときの最後の手当て**なので、これまで当たっていた材料の結果は1件も変わらない。
+ * 括弧書きを落としてから成分表を引くのが要点で（「アーモンドプードル(無い方は薄力粉で)」が
+ * 括弧の中の語で小麦粉に当たるのを防ぐ）、見つけた食品の label と別名を順に価格マスタへ当てる。
+ */
+function matchPriceEntryViaNutritionFood(
+  name: string,
+  index: PriceIndexEntry[],
+): PriceIndexEntry | undefined {
+  const normalized = normalizeIngredientNameForPrice(name)
+  if (!normalized) return undefined
+  const food = matchNutritionFood(normalized)
+  if (!food) return undefined
+  for (const alias of [food.label, ...(food.aliases ?? [])]) {
+    const hit = matchPriceEntryExact(alias, index)
+    if (hit) return hit
+  }
+  return undefined
 }
 
 function matchPriceEntryExact(
@@ -114,7 +173,9 @@ function matchPriceEntryExact(
   const key = toHiragana(normalized)
   const exact = index.find((e) => e.matchKey === key)
   if (exact) return exact
-  return index.find((e) => key.startsWith(e.matchKey))
+  return index.find(
+    (e) => key.startsWith(e.matchKey) && isSameNutritionFood(normalized, e.normalizedName),
+  )
 }
 
 /** "200" "1.5" "1/2" のような数字の分量を数値化する（人数換算不要の素の値） */
@@ -161,7 +222,27 @@ function toGramsForPrice(
 ): number | null {
   const food = matchNutritionFood(ingredientName) ?? matchNutritionFood(entryName)
   if (!food) return null
-  return convertToGrams(value, unit, food)
+  const direct = convertToGrams(value, unit, food)
+  if (direct != null) return direct
+  // ここから下は 2026-08-22 便JG で足した最後の手当て。
+  // 【直す前に何が起きていたか】マスタが販売単位「1L」で、レシピがグラムで書いてある組
+  // （ケチャップ 960円/1L × 「トマトケチャップ 120g」）は、栄養側の換算(convertToGrams)が
+  // リットルを知らないため換算できず、**ボトル1本ぶんの960円**が1行に乗っていた。
+  // ①単位を基準量(g・ml)へ直してからもう一度換算する
+  const normalized = normalizeUnit(value, unit)
+  if (normalized == null) return null
+  if (normalized.dim === 'mass') return normalized.base
+  if (normalized.dim !== 'volume') return null
+  // ②1mlあたりの重さを持たない食品は、成分表の目安量「大さじ1=◯g」(=15ml)から作る。
+  // 新しい数値を発明せず、アプリが既に持っている目安量とJISの大さじ15ml・小さじ5mlだけで出す
+  const gramsPerMl =
+    food.gramsPerMl ??
+    (food.unitGrams?.['大さじ'] != null
+      ? food.unitGrams['大さじ'] / VOLUME_UNIT_FACTORS.大さじ
+      : food.unitGrams?.['小さじ'] != null
+        ? food.unitGrams['小さじ'] / VOLUME_UNIT_FACTORS.小さじ
+        : undefined)
+  return gramsPerMl != null ? normalized.base * gramsPerMl : null
 }
 
 /** 按分額から戻り値を作る（表示・合計に使う四捨五入後のyenと、丸め前のrawYenの両方を持たせる） */
@@ -317,12 +398,35 @@ export interface IngredientRowCostEstimate {
   /** totalYen ÷ servings を四捨五入した1食あたりの按分原価。0(=1円未満)なら
    *  呼び出し側は金額の代わりに「1円未満」を表示する想定(仕様書「四捨五入・1円未満は「1円未満」」) */
   perServingYen: number
+  /**
+   * いま画面に出ている分量ぶんの金額（2026-08-22 便JG）。
+   * 全量 × 表示人数 ÷ 登録人数。表示人数を指定しなければ登録人数と同じ＝全量ぶん。
+   * 0(=1円未満)なら呼び出し側は「1円未満」を表示する。
+   */
+  shownYen: number
 }
 
+/**
+ * 2026-08-22 便JG（オーナー原文「原価が、人数分の表示に合わせて計算されていない。
+ * 人数の増減で数値が変わらない。何人分を表示しているの？」「シフォンケーキ・卵が半量で６円」）。
+ *
+ * 【直す前に何が起きていたか（実測）】レシピ詳細の材料の行は、
+ *  ・分量  … 表示中の人数分にスケールした量（scaleAmount）
+ *  ・原価  … 全量 ÷ **登録人数** で固定（表示人数に追随しない）
+ * という別々の基準で並んでいた。登録17人分のシフォンケーキを2人分で表示すると
+ * 「卵 1/2個」の行に「約6円」（100円÷17人分）が出る＝半分の卵の値段（約12円）と合わない。
+ * 人数を増減しても金額だけ動かないのはこのため。
+ *
+ * そこで shownYen（画面に出ている分量ぶんの金額）を足し、画面はこちらを出す。
+ * 分量と金額が同じ人数分を指すので「その量でいくらか」がそのまま読める。
+ * perServingYen（1食あたり＝登録人数で割った値）は従来どおり返すので、
+ * これを使っている計算・表示は1円も変わらない。
+ */
 export function estimateIngredientRowCost(
   ingredient: Pick<Ingredient, 'name' | 'amount' | 'unit' | 'price'>,
   index: PriceIndexEntry[],
   servings: number,
+  shownServings?: number,
 ): IngredientRowCostEstimate | undefined {
   let rawTotal: number
   if (ingredient.price != null && ingredient.price > 0) {
@@ -336,8 +440,65 @@ export function estimateIngredientRowCost(
   }
   // 丸め前のrawTotalから直接割る(yenを丸めてからservingsで割る二重丸めを避ける)
   const totalYen = Math.round(rawTotal)
+  const registered = servings > 0 ? servings : 1
+  const shown = shownServings != null && shownServings > 0 ? shownServings : registered
   const perServingYen = Math.round(servings > 0 ? rawTotal / servings : rawTotal)
-  return { totalYen, perServingYen }
+  const shownYen = Math.round((rawTotal * shown) / registered)
+  return { totalYen, perServingYen, shownYen }
+}
+
+/**
+ * 概算食費の「どれくらい当てになるか」（2026-08-22 便JG）。
+ *
+ * オーナー原文「写真下の原価表示は、『価格なし』が複数（１つだったとしても金額によっては
+ * 大きいが）ある場合には、目安とはいえ実際と大きく異なることを記号でお知らせして欲しい」
+ * 「ティラミスとか、１食４円なわけない。チーズがたくさん」。
+ *
+ * 価格が分からない材料は合計に1円も入っていないので、その品の金額は必ず実際より安く出る。
+ * 知らせる条件は次のどちらか（オーナーの言葉をそのまま2つの条件にした）:
+ *  ①価格が分からない材料が **2件以上** ある＝「複数ある場合」
+ *  ②1件でも、それが **主材料** のとき＝「１つだったとしても金額によっては大きい」
+ *    主材料かどうかは一覧カードの食材チップと同じ判定（pickMainIngredients）を使う＝
+ *    分量が数値で書かれていて、単位が大さじ・小さじ・単位なしではなく、調味料の名前でもないもの。
+ *    ティラミスの「マスカルポーネチーズ 250g」やカルボナーラの「スパゲティ 150g」がこれに当たる。
+ * 水・湯・氷は価格を付ける対象ではないので数えない（pricelessIngredientNamesOfRecipes と同じ）。
+ */
+export interface RecipeCostConfidence {
+  /** 価格が分からない材料の件数（同じ名前は1件） */
+  pricelessCount: number
+  /** そのうち主材料が1件でもあるか */
+  hasPricelessMainIngredient: boolean
+  /** 金額が実際と大きく違うおそれを知らせるか */
+  shouldWarn: boolean
+}
+
+export function recipeCostConfidence(
+  ingredients: Pick<Ingredient, 'name' | 'amount' | 'unit' | 'price'>[],
+  index: PriceIndexEntry[],
+): RecipeCostConfidence {
+  const pricelessNames = new Set(
+    pricelessIngredientNamesOfRecipes([{ ingredients }], index),
+  )
+  const mainNames = new Set(
+    pickMainIngredients(
+      ingredients.map((ing) => ({
+        name: ing.name,
+        amount: ing.amount ?? '',
+        unit: ing.unit ?? '',
+      })),
+      Number.MAX_SAFE_INTEGER,
+    ).map((ing) => ing.name),
+  )
+  let hasPricelessMainIngredient = false
+  for (const name of pricelessNames) {
+    if (mainNames.has(name)) hasPricelessMainIngredient = true
+  }
+  const pricelessCount = pricelessNames.size
+  return {
+    pricelessCount,
+    hasPricelessMainIngredient,
+    shouldWarn: pricelessCount >= 2 || (pricelessCount >= 1 && hasPricelessMainIngredient),
+  }
 }
 
 /** 献立エントリ群(mealPlans)の概算食費の合計・内訳 */

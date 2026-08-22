@@ -103,6 +103,10 @@ import { preferSeasonWithFallback, SEASON_MIN_CANDIDATES } from '../src/logic/se
 import { guessDishType } from '../src/logic/dishTypeGuess.ts'
 import { PRICE_DEFAULTS } from '../src/data/priceDefaults.ts'
 import {
+  PRICE_DEFAULTS_VERSION as PRICE_DEFAULTS_VERSION_FOR_JG,
+  PRICE_DEFAULT_MERGES as PRICE_DEFAULT_MERGES_FOR_JG,
+} from '../src/data/priceDefaults.ts'
+import {
   buildShoppingCandidates,
   sortShoppingByAisle,
   groupShoppingByAisle,
@@ -303,6 +307,7 @@ import {
   sumCookedRecipesCost,
   normalizeIngredientNameForPrice,
 } from '../src/logic/priceEstimate.ts'
+import * as priceEstimateModule from '../src/logic/priceEstimate.ts'
 import {
   splitRangeByToday,
   rangeBasisParts,
@@ -10197,22 +10202,22 @@ eq('normalizeIngredientNameForPrice 前後空白除去', normalizeIngredientName
   eq(
     'estimateIngredientRowCost マスタ一致(300g/100gあたり130円→390円)を4人分で割る(97.5→98円)',
     estimateIngredientRowCost({ name: '鶏もも肉', amount: '300', unit: 'g' }, index, 4),
-    { totalYen: 390, perServingYen: 98 },
+    { totalYen: 390, perServingYen: 98, shownYen: 390 },
   )
   eq(
     'estimateIngredientRowCost 個別入力(ing.price)はマスタより優先される',
     estimateIngredientRowCost({ name: '玉ねぎ', amount: '1', unit: '個', price: 80 }, index, 2),
-    { totalYen: 80, perServingYen: 40 },
+    { totalYen: 80, perServingYen: 40, shownYen: 80 },
   )
   eq(
     'estimateIngredientRowCost 四捨五入で1円未満(0.5円未満)は0円(呼び出し側が「1円未満」表示する契機)',
     estimateIngredientRowCost({ name: '玉ねぎ', amount: '2', unit: '個' }, index, 250),
-    { totalYen: 100, perServingYen: 0 }, // 100÷250=0.4→0
+    { totalYen: 100, perServingYen: 0, shownYen: 100 }, // 100÷250=0.4→0
   )
   eq(
     'estimateIngredientRowCost 0.5円ちょうどは四捨五入で1円(境界値)',
     estimateIngredientRowCost({ name: '玉ねぎ', amount: '1', unit: '個' }, index, 100),
-    { totalYen: 50, perServingYen: 1 }, // 50÷100=0.5→1
+    { totalYen: 50, perServingYen: 1, shownYen: 50 }, // 50÷100=0.5→1
   )
   eq(
     'estimateIngredientRowCost マスタにも個別入力にも無い材料はundefined',
@@ -10222,7 +10227,7 @@ eq('normalizeIngredientNameForPrice 前後空白除去', normalizeIngredientName
   eq(
     'estimateIngredientRowCost servings=0はtotalYenをそのまま返す(0除算回避)',
     estimateIngredientRowCost({ name: '玉ねぎ', amount: '1', unit: '個' }, index, 0),
-    { totalYen: 50, perServingYen: 50 },
+    { totalYen: 50, perServingYen: 50, shownYen: 50 },
   )
 
   // COST-02(2026-07-28 便BY): 「価格なし」と「1円未満」の混線を解消する。
@@ -10236,12 +10241,12 @@ eq('normalizeIngredientNameForPrice 前後空白除去', normalizeIngredientName
     eq(
       'COST-02: 砂糖 小さじ1/2(=0.33円)はundefinedではなく0円で返す(呼び出し側が「1円未満」を出す)',
       estimateIngredientRowCost({ name: '砂糖', amount: '1/2', unit: '小さじ' }, seasoningIndex, 2),
-      { totalYen: 0, perServingYen: 0 },
+      { totalYen: 0, perServingYen: 0, shownYen: 0 },
     )
     eq(
       'COST-02: 塩 小さじ1/4(=0.25円)も同じく0円で返す',
       estimateIngredientRowCost({ name: '塩', amount: '1/4', unit: '小さじ' }, seasoningIndex, 2),
-      { totalYen: 0, perServingYen: 0 },
+      { totalYen: 0, perServingYen: 0, shownYen: 0 },
     )
     eq(
       'COST-02: マスタに無い材料は従来どおりundefined(=「価格なし」のまま)',
@@ -10252,7 +10257,7 @@ eq('normalizeIngredientNameForPrice 前後空白除去', normalizeIngredientName
     eq(
       'COST-02: 二重丸めをやめる(0.33円を2人で割っても合計は丸め前から計算する)',
       estimateIngredientRowCost({ name: '砂糖', amount: '1', unit: '小さじ' }, seasoningIndex, 2),
-      { totalYen: 1, perServingYen: 0 }, // 0.667円→合計1円・1食あたり0.33円→0(1円未満)
+      { totalYen: 1, perServingYen: 0, shownYen: 1 }, // 0.667円→合計1円・1食あたり0.33円→0(1円未満)
     )
     // 合計金額(estimateRecipeCost)は1円も変わらないこと
     eq(
@@ -10986,7 +10991,7 @@ eq('normalizeIngredientNameForPrice 前後空白除去', normalizeIngredientName
     eq(
       '1Lボトル按分: 2人分レシピの1食あたり(6円÷2=3円。オーナー指示の検証ケース)',
       estimateIngredientRowCost({ name: 'しょうゆ', amount: '1', unit: '大さじ' }, soySauceBottleIndex, 2),
-      { totalYen: 6, perServingYen: 3 },
+      { totalYen: 6, perServingYen: 3, shownYen: 6 },
     )
   }
 
@@ -10997,7 +11002,7 @@ eq('normalizeIngredientNameForPrice 前後空白除去', normalizeIngredientName
     eq(
       `1Lボトル登録表記ゆれ「${unitText}」でも大さじ1×2人分=3円になる`,
       estimateIngredientRowCost({ name: 'しょうゆ', amount: '1', unit: '大さじ' }, idx, 2),
-      { totalYen: 6, perServingYen: 3 },
+      { totalYen: 6, perServingYen: 3, shownYen: 6 },
     )
   }
   // 500mlボトル(半量・半額の200円)でも単価は同じなので同じ結果になることを確認
@@ -11006,7 +11011,7 @@ eq('normalizeIngredientNameForPrice 前後空白除去', normalizeIngredientName
     eq(
       '500mlボトル(200円)でも単価が同じなら大さじ1×2人分=3円になる',
       estimateIngredientRowCost({ name: 'しょうゆ', amount: '1', unit: '大さじ' }, halfBottleIndex, 2),
-      { totalYen: 6, perServingYen: 3 },
+      { totalYen: 6, perServingYen: 3, shownYen: 6 },
     )
   }
   // UIの数量+単位入力(unitForm.ts)でも同じ文字列が扱えること(登録フォームの往復確認)。
@@ -11304,7 +11309,11 @@ eq('normalizeIngredientNameForPrice 前後空白除去', normalizeIngredientName
     // 下がったのは7品・7材料行(いちご6個/しいたけ4枚/生しいたけ5枚・2枚/オクラ8本/小ねぎ2本×2)
     // 2026-08-10 便FA「しいたけ」の名寄せで38,047→38,014円(-33円)。動いたのは寄せ鍋1品だけで、
     // 「しいたけ4枚」が旧150円/6枚のマスタ(100円)ではなく生しいたけ100円/6枚(67円)で計算される
-    eq('同梱109品の概算食費の合計(便FA名寄せ後。便EY前は38,622円/便BY修正前は48,377円)', grand, 38014)
+    // 2026-08-22 便JG「分量が書かれていないこしょう」の修正で38,014→37,934円(-80円)。
+    // 動いたのは10行だけ(こしょう「少々」7行・粗びき黒こしょう「少々」3行)で、
+    // 登録単位の小さじ1杯まるごと(10円)から「少々」の実量0.3g相当(2円)へ下がった。
+    // 塩こしょう(5円/少々)は登録単位が「少々」なので1円も動いていない
+    eq('同梱109品の概算食費の合計(便JG後。便FA後は38,014円/便EY前は38,622円/便BY修正前は48,377円)', grand, 37934)
     const nabe = starterDefs.find((d) => d.title === '寄せ鍋')
     eq(
       '寄せ鍋 1食あたり(便EY後226円→便FAのしいたけ名寄せで217円)',
@@ -27634,6 +27643,181 @@ Aみりん 大さじ1
     for (const m of src.matchAll(/borderRadius:\s*'[^']*'/g)) jeHardCoded.push(`${f}: ${m[0]}`)
   }
   eq('JE-1 角の大きさを直に書いた場所が無い', jeHardCoded, [])
+}
+
+// ---------- 便JG: 原価の数字が嘘をついている（2026-08-22 オーナーの書き溜め） ----------
+// オーナー原文（抜粋）:
+//   「食材の原価で、一般的によく使うのに元から設定がない材料が多い」
+//   「カルボナーラ・スパゲティが原価なし。ペペロンチーノにはあったのに。表記揺れ？」
+//   「ティラミス・卵黄と卵白がそれぞれ約１円は明らかに間違い」
+//   「ハヤシライス・塩コショウサラダ油は分量なし。こしょう５円…って高い」
+//   「原価が、人数分の表示に合わせて計算されていない。人数の増減で数値が変わらない」
+//   「『価格なし』が複数ある場合には、目安とはいえ実際と大きく異なることを記号でお知らせして欲しい」
+//
+// ここで見張るのは、オーナーの実データ31品で実測した「そのとき出ていた数字」そのもの。
+// 直す前はすべて赤になることを確認してから直している。
+{
+  const jgIndex = buildPriceIndex(PRICE_DEFAULTS.map((d) => ({ ...d, isDefault: true })))
+  const jgHit = (name) => matchPriceEntry(name, jgIndex)?.normalizedName ?? 'なし'
+  const jgYen = (name, amount, unit) =>
+    estimateIngredientYen({ name, amount, unit }, jgIndex)?.yen ?? null
+
+  // --- JG-1: 同じ食材の書き方ちがいで価格が当たらない（スパゲティ／スパゲッティ型の表記ゆれ） ---
+  // オーナーの31品に実在する書き方。左が材料名、右が当たってほしい食材価格マスタの項目名
+  for (const [written, expected] of [
+    ['スパゲティ', 'スパゲッティ'], // カルボナーラ（ペペロンチーノは「スパゲッティ1.6mm」で当たっていた）
+    ['マカロニ', 'スパゲッティ'],
+    ['薄力粉', '小麦粉'],
+    ['上白糖', '砂糖'],
+    ['白ネギ（あれば）', '長ねぎ'],
+    ['溶き卵', '卵'],
+    ['全卵', '卵'],
+    ['温泉卵', '卵'],
+    ['有塩バター', 'バター'],
+    ['料理酒', '酒'],
+    ['すりおろしニンニク', 'おろしにんにく'],
+    ['エビ', 'むきえび'],
+    ['海老', 'むきえび'],
+    ['豚こま切れ', '豚こま切れ肉'],
+    ['合挽き肉', '合いびき肉'],
+    ['温かいご飯', 'ご飯'],
+    ['水溶き片栗粉', '片栗粉'],
+    ['唐辛子(輪切り)', '赤唐辛子'],
+    ['赤ピーマン', '赤パプリカ'],
+    ['ドライパセリ', 'パセリ'],
+  ]) {
+    eq(`JG-1 「${written}」が価格マスタの「${expected}」に当たる`, jgHit(written), expected)
+  }
+
+  // --- JG-2: 前方一致で別の食材に当たってしまう（値段が桁で違う誤爆） ---
+  for (const [written, expected] of [
+    ['トマトケチャップ', 'ケチャップ'], // 旧: トマト1個60円が丸ごと乗っていた
+    ['トマト水煮缶（カット）', 'カットトマト缶'], // 旧: トマト1個60円
+    ['昆布だし', 'だし汁'], // 旧: 昆布100g 400円
+    ['塩鮭', '塩鮭'], // 旧: 塩 小さじ1 = 1円（2切れで1円）
+    ['甘塩鮭', '塩鮭'],
+  ]) {
+    eq(`JG-2 「${written}」が「${expected}」に当たる（別の食材に当たらない）`, jgHit(written), expected)
+  }
+
+  // --- JG-3: 卵黄・卵白が「卵1個ぶんの満額」になっていた ---
+  // 旧実測（ティラミス）: 卵黄「2個分」→ 25円（卵1個の満額）／卵白「2個分」→ 25円。
+  // 卵1個(25円)を可食部の重さの比（卵黄1：卵白2）で分けた値にする＝両方使うレシピでは
+  // 合計が卵の値段と一致する（卵黄2個分16円＋卵白2個分34円＝50円＝卵2個）
+  eq('JG-3 卵黄は卵の行に当たらない', jgHit('卵黄'), '卵黄')
+  eq('JG-3 卵白は卵の行に当たらない', jgHit('卵白'), '卵白')
+  eq('JG-3 卵黄2個分は16円（8円×2）', jgYen('卵黄', '2', '個分'), 16)
+  eq('JG-3 卵白2個分は34円（17円×2）', jgYen('卵白', '2', '個分'), 34)
+  eq('JG-3 卵黄1個分＋卵白1個分＝卵1個の値段', jgYen('卵黄', '1', '個分') + jgYen('卵白', '1', '個分'), 25)
+
+  // --- JG-4: 分量が書かれていない材料に、登録単位まるごとの金額が乗っていた ---
+  // 旧実測（ハヤシライス・2人分）: こしょう(分量なし) → 小さじ1杯まるごとの10円が1行に乗り、
+  // 1食あたり5円と表示されていた。「少々」の実量は栄養側が既に持っている値（こしょう0.3g）を使う
+  eq('JG-4 分量なしのこしょうは小さじ1杯まるごと(10円)にならない', jgYen('こしょう', '', '') !== 10, true)
+  eq('JG-4 分量なしのこしょうは約2円（0.3g÷小さじ1=2g×10円）', jgYen('こしょう', '', ''), 2)
+  eq('JG-4 「少々」と書いたこしょうも同じ', jgYen('こしょう', '少々', ''), 2)
+  eq('JG-4 黒こしょうも同じ', jgYen('黒こしょう', '少々', ''), 2)
+  // 分量が数値で書いてあるときは今までどおり按分する（仮の量に置き換えない）
+  eq('JG-4 こしょう小さじ1/2は5円のまま', jgYen('こしょう', '1/2', '小さじ'), 5)
+  // サラダ油は同梱109品の最頻値「大さじ1」のまま（400円/1L×15ml=6円）＝変えていない
+  eq('JG-4 分量なしのサラダ油は大さじ1ぶんの6円のまま', jgYen('サラダ油', '', ''), 6)
+
+  // --- JG-5: 原価の行が、画面に出ている人数分の分量に追随していなかった ---
+  // 旧実測（シフォンケーキ・登録17人分を2人分で表示）: 材料は「卵 1/2個」と出るのに、
+  // 原価の行は「約6円」（100円÷17人分）で、半分の卵の値段（約12円）と合っていなかった
+  {
+    const egg = { name: '卵', amount: '4', unit: '個' }
+    const row17 = estimateIngredientRowCost(egg, jgIndex, 17, 17)
+    const row2 = estimateIngredientRowCost(egg, jgIndex, 17, 2)
+    const row4 = estimateIngredientRowCost(egg, jgIndex, 17, 4)
+    eq('JG-5 登録人数のままなら全量ぶん(卵4個=100円)', row17?.shownYen, 100)
+    eq('JG-5 2人分にすると2/17ぶん(約12円)になる', row2?.shownYen, 12)
+    eq('JG-5 人数を増やすと金額も増える', row4?.shownYen, 24)
+    eq('JG-5 1食あたりの値は今までどおり登録人数で割った値', row2?.perServingYen, 6)
+  }
+
+  // --- JG-6: 「価格なし」があることを知らせる判定 ---
+  // オーナー原文「『価格なし』が複数（１つだったとしても金額によっては大きいが）ある場合には、
+  // 目安とはいえ実際と大きく異なることを記号でお知らせして欲しい」「ティラミスとか、１食４円なわけない。
+  // チーズがたくさん」。判定そのものを純ロジックとして持たせる
+  eq('JG-6 知らせるかどうかの判定が logic/priceEstimate.ts にある', typeof priceEstimateModule.recipeCostConfidence, 'function')
+  {
+    const conf = (ings) => priceEstimateModule.recipeCostConfidence(ings, jgIndex)
+    // 同梱109品は全材料に価格があるので1品も知らせない（実測: 109品中0品）
+    let starterWarn = 0
+    for (const def of starterDefs) if (conf(def.ingredients).shouldWarn) starterWarn++
+    eq('JG-6 同梱109品では1品も知らせない（価格が全部そろっているため）', starterWarn, 0)
+    // 価格が分からない材料が1件でも、それが調味料・薬味なら知らせない
+    eq(
+      'JG-6 分からないのが調味料1件だけなら知らせない',
+      conf([
+        { name: '玉ねぎ', amount: '1', unit: '個' },
+        { name: '架空の調味料', amount: '少々', unit: '' },
+      ]).shouldWarn,
+      false,
+    )
+    // 1件でも主材料なら知らせる（オーナー「１つだったとしても金額によっては大きい」）
+    eq(
+      'JG-6 分からないのが主材料1件なら知らせる（ティラミスのマスカルポーネチーズ 250g の形）',
+      conf([
+        { name: '玉ねぎ', amount: '1', unit: '個' },
+        { name: 'マスカルポーネチーズ', amount: '250', unit: 'g' },
+      ]).shouldWarn,
+      true,
+    )
+    // 調味料でも2件以上なら知らせる（オーナー「『価格なし』が複数ある場合」）
+    eq(
+      'JG-6 分からないのが2件以上なら、調味料でも知らせる',
+      conf([
+        { name: '玉ねぎ', amount: '1', unit: '個' },
+        { name: '架空の調味料', amount: '少々', unit: '' },
+        { name: '架空の香辛料', amount: '少々', unit: '' },
+      ]).shouldWarn,
+      true,
+    )
+    // 水・湯・氷水・ゆで汁は価格を付ける対象ではないので数えない
+    eq(
+      'JG-6 水・氷水・ゆで汁は「価格が分からない材料」に数えない',
+      conf([
+        { name: '玉ねぎ', amount: '1', unit: '個' },
+        { name: '水', amount: '300', unit: 'ml' },
+        { name: '氷水', amount: '適量', unit: '' },
+        { name: 'ゆで汁', amount: '90', unit: 'cc' },
+      ]),
+      { pricelessCount: 0, hasPricelessMainIngredient: false, shouldWarn: false },
+    )
+  }
+
+  // --- JG-7: 足した既定価格が入っていること（値は各行の根拠つきコメントを参照） ---
+  for (const [name, pricePerUnit, unit] of [
+    ['卵黄', 8, '1個分'],
+    ['卵白', 17, '1個分'],
+    ['生クリーム', 300, '200ml'],
+    ['赤ワイン', 600, '1L'],
+    ['ローリエ', 5, '1枚'],
+    ['えんどう豆', 250, '200g'],
+    ['ホットケーキミックス', 300, '600g'],
+    ['無塩バター', 600, '200g'],
+    ['マッシュルーム', 180, '100g'],
+    ['粉砂糖', 15, '大さじ1'],
+    ['青ねぎ', 80, '100g'],
+    ['塩鮭', 150, '1切れ'],
+    ['黒こしょう', 10, '小さじ1'], // 「粗びき黒こしょう」からの改名（価格・単位は据え置き）
+  ]) {
+    const entry = PRICE_DEFAULTS.find((d) => d.name === name)
+    eq(`JG-7 「${name}」の目安価格が ${pricePerUnit}円/${unit}`, entry && [entry.pricePerUnit, entry.unit], [pricePerUnit, unit])
+  }
+  // 改名した旧名は残っていないこと（同じ食材が2行になるのを防ぐ）
+  eq('JG-7 旧名「粗びき黒こしょう」の行は残っていない', PRICE_DEFAULTS.some((d) => d.name === '粗びき黒こしょう'), false)
+  eq('JG-7 旧名で書いたレシピも「黒こしょう」の1件に解決する', jgHit('粗びき黒こしょう'), '黒こしょう')
+  // 既存端末の行を改名する移行が入っていること
+  eq(
+    'JG-7 「粗びき黒こしょう」→「黒こしょう」の改名が PRICE_DEFAULT_MERGES にある',
+    PRICE_DEFAULT_MERGES_FOR_JG.some((m) => m.fromName === '粗びき黒こしょう' && m.toName === '黒こしょう'),
+    true,
+  )
+  eq('JG-7 版番号を上げてある（上げないと既存の端末に新しい行が届かない）', PRICE_DEFAULTS_VERSION_FOR_JG, 10)
+  eq('JG-7 読み仮名辞書の版番号も上げてある', READINGS_VERSION >= 7, true)
 }
 
 // ---------- 結果 ----------
