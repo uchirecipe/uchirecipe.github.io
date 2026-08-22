@@ -69,6 +69,7 @@ import PhotoFocusModal from '../components/PhotoFocusModal'
 import Collapse from '../components/Collapse'
 import SwapLabel from '../components/SwapLabel'
 import BackHeader from '../components/BackHeader'
+import { setLeaveGuard } from '../logic/leaveGuard'
 import { useScrollTopOnOpen } from '../components/useScrollTopOnOpen'
 import Toast from '../components/Toast'
 import { useConfirm } from '../components/ConfirmProvider'
@@ -826,6 +827,34 @@ function RecipeFormInner() {
     window.addEventListener('beforeunload', handler)
     return () => window.removeEventListener('beforeunload', handler)
   }, [])
+
+  /**
+   * アプリの中の移動で離れようとしたときの引き止め（2026-08-23 便JO・logic/leaveGuard）。
+   *
+   * オーナー原文「編集終わりのつもりでそのまま保存をせずにページを離れそう。一時保存はされるが、
+   * 反映されていないことに気づきにくい。」
+   *
+   * すぐ上の beforeunload は**ブラウザを閉じる・読み込み直す**ときにしか鳴らない
+   * （アプリの中の移動はページを読み込み直さないため）。上の「戻る」と下の並びのタブは
+   * この引き止めを通る（components/BackHeader ／ components/TabBar）。
+   *
+   * 書きかけが無ければ何も出さない＝普段の行き来の邪魔をしない。
+   * 書きかけは**消さない**（自動保存されたまま残す）＝窓の文言もそう言い切る。
+   * 「キャンセル」で抜けるとき（handleCancel）はこの引き止めを通らない
+   * ＝あちらは書きかけを捨てる操作で、確認の文も別物なので二重に聞かない。
+   */
+  useEffect(() => {
+    setLeaveGuard(async () => {
+      if (!dirtyRef.current) return true
+      return await confirm({
+        title: ja.form.leaveUnsavedTitle,
+        body: ja.form.leaveUnsaved,
+        confirmLabel: ja.form.leaveUnsavedOk,
+        cancelLabel: ja.form.leaveUnsavedStay,
+      })
+    })
+    return () => setLeaveGuard(null)
+  }, [confirm])
 
   // 保存前の指摘(「料理名を入力してください」等)は、入力を直した時点で消す(2026-07-28 便BW・QA S3)。
   // 以前は次に保存を押すまで赤いエラーが残り続け、直したのに直っていないように見えていた
@@ -2207,9 +2236,19 @@ function RecipeFormInner() {
             return (
             <div
               key={index}
+              data-testid="ingredient-row"
+              /* 2026-08-23 便JO（オーナー原文「「選んで削除」で食材の☑️を押さないと選択できない。
+                 削除する項目を選ぶだけなら、枠のどこを触っても選択できるからいいのでは？
+                 触れる場所が狭すぎる。」）:
+                 直す前の実測（390px幅）＝触れるのは丸いチェックの 40×40px だけで、
+                 材料1件の枠は 358×162px。**枠の面積の2.8%**しか押せなかった。
+                 「選んで削除」の最中は枠ぜんぶを選ぶ面にする。読み上げ・キーボードの口は
+                 丸いチェック（aria-pressed 付き）が今までどおり持つので、ここには役割を足さない
+                 （同じものが2回読み上げられないようにする）。 */
+              onClick={ingredientOrganizing ? () => toggleIngredientSelected(index) : undefined}
               className={`rounded-md border bg-surface p-[var(--space-sm)] shadow-sm ${
                 rowSelected ? 'border-accent ring-2 ring-accent' : 'border-edge'
-              }`}
+              } ${ingredientOrganizing ? 'cursor-pointer select-none' : ''}`}
               style={
                 row.group
                   ? { borderLeft: `4px solid var(${seasoningGroupColorToken(row.group)})` }
@@ -2223,7 +2262,13 @@ function RecipeFormInner() {
                   onChange={(e) => updateIngredient(index, { name: e.target.value })}
                   placeholder={ja.form.ingredientNamePlaceholder}
                   aria-label={ja.form.ingredientName}
-                  className="min-w-0 flex-[2] rounded-sm border border-edge bg-app px-3 py-3 text-base text-ink placeholder:text-ink-muted/60"
+                  /* 「選んで削除」の最中は欄を触れなくする（2026-08-23 便JO）。
+                     枠ぜんぶが「選ぶ」面になるので、欄だけが選べない穴になっていると
+                     「枠のどこを触っても選べる」が成り立たない。「完了」で元どおり書ける */
+                  readOnly={ingredientOrganizing}
+                  className={`min-w-0 flex-[2] rounded-sm border border-edge bg-app px-3 py-3 text-base text-ink placeholder:text-ink-muted/60 ${
+                    ingredientOrganizing ? 'pointer-events-none' : ''
+                  }`}
                 />
                 <input
                   type="text"
@@ -2232,7 +2277,10 @@ function RecipeFormInner() {
                   onBlur={normalizeIngredientFieldOnBlur(index, 'amount')}
                   placeholder={ja.form.ingredientAmountPlaceholder}
                   aria-label={ja.form.ingredientAmount}
-                  className="min-w-0 flex-1 rounded-sm border border-edge bg-app px-3 py-3 text-base text-ink placeholder:text-ink-muted/60"
+                  readOnly={ingredientOrganizing}
+                  className={`min-w-0 flex-1 rounded-sm border border-edge bg-app px-3 py-3 text-base text-ink placeholder:text-ink-muted/60 ${
+                    ingredientOrganizing ? 'pointer-events-none' : ''
+                  }`}
                 />
                 <input
                   type="text"
@@ -2241,7 +2289,10 @@ function RecipeFormInner() {
                   onBlur={normalizeIngredientFieldOnBlur(index, 'unit')}
                   placeholder={ja.form.ingredientUnitPlaceholder}
                   aria-label={ja.form.ingredientUnit}
-                  className="min-w-0 flex-1 rounded-sm border border-edge bg-app px-3 py-3 text-base text-ink placeholder:text-ink-muted/60"
+                  readOnly={ingredientOrganizing}
+                  className={`min-w-0 flex-1 rounded-sm border border-edge bg-app px-3 py-3 text-base text-ink placeholder:text-ink-muted/60 ${
+                    ingredientOrganizing ? 'pointer-events-none' : ''
+                  }`}
                 />
               </div>
               {/* 取り込みで分量が読み取れなかった行の控えめな印(2026-07-28 便BX/C09)。
@@ -2260,7 +2311,13 @@ function RecipeFormInner() {
                   {ingredientOrganizing && (
                     <button
                       type="button"
-                      onClick={() => toggleIngredientSelected(index)}
+                      /* 枠ぜんぶが選ぶ面になったので、ここで止めないと1回の押下で
+                         「丸のぶん」と「枠のぶん」の2回入れ替わり、見た目が動かなくなる
+                         （2026-08-23 便JO） */
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        toggleIngredientSelected(index)
+                      }}
                       aria-pressed={rowSelected}
                       aria-label={ja.form.ingredientOrganizeSelectRow}
                       className={`tap-target flex h-10 w-10 shrink-0 items-center justify-center rounded-full border ${
@@ -2353,7 +2410,10 @@ function RecipeFormInner() {
                 onChange={(e) => updateIngredient(index, { memo: e.target.value })}
                 placeholder={ja.form.ingredientMemoPlaceholder}
                 aria-label={ja.form.ingredientMemoPlaceholder}
-                className="mt-[var(--space-sm)] block w-full rounded-sm border border-edge bg-app px-3 py-2 text-sm text-ink-muted placeholder:text-ink-muted/60"
+                readOnly={ingredientOrganizing}
+                className={`mt-[var(--space-sm)] block w-full rounded-sm border border-edge bg-app px-3 py-2 text-sm text-ink-muted placeholder:text-ink-muted/60 ${
+                  ingredientOrganizing ? 'pointer-events-none' : ''
+                }`}
               />
             </div>
             )

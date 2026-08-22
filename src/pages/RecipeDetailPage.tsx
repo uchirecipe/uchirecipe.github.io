@@ -935,24 +935,24 @@ export default function RecipeDetailPage() {
               </span>
             </div>
           </div>
-          {/* 元のレシピが何人分で書かれているかの併記(2026-08-03 便DK・オーナー決定)。
-              設定「ふだん作る人数」を入れているとこの画面は最初からその人数で開くため、
-              登録人数が画面から消えないようにする。出したり消したりすると材料の行が
-              上下に動くので、人数を変えているかどうかに関わらず常に同じ場所に出す */}
-          {recipe.servings > 0 && (
-            <p className="mt-1 text-right text-xs text-ink-muted">
-              {ja.detail.servingsRegisteredNote.replace('{n}', String(recipe.servings))}
-            </p>
-          )}
-          {/* 「原価を編集」(view⇔editの子トグル)。2026-08-03 オーナー指示で見出し行から
-              この行へ移した。原価を開いている間だけ出る */}
-          {costMode !== 'hidden' && (
-            <div className="mt-[var(--space-sm)] flex flex-wrap items-center gap-2">
+          {/* 「原価を編集」と、元のレシピが何人分で書かれているかの併記を**同じ1行**に置く。
+              2026-08-23 便JO（オーナー原文「「原価を編集」ボタンのせいで、材料の文字が下に動くのが
+              気になる。ボタンの場所変えたい。下でもいいが不便になる。」）:
+              直す前の実測（390×844）＝材料の1行目は 629px。「原価を見る」で 675px（**46px下がる**）、
+              続けて「原価を編集」で 723px（**さらに48px**）。合わせて94px＝材料3行ぶんずれていた。
+              下へ移すのはオーナーが消極的（「下でもいいが不便になる」）なので採らず、
+              **いつも同じ場所にある行に先に高さを取っておく**手にした（便IAが窓の中で採ったのと同じ手）。
+              この行は登録人数の併記でもとから常にあるので、増える余白は最小で済む。
+              ・行の高さは押せる大きさ（44px・--tap-min）で固定＝ボタンが出ても消えても1pxも動かない
+              ・登録人数の併記（2026-08-03 便DK・オーナー決定）は右端のまま。
+                設定「ふだん作る人数」を入れていると最初からその人数で開くので、登録人数を消さない */}
+          <div className="mt-1 flex min-h-11 items-center justify-between gap-2">
+            {costMode !== 'hidden' ? (
               <button
                 type="button"
                 onClick={() => setCostMode((m) => (m === 'edit' ? 'view' : 'edit'))}
                 aria-pressed={costMode === 'edit'}
-                className={`inline-flex shrink-0 items-center gap-1 rounded-full border px-3 py-2 text-sm font-bold shadow-sm ${
+                className={`inline-flex min-h-11 shrink-0 items-center gap-1 rounded-full border px-3 py-2 text-sm font-bold shadow-sm ${
                   costMode === 'edit'
                     ? 'border-accent bg-accent text-on-accent'
                     : 'border-edge bg-surface text-accent-ink'
@@ -961,14 +961,15 @@ export default function RecipeDetailPage() {
                 <Pencil size={16} aria-hidden />
                 {ja.detail.priceEditShow}
               </button>
-            </div>
-          )}
-          {/* 原価サマリーカード(2026-07-16 裁定1で新設)は2026-07-20 便AJ(docs/45)で丸ごと削除
-              (オーナー指示。上部メタ行の概算食費「約◯円」「1食あたり 約◯円」は不変のため重複していた)。
-              代わりに「原価を編集」モードの説明を1文だけ出す(チップ表の上・編集モード時のみ) */}
-          {costMode === 'edit' && (
-            <p className="mt-[var(--space-sm)] text-sm text-ink-muted">{ja.detail.priceEditNote}</p>
-          )}
+            ) : (
+              <span aria-hidden />
+            )}
+            {recipe.servings > 0 && (
+              <span className="text-right text-xs text-ink-muted">
+                {ja.detail.servingsRegisteredNote.replace('{n}', String(recipe.servings))}
+              </span>
+            )}
+          </div>
           {recipe.ingredients.some((ing) => ing.seasoningGroup) && (
             <p className="mt-1 text-sm text-ink-muted">{ja.detail.seasoningGroupHint}</p>
           )}
@@ -994,6 +995,7 @@ export default function RecipeDetailPage() {
               return (
                 <li
                   key={index}
+                  data-testid="detail-ingredient"
                   className="px-[var(--space-md)] py-3 text-lg"
                   style={
                     ing.seasoningGroup
@@ -1100,6 +1102,16 @@ export default function RecipeDetailPage() {
               )
             })}
           </ul>
+          {/* 原価サマリーカード(2026-07-16 裁定1で新設)は2026-07-20 便AJ(docs/45)で丸ごと削除
+              (オーナー指示。上部メタ行の概算食費「約◯円」「1食あたり 約◯円」は不変のため重複していた)。
+              代わりに「原価を編集」モードの説明を1文だけ出す。
+              2026-08-23 便JO: 置き場所を材料の一覧の**上から下へ**移した。上に出していたときは、
+              「原価を編集」を押すたびにこの1文（実測48px＝2行）が挟まって材料の文字が下へずれていた。
+              下なら出ても消えても材料の行は1pxも動かず、単価を直したあとに
+              「どこへ保存されたのか」を読む順番としても自然になる */}
+          {costMode === 'edit' && (
+            <p className="mt-[var(--space-sm)] text-sm text-ink-muted">{ja.detail.priceEditNote}</p>
+          )}
         </section>
 
         {/* 栄養価のめやす（M6-1）: 公開前はティーザー、公開後は未解錠ゲート/実表示(③)。

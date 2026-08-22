@@ -216,7 +216,14 @@ export default function TimerBar() {
               </span>
               {/* +1分ミニボタン(2026-07-13 UIペルソナQA)。行タップ(±調整の窓)より手前で即+60秒したい
                   ニーズに応える近道ボタン。既存adjustTimerをそのまま流用する。doneな行は
-                  adjustTimerが効かない(TimerProvider側の既定)ので出さない */}
+                  adjustTimerが効かない(TimerProvider側の既定)ので出さない。
+                  2026-08-23 便JO(オーナー原文「起動したタイマーの「＋１」が押せるとわかりづらい。
+                  見た目工夫が必要」): 直す前の実測＝38×36px・**枠なし**・地色なしの12pxの文字で、
+                  すぐ隣の残り時間(18px太字)と同じ面に並んでいた＝ただの注記に見えていた。
+                  ①枠を付けて「押せるもの」の形にする(アクセント色の枠。この行で唯一の近道なので、
+                    隣の消音・✕のアイコンより一段はっきりさせる)
+                  ②当たり判定だけ44px(--tap-min)へ広げる(.tap-target)。見た目の大きさは変えない
+                    ＝行の高さを増やさない。少し外れて押しても行(調整の窓)に化けない */}
               {!timer.done && (
                 <span
                   role="button"
@@ -233,7 +240,7 @@ export default function TimerBar() {
                     }
                   }}
                   aria-label={ja.timer.plusOneMinuteAria.replace('{label}', timer.label)}
-                  className="flex h-9 shrink-0 items-center justify-center rounded-sm px-1.5 text-xs font-bold text-accent-ink"
+                  className="tap-target flex h-9 shrink-0 items-center justify-center rounded-sm border border-accent bg-surface px-2 text-xs font-bold text-accent-ink"
                 >
                   {ja.timer.plusOneMinute}
                 </span>

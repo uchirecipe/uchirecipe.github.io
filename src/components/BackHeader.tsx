@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
 import { ChevronLeft } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
+import { askBeforeLeave } from '../logic/leaveGuard'
 import { ja } from '../i18n/ja'
 
 type Props = {
@@ -41,7 +42,14 @@ export default function BackHeader({
 }: Props) {
   const navigate = useNavigate()
 
-  const goBack = () => {
+  /**
+   * 2026-08-23 便JO: 離れる前に、いま開いている画面の引き止めを聞く（logic/leaveGuard）。
+   * 引き止めが「いいえ」なら**何もしない**＝後片付け（onBack）も走らせない
+   * （離れていないのに、離れるときの片付けだけが済んでしまうのを防ぐ）。
+   * 引き止めを登録していない画面では今までどおり素通りする。
+   */
+  const goBack = async () => {
+    if (!(await askBeforeLeave())) return
     onBack?.()
     if (alwaysFallback) {
       navigate(fallback)
@@ -64,7 +72,7 @@ export default function BackHeader({
     >
       <button
         type="button"
-        onClick={goBack}
+        onClick={() => void goBack()}
         className="flex shrink-0 items-center gap-1 rounded-sm px-2 py-2 font-bold text-accent-ink"
       >
         <ChevronLeft size={22} aria-hidden />

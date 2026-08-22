@@ -27559,9 +27559,11 @@ try {
       await fiPage.getByRole('button', { name: ja.form.ingredientOrganizeToggle, exact: true }).click()
       await fiPage.waitForTimeout(300)
       check(
+        // 2026-08-23 便JO: 画面の文を書き写した正規表現をやめ、ja.ts から読む形にした（禁じ手②）。
+        // 触れる面を枠ぜんぶに広げたのに合わせて案内も直したところ、この1行だけが赤くなっていた
         'FORMING-01(便DF) モードに入ると消し方の説明が出る',
-        /消したい材料にチェックを付けて、「選んだ材料◯[品件行]を削除」を押します/.test(
-          await fiPage.textContent('body'),
+        stripZwspText(await fiPage.textContent('body')).includes(
+          stripZwspText(ja.form.ingredientOrganizeHint),
         ),
       )
       check(
@@ -49120,6 +49122,553 @@ try {
       )
     } finally {
       await jkBrowser.close()
+    }
+  }
+
+
+  // ==========================================================================================
+  // JOSELECT-01（2026-08-23 便JO）: 材料の「選んで削除」は、枠のどこを押しても選べる
+  //
+  // オーナー原文:
+  //   「「選んで削除」で食材の☑️を押さないと選択できない。削除する項目を選ぶだけなら、
+  //     枠のどこを触っても選択できるからいいのでは？触れる場所が狭すぎる。」
+  //
+  // 直す前の実測（390×844）: 触れるのは丸いチェックだけで 40×40px、材料1件の枠は 358×162px。
+  // **枠の面積の 2.8% しか触れなかった**。材料名の欄・メモの欄・枠の余白を押しても選べない。
+  //
+  // 測るのは「利用者が確かめたいこと」:
+  //   ①「選んで削除」の最中は、枠の**どこを押しても**その材料を選べる（代表の5点で見る）
+  //   ②同じ場所をもう一度押せば外せる（選ぶのと同じ手で戻せる）
+  //   ③「選んで削除」でないときは、材料名の欄を押しても選択にならず、今までどおり書ける
+  //     （選ぶために普段の編集を壊していないこと）
+  // 禁じ手よけ: 料理名で掴まない（端末に入っている1件目のidを使う）／文言は ja.ts から読む／
+  //   押す回数・件数を決め打ちしない／page.evaluate の中に ja.*** を書かない（引数で渡す）
+  // ==========================================================================================
+  currentCheck = 'JOSELECT-01'
+  {
+    const joBrowser = await chromium.launch()
+    try {
+      const joContext = await joBrowser.newContext({ viewport: { width: 390, height: 844 } })
+      const joPage = await joContext.newPage()
+      joPage.on('pageerror', (err) => {
+        if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+        errors.push(`[pageerror@JOSELECT-01] ${err.message}`)
+      })
+      await joPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await joPage.waitForTimeout(2400) // 初回シード完了待ち
+      const joId = await joPage.evaluate(
+        () =>
+          new Promise((resolve, reject) => {
+            const req = indexedDB.open('uchi-recipe')
+            req.onsuccess = () => {
+              const keys = req.result
+                .transaction('recipes', 'readonly')
+                .objectStore('recipes')
+                .getAllKeys()
+              keys.onsuccess = () => resolve(keys.result[0] ?? null)
+              keys.onerror = () => reject(keys.error)
+            }
+            req.onerror = () => reject(req.error)
+          }),
+      )
+      check('JOSELECT-01 前提: 材料を触るレシピのidを取れた', Number.isInteger(joId), `id=${joId}`)
+      await joPage.goto(`${BASE}/#/recipes/${joId}/edit`, { waitUntil: 'networkidle' })
+      await joPage.reload({ waitUntil: 'networkidle' })
+      await joPage.waitForTimeout(1400)
+
+      // ③普段（選ぶモードでない）は、材料名の欄が今までどおり書ける
+      const joName = joPage.getByLabel(ja.form.ingredientName).first()
+      check('JOSELECT-01 前提: 材料名の欄を掴めた', (await joName.count()) === 1)
+      await joName.fill('検査用の材料名')
+      await joPage.waitForTimeout(200)
+      check(
+        'JOSELECT-01 「選んで削除」でないときは、材料名の欄に今までどおり書ける',
+        (await joName.inputValue()) === '検査用の材料名',
+        `欄の中身=${await joName.inputValue()}`,
+      )
+
+      const joOrganize = joPage.getByRole('button', {
+        name: ja.form.ingredientOrganizeToggle,
+        exact: true,
+      })
+      check('JOSELECT-01 前提: 「選んで削除」を掴めた', (await joOrganize.count()) === 1)
+      await joOrganize.first().click()
+      await joPage.waitForTimeout(400)
+
+      /** 1件目の材料の枠と、その枠の選択状態を読む（枠は data-testid、状態は aria-pressed） */
+      const joRead = () =>
+        joPage.evaluate((label) => {
+          const row = document.querySelector('[data-testid="ingredient-row"]')
+          if (!row) return null
+          const btn = [...row.querySelectorAll('button')].find(
+            (el) => el.getAttribute('aria-label') === label,
+          )
+          const r = row.getBoundingClientRect()
+          return {
+            x: r.x,
+            y: r.y,
+            w: Math.round(r.width),
+            h: Math.round(r.height),
+            pressed: btn ? btn.getAttribute('aria-pressed') === 'true' : null,
+          }
+        }, ja.form.ingredientOrganizeSelectRow)
+
+      // 材料1件目を画面の真ん中へ持ってくる（下の並び＝タブの帯に重なった場所を押すと、
+      // タブを押したことになって画面ごと移ってしまう。実測: 帯に隠れる位置に枠があった）
+      await joPage.evaluate(() => {
+        document
+          .querySelector('[data-testid="ingredient-row"]')
+          ?.scrollIntoView({ block: 'center' })
+      })
+      await joPage.waitForTimeout(400)
+
+      const joBefore = await joRead()
+      check(
+        'JOSELECT-01 前提: 材料1件の枠と選択状態を読めた（選ぶモードに入っている）',
+        joBefore !== null && joBefore.pressed === false && joBefore.w > 0 && joBefore.h > 0,
+        JSON.stringify(joBefore),
+      )
+
+      // ①②枠の代表の5点。どこを押しても「選ぶ⇄外す」が入れ替わる。
+      //   点は枠の割合で決める＝枠の高さ・欄の並びが変わっても同じ意味の場所を指す
+      const joSpots = [
+        ['左上（材料名の欄）', 0.2, 0.12],
+        ['右上（単位の欄）', 0.85, 0.12],
+        ['真ん中（欄と欄のあいだ）', 0.5, 0.5],
+        ['左下（メモの欄）', 0.3, 0.9],
+        ['右下（枠の余白）', 0.95, 0.9],
+      ]
+      for (const [joSpotName, joRx, joRy] of joSpots) {
+        const joBox = await joRead()
+        if (!joBox) {
+          check(`JOSELECT-01 ${joSpotName}を押すとその材料を選べる`, false, '枠を読めなかった')
+          continue
+        }
+        const joWas = joBox.pressed
+        await joPage.mouse.click(joBox.x + joBox.w * joRx, joBox.y + joBox.h * joRy)
+        await joPage.waitForTimeout(250)
+        const joAfter = await joRead()
+        check(
+          `JOSELECT-01 ${joSpotName}を押すと、その材料の選択が入れ替わる（直す前は丸いチェック 40×40px だけ）`,
+          joAfter !== null && joAfter.pressed === !joWas,
+          `押す前=${joWas} 押した後=${joAfter ? joAfter.pressed : 'null'}`,
+        )
+      }
+
+      // ③選ぶモードを抜けたら、材料名の欄はまた書ける（モードのあいだだけ止めている）
+      await joPage
+        .getByRole('button', { name: ja.form.ingredientOrganizeDone, exact: true })
+        .first()
+        .click()
+      await joPage.waitForTimeout(400)
+      await joPage.getByLabel(ja.form.ingredientName).first().fill('戻したあとの材料名')
+      await joPage.waitForTimeout(200)
+      check(
+        'JOSELECT-01 「完了」で選ぶモードを抜けたら、材料名の欄にまた書ける',
+        (await joPage.getByLabel(ja.form.ingredientName).first().inputValue()) ===
+          '戻したあとの材料名',
+      )
+    } finally {
+      await joBrowser.close()
+    }
+  }
+
+  // ==========================================================================================
+  // JOLEAVE-02（2026-08-23 便JO）: 保存せずにレシピ編集を離れようとしたら知らせる
+  //
+  // オーナー原文:
+  //   「編集終わりのつもりでそのまま保存をせずにページを離れそう。一時保存はされるが、
+  //     反映されていないことに気づきにくい。」
+  //
+  // 直す前の実測: 料理名を書き換えたあと上の「戻る」を押すと、何も出ないまま
+  // レシピ詳細（#/recipes/1）へ移り、見出しは元の料理名のまま＝編集が反映されていない。
+  // 下の並びの「献立」でも同じく黙って離れていた。
+  //
+  // 測るのは「利用者が確かめたいこと」:
+  //   ①書きかけがあるとき、上の「戻る」で離れようとすると知らせが出る
+  //   ②その知らせが「反映されない」ことと「書きかけは残る」ことの両方を言っている（規約F）
+  //   ③「編集を続ける」を選べば離れない（編集の画面のまま）
+  //   ④「保存せずに離れる」を選べば離れる。そのときレシピは書き換わっていない
+  //   ⑤開き直すと書きかけを戻す案内が出る（言ったとおり端末に残っている）
+  //   ⑥下の並びのタブで離れようとしても同じ知らせが出る
+  //   ⑦何も書き換えていなければ、知らせは出ずにそのまま離れられる（普段の邪魔をしない）
+  // 禁じ手よけ: 文言は ja.ts から読む／料理名で掴まない／ゼロ幅スペースを外してから照合する
+  // ==========================================================================================
+  currentCheck = 'JOLEAVE-02'
+  {
+    const jolBrowser = await chromium.launch()
+    try {
+      const jolContext = await jolBrowser.newContext({ viewport: { width: 390, height: 844 } })
+      // 確認の窓は自分で押す（この節は「窓が出るか・どちらを押すと何が起きるか」そのものを測る）
+      await jolContext.addInitScript(() => {
+        try {
+          localStorage.setItem('e2e:confirmAuto', 'off')
+        } catch {
+          /* 何もしない */
+        }
+      })
+      const jolPage = await jolContext.newPage()
+      jolPage.on('pageerror', (err) => {
+        if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+        errors.push(`[pageerror@JOLEAVE-02] ${err.message}`)
+      })
+      await jolPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await jolPage.waitForTimeout(2400)
+      const jolId = await jolPage.evaluate(
+        () =>
+          new Promise((resolve, reject) => {
+            const req = indexedDB.open('uchi-recipe')
+            req.onsuccess = () => {
+              const keys = req.result
+                .transaction('recipes', 'readonly')
+                .objectStore('recipes')
+                .getAllKeys()
+              keys.onsuccess = () => resolve(keys.result[0] ?? null)
+              keys.onerror = () => reject(keys.error)
+            }
+            req.onerror = () => reject(req.error)
+          }),
+      )
+      check('JOLEAVE-02 前提: 編集するレシピのidを取れた', Number.isInteger(jolId), `id=${jolId}`)
+
+      const jolOpenEdit = async () => {
+        await jolPage.goto(`${BASE}/#/recipes/${jolId}/edit`, { waitUntil: 'networkidle' })
+        await jolPage.reload({ waitUntil: 'networkidle' })
+        await jolPage.waitForTimeout(1400)
+      }
+      await jolOpenEdit()
+      const jolTitleField = jolPage.getByLabel(ja.form.nameLabel).first()
+      check('JOLEAVE-02 前提: 料理名の欄を掴めた', (await jolTitleField.count()) === 1)
+      const jolOriginalTitle = stripZwspText(await jolTitleField.inputValue())
+      const jolNewTitle = `${jolOriginalTitle}・書きかえ`
+      await jolTitleField.fill(jolNewTitle)
+      await jolPage.waitForTimeout(500)
+
+      // ①上の「戻る」で離れようとすると知らせが出る
+      const jolBack = jolPage.getByRole('button', { name: ja.common.back, exact: true }).first()
+      await jolBack.click()
+      await jolPage.waitForTimeout(600)
+      const jolDialog = jolPage.locator('[data-testid="confirm"]')
+      check(
+        'JOLEAVE-02 書きかけがあるとき、上の「戻る」で離れようとすると知らせが出る',
+        (await jolDialog.count()) === 1,
+        `窓の数=${await jolDialog.count()} URL=${jolPage.url()}`,
+      )
+      // ②何が起きないか・何が残るかを両方言っている（規約F）
+      const jolBody = stripZwspText(await jolDialog.first().textContent().catch(() => ''))
+      check(
+        'JOLEAVE-02 知らせが「レシピに反映されないこと」と「書きかけが残ること」を言っている',
+        jolBody.includes(stripZwspText(ja.form.leaveUnsaved)),
+        `窓の文=${jolBody.slice(0, 160)}`,
+      )
+      check(
+        'JOLEAVE-02 知らせに「保存していない」ことが見出しで出ている',
+        jolBody.includes(stripZwspText(ja.form.leaveUnsavedTitle)),
+        `窓の文=${jolBody.slice(0, 160)}`,
+      )
+      // ③「編集を続ける」で留まれる
+      await jolPage.locator('[data-testid="confirm-cancel"]').first().click()
+      await jolPage.waitForTimeout(600)
+      check(
+        'JOLEAVE-02 「編集を続ける」を選ぶと、編集の画面のまま留まる',
+        /#\/recipes\/\d+\/edit/.test(jolPage.url()) &&
+          stripZwspText(await jolTitleField.inputValue()) === jolNewTitle,
+        `URL=${jolPage.url()}`,
+      )
+      // ④「保存せずに離れる」で離れる。レシピは書き換わっていない
+      await jolBack.click()
+      await jolPage.waitForTimeout(600)
+      await jolPage.locator('[data-testid="confirm-ok"]').first().click()
+      await jolPage.waitForTimeout(900)
+      check(
+        'JOLEAVE-02 「保存せずに離れる」を選ぶと、編集の画面から離れる',
+        !/\/edit/.test(jolPage.url()),
+        `URL=${jolPage.url()}`,
+      )
+      const jolSavedTitle = await jolPage.evaluate(
+        (id) =>
+          new Promise((resolve, reject) => {
+            const req = indexedDB.open('uchi-recipe')
+            req.onsuccess = () => {
+              const one = req.result
+                .transaction('recipes', 'readonly')
+                .objectStore('recipes')
+                .get(id)
+              one.onsuccess = () => resolve(one.result ? one.result.title : null)
+              one.onerror = () => reject(one.error)
+            }
+            req.onerror = () => reject(req.error)
+          }),
+        jolId,
+      )
+      check(
+        'JOLEAVE-02 保存せずに離れたので、レシピそのものは書き換わっていない',
+        stripZwspText(jolSavedTitle ?? '') === jolOriginalTitle,
+        `端末の中の料理名=${jolSavedTitle} / 元の料理名=${jolOriginalTitle}`,
+      )
+      // ⑤言ったとおり書きかけは残っている（開き直すと戻す案内が出る）
+      await jolOpenEdit()
+      check(
+        'JOLEAVE-02 開き直すと、書きかけを戻す案内が出ている（知らせの言うとおり端末に残る）',
+        stripZwspText(await jolPage.locator('body').textContent()).includes(
+          stripZwspText(ja.form.draftFound),
+        ),
+      )
+      // ⑥下の並びのタブで離れようとしても同じ知らせが出る
+      await jolPage.getByRole('button', { name: ja.form.draftDiscard, exact: true }).first().click()
+      await jolPage.waitForTimeout(400)
+      await jolPage.getByLabel(ja.form.nameLabel).first().fill(`${jolOriginalTitle}・タブで離れる`)
+      await jolPage.waitForTimeout(500)
+      await jolPage.getByRole('link', { name: ja.nav.mealPlan }).first().click()
+      await jolPage.waitForTimeout(700)
+      check(
+        'JOLEAVE-02 下の並びのタブで離れようとしても、同じ知らせが出る',
+        (await jolPage.locator('[data-testid="confirm"]').count()) === 1 &&
+          /#\/recipes\/\d+\/edit/.test(jolPage.url()),
+        `窓の数=${await jolPage.locator('[data-testid="confirm"]').count()} URL=${jolPage.url()}`,
+      )
+      await jolPage.locator('[data-testid="confirm-ok"]').first().click()
+      await jolPage.waitForTimeout(900)
+      check(
+        'JOLEAVE-02 タブの知らせで「保存せずに離れる」を選ぶと、そのタブへ移る',
+        /#\/meal-plan/.test(jolPage.url()),
+        `URL=${jolPage.url()}`,
+      )
+
+      // ⑦何も書き換えていなければ、知らせは出ずにそのまま離れられる
+      await jolOpenEdit()
+      await jolPage.getByRole('button', { name: ja.form.draftDiscard, exact: true }).first().click()
+      await jolPage.waitForTimeout(400)
+      await jolPage.getByRole('button', { name: ja.common.back, exact: true }).first().click()
+      await jolPage.waitForTimeout(900)
+      check(
+        'JOLEAVE-02 何も書き換えていなければ、知らせは出ずにそのまま離れられる',
+        (await jolPage.locator('[data-testid="confirm"]').count()) === 0 &&
+          !/\/edit/.test(jolPage.url()),
+        `窓の数=${await jolPage.locator('[data-testid="confirm"]').count()} URL=${jolPage.url()}`,
+      )
+    } finally {
+      await jolBrowser.close()
+    }
+  }
+
+  // ==========================================================================================
+  // JOCOST-03（2026-08-23 便JO）: 「原価を見る」「原価を編集」で材料の文字が動かない
+  //
+  // オーナー原文:
+  //   「「原価を編集」ボタンのせいで、材料の文字が下に動くのが気になる。ボタンの場所変えたい。
+  //     下でもいいが不便になる。」
+  //
+  // 直す前の実測（390×844・肉じゃが）: 材料の1行目の位置は
+  //   閉じた状態 629px → 「原価を見る」で 675px（**46px下がる**）→「原価を編集」で 723px（**さらに48px**）。
+  //   合わせて 94px、材料の3行ぶんが下へずれていた。
+  //
+  // 測るのは「利用者が確かめたいこと」＝**材料の文字が動かないこと**:
+  //   ①「原価を見る」を押しても材料の1行目が1pxも動かない
+  //   ②続けて「原価を編集」を押しても動かない
+  //   ③「材料に戻す」で閉じても元の位置のまま
+  //   ④「原価を編集」は画面に出ていて、指で押せる大きさ（44px・--tap-min）である
+  // 禁じ手よけ: 縦位置はスクロールに依らない値（画面の位置＋スクロール量）で測る／
+  //   文言は ja.ts から読む／料理名で掴まない
+  // ==========================================================================================
+  currentCheck = 'JOCOST-03'
+  {
+    const jocBrowser = await chromium.launch()
+    try {
+      const jocContext = await jocBrowser.newContext({ viewport: { width: 390, height: 844 } })
+      const jocPage = await jocContext.newPage()
+      jocPage.on('pageerror', (err) => {
+        if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+        errors.push(`[pageerror@JOCOST-03] ${err.message}`)
+      })
+      await jocPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await jocPage.waitForTimeout(2400)
+      const jocId = await jocPage.evaluate(
+        () =>
+          new Promise((resolve, reject) => {
+            const req = indexedDB.open('uchi-recipe')
+            req.onsuccess = () => {
+              const keys = req.result
+                .transaction('recipes', 'readonly')
+                .objectStore('recipes')
+                .getAllKeys()
+              keys.onsuccess = () => resolve(keys.result[0] ?? null)
+              keys.onerror = () => reject(keys.error)
+            }
+            req.onerror = () => reject(req.error)
+          }),
+      )
+      check('JOCOST-03 前提: 材料を見るレシピのidを取れた', Number.isInteger(jocId), `id=${jocId}`)
+      await jocPage.goto(`${BASE}/#/recipes/${jocId}`, { waitUntil: 'networkidle' })
+      await jocPage.reload({ waitUntil: 'networkidle' })
+      await jocPage.waitForTimeout(1400)
+
+      /** 材料の1行目の、ページの先頭から数えた縦位置（スクロールしても変わらない値） */
+      const jocTop = () =>
+        jocPage.evaluate(() => {
+          const li = document.querySelector('[data-testid="detail-ingredient"]')
+          if (!li) return null
+          return Math.round(li.getBoundingClientRect().top + window.scrollY)
+        })
+      const jocClosed = await jocTop()
+      check('JOCOST-03 前提: 材料の1行目の位置を測れた', jocClosed !== null && jocClosed > 0, `${jocClosed}px`)
+
+      await jocPage.getByRole('button', { name: ja.detail.priceViewShow, exact: true }).first().click()
+      await jocPage.waitForTimeout(600)
+      const jocView = await jocTop()
+      check(
+        'JOCOST-03 「原価を見る」を押しても材料の1行目が動かない（直す前は46px下がった）',
+        jocView !== null && jocView === jocClosed,
+        `押す前=${jocClosed}px 押した後=${jocView}px`,
+      )
+
+      const jocEditBtn = jocPage.getByRole('button', { name: ja.detail.priceEditShow, exact: true })
+      check('JOCOST-03 前提: 「原価を編集」が画面に出ている', (await jocEditBtn.count()) === 1)
+      const jocEditBox = await jocEditBtn.first().boundingBox()
+      check(
+        'JOCOST-03 「原価を編集」が指で押せる大きさ（44px以上）',
+        jocEditBox !== null && jocEditBox.height >= 44,
+        JSON.stringify(jocEditBox),
+      )
+      await jocEditBtn.first().click()
+      await jocPage.waitForTimeout(600)
+      const jocEdit = await jocTop()
+      check(
+        'JOCOST-03 「原価を編集」を押しても材料の1行目が動かない（直す前はさらに48px下がった）',
+        jocEdit !== null && jocEdit === jocClosed,
+        `閉じた状態=${jocClosed}px 編集=${jocEdit}px`,
+      )
+
+      await jocPage.getByRole('button', { name: ja.detail.priceViewHide, exact: true }).first().click()
+      await jocPage.waitForTimeout(600)
+      const jocBack = await jocTop()
+      check(
+        'JOCOST-03 「材料に戻す」で閉じても、材料の1行目は元の位置のまま',
+        jocBack !== null && jocBack === jocClosed,
+        `閉じた状態=${jocClosed}px 戻したあと=${jocBack}px`,
+      )
+    } finally {
+      await jocBrowser.close()
+    }
+  }
+
+  // ==========================================================================================
+  // JOTIMER-04（2026-08-23 便JO）: 起動中タイマーの「+1分」が押せると分かる
+  //
+  // オーナー原文:
+  //   「起動したタイマーの「＋１」が押せるとわかりづらい。見た目工夫が必要」
+  //
+  // 直す前の実測（390×844）: 「+1分」は 38×36px・**枠なし（border 0px）**・地色なし（透明）の
+  // 12pxの文字で、隣の残り時間（18px太字）と同じ面に並んでいた＝ただの注記に見えていた。
+  // 当たり判定も 38×36px で、指で押せる大きさ（44px・--tap-min）に届いていない。
+  //
+  // 測るのは「利用者が確かめたいこと」:
+  //   ①「+1分」に押せる面の印（枠）が付いている
+  //   ②少し外れて押しても届く（当たり判定が44px＝--tap-min まで広がっている）。
+  //     届かなければ、その押しは行そのもの＝調整の窓を開く操作になってしまう
+  //   ③押すと今までどおり残りが約1分増え、調整の窓は開かない（近道としての役目は変えていない）
+  // 禁じ手よけ: 文言は ja.ts から読む／残り時間は「増えた向き」だけを見る（秒の決め打ちをしない）
+  // ==========================================================================================
+  currentCheck = 'JOTIMER-04'
+  {
+    const jotBrowser = await chromium.launch()
+    try {
+      const jotContext = await jotBrowser.newContext({ viewport: { width: 390, height: 844 } })
+      const jotPage = await jotContext.newPage()
+      jotPage.on('pageerror', (err) => {
+        if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+        errors.push(`[pageerror@JOTIMER-04] ${err.message}`)
+      })
+      await jotPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await jotPage.waitForTimeout(2400)
+      const jotId = await jotPage.evaluate(
+        () =>
+          new Promise((resolve, reject) => {
+            const req = indexedDB.open('uchi-recipe')
+            req.onsuccess = () => {
+              const all = req.result
+                .transaction('recipes', 'readonly')
+                .objectStore('recipes')
+                .getAll()
+              all.onsuccess = () => {
+                // 手順に分数の入った品（タイマーを起動できる品）を選ぶ。料理名では掴まない
+                const hit = all.result.find((r) =>
+                  (r.steps ?? []).some((s) => typeof s.minutes === 'number' && s.minutes > 0),
+                )
+                resolve(hit ? hit.id : null)
+              }
+              all.onerror = () => reject(all.error)
+            }
+            req.onerror = () => reject(req.error)
+          }),
+      )
+      check('JOTIMER-04 前提: タイマーを起動できるレシピのidを取れた', Number.isInteger(jotId), `id=${jotId}`)
+      await jotPage.goto(`${BASE}/#/recipes/${jotId}`, { waitUntil: 'networkidle' })
+      await jotPage.reload({ waitUntil: 'networkidle' })
+      await jotPage.waitForTimeout(1400)
+      await jotPage
+        .getByRole('button', { name: new RegExp(`${ja.timer.start}$`) })
+        .first()
+        .click()
+      await jotPage.waitForTimeout(800)
+
+      const jotRow = jotPage.getByRole('button', { name: new RegExp(ja.timer.adjustOpenAria.replace('{label}', '.*')) })
+      check('JOTIMER-04 前提: 常駐バーにタイマーの行が出た', (await jotRow.count()) >= 1)
+      const jotPlus = jotPage.getByRole('button', {
+        name: new RegExp(ja.timer.plusOneMinuteAria.replace('{label}', '.*')),
+      })
+      check('JOTIMER-04 前提: 「+1分」を掴めた', (await jotPlus.count()) === 1)
+
+      // ①押せる面の印（枠）が付いている
+      const jotLook = await jotPlus.first().evaluate((el) => {
+        const cs = getComputedStyle(el)
+        const r = el.getBoundingClientRect()
+        return {
+          borderWidth: Math.round(parseFloat(cs.borderTopWidth)),
+          borderColor: cs.borderTopColor,
+          background: cs.backgroundColor,
+          w: Math.round(r.width),
+          h: Math.round(r.height),
+          cx: r.x + r.width / 2,
+          cy: r.y + r.height / 2,
+        }
+      })
+      check(
+        'JOTIMER-04 「+1分」に押せる面の印（枠）が付いている（直す前は枠なし）',
+        jotLook.borderWidth >= 1,
+        JSON.stringify(jotLook),
+      )
+
+      // ②③少し外れた場所を押しても「+1分」に届く（届かなければ行＝調整の窓が開いてしまう）
+      const jotRemaining = async () => parseRemainingSeconds(await jotRow.first().textContent())
+      const jotBeforeSec = await jotRemaining()
+      await jotPage.mouse.click(jotLook.cx, jotLook.cy - 20)
+      await jotPage.waitForTimeout(400)
+      const jotAfterSec = await jotRemaining()
+      check(
+        'JOTIMER-04 「+1分」の少し外を押しても届く（当たり判定が44pxまで広がっている）',
+        jotBeforeSec !== null && jotAfterSec !== null && jotAfterSec - jotBeforeSec >= 50,
+        `押す前=${jotBeforeSec}s 押した後=${jotAfterSec}s`,
+      )
+      check(
+        'JOTIMER-04 「+1分」の少し外を押しても、調整の窓は開かない（行の操作に化けない）',
+        !(await jotPage
+          .getByRole('dialog', { name: ja.timer.adjustDialogTitle })
+          .isVisible()
+          .catch(() => false)),
+      )
+      // 真ん中を押したときも今までどおり（近道としての役目は変えていない）
+      const jotBefore2 = await jotRemaining()
+      await jotPlus.first().click()
+      await jotPage.waitForTimeout(400)
+      const jotAfter2 = await jotRemaining()
+      check(
+        'JOTIMER-04 「+1分」を押すと今までどおり残りが約1分増える',
+        jotBefore2 !== null && jotAfter2 !== null && jotAfter2 - jotBefore2 >= 50,
+        `押す前=${jotBefore2}s 押した後=${jotAfter2}s`,
+      )
+    } finally {
+      await jotBrowser.close()
     }
   }
 

@@ -29157,6 +29157,55 @@ import { safetyNotesFor, stepSafetyNotes, wholeRecipeSafetyNotes } from '../src/
   }
 }
 
+// ---------- JO-1: 画面を離れる前の引き止め（2026-08-23 便JO・src/logic/leaveGuard.ts） ----------
+//
+// オーナー原文:
+//   「編集終わりのつもりでそのまま保存をせずにページを離れそう。一時保存はされるが、
+//     反映されていないことに気づきにくい。」
+//
+// レシピ編集の画面が「書きかけがあるときだけ引き止める」ための受け口。ここで測るのは
+// **利用者が閉じ込められないこと**:
+//   ・引き止めを登録していない画面では、必ずそのまま離れられる
+//   ・画面を離れたあと（解除したあと）は、前の画面の引き止めが残らない
+//   ・引き止めの中で例外が起きても、離れられなくならない（画面から出られなくなるのが最悪の壊れ方）
+{
+  const { setLeaveGuard, askBeforeLeave, hasLeaveGuard } = await import('../src/logic/leaveGuard.ts')
+  setLeaveGuard(null)
+  eq('JO-1 引き止めが無いときは、そのまま離れられる', await askBeforeLeave(), true)
+  eq('JO-1 引き止めが無いことを外から読める', hasLeaveGuard(), false)
+
+  let asked = 0
+  setLeaveGuard(async () => {
+    asked++
+    return false
+  })
+  eq('JO-1 引き止めがあることを外から読める', hasLeaveGuard(), true)
+  eq('JO-1 引き止めが「いいえ」と答えたら離れない', await askBeforeLeave(), false)
+  eq('JO-1 引き止めは1回だけ聞かれる', asked, 1)
+
+  // 2つ目を登録したら、聞かれるのは新しいほうだけ（古い画面の引き止めが二重に出ない）
+  let secondAsked = 0
+  setLeaveGuard(async () => {
+    secondAsked++
+    return true
+  })
+  eq('JO-1 あとから登録したほうが答える', await askBeforeLeave(), true)
+  eq('JO-1 前の引き止めはもう聞かれない', asked, 1)
+  eq('JO-1 新しい引き止めが聞かれている', secondAsked, 1)
+
+  // 画面を離れたら解除する＝次の画面に前の引き止めを持ち越さない
+  setLeaveGuard(null)
+  eq('JO-1 解除したら、そのまま離れられる', await askBeforeLeave(), true)
+  eq('JO-1 解除したことを外から読める', hasLeaveGuard(), false)
+
+  // 引き止めの中で例外が起きても、閉じ込めない（何も聞けなかったら通す側に倒す）
+  setLeaveGuard(() => {
+    throw new Error('わざと壊す')
+  })
+  eq('JO-1 引き止めが壊れても画面から出られる', await askBeforeLeave(), true)
+  setLeaveGuard(null)
+}
+
 // ---------- 結果 ----------
 console.log(`合格: ${passed}件 / 失敗: ${failures.length}件`)
 for (const f of failures) console.log(`  NG ${f}`)

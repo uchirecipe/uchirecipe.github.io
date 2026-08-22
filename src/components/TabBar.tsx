@@ -1,10 +1,13 @@
 import { useEffect } from 'react'
-import { Link, NavLink, useLocation } from 'react-router-dom'
+import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom'
 import { BookOpen, CalendarDays, Refrigerator, Settings } from 'lucide-react'
 import { ja } from '../i18n/ja'
 // 覚えるキーと「覚えを捨てる」操作は logic/navMemory.ts に置いてある
 // （捨てる側＝献立タブからも同じキーを触るため。2026-08-07 便DT-2）
 import { LAST_RECIPES_PATH_KEY, MEAL_PLAN_TAB_TAP_KEY, writeSessionItem } from '../logic/navMemory'
+// 離れる前の引き止め（2026-08-23 便JO）。レシピ編集の書きかけを黙って捨てさせないため、
+// 上の「戻る」（components/BackHeader）と同じ受け口をここでも見る
+import { askBeforeLeave, hasLeaveGuard } from '../logic/leaveGuard'
 
 /**
  * 「レシピ」の後ろに並べる行き先（2026-08-17 便HG）。
@@ -32,6 +35,30 @@ const tabsAfterRecipes = [
  */
 export default function TabBar() {
   const location = useLocation()
+  const navigate = useNavigate()
+
+  /**
+   * 2026-08-23 便JO: いま開いている画面が引き止めを登録していたら、先に聞いてから移る。
+   *
+   * オーナー原文（レシピを編集）「編集終わりのつもりでそのまま保存をせずにページを離れそう。」
+   * 直す前は、下の並びを押すと書きかけを抱えたまま黙って別の画面へ移っていた。
+   *
+   * 引き止めが無いときは**何もしない**＝リンクの既定の動き（react-router の移動）が
+   * そのまま走る。引き止めがあるときだけ既定を止めて、返事を待ってから自分で移る。
+   * `after` は移ると決まったあとにだけ走らせる（押しただけでは合図を残さない）。
+   */
+  const guardNav = (event: { preventDefault: () => void }, to: string, after?: () => void) => {
+    if (!hasLeaveGuard()) {
+      after?.()
+      return
+    }
+    event.preventDefault()
+    void (async () => {
+      if (!(await askBeforeLeave())) return
+      after?.()
+      navigate(to)
+    })()
+  }
 
   useEffect(() => {
     if (location.pathname.startsWith('/recipes')) {
@@ -57,7 +84,9 @@ export default function TabBar() {
              「週や月の献立を表示中に献立タブをタップしたら、日に戻るようにして」）。
              日/週/月は献立の画面の中の状態なので、すでに献立にいると行き先が同じで
              何も起きなかった。合図の置き場所と理由は logic/navMemory.ts */
-          onClick={() => writeSessionItem(MEAL_PLAN_TAB_TAP_KEY, '1')}
+          onClick={(e) =>
+            guardNav(e, '/meal-plan', () => writeSessionItem(MEAL_PLAN_TAB_TAP_KEY, '1'))
+          }
           className={({ isActive }) =>
             `flex flex-1 flex-col items-center gap-1 py-[var(--space-sm)] text-xs ${
               isActive ? 'font-bold text-accent-ink' : 'text-ink-muted'
@@ -70,6 +99,7 @@ export default function TabBar() {
 
         <Link
           to={recipesTarget}
+          onClick={(e) => guardNav(e, recipesTarget)}
           className={`flex flex-1 flex-col items-center gap-1 py-[var(--space-sm)] text-xs ${
             isRecipesActive ? 'font-bold text-accent-ink' : 'text-ink-muted'
           }`}
@@ -82,6 +112,7 @@ export default function TabBar() {
           <NavLink
             key={to}
             to={to}
+            onClick={(e) => guardNav(e, to)}
             className={({ isActive }) =>
               `flex flex-1 flex-col items-center gap-1 py-[var(--space-sm)] text-xs ${
                 isActive ? 'font-bold text-accent-ink' : 'text-ink-muted'
