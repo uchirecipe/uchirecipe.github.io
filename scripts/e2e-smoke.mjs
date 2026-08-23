@@ -455,6 +455,8 @@ import { pickDisplayIngredientChips } from '../src/logic/mainIngredients.ts'
 import { FREE_LIMIT } from '../src/logic/freeLimit.ts'
 // 便IY: 選べる料理のジャンル（画面の字を書き写さず、実装と同じ一覧から引く）
 import { MEAL_GENRES } from '../src/logic/mealPlan.ts'
+// 便KD（レンジの二重予約）で、段取りの工程がどの器具を使うかを見分けるのに使う
+import { stepAppliance } from '../src/logic/cookAppliance.ts'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const appRoot = path.join(__dirname, '..')
@@ -50951,6 +50953,136 @@ try {
       await jqtBrowser.close()
     }
   }
+
+
+  // --- KDNAVI-01: 電子レンジの二重予約（2026-08-23 便KD・影響範囲テストC「時間が無い人」の実データ）。
+  //
+  // 起きていたこと（画面から書き写した実際の段取り）:
+  //   [16-22] 600Wのレンジで6分加熱し、ラップをしたまま2分おく ← 「この間に、次の手作業を進められます」
+  //   [16-18] ラップをかけて2分レンチンし、水けをきる          ← その「次」がもう1品のレンジ
+  // レンジは1台なので、言われたとおりには進められない。
+  //
+  // 画面には工程の開始時刻が出ないので、e2eが見張るのは**画面が利用者に約束していること**:
+  // 「この待ちの間に次の手作業を進められます」と書いた待ちの、**すぐ次のカードが同じ器具を
+  // 使う工程になっていない**こと。掴み方は data-testid と ja.ts の文言（並びの何番目かには依らない）。
+  // 手順の本文はレシピのデータなので、器具の見分けはロジックと同じ関数に通して読む ---
+  currentCheck = 'KDNAVI-01'
+  {
+    const kdBrowser = await chromium.launch()
+    const kdContext = await kdBrowser.newContext({ viewport: { width: 390, height: 844 } })
+    const kdPage = await kdContext.newPage()
+    kdPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin'))
+        return
+      errors.push(`[pageerror@KDNAVI-01] ${err.message}`)
+    })
+    try {
+      await kdPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await kdPage.waitForTimeout(2400) // 初回シード完了待ち
+      await kdPage.evaluate(async () => {
+        const openDb = () =>
+          new Promise((resolve, reject) => {
+            const r = indexedDB.open('uchi-recipe')
+            r.onsuccess = () => resolve(r.result)
+            r.onerror = () => reject(r.error)
+          })
+        const db = await openDb()
+        const P = (req) =>
+          new Promise((res, rej) => {
+            req.onsuccess = () => res(req.result)
+            req.onerror = () => rej(req.error)
+          })
+        const store = (name) => db.transaction(name, 'readwrite').objectStore(name)
+        const mk = (title, dishType, steps) => ({
+          title,
+          servings: 2,
+          effortLevel: 'normal',
+          tags: [],
+          dishType,
+          ingredients: [],
+          steps,
+          isFavorite: false,
+          cookedLogs: [],
+          searchWords: [],
+          isStarter: false,
+          updatedAt: Date.now(),
+        })
+        // 本文は実データ（デリッシュキッチン／レタスクラブから取り込んだもの）そのまま
+        const idA = await P(
+          store('recipes').add(
+            mk('E2Eレンチンみぞれ煮', 'main', [
+              { text: '鶏肉はキッチンペーパーで水気をふきとり、一口大に切る。ビニール袋に鶏肉、マヨネーズを入れて揉み込む。' },
+              { text: 'しめじは根元を切り落とし、手でほぐす。大根は皮を厚めにむき、すりおろして軽く水気を切る(大根おろし)。' },
+              { text: '耐熱容器に☆、1を入れて混ぜ、しめじ、大根おろしをのせてふんわりとラップをし、600Wのレンジで6分加熱し、ラップをしたまま2分おく。', minutes: 6 },
+              { text: '器に盛り、細ねぎをちらす。' },
+            ]),
+          ),
+        )
+        const idB = await P(
+          store('recipes').add(
+            mk('E2Eキャベツののりごまあえ', 'side', [
+              { text: 'キャベツは3～4cm四方に切って耐熱ボウルに入れ、ラップをかけて2分レンチンし、水けをきる。', minutes: 2 },
+              { text: '焼きのりは細かくちぎり、白すりごま大さじ1、しょうゆ小さじ2、砂糖小さじ1/2とともに１に加えてあえる。' },
+            ]),
+          ),
+        )
+        let addedAt = Date.now()
+        await P(store('todayList').add({ recipeId: idA, addedAt: addedAt++ }))
+        await P(store('todayList').add({ recipeId: idB, addedAt: addedAt++ }))
+        const cur = (await P(store('settings').get(1))) || { id: 1 }
+        await P(
+          store('settings').put({ ...cur, id: 1, proCode: 'UR-E2E-TEST-ONLY', proActivatedAt: Date.now() }),
+        )
+        db.close()
+      })
+      // 生のIndexedDBへ書いたので、必ず読み込み直す（Dexieのライブ購読はDexie経由しか見ていない）
+      await kdPage.goto(`${BASE}/#/cook-navi`)
+      await kdPage.reload({ waitUntil: 'networkidle' })
+      await kdPage.waitForTimeout(1600)
+      await kdPage.getByRole('button', { name: ja.cookNavi.build }).click()
+      await kdPage.waitForTimeout(900)
+
+      // 画面から段取りのカードを読む（本文・待ちかどうか・「この間に進められます」の有無）
+      const kdCards = await kdPage.$$eval(
+        'ol > li',
+        (lis, hint) =>
+          lis.map((li) => ({
+            text: (li.querySelector('[data-testid="navi-step-text"]')?.textContent ?? '').replaceAll(
+              '\u200b',
+              '',
+            ),
+            isWait: li.querySelector('[data-testid="navi-wait-block"]') != null,
+            fillHint: ((li.textContent ?? '').replaceAll('\u200b', '')).includes(hint),
+          })),
+        ja.cookNavi.waitFillHint,
+      )
+      check(
+        'KDNAVI-01 前提: 並行の段取りが出て、レンジを使う工程が2つとも段取りに載っている',
+        kdCards.length > 0 &&
+          kdCards.filter((c) => stepAppliance(c.text) === 'microwave').length >= 2,
+        `カード=${kdCards.length} レンジの工程=${kdCards.filter((c) => stepAppliance(c.text) === 'microwave').length}`,
+      )
+      const kdClash = kdCards
+        .map((c, i) => ({ c, next: kdCards[i + 1], i }))
+        .filter(
+          ({ c, next }) =>
+            c.isWait &&
+            c.fillHint &&
+            stepAppliance(c.text) != null &&
+            next != null &&
+            stepAppliance(next.text) === stepAppliance(c.text),
+        )
+        .map(({ c, i }) => `${i + 1}枚目(${stepAppliance(c.text)}) → ${i + 2}枚目`)
+      check(
+        'KDNAVI-01 「この間に進められます」と書いた待ちの次に、同じ器具を使う工程を置かない',
+        kdClash.length === 0,
+        kdClash.join(' / '),
+      )
+    } finally {
+      await kdBrowser.close()
+    }
+  }
+
 
 } catch (err) {
   ng(`実行中断(${currentCheck})`, err.message)

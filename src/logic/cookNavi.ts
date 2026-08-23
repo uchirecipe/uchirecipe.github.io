@@ -1249,6 +1249,60 @@ export function heatOffAtEnd(step: Step): boolean {
 }
 
 /**
+ * 【台所を離れてよいかと、器具をふさぐかは別の話】2026-08-23 便KD・影響範囲テストC（時短の人）。
+ *
+ * 起きていた不具合（実データ30品・レンジを使う17品の全136組で実測）:
+ * 「鶏むね肉ときのこのレンチンみぞれ煮」と「キャベツののりごまあえ」を組むと
+ * ```
+ * [16-22] 600Wのレンジで6分加熱し、ラップをしたまま2分おく    ← レンジを押さえていない扱い
+ * [16-18] ラップをかけて2分レンチンし、水けをきる            ← 同じ16分から同時に始まる
+ * ```
+ * になり、**電子レンジ1台を2品が同時に使う段取り**が出ていた。この台所では作れない。
+ *
+ * 原因は、待ちが器具をふさぐかを `waitUrgency(s) !== 'relaxed'` で決めていたこと。
+ * `waitUrgency` が答えるのは「**遅くとも何分後までに手を戻さないといけないか**」＝
+ * 台所を離れてよいかの話で、**器具が動いているかどうかとは別の軸**。
+ * レンジ加熱の文が「〜2分おく」「〜粗熱を取ります」で終わると、最後に当たった語で relaxed に倒れ、
+ * 6分レンジが動いている工程が「器具を取らない待ち」に化けていた。
+ * 実測すると、器具の字がある待ちのうち relaxed で除外されていたのは同梱109品＋実データ30品で
+ * わずか8件、そのうち7件は**本当は器具が動いている**工程だった（除外がほぼ全部まちがい）。
+ *
+ * ここで見るのは1つだけ＝**その待ちの間、鍋や器がまだ器具の上にあるか**。
+ * 見分けは、この画面のほかの規則と同じ位置くらべ:
+ *   下ろす語だけがある（火にかける語が1つも無い）… 「火を止めてそのまま10分おく」
+ *     ＝待ちに入る時点でもう下りている → **ふさがない**
+ *   それ以外 … 「弱火で5分ほど煮て味をなじませたら器に盛る」「600Wで6分加熱し、2分おく」
+ *     ＝その待ちの間は器具の上にいる → **ふさぐ**
+ *
+ * 迷ったらふさぐ側に倒す（`cookAppliance.ts` 冒頭の方針。見落とすとその家では作れない段取りが出るが、
+ * 多めに数えても段取りが少し長くなるだけ）。
+ */
+const APPLIANCE_RELEASED_PATTERN = new RegExp(
+  // 火を下ろす合図（HEAT_OFF_PATTERN）に、器具から下ろす言い回しを足したもの。
+  // 「鍋ごと冷蔵庫で冷やす」のように火の語が1つも無い待ちを拾うために別に持つ
+  // （HEAT_OFF_PATTERN を直に太らせると、火が残るかの判定 stepHeatShift まで動いてしまう）
+  `${HEAT_OFF_PATTERN.source}|冷や|冷蔵庫|冷凍庫|保存容器|バットに移|ボウルに移|皿に移|器に移`,
+)
+
+/**
+ * 器具が動いている合図。`HEAT_ON_PATTERN`（コンロに火がついているか）に、
+ * **コンロ以外の器具を回す語**を足す。HEAT_ON_PATTERN はコンロ専用に育ってきた辞書なので
+ * 「レンチン」「7分チン」「トースターで焼く」を1つも持っておらず、これだけで見ると
+ * 「ラップをかけて2分レンチンし、水けをきる」が**動いていない待ち**に化ける（実測）。
+ */
+const APPLIANCE_RUNNING_PATTERN = new RegExp(
+  `${HEAT_ON_PATTERN.source}|レンジ|レンチン|チンす|チンし|チン。|グリル|トースター|オーブン|[0-9０-９]\\s*[WＷ]`,
+)
+
+/** その待ちの間、鍋や器がまだ器具の上にあるか（＝器具をふさぐか） */
+export function waitKeepsAppliance(step: Step): boolean {
+  const text = maskNonWaitNouns(stepMainText(step.text))
+  const off = lastEndOfPatterns(text, [APPLIANCE_RELEASED_PATTERN])
+  const on = lastEndOfPatterns(text, [APPLIANCE_RUNNING_PATTERN])
+  return !(off >= 0 && on === -1)
+}
+
+/**
  * 火にかけたまま、次の手順まで空けてよい時間（分）。
  *
  * 3分の根拠は利用者自身の手順そのもの＝「豆腐を入れて味噌を溶くのは焼き上がりの3分前」。
@@ -1364,6 +1418,26 @@ const BOIL_STEP_PATTERN = /茹で|ゆで|湯がく|ゆがく/
 const BOILED_ALREADY_PATTERN = /ゆで上が|茹で上が|ゆであが|ゆでた|茹でた/g
 /** すでに湯を沸かす工程が書かれている（「鍋にたっぷりの湯を沸かし」「沸騰したら」） */
 const BOIL_WATER_MENTION = /沸/
+
+/**
+ * 【ワンパンのレシピに、存在しない湯沸かしを足さない】2026-08-23 便KD・影響範囲テストC。
+ *
+ * 起きていた不具合（実データ「ワンパンミートソースパスタ」・画面から）:
+ *   [20-25] 湯を沸かす（ナビが足した5分の待ち）
+ *   [25-26] カットトマト缶、水、☆を加えて混ぜ、パスタを半分に折り入れて混ぜる。
+ *           煮立ったらふたをし、中火で時々混ぜながら袋の表示時間より1分長くゆでる。
+ * このレシピはフライパン1つで、ソースの中にパスタを直接入れて煮る。**別鍋で湯を沸かす工程は無い。**
+ *
+ * ゆでる工程そのものに「煮立ったら」と書いてある＝**液体はもう器に入っていて、沸くのを待っている**。
+ * そこから先の加熱は本文が受け持っているので、手前に湯沸かしを足す余地がない。
+ * 「たっぷりの湯に塩を入れ、スパゲッティをゆでる」（同梱 ペペロンチーノ）のような
+ * **湯だけを別に沸かす**書き方には「煮立った」が出てこないので、今までどおり湯沸かしを足す。
+ *
+ * 見るのは**ゆでる工程そのものだけ**にする。前の手順まで見ると、
+ * 「小鍋につゆを作る（煮立ったら火を止める）」→「鍋にたっぷりの湯を沸かし、うどんを茹でる」
+ * （同梱 梅おろしぶっかけうどん）のように、**別の鍋の煮立ち**で本物の湯沸かしを消してしまう。
+ */
+const BOIL_ALREADY_IN_POT = /煮立/
 
 /**
  * 湯が沸くまでの既定の待ち分数。
@@ -1538,6 +1612,8 @@ function withBoilWaterStep(steps: readonly Step[]): PlanStep[] {
     }
     return [...plain.slice(0, boilAt), addedAt(split.boilWater), rest, ...plain.slice(boilAt + 1)]
   }
+  // 「煮立ったら…ゆでる」＝液体はもう器の中。別鍋の湯沸かしは足さない（2026-08-23 便KD）
+  if (BOIL_ALREADY_IN_POT.test(masked[boilAt])) return plain
   const boiled: PlanStep = { ...plain[boilAt], splitOf: boilAt + 1, splitPart: 2 }
   return [
     ...plain.slice(0, boilAt),
@@ -1804,8 +1880,11 @@ interface Job {
     heatShift: HeatShift
     /**
      * その工程が器具を**ふさぐ**か。
-     * 待ちのうち漬ける・冷ます・寝かせる（waitUrgency の relaxed）はふさがない
+     * 待ちのうち、**待ちに入る時点でもう器具から下りている**もの（「火を止めてそのまま10分おく」・
+     * 冷蔵庫で冷やす等）はふさがない＝`waitKeepsAppliance`
      * （docs/72 §3「占有する待ち＝煮る・焼く／占有しない待ち＝漬ける・冷ます・寝かせる」）。
+     * **手を戻す締め切り（waitUrgency）とは別の軸**。混ぜていたせいで、レンジ加熱の文が
+     * 「〜2分おく」で終わると relaxed に倒れてレンジを押さえなかった（2026-08-23 便KD）。
      */
     occupies: boolean
   }[]
@@ -1860,10 +1939,12 @@ function buildJobs(recipes: Recipe[], kitchen: KitchenEquipment): Job[] {
         const active = estimateActiveMinutes(s, { leadIn })
         // どの器具をふさぐか（2026-08-13 便GC）。持っていない器具の工程はコンロ1口として数える
         const applianceKey = stepApplianceFor(s.text, kitchen)
+        // 器具をふさぐかは「器具が動いているか」だけで決める（2026-08-23 便KD）。
+        // 手を戻す締め切り（waitUrgency）はこことは別の軸なので混ぜない
         const occupies =
           applianceKey != null &&
           (kind === 'wait'
-            ? !longRest && waitMinutes > 0 && waitUrgency(s) !== 'relaxed'
+            ? !longRest && waitMinutes > 0 && waitKeepsAppliance(s)
             : active.minutes > 0)
         return {
           stepIndex,
