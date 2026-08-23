@@ -479,6 +479,78 @@ if (/:5173(\/|$)/.test(BASE) && process.env.ALLOW_DEV_SERVER !== '1') {
 }
 
 /**
+ * 「今日」を指定の日に合わせて e2e を走らせる（2026-08-24 便KH）。既定では**何もしない**。
+ *
+ * なぜ要るか: 禁じ手①（曜日・月替わりの前提）で赤くなった節が、2026-08-09 以降で
+ * 5回作り込まれた（LOCK-5・EQ-01・WEEKUI-DT、そして 2026-08-24 の EQ-01 再発）。
+ * どれも「実行した日の曜日でしか起きない」ので、その曜日が来るまで気づけず、
+ * 気づいたときには**実行が中断**して以降の1,700件が走っていなかった。
+ * 「今日が日曜だと落ちる形」は 2026-08-23 に洗ったが、**月曜側は実測できていなかった**。
+ *
+ * 使い方: `E2E_FAKE_TODAY=2026-08-24 BASE_URL=... npx tsx scripts/e2e-part.mjs EQ-01`
+ * （`scripts/e2e-part.mjs` は e2e-smoke.mjs をそのまま切り出すので、こちらにも効く）
+ *
+ * 合わせるのは**ブラウザ側と e2e 側の両方**（下に理由）。どちらも**止めずにずらす**
+ * ＝時計の針は今までどおり進み、日付だけが指定の日になる。
+ * 止めて（固定して）しまうと、残り時間を Date から数えている調理タイマーが1秒も減らず、
+ * 曜日と関係ないところが赤くなる（2026-08-24 実測: EZ-01「再開で動き出す」と
+ * FT-07「開き直しても残り時間が続く」が、固定にした版でだけ落ちた）。
+ * ブラウザ側は clock.install(時刻) のあと clock.resume() で針を進め直す。
+ * newContext / newPage を包むので、節ごとに launch している今の書き方のまま全節に効く。
+ * **環境変数が無いときは包まない**＝普段の実行に一切影響しない。
+ */
+const FAKE_TODAY = process.env.E2E_FAKE_TODAY
+if (FAKE_TODAY) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(FAKE_TODAY)) {
+    console.error(`E2E_FAKE_TODAY は YYYY-MM-DD で指定してください: ${FAKE_TODAY}`)
+    process.exit(1)
+  }
+  const fixedAt = new Date(`${FAKE_TODAY}T10:00:00`)
+  console.log(`e2e: 時計を ${FAKE_TODAY} 10:00 に合わせます（曜日の前提の見張り用）`)
+  // e2e側（node）の「今日」もずらす。節の多くが node で「今日／昨日」を組み立てて
+  // それを端末へ仕込むので、ブラウザだけずらすと**仕込む日と画面の今日が食い違う**
+  // （ずらした意味が無くなるどころか、その食い違いで落ちる）。
+  // 止めずに**ずらす**（差を足すだけ）のは、Playwright の待ち時間の計算が Date.now() の
+  // 進みに依存しうるため＝固定すると待ちが返らなくなる恐れがある。ブラウザ側も同じ理由と、
+  // 調理タイマーが減らなくなるのを避けるため、固定ではなく進める形にしてある。
+  {
+    const RealDate = Date
+    const offset = fixedAt.getTime() - RealDate.now()
+    class ShiftedDate extends RealDate {
+      constructor(...args) {
+        if (args.length === 0) super(RealDate.now() + offset)
+        else super(...args)
+      }
+      static now() {
+        return RealDate.now() + offset
+      }
+    }
+    globalThis.Date = ShiftedDate
+  }
+  for (const browserType of [chromium, webkit]) {
+    const launch = browserType.launch.bind(browserType)
+    browserType.launch = async (...args) => {
+      const browser = await launch(...args)
+      const newContext = browser.newContext.bind(browser)
+      browser.newContext = async (...contextArgs) => {
+        const context = await newContext(...contextArgs)
+        await context.clock.install({ time: fixedAt })
+        await context.clock.resume()
+        return context
+      }
+      const newPage = browser.newPage.bind(browser)
+      browser.newPage = async (...pageArgs) => {
+        const page = await newPage(...pageArgs)
+        await page.clock.install({ time: fixedAt })
+        await page.clock.resume()
+        return page
+      }
+      return browser
+    }
+  }
+}
+
+/**
  * このスクリプトが自前で立てるpreviewサーバーのポートを決める(2026-08-09 便EM)。
  *
  * 直していること: PRO-FALLBACK-01(旧4194)とURLIMPORT-01(旧4203)が固定ポートだったため、
@@ -31128,15 +31200,32 @@ try {
       // 週タブは月曜始まりで、表示中の週は sessionStorage に覚えられる(便DT-2「戻ったら同じ場所へ返す」)。
       // つまり画面を開き直しても今週には戻らない。目的の日のカードが出るまで週を送る形にする
       // (今日が月曜だと「昨日」=日曜が前の週に入り、旧実装は前の週へ移ったまま帰れず必ず落ちた。2026-08-10 実発)
+      //
+      // 2026-08-24 便KH: **着いた週で必ず開き直す**ようにした。
+      // 曜日カードの畳み方(dayFoldOverrides)は日付をキーに覚えるので、週を送った先の日は
+      // 「人が押して開けた」記憶が無く既定に戻る＝過ぎた日は畳んだまま(便ID・⑦)。
+      // 畳んだカードは中身をDOMに出さないため、送った先で肉じゃがのリンクも
+      // 「作った記録を見る」も0件になり、scrollIntoViewIfNeeded が30秒待って**実行が中断**していた。
+      // 時計を固定した実測: 日曜(2026-08-23)は昨日=土曜が同じ週なので週送り0回で緑、
+      // 月曜(2026-08-24)は昨日=日曜が前の週に入り週送り1回→7日とも畳み(aria-expanded=false)、
+      // リンク0件・ボタン0件。アプリ側は正常で(畳んだ見出しに「作った記録あり」の印は出ている)、
+      // 開き直せば同じ週で肉じゃがのカードもボタンも出る。JFPAST-01 が同じ作法(送ってから開く)。
       const eqShowWeekWith = async (date) => {
+        const eqAtWeek = async () =>
+          (await eqPage.locator(`section[data-date="${date}"]`).count()) > 0
         for (let i = 0; i < 4; i++) {
-          if ((await eqPage.locator(`section[data-date="${date}"]`).count()) > 0) return true
+          if (await eqAtWeek()) {
+            await openAllWeekDays(eqPage)
+            return true
+          }
           const shown = await eqPage.locator('section[data-date]').first().getAttribute('data-date')
-          const dir = shown && date < shown ? '前の週' : '次の週'
+          const dir = shown && date < shown ? ja.mealPlan.prevWeek : ja.mealPlan.nextWeek
           await eqPage.locator(`button[aria-label="${dir}"]`).click()
           await eqPage.waitForTimeout(600)
         }
-        return (await eqPage.locator(`section[data-date="${date}"]`).count()) > 0
+        if (!(await eqAtWeek())) return false
+        await openAllWeekDays(eqPage)
+        return true
       }
       check('EQ-01(③) 昨日を含む週を表示できる', await eqShowWeekWith(eqYesterday), `昨日=${eqYesterday}`)
       // 週タブの過去日カードは従来どおりレシピ詳細へのリンクのまま(便DT-2の動線を壊さない)

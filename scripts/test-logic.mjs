@@ -29125,6 +29125,32 @@ import { safetyNotesFor, stepSafetyNotes, wholeRecipeSafetyNotes } from '../src/
     true,
   )
 
+  // ---- JM-5: 曜日を固定して走らせる道具が e2e にあること（禁じ手①の見張り・2026-08-24 便KH） ----
+  //
+  // 禁じ手①（曜日・月替わりの前提）で赤くなった節は 2026-08-09 以降で5回作り込まれた
+  // （LOCK-5・EQ-01・WEEKUI-DT、そして 2026-08-24 の EQ-01 再発）。どれも
+  // **その曜日が来るまで気づけない**のが共通で、EQ-01 の再発では実行が中断して
+  // 以降の1,700件が走らないまま「合格2322/2325件」で終わっていた。
+  // 直したあと「他の曜日でも緑か」を測れるように、e2e に時計を合わせる入口を常設にした。
+  //   E2E_FAKE_TODAY=2026-08-24 BASE_URL=... npx tsx scripts/e2e-part.mjs EQ-01
+  // ここでは**その入口が消えていないこと**だけを見る（JM-3 と同じ役割の見張り）。
+  eq(
+    'JM-5 e2e に、曜日を固定して走らせる入口(E2E_FAKE_TODAY)がある',
+    /const FAKE_TODAY = process\.env\.E2E_FAKE_TODAY/.test(jmSrc.join('\n')),
+    true,
+  )
+  eq(
+    'JM-5 その入口は、ブラウザ側と e2e 側の両方の「今日」を合わせている（片方だけだと仕込む日と画面がずれる）',
+    /clock\.install\(\{ time: fixedAt \}\)/.test(jmSrc.join('\n')) &&
+      /globalThis\.Date = ShiftedDate/.test(jmSrc.join('\n')),
+    true,
+  )
+  eq(
+    'JM-5 既定（環境変数が無いとき）は時計に触らない＝普段の実行に影響しない',
+    /if \(FAKE_TODAY\) \{/.test(jmSrc.join('\n')),
+    true,
+  )
+
   // ---- JM-4: ja.ts の文言を**ブラウザ側で走る関数の中**に書いていないこと ----
   //
   // page.evaluate / evaluateAll / waitForFunction などに渡す関数は、文字列にしてブラウザへ
