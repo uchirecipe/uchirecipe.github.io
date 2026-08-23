@@ -50514,6 +50514,444 @@ try {
     }
   }
 
+
+  // --- JQBOX-01 / JQBOX-02 / JQSAME-03(2026-08-23 便JQ): 操作の段が「どの品のものか」を距離と囲みで読める ---
+  //
+  // オーナー原文:
+  //   「献立・週
+  //     ・編集の主菜や◯人分、削除などの列が、どのレシピについているのかわからない。
+  //       上下のレシピで距離が同じ」
+  //
+  // 2026-08-22 便IZ が操作を2段目へ移したとき、**1品の中（カードの下端→操作の段の上端）も、
+  // 品と品の間（操作の段の下端→次の品のカードの上端）も同じ12px**にしてしまった。
+  // 距離がまったく同じなので、操作の段が上の品のものか下の品のものかを目で読めない。
+  //
+  // 測るのは「利用者が確かめたいこと」で、**数字の決め打ちではなく関係で測る**:
+  //   ①1品ぶん（カードの段＋操作の段）が**1つの囲み**に入っている（線が引かれている）
+  //   ②**1品の中 < 品と品の間**（近いほうが同じ品＝距離で切れ目が読める）
+  //   ③1品の中は12px以上のまま（便IZ が「上の品の×と下の品のカードの押し間違え」を理由に
+  //     広げた値なので、縮めて直したことにしない）
+  //   ④囲みを足しても**料理名の幅が通常表示と同じ**（幅を削って囲みを置いていない）
+  //   ⑤囲みと隙間で1品ぶんが縦に伸びすぎない（1画面に入る品数が減りすぎない）
+  //   ⑥週タブと月タブの日の窓で**同じ形**（同じ部品を使っているので、片方だけ直さない）
+  // 禁じ手よけ: 曜日・月替わりに依らない（今日のカードを使い、週の区切りは「今日から7日間」）／
+  // 画面の文言を書き写さない（掴む側は data-testid と ja.ts）／並び順・入れ子の段数に依らない／
+  // 生のIndexedDBへ書いたら読み込み直す／畳み方が落ち着いてから掴む（openAllWeekDays）
+  currentCheck = 'JQBOX-01'
+  {
+    /**
+     * 「1品ぶん」の並びを実測する（週の曜日カード／月の日の窓のどちらにも同じものを当てる）。
+     * 掴むのは data-testid だけ。文言は使わない（この関数はブラウザ側で走るので ja は見えない）
+     */
+    const JQ_MEASURE = (rootSel) => {
+      const root = document.querySelector(rootSel)
+      if (!root) return null
+      const cvs = document.createElement('canvas').getContext('2d')
+      const toRgb = (v) => {
+        cvs.clearRect(0, 0, 1, 1)
+        cvs.fillStyle = v
+        cvs.fillRect(0, 0, 1, 1)
+        const d = cvs.getImageData(0, 0, 1, 1).data
+        return { r: d[0], g: d[1], b: d[2], a: d[3] / 255 }
+      }
+      // 透けていない親をさかのぼって、その要素の「後ろに見えている面」を拾う
+      const behindOf = (el) => {
+        let p = el.parentElement
+        while (p) {
+          const bg = getComputedStyle(p).backgroundColor
+          if (toRgb(bg).a > 0) return toRgb(bg)
+          p = p.parentElement
+        }
+        return toRgb('rgb(255,255,255)')
+      }
+      const blocks = []
+      for (const block of root.querySelectorAll('[data-testid="slot-block"]')) {
+        const rows = [...block.querySelectorAll('[data-testid="plan-row"]')]
+        if (rows.length === 0) continue
+        const info = rows.map((row) => {
+          const cs = getComputedStyle(row)
+          const kids = [...row.children].map((k) => k.getBoundingClientRect())
+          const rr = row.getBoundingClientRect()
+          const title = row.querySelector('[data-testid="row-title"]')
+          return {
+            // 1品の中＝1段目（料理カード）の下端 → 2段目（この品への操作）の上端
+            inner: kids.length >= 2 ? Math.round((kids[1].top - kids[0].bottom) * 10) / 10 : null,
+            cardTop: kids.length >= 1 ? kids[0].top : rr.top,
+            cardHeight: kids.length >= 1 ? Math.round(kids[0].height) : 0,
+            opsHeight: kids.length >= 2 ? Math.round(kids[1].height) : 0,
+            opsBottom: kids.length >= 2 ? kids[1].bottom : rr.bottom,
+            top: rr.top,
+            bottom: rr.bottom,
+            titleWidth: title ? Math.round(title.getBoundingClientRect().width) : 0,
+            borderWidth: Math.round(parseFloat(cs.borderTopWidth) * 10) / 10,
+            borderColor: toRgb(cs.borderTopColor),
+            behind: behindOf(row),
+            radius: Math.round(parseFloat(cs.borderTopLeftRadius) * 10) / 10,
+          }
+        })
+        // 品と品の間＝上の品の操作の段の下端 → 次の品のカードの上端
+        const between = []
+        const stride = []
+        for (let i = 0; i + 1 < info.length; i++) {
+          between.push(Math.round((info[i + 1].cardTop - info[i].opsBottom) * 10) / 10)
+          stride.push(Math.round((info[i + 1].top - info[i].top) * 10) / 10)
+        }
+        blocks.push({
+          slot: block.getAttribute('data-slot'),
+          rows: info.length,
+          inner: info.map((r) => r.inner),
+          between,
+          stride,
+          content: info.map((r) => r.cardHeight + (r.inner ?? 0) + r.opsHeight),
+          titleWidth: info.map((r) => r.titleWidth),
+          borderWidth: info.map((r) => r.borderWidth),
+          radius: info.map((r) => r.radius),
+          borderColor: info[0].borderColor,
+          behind: info[0].behind,
+        })
+      }
+      return blocks
+    }
+    /** 通常表示の料理名の幅（囲みを足したせいで編集モードだけ細っていないかの物差し） */
+    const JQ_TITLES = (rootSel) => {
+      const root = document.querySelector(rootSel)
+      if (!root) return null
+      return [...root.querySelectorAll('[data-testid="row-title"]')].map((el) =>
+        Math.round(el.getBoundingClientRect().width),
+      )
+    }
+    /** 測った並びから「関係」を取り出す（数字の決め打ちをしないで判定するため） */
+    const jqFacts = (blocks) => {
+      if (!Array.isArray(blocks) || blocks.length === 0) return null
+      const inner = blocks.flatMap((b) => b.inner).filter((v) => typeof v === 'number')
+      const between = blocks.flatMap((b) => b.between)
+      const stride = blocks.flatMap((b) => b.stride)
+      const content = blocks.flatMap((b) => b.content)
+      return {
+        rows: blocks.reduce((a, b) => a + b.rows, 0),
+        innerMax: inner.length > 0 ? Math.max(...inner) : null,
+        innerMin: inner.length > 0 ? Math.min(...inner) : null,
+        betweenMin: between.length > 0 ? Math.min(...between) : null,
+        strideMax: stride.length > 0 ? Math.max(...stride) : null,
+        contentMin: content.length > 0 ? Math.min(...content) : null,
+        borderMin: Math.min(...blocks.flatMap((b) => b.borderWidth)),
+        radiusMin: Math.min(...blocks.flatMap((b) => b.radius)),
+        titleWidths: [...new Set(blocks.flatMap((b) => b.titleWidth))].sort((a, b) => a - b),
+      }
+    }
+    const jqBrowser = await chromium.launch()
+    const jqContext = await jqBrowser.newContext({ viewport: { width: 390, height: 844 } })
+    const jqPage = await jqContext.newPage()
+    jqPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@JQBOX-01] ${err.message}`)
+    })
+    try {
+      await jqPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await jqPage.waitForTimeout(2400) // 初回シード完了待ち
+      // 月タブは買い切り版の機能なので、測る前に解錠しておく（線引きそのものは他の節が受け持つ）
+      await jqPage.evaluate(async () => {
+        const db = await new Promise((res, rej) => {
+          const r = indexedDB.open('uchi-recipe')
+          r.onsuccess = () => res(r.result)
+          r.onerror = () => rej(r.error)
+        })
+        const P = (req) =>
+          new Promise((res, rej) => {
+            req.onsuccess = () => res(req.result)
+            req.onerror = () => rej(req.error)
+          })
+        const cur = (await P(db.transaction('settings').objectStore('settings').get(1))) || { id: 1 }
+        await P(
+          db
+            .transaction('settings', 'readwrite')
+            .objectStore('settings')
+            .put({ ...cur, id: 1, proCode: 'UR-E2E-TEST-ONLY', proActivatedAt: Date.now() }),
+        )
+        db.close()
+      })
+      // 生のIndexedDBへ書いたので読み込み直す（禁じ手⑥。Dexieの購読は張り直さないと届かない）
+      await jqPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+      await jqPage.reload({ waitUntil: 'networkidle' })
+      await jqPage.waitForTimeout(1800)
+      await jqPage.getByRole('button', { name: ja.mealPlan.viewWeek, exact: true }).click()
+      await jqPage.waitForTimeout(1200)
+      // 「今日から7日間」にすれば、今日が何曜日でも今日に献立が入る（禁じ手①）
+      const jqLayoutOk = await selectWeekLayout(jqPage, ja.mealPlan.weekLayoutRolling)
+      check('JQBOX-01 前提: 週の区切りを「今日から7日間」にできた', jqLayoutOk === true, `結果=${jqLayoutOk}`)
+      await jqPage.locator('[data-testid="week-fill-run"]').first().click()
+      await jqPage.waitForTimeout(3000)
+      await openAllWeekDays(jqPage)
+      await jqPage.waitForTimeout(600)
+      const jqToday = await jqPage.evaluate(() => {
+        const d = new Date()
+        const p = (n) => String(n).padStart(2, '0')
+        return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
+      })
+      const jqWeekRoot = `section[data-date="${jqToday}"]`
+
+      // まず通常表示の料理名の幅を控える（編集モードと突き合わせる物差し）
+      const jqWeekViewTitles = await jqPage.evaluate(JQ_TITLES, jqWeekRoot)
+      check(
+        'JQBOX-01 前提: 週タブの通常表示の料理名を測れた',
+        Array.isArray(jqWeekViewTitles) && jqWeekViewTitles.length > 0 && jqWeekViewTitles.every((w) => w > 0),
+        `幅=${JSON.stringify(jqWeekViewTitles)}`,
+      )
+      const jqWeekEditOn = await openWeekDayEdit(jqPage, jqToday)
+      check('JQBOX-01 前提: 今日のカードを編集モードにできた', jqWeekEditOn === true, `結果=${jqWeekEditOn}`)
+      await jqPage.waitForTimeout(600)
+      const jqWeekBlocks = await jqPage.evaluate(JQ_MEASURE, jqWeekRoot)
+      const jqWeek = jqFacts(jqWeekBlocks)
+      check(
+        'JQBOX-01 前提: 週タブの編集モードの1品ぶんを実測できた',
+        jqWeek !== null && jqWeek.rows >= 2 && jqWeek.innerMax !== null && jqWeek.betweenMin !== null,
+        JSON.stringify(jqWeek),
+      )
+      if (jqWeek !== null) {
+        check(
+          'JQBOX-01 1品ぶん（カードの段＋操作の段）が囲みで囲まれている',
+          jqWeek.borderMin > 0 && jqWeek.radiusMin > 0,
+          `線の太さ=${jqWeek.borderMin}px 角丸=${jqWeek.radiusMin}px`,
+        )
+        check(
+          'JQBOX-01 1品の中より、品と品の間のほうが広い（近いほうが同じ品）',
+          jqWeek.innerMax !== null && jqWeek.betweenMin !== null && jqWeek.betweenMin > jqWeek.innerMax,
+          `1品の中=最大${jqWeek.innerMax}px / 品と品の間=最小${jqWeek.betweenMin}px`,
+        )
+        check(
+          'JQBOX-01 1品の中は12px以上のまま（便IZ の押し間違え対策を縮めていない）',
+          jqWeek.innerMin !== null && jqWeek.innerMin >= 12,
+          `1品の中=最小${jqWeek.innerMin}px`,
+        )
+        check(
+          'JQBOX-01 囲みを足しても料理名の幅が通常表示と同じ（幅を削って囲みを置いていない）',
+          Array.isArray(jqWeekViewTitles) &&
+            jqWeekViewTitles.length > 0 &&
+            jqWeek.titleWidths.length > 0 &&
+            jqWeek.titleWidths.every((w) => jqWeekViewTitles.includes(w)),
+          `編集=${JSON.stringify(jqWeek.titleWidths)} 通常=${JSON.stringify([...new Set(jqWeekViewTitles)])}`,
+        )
+        check(
+          'JQBOX-01 囲みと隙間で1品ぶんが縦に伸びすぎない（中身の1.5倍以内）',
+          jqWeek.strideMax !== null && jqWeek.contentMin !== null && jqWeek.strideMax <= jqWeek.contentMin * 1.5,
+          `1品の送り=最大${jqWeek.strideMax}px / 中身=最小${jqWeek.contentMin}px`,
+        )
+      }
+      const jqWeekScroll = await jqPage.evaluate(() => ({
+        doc: document.documentElement.scrollWidth,
+        client: document.documentElement.clientWidth,
+      }))
+      check(
+        'JQBOX-01 囲みを足しても横スクロールが出ない',
+        jqWeekScroll.doc <= jqWeekScroll.client,
+        JSON.stringify(jqWeekScroll),
+      )
+
+      // --- JQBOX-02: 月タブの日の窓（同じ部品を使っているので、同じことを同じ物差しで測る） ---
+      currentCheck = 'JQBOX-02'
+      await jqPage.getByRole('button', { name: ja.mealPlan.viewMonth, exact: true }).click()
+      await jqPage.waitForTimeout(1600)
+      const jqCell = jqPage.locator(`[data-testid="month-day-cell"][data-date="${jqToday}"]`)
+      check('JQBOX-02 前提: カレンダーに今日のマスが出ている', (await jqCell.count()) === 1, `マス=${await jqCell.count()}件`)
+      await jqCell.click()
+      await jqPage.waitForTimeout(1000)
+      const jqMonthViewTitles = await jqPage.evaluate(JQ_TITLES, '[role="dialog"]')
+      check(
+        'JQBOX-02 前提: 日の窓の通常表示の料理名を測れた',
+        Array.isArray(jqMonthViewTitles) && jqMonthViewTitles.length > 0 && jqMonthViewTitles.every((w) => w > 0),
+        `幅=${JSON.stringify(jqMonthViewTitles)}`,
+      )
+      const jqMonthEditOn = await openMonthDayEdit(jqPage)
+      check('JQBOX-02 前提: 日の窓を編集モードにできた', jqMonthEditOn === true, `結果=${jqMonthEditOn}`)
+      await jqPage.waitForTimeout(600)
+      const jqMonthBlocks = await jqPage.evaluate(JQ_MEASURE, '[role="dialog"]')
+      const jqMonth = jqFacts(jqMonthBlocks)
+      check(
+        'JQBOX-02 前提: 月タブの日の窓の1品ぶんを実測できた',
+        jqMonth !== null && jqMonth.rows >= 2 && jqMonth.innerMax !== null && jqMonth.betweenMin !== null,
+        JSON.stringify(jqMonth),
+      )
+      if (jqMonth !== null) {
+        check(
+          'JQBOX-02 1品ぶん（カードの段＋操作の段）が囲みで囲まれている',
+          jqMonth.borderMin > 0 && jqMonth.radiusMin > 0,
+          `線の太さ=${jqMonth.borderMin}px 角丸=${jqMonth.radiusMin}px`,
+        )
+        check(
+          'JQBOX-02 1品の中より、品と品の間のほうが広い（近いほうが同じ品）',
+          jqMonth.innerMax !== null && jqMonth.betweenMin !== null && jqMonth.betweenMin > jqMonth.innerMax,
+          `1品の中=最大${jqMonth.innerMax}px / 品と品の間=最小${jqMonth.betweenMin}px`,
+        )
+        check(
+          'JQBOX-02 1品の中は12px以上のまま（便IZ の押し間違え対策を縮めていない）',
+          jqMonth.innerMin !== null && jqMonth.innerMin >= 12,
+          `1品の中=最小${jqMonth.innerMin}px`,
+        )
+        check(
+          'JQBOX-02 囲みを足しても料理名の幅が通常表示と同じ（幅を削って囲みを置いていない）',
+          Array.isArray(jqMonthViewTitles) &&
+            jqMonthViewTitles.length > 0 &&
+            jqMonth.titleWidths.length > 0 &&
+            jqMonth.titleWidths.every((w) => jqMonthViewTitles.includes(w)),
+          `編集=${JSON.stringify(jqMonth.titleWidths)} 通常=${JSON.stringify([...new Set(jqMonthViewTitles)])}`,
+        )
+      }
+
+      // --- JQSAME-03: 週と月がそろっている（同じ部品なので片方だけ直さない） ---
+      currentCheck = 'JQSAME-03'
+      check(
+        'JQSAME-03 前提: 週と月の両方を実測できた',
+        jqWeek !== null && jqMonth !== null,
+        `週=${JSON.stringify(jqWeek)} 月=${JSON.stringify(jqMonth)}`,
+      )
+      if (jqWeek !== null && jqMonth !== null) {
+        check(
+          'JQSAME-03 1品の中が週と月で同じ',
+          jqWeek.innerMin === jqMonth.innerMin && jqWeek.innerMax === jqMonth.innerMax,
+          `週=${jqWeek.innerMin}〜${jqWeek.innerMax}px 月=${jqMonth.innerMin}〜${jqMonth.innerMax}px`,
+        )
+        check(
+          'JQSAME-03 品と品の間が週と月で同じ',
+          jqWeek.betweenMin === jqMonth.betweenMin,
+          `週=${jqWeek.betweenMin}px 月=${jqMonth.betweenMin}px`,
+        )
+        check(
+          'JQSAME-03 囲みの線の太さと角丸が週と月で同じ',
+          jqWeek.borderMin === jqMonth.borderMin && jqWeek.radiusMin === jqMonth.radiusMin,
+          `週=線${jqWeek.borderMin}px/角${jqWeek.radiusMin}px 月=線${jqMonth.borderMin}px/角${jqMonth.radiusMin}px`,
+        )
+      }
+    } finally {
+      await jqContext.close()
+      await jqBrowser.close()
+    }
+  }
+
+  // --- JQTHEME-04(2026-08-23 便JQ): 1品ぶんの囲みが、5テーマとも後ろの面と見分けられる ---
+  //
+  // 2026-08-22 に「押せるものが背景と差0.0」という実例が出ている（便IU・③）。
+  // 囲みは**見分けられて初めて意味がある**ので、線と後ろの面の差を5テーマぶん数値で見張る。
+  // 直接の色の値は書かない＝色を変えたらここも直す、では見張りにならない。
+  // 線は --border-card（border-edge-card。便JE が「図形の下限 3:1」を5テーマで満たす濃さにした）
+  // を使っているので、その濃さがこの囲みにも効いていることを確かめる形になる。
+  currentCheck = 'JQTHEME-04'
+  {
+    const jqtLum = (c) => {
+      const f = (v) => {
+        const x = v / 255
+        return x <= 0.03928 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4
+      }
+      return 0.2126 * f(c.r) + 0.7152 * f(c.g) + 0.0722 * f(c.b)
+    }
+    const jqtRatio = (a, b) => (Math.max(jqtLum(a), jqtLum(b)) + 0.05) / (Math.min(jqtLum(a), jqtLum(b)) + 0.05)
+    const jqtHex = (c) => `#${[c.r, c.g, c.b].map((v) => v.toString(16).padStart(2, '0')).join('')}`
+    const jqtBrowser = await chromium.launch()
+    try {
+      for (const [jqtTheme, jqtLabel, jqtScheme] of [
+        ['auto', '自動（端末=ライト）', 'light'],
+        ['auto', '自動（端末=ダーク）', 'dark'],
+        ['light', 'ライト', 'dark'],
+        ['dark', 'ダーク', 'light'],
+        ['brown', 'ブラウン', 'light'],
+        ['green', 'グリーン', 'dark'],
+      ]) {
+        const jqtContext = await jqtBrowser.newContext({
+          viewport: { width: 390, height: 844 },
+          colorScheme: jqtScheme,
+        })
+        const jqtPage = await jqtContext.newPage()
+        try {
+          await jqtPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+          await jqtPage.waitForTimeout(2400)
+          await jqtPage.evaluate(async (theme) => {
+            const req = indexedDB.open('uchi-recipe')
+            const idb = await new Promise((resolve, reject) => {
+              req.onsuccess = () => resolve(req.result)
+              req.onerror = () => reject(req.error)
+            })
+            const P = (r) => new Promise((res, rej) => { r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error) })
+            const cur = await P(idb.transaction('settings').objectStore('settings').get(1))
+            await P(idb.transaction('settings', 'readwrite').objectStore('settings').put({ ...(cur || {}), id: 1, theme }))
+            idb.close()
+          }, jqtTheme)
+          // 生のIndexedDBへ書いたので読み込み直す（禁じ手⑥）
+          await jqtPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+          await jqtPage.reload({ waitUntil: 'networkidle' })
+          await jqtPage.waitForTimeout(1800)
+          await jqtPage.getByRole('button', { name: ja.mealPlan.viewWeek, exact: true }).click()
+          await jqtPage.waitForTimeout(1200)
+          const jqtLayoutOk = await selectWeekLayout(jqtPage, ja.mealPlan.weekLayoutRolling)
+          check(`JQTHEME-04 [${jqtLabel}] 前提: 週の区切りを「今日から7日間」にできた`, jqtLayoutOk === true, `結果=${jqtLayoutOk}`)
+          await jqtPage.locator('[data-testid="week-fill-run"]').first().click()
+          await jqtPage.waitForTimeout(3000)
+          await openAllWeekDays(jqtPage)
+          await jqtPage.waitForTimeout(600)
+          const jqtToday = await jqtPage.evaluate(() => {
+            const d = new Date()
+            const p = (n) => String(n).padStart(2, '0')
+            return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
+          })
+          const jqtEditOn = await openWeekDayEdit(jqtPage, jqtToday)
+          check(`JQTHEME-04 [${jqtLabel}] 前提: 今日のカードを編集モードにできた`, jqtEditOn === true, `結果=${jqtEditOn}`)
+          await jqtPage.waitForTimeout(600)
+          const jqtSeen = await jqtPage.evaluate((date) => {
+            const cvs = document.createElement('canvas').getContext('2d')
+            const toRgb = (v) => {
+              cvs.clearRect(0, 0, 1, 1)
+              cvs.fillStyle = v
+              cvs.fillRect(0, 0, 1, 1)
+              const d = cvs.getImageData(0, 0, 1, 1).data
+              return { r: d[0], g: d[1], b: d[2], a: d[3] / 255 }
+            }
+            const behindOf = (el) => {
+              let p = el.parentElement
+              while (p) {
+                const bg = getComputedStyle(p).backgroundColor
+                if (toRgb(bg).a > 0) return toRgb(bg)
+                p = p.parentElement
+              }
+              return toRgb('rgb(255,255,255)')
+            }
+            const section = document.querySelector(`section[data-date="${date}"]`)
+            if (!section) return null
+            return [...section.querySelectorAll('[data-testid="plan-row"]')].map((row) => {
+              const cs = getComputedStyle(row)
+              return {
+                width: Math.round(parseFloat(cs.borderTopWidth) * 10) / 10,
+                line: toRgb(cs.borderTopColor),
+                behind: behindOf(row),
+              }
+            })
+          }, jqtToday)
+          check(
+            `JQTHEME-04 [${jqtLabel}] 前提: 1品ぶんの囲みを掴めた`,
+            Array.isArray(jqtSeen) && jqtSeen.length > 0,
+            JSON.stringify(jqtSeen),
+          )
+          if (Array.isArray(jqtSeen) && jqtSeen.length > 0) {
+            const jqtWorst = jqtSeen
+              .map((s) => ({ ...s, ratio: jqtRatio(s.line, s.behind) }))
+              .sort((a, b) => a.ratio - b.ratio)[0]
+            check(
+              `JQTHEME-04 [${jqtLabel}] 囲みの線が引かれている`,
+              jqtSeen.every((s) => s.width > 0),
+              `太さ=${JSON.stringify(jqtSeen.map((s) => s.width))}`,
+            )
+            check(
+              `JQTHEME-04 [${jqtLabel}] 囲みの線が後ろの面と見分けられる（図形の下限 3:1 以上）`,
+              jqtWorst.ratio >= 3,
+              `線=${jqtHex(jqtWorst.line)} 後ろ=${jqtHex(jqtWorst.behind)} 差=${jqtWorst.ratio.toFixed(2)}:1`,
+            )
+          }
+        } finally {
+          await jqtContext.close()
+        }
+      }
+    } finally {
+      await jqtBrowser.close()
+    }
+  }
+
 } catch (err) {
   ng(`実行中断(${currentCheck})`, err.message)
 } finally {

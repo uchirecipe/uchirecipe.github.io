@@ -29519,6 +29519,128 @@ import { safetyNotesFor, stepSafetyNotes, wholeRecipeSafetyNotes } from '../src/
   eq('JP-3 「超簡単」で絞ればその品だけが出る', jpFind('easy'), [2])
 }
 
+
+// ==========================================================================================
+// JQ-1〜JQ-3（2026-08-23 便JQ）: 献立の編集モードで「操作の段がどの品のものか」を読める形の見張り
+//
+// オーナー原文:
+//   「献立・週
+//     ・編集の主菜や◯人分、削除などの列が、どのレシピについているのかわからない。
+//       上下のレシピで距離が同じ」
+//
+// 画面での見え方（間隔・囲み・線の濃さ）は e2e の JQBOX-01/02・JQSAME-03・JQTHEME-04 が
+// 実測で受け持つ。ここで見張るのは**書き方そのものに残る決まりごと**で、e2e より早く・
+// ブラウザ無しで気づける3つ:
+//   JQ-1 1品の中（カードの段と操作の段の間）より、品と品の間のほうが広い（**関係で測る**。
+//        「12pxであること」ではなく「近いほうが同じ品」を守る）
+//   JQ-2 1品ぶんが囲みで囲まれていて、その線は並ぶカード用の濃い線（--border-card ＝
+//        border-edge-card。2026-08-22 便JE が5テーマで 3:1 を満たす濃さにしたもの）を使う
+//   JQ-3 囲みのぶんを**外へ逃がして**いる＝料理名の幅を1pxも削っていない
+//        （囲みの内側の余白＋線 と、逃がす負の余白 が釣り合っている）
+//
+// 掴み方は「関数の範囲」と「その中の目印」だけで、行番号は使わない。
+// **見つけられなければその場で赤にする**（書き方が変わったのに黙って素通りしない）。
+// ==========================================================================================
+{
+  const jqSrc = readFileSync(new URL('../src/pages/MealPlanPage.tsx', import.meta.url), 'utf-8')
+  eq('JQ-1 前提: 献立の画面を読めている（0なら見張りが壊れている）', jqSrc.length > 10000, true)
+
+  /** Tailwind の間隔クラスを px にする（p-1=4px / space-y-4=16px / -mx-[5px]=5px） */
+  const jqPx = (raw) => {
+    if (raw == null) return null
+    const bracket = raw.match(/^\[(\d+(?:\.\d+)?)px\]$/)
+    if (bracket) return Number(bracket[1])
+    const sm = raw.match(/^\[var\(--space-(sm|md|lg)\)\]$/)
+    if (sm) return { sm: 8, md: 16, lg: 24 }[sm[1]]
+    if (/^\d+(\.\d+)?$/.test(raw)) return Number(raw) * 4
+    return null
+  }
+  /** クラス並びから、その種類（p / py / mt / space-y / -mx …）の値を px で取り出す */
+  const jqOf = (className, kind) => {
+    const m = (className ?? '').match(new RegExp(`(?:^|\\s)${kind}-((?:\\[[^\\]]+\\])|[\\d.]+)(?:\\s|$)`))
+    return m ? jqPx(m[1]) : null
+  }
+  /** border（太さの指定が無ければ1px）。border-2 等なら その値 */
+  const jqBorder = (className) => {
+    if (!/(?:^|\s)border(?:-\d+)?(?:\s|$)/.test(className ?? '')) return 0
+    const m = (className ?? '').match(/(?:^|\s)border-(\d+)(?:\s|$)/)
+    return m ? Number(m[1]) : 1
+  }
+  /**
+   * from 以降にある目印を探し、その目印の**手前（before）／後ろ（after）で
+   * いちばん近い className="..."** を拾う。行番号にも並び順にも依らない
+   */
+  const jqClassNear = (from, marker, dir, kind) => {
+    const at = jqSrc.indexOf(marker, from)
+    if (at < 0) return null
+    const near = dir === 'after' ? jqSrc.slice(at, at + 600) : jqSrc.slice(Math.max(0, at - 600), at)
+    const all = [...near.matchAll(/className="([^"]*)"/g)].map((m) => m[1])
+    // 目印にいちばん近い順に見て、探している種類の間隔を持つものを選ぶ
+    // （入れ子の内側の要素＝間隔を持たない span などを取り違えない）
+    const ordered = dir === 'after' ? all : [...all].reverse()
+    if (kind) return ordered.find((c) => jqOf(c, kind) !== null) ?? null
+    return ordered[0] ?? null
+  }
+
+  // 1品ぶんを組む関数（renderRow）と、それを並べる関数（renderSlotEditor）の範囲を取る
+  // 引数を1行ずつ書いている方＝献立の1品ぶんを組む関数（同名の関数が食費の表にもあるので、
+  // 「const renderRow = (」だけで探すとそちらに当たる）
+  const jqRowAt = jqSrc.indexOf('const renderRow = (\n')
+  const jqEditorAt = jqSrc.indexOf('const renderSlotEditor = (')
+  eq('JQ-1 前提: 1品ぶんを組む関数と、それを並べる関数を見つけられた', jqRowAt > 0 && jqEditorAt > jqRowAt, true)
+
+  // ①1品の中＝操作の段（役割ラベルを出している段）に付いている上の余白
+  const jqInnerClass = jqClassNear(jqRowAt, 'ja.mealPlan.role[role]', 'before', 'mt')
+  const jqInner = jqOf(jqInnerClass, 'mt')
+  eq('JQ-1 前提: 1品の中の間隔を読めた', typeof jqInner === 'number' && jqInner > 0, true)
+
+  // ②品と品の間＝品を並べている入れ物の space-y
+  const jqListClass = jqClassNear(jqEditorAt, 'roleRows.map(', 'before', 'space-y')
+  const jqBetween = jqOf(jqListClass, 'space-y')
+  eq('JQ-1 前提: 品と品の間の間隔を読めた', typeof jqBetween === 'number' && jqBetween > 0, true)
+
+  // ③1品ぶんの囲み（plan-row そのもの）
+  const jqBoxClass = jqClassNear(jqRowAt, 'data-testid="plan-row"', 'after')
+  const jqBoxPad = jqOf(jqBoxClass, 'p')
+  const jqBoxBorder = jqBorder(jqBoxClass)
+  eq('JQ-2 前提: 1品ぶんの囲みの書き方を読めた', typeof jqBoxClass === 'string' && jqBoxClass.length > 0, true)
+
+  // --- JQ-1: 近いほうが同じ品（数字ではなく関係で見る） ---
+  // 品と品の間は、囲みの内側の余白と線のぶんだけさらに開く（上の品の操作の段の下端から
+  // 次の品のカードの上端まで＝space-y ＋ (余白＋線)×2）
+  const jqBetweenSeen = jqBetween + (jqBoxPad ?? 0) * 2 + jqBoxBorder * 2
+  eq(
+    `JQ-1 1品の中(${jqInner}px)より、品と品の間(${jqBetweenSeen}px)のほうが広い`,
+    jqBetweenSeen > jqInner,
+    true,
+  )
+  // 便IZ が「上の品の×と下の品のカードの押し間違え」を理由に広げた値なので、縮めて直したことにしない
+  eq('JQ-1 1品の中は12px以上のまま（押し間違えない間隔を縮めていない）', jqInner >= 12, true)
+
+  // --- JQ-2: 囲みがあり、線は並ぶカード用の濃い線を使う ---
+  eq('JQ-2 1品ぶんが囲みで囲まれている（線がある）', jqBoxBorder > 0, true)
+  eq(
+    'JQ-2 囲みの線は並ぶカードと同じ濃い線（border-edge-card＝--border-card）を使う',
+    /(?:^|\s)border-edge-card(?:\s|$)/.test(jqBoxClass ?? ''),
+    true,
+  )
+  eq('JQ-2 囲みの角丸は並ぶカードと同じ（rounded-card）', /(?:^|\s)rounded-card(?:\s|$)/.test(jqBoxClass ?? ''), true)
+
+  // --- JQ-3: 囲みのぶんは外へ逃がす＝料理名の幅を1pxも削らない ---
+  // 囲みを普通に足すと、内側の余白と線のぶんだけ中の料理カードが細る。
+  // それを打ち消すために、品を並べる入れ物に同じだけの負の余白を付けてある。
+  // 釣り合いが崩れた瞬間に料理名が細るので、**等しいこと**を見張る
+  const jqPull = jqOf(jqListClass, '-mx')
+  eq('JQ-3 前提: 囲みを外へ逃がす負の余白を読めた', typeof jqPull === 'number', true)
+  eq(
+    `JQ-3 囲み(余白${jqBoxPad}px＋線${jqBoxBorder}px)と同じだけ外へ逃がしている＝料理名の幅を削らない`,
+    jqPull,
+    (jqBoxPad ?? 0) + jqBoxBorder,
+  )
+  // 逃がしすぎると、囲みが1つ外の枠（朝食/昼食/夕食の枠＝余白 --space-sm）の線に重なる
+  eq('JQ-3 逃がす量が、1つ外の枠の余白(8px)を食い破っていない', jqPull < 8, true)
+}
+
 // ---------- 結果 ----------
 console.log(`合格: ${passed}件 / 失敗: ${failures.length}件`)
 for (const f of failures) console.log(`  NG ${f}`)
