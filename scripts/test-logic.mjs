@@ -8,7 +8,7 @@ import {
   normalizeAmountInput,
   expandMixedFraction,
 } from '../src/logic/amount.ts'
-import { leadingRangeAmount } from '../src/logic/amount.ts'
+import { leadingRangeAmount, resolveCalcAmount } from '../src/logic/amount.ts'
 import { isHttpUrl } from '../src/logic/url.ts'
 import { normalizeQuarterTurns, rotatedSize } from '../src/logic/image.ts'
 import {
@@ -316,6 +316,7 @@ import {
   pricelessIngredientNamesOfRecipes,
   sumCookedRecipesCost,
   normalizeIngredientNameForPrice,
+  recipeCostConfidence,
 } from '../src/logic/priceEstimate.ts'
 import * as priceEstimateModule from '../src/logic/priceEstimate.ts'
 import {
@@ -10187,10 +10188,12 @@ eq('normalizeIngredientNameForPrice 前後空白除去', normalizeIngredientName
     estimateIngredientYen({ name: '玉ねぎ', amount: '2', unit: '個' }, index),
     { yen: 100, rawYen: 100, source: 'user' },
   )
+  // 2026-08-23 便KE: 販売単位(100g)で登録した食材は、分量が読めないときに金額を出さない
+  // （満額＝買ってきた100gぶんを1行に乗せると桁で外れるため。「価格が分からない材料」に数える）
   eq(
-    'estimateIngredientYen 非数値の分量(少々)はマスタの金額をそのまま使う',
+    'estimateIngredientYen 非数値の分量(少々)は、販売単位のマスタなら金額を出さない(便KE)',
     estimateIngredientYen({ name: '鶏もも肉', amount: '少々', unit: 'g' }, index),
-    { yen: 130, rawYen: 130, source: 'user' },
+    undefined,
   )
   eq(
     'estimateIngredientYen 単位が噛み合わない場合はマスタの金額をそのまま使う',
@@ -11089,17 +11092,27 @@ eq('normalizeIngredientNameForPrice 前後空白除去', normalizeIngredientName
     estimateIngredientYen({ name: '玉ねぎ', amount: '2', unit: '個' }, onionIndex),
     { yen: 100, rawYen: 100, source: 'user' },
   )
-  // 個数不一致(個 vs 本): 単位名が違うので換算せずフォールバック(マスタ価格そのまま)
+  // 個数不一致(個 vs 本): 単位名が違い、栄養側にも「本」の目安量が無いので量が決まらない。
+  // 2026-08-23 便KE で、販売単位(1個)のマスタでは金額を出さない扱いに変えた
   eq(
-    'estimateIngredientYen 個数系は単位名が違うと按分せずフォールバック(50円/1個×1本→50円のまま)',
+    'estimateIngredientYen 個数系は単位名が違うと金額を出さない(50円/1個×1本。便KE)',
     estimateIngredientYen({ name: '玉ねぎ', amount: '1', unit: '本' }, onionIndex),
-    { yen: 50, rawYen: 50, source: 'user' },
+    undefined,
   )
-  // 解釈不能(少々): 従来どおりマスタ価格そのままのフォールバック
+  // 解釈不能(少々)も同じ: 販売単位(1個)なら金額を出さない(便KE)
   eq(
-    'estimateIngredientYen 解釈不能な分量(少々)は従来どおりフォールバック',
+    'estimateIngredientYen 解釈不能な分量(少々)は販売単位のマスタでは金額を出さない(便KE)',
     estimateIngredientYen({ name: '玉ねぎ', amount: '少々', unit: '個' }, onionIndex),
-    { yen: 50, rawYen: 50, source: 'user' },
+    undefined,
+  )
+  // 逆に、登録単位そのものが「1回に使う量」なら従来どおり満額を使う(便KEで残した側)
+  eq(
+    'estimateIngredientYen 登録単位が「少々」なら分量が読めなくても満額を使う(便KE)',
+    estimateIngredientYen(
+      { name: '塩こしょう', amount: '少々', unit: '' },
+      buildPriceIndex([{ name: '塩こしょう', pricePerUnit: 5, unit: '少々' }]),
+    ),
+    { yen: 5, rawYen: 5, source: 'user' },
   )
 
   // 既存の同一単位(100g×200g等)の按分が回帰しないこと(質量side・従来からの主要ケース)
@@ -11165,12 +11178,13 @@ eq('normalizeIngredientNameForPrice 前後空白除去', normalizeIngredientName
     estimateIngredientYen({ name: '長ねぎ', amount: '10', unit: 'cm' }, negiIndex),
     { yen: 30, rawYen: 30, source: 'user' },
   )
-  // (4) 栄養側に目安量が無い組は従来どおり満額フォールバック(勝手な換算を作らない)
+  // (4) 栄養側に目安量が無い組は勝手な換算を作らない。2026-08-23 便KE から、
+  //     販売単位(1枚)で登録されたマスタでは金額そのものを出さない(価格が分からない材料に数える)
   const konnyakuIndex = buildPriceIndex([{ name: 'こんにゃく', pricePerUnit: 60, unit: '1枚' }])
   eq(
-    'g換算按分: 換算の根拠が無い組(こんにゃく1袋 vs マスタ1枚)は従来どおり満額フォールバック',
+    'g換算按分: 換算の根拠が無い組(こんにゃく1袋 vs マスタ1枚)は金額を出さない(便KE)',
     estimateIngredientYen({ name: 'こんにゃく', amount: '1', unit: '袋' }, konnyakuIndex),
-    { yen: 60, rawYen: 60, source: 'user' },
+    undefined,
   )
   // (5) 「適量」「少々」を1回の使用量で按分する(サラダ油=大さじ1・ごま油=小さじ1・
   //     オリーブオイル=大さじ1。同梱レシピが分量を数値で書いているときの最頻値)
@@ -11203,12 +11217,15 @@ eq('normalizeIngredientNameForPrice 前後空白除去', normalizeIngredientName
     estimateIngredientYen({ name: 'オリーブオイル', amount: '2', unit: '大さじ' }, oliveOilIndex),
     { yen: 42, rawYen: 42, source: 'user' },
   )
-  // 1回使用量を持たない食材(薬味等・docs/49 §7でオーナー了承済みの満額表示)は従来どおり
+  // 1回使用量を持たない薬味は、docs/49 §7では「満額でも過大にならない」として満額表示のままだった。
+  // 2026-08-23 便KE で見直した: 小ねぎの登録単位はその後100g(=1束まるごと)になっており、
+  // 薬味ひとつまみの行に80円が乗っていた(中華風卵スープ 2人分で1食82円のうち40円が小ねぎ)。
+  // 販売単位のマスタでは金額を出さない
   const komeIndex = buildPriceIndex([{ name: '小ねぎ', pricePerUnit: 80, unit: '1袋' }])
   eq(
-    '1回使用量: 持たない食材(小ねぎ「適量(お好みで)」)は従来どおり満額のまま(docs/49 §7の既決事項)',
+    '1回使用量: 持たない食材(小ねぎ「適量(お好みで)」)は金額を出さない(便KEでdocs/49 §7を見直し)',
     estimateIngredientYen({ name: '小ねぎ', amount: '適量(お好みで)', unit: '' }, komeIndex),
-    { yen: 80, rawYen: 80, source: 'user' },
+    undefined,
   )
   // (6) parseUnitQuantityの分数対応: マスタ「1/4個」を数量0.25として読む。
   //     従来は{qty:1, baseUnit:'/4個'}になり、レシピ側にどんな分量を書いても按分できなかった
@@ -11316,11 +11333,11 @@ eq('normalizeIngredientNameForPrice 前後空白除去', normalizeIngredientName
       estimateIngredientYen({ name: 'レタス', amount: '4', unit: '枚' }, idx)?.yen,
       60,
     )
-    // 「適量」「少々」の薬味は従来どおり満額のまま(docs/49 §7の既決事項。今回変えていない)
+    // 「適量」「少々」の薬味は、2026-08-23 便KE から金額を出さない(登録単位が100g=販売単位のため)
     eq(
-      '単位修正後も小ねぎ「適量(お好みで)」は従来どおり満額80円(薬味の既決方針は不変)',
-      estimateIngredientYen({ name: '小ねぎ', amount: '適量(お好みで)', unit: '' }, idx)?.yen,
-      80,
+      '小ねぎ「適量(お好みで)」は金額を出さない(便KE。登録単位100gの満額80円が乗っていた)',
+      estimateIngredientYen({ name: '小ねぎ', amount: '適量(お好みで)', unit: '' }, idx)?.yen ?? null,
+      null,
     )
   }
   // (8) 同梱109品の合計原価のピン留め(この数字が動いたら按分の前提が変わったということ)
@@ -11340,7 +11357,12 @@ eq('normalizeIngredientNameForPrice 前後空白除去', normalizeIngredientName
     // 2026-08-22 便JI「実勢とずれていた目安価格」の修正で37,934→37,951円(+17円)。
     // バター250→600円/200gで上がったぶんと、小麦粉10→2円・片栗粉10→5円・きな粉15→7円で
     // 下がったぶんの差し引き(同梱109品はバターを使う品が少なく、粉物のほうが多い)
-    eq('同梱109品の概算食費の合計(便JI後。便JG後は37,934円/便EY前は38,622円/便BY修正前は48,377円)', grand, 37951)
+    // 2026-08-23 便KE「単位が噛み合わないときの満額フォールバックをやめる」で37,951→35,826円(-2,125円)。
+    // 下がったのは、販売単位(1袋・100g・1本・1株…)で登録された食材の「適量」「お好みで」の行に
+    // 買ってきた1つぶんの金額が乗っていた55行(小ねぎ80円×5・かつお節15円×3・パセリ50円×2・
+    // グラノーラ500円・ブルーベリー300円・大根おろし100円 ほか)。
+    // 登録単位が「1回に使う量」(大さじ1・小さじ1・少々・1かけ・1個分・使用分)の行は1円も動いていない
+    eq('同梱109品の概算食費の合計(便KE後。便JI後は37,951円/便JG後は37,934円/便BY修正前は48,377円)', grand, 35826)
     const nabe = starterDefs.find((d) => d.title === '寄せ鍋')
     eq(
       '寄せ鍋 1食あたり(便EY後226円→便FAのしいたけ名寄せで217円)',
@@ -11349,7 +11371,8 @@ eq('normalizeIngredientNameForPrice 前後空白除去', normalizeIngredientName
     )
     const soup = starterDefs.find((d) => d.title.includes('中華風卵スープ'))
     // 2026-08-22 便JI: 片栗粉10→5円/大さじ1(実勢600円/kg)で85→82円
-    eq('中華風卵スープ 1食あたり(修正前682円・ごま油「少々」に1Lボトル満額が乗っていた)', Math.round(estimateRecipeCost(soup.ingredients, idx).total / soup.servings), 82)
+    // 2026-08-23 便KE: 「小ねぎ 適量(お好みで)」に小ねぎ100g(1束まるごと)の80円が乗っていた分が抜け82→42円
+    eq('中華風卵スープ 1食あたり(便KE後。便JI後82円・修正前682円はごま油「少々」に1Lボトル満額)', Math.round(estimateRecipeCost(soup.ingredients, idx).total / soup.servings), 42)
     const steamed = starterDefs.find((d) => d.title.includes('レンジ蒸し鶏'))
     eq('レンジ蒸し鶏 1食あたり(修正前48円・鶏むね肉1枚が100g分の90円だった)', Math.round(estimateRecipeCost(steamed.ingredients, idx).total / steamed.servings), 115)
     const teriyaki = starterDefs.find((d) => d.title === '鶏の照り焼き')
@@ -27035,15 +27058,26 @@ Aみりん 大さじ1
     )
   }
   {
-    // 単位が違うときは足さない(勝手に足すと嘘の数量になる)。キッコーマン「ぶり大根」実測:
-    // 砂糖が「小さじ1」と「大さじ3」の2行
+    // キッコーマン「ぶり大根」実測: 砂糖が「小さじ1」と「大さじ3」の2行。
+    // 2026-08-23 便KE から、**換算できる単位どうし**（小さじ⇄大さじ、g⇄kg）は足して1つにする
+    // （買い物メモに「小さじ1・大さじ3」と並んでいても、店で何を買えばよいかが決まらないため）。
+    // 換算できない組（本 vs g、個 vs 玉）は今までどおり足さずに並べる＝下の2件で見張る
     const buri = [
       { name: '砂糖', amount: '1', unit: '小さじ' },
       { name: '砂糖', amount: '3', unit: '大さじ' },
     ]
     const built = buildShoppingCandidates([{ id: 1, ingredients: buri }], [])
-    eq('IX-3 単位が違う2行は1行にまとめるが、数量は足さず並べて出す', built.length, 1)
-    eq('IX-3 ぶり大根の砂糖は「小さじ1・大さじ3」', built[0].amount, '小さじ1・大さじ3')
+    eq('IX-3 単位が違う2行は1行にまとめる', built.length, 1)
+    eq('IX-3 ぶり大根の砂糖は足して「大さじ3と1/4」(便KE。旧:「小さじ1・大さじ3」)', built[0].amount, '大さじ3と1/4')
+    // 成分表に目安量が無い食材は、単位が違えば今までどおり足さずに並べる（勝手な重さを作らない）
+    const mixed = buildShoppingCandidates(
+      [{ id: 1, ingredients: [
+        { name: '豆苗', amount: '1', unit: 'パック' },
+        { name: '豆苗', amount: '100', unit: 'g' },
+      ] }],
+      [],
+    )
+    eq('IX-3 目安量が無い食材は単位が違えば足さずに並べる', mixed[0].amount, '1パック・100g')
   }
 
   // ---------- IX-4 ④材料が0件のレシピでも壊れない・空行を出さない ----------
@@ -28319,7 +28353,8 @@ import { safetyNotesFor, stepSafetyNotes, wholeRecipeSafetyNotes } from '../src/
     eq('JI-1 バター10gは30円（実勢600円/200g）', jiYen('バター', '10', 'g'), 30)
     eq('JI-1 有塩バターと書いても同じ30円', jiYen('有塩バター', '10', 'g'), 30)
   }
-  eq('JI-1 版番号を上げてある（上げないと新しい行が既存の端末に届かない）', PRICE_DEFAULTS_VERSION_FOR_JG, 11)
+  // 2026-08-23 便KE で厚揚げ・小松菜・豆苗・大豆水煮・キムチを足したので版12
+  eq('JI-1 版番号を上げてある（上げないと新しい行が既存の端末に届かない）', PRICE_DEFAULTS_VERSION_FOR_JG, 12)
 
   // --- JI-2: 古い目安のままの行だけを新しい目安価格に入れ替える ---
   {
@@ -30040,6 +30075,261 @@ import { safetyNotesFor, stepSafetyNotes, wholeRecipeSafetyNotes } from '../src/
   }
 }
 
+
+// ---------- 便KE: 節約したい人の実データ30品で、原価と買い物メモが判断に使えない ----------
+// 影響範囲テストA「食費を切り詰めたい人」(30品・2026-08-23)で実測した数字をそのまま見張る。
+// 直す前はここに並べた値がすべて赤になることを確認してから直している。
+//   ・厚揚げニラ玉 1食417円（正しくは約94円）… 醤油「大匙1」に1L1本ぶんの400円が乗っていた
+//   ・つくねの照り焼き 1食386円 … 配合比の注記「醤油｜砂糖 みりん 1 1 1」に400円が乗っていた
+//   ・もやしのナムル 1食115円 … にんにく「少々」に1玉60円・ねぎ「大1」に1本100円
+//   ・鶏胸肉「1｜枚300g」が90円（100gぶん）＝逆に安く出る
+// いちばん高く出た2品には「※価格が分からない材料」の印が1つも付かず、
+// 「実際はこれより高くなります」という案内が事実と逆になっていた。
+{
+  const keIndex = buildPriceIndex(PRICE_DEFAULTS.map((d) => ({ ...d, isDefault: true })))
+  const keYen = (name, amount, unit) =>
+    estimateIngredientYen({ name, amount, unit }, keIndex)?.yen ?? null
+  const kePerServing = (ingredients, servings) =>
+    Math.round(estimateRecipeCost(ingredients, keIndex).total / servings)
+
+  // --- KE-1: 「大匙」「小匙」を大さじ・小さじとして読む ---
+  // 「大3」「大さじ3」は読めるのに「大匙3」だけ読めず、原価も買い物メモも別枠に落ちていた
+  const keSpoon = (amount) => {
+    const r = resolveCalcAmount(amount, '')
+    return r ? { value: r.value, unit: r.unit } : null
+  }
+  eq('KE-1 「大匙1」は大さじ1として読む', keSpoon('大匙1'), { value: 1, unit: '大さじ' })
+  eq('KE-1 「小匙2」は小さじ2として読む', keSpoon('小匙2'), { value: 2, unit: '小さじ' })
+  eq('KE-1 「大匙1/2」も読む', keSpoon('大匙1/2'), { value: 0.5, unit: '大さじ' })
+  eq('KE-1 「大3」の略記は今までどおり読む', keSpoon('大3'), { value: 3, unit: '大さじ' })
+  eq('KE-1 分量欄に「大さじ2」と書いてあっても読む', keSpoon('大さじ2'), { value: 2, unit: '大さじ' })
+  eq('KE-1 単位欄の「大匙」も体積として読む', normalizeUnit(1, '大匙'), { dim: 'volume', base: 15 })
+  eq('KE-1 単位欄の「小匙」も体積として読む', normalizeUnit(1, '小匙'), { dim: 'volume', base: 5 })
+  // 表示は原文の書き方（「大匙」）のまま。人数を変えても勝手に「大さじ」へ書き換えない
+  eq('KE-1 人数変更しても「大匙」の書き方は変えない', scaleAmount('大匙1', 2, 4, ''), '大匙2')
+  // 原価: しょうゆ 400円/1L の大さじ1＝15ml＝6円（1本まるごとの400円ではない）
+  eq('KE-1 醤油「大匙1」は6円（旧: 1L1本ぶんの400円）', keYen('醤油', '大匙1', ''), 6)
+  eq('KE-1 酒「大匙2」は8円（旧: 1L1本ぶんの260円）', keYen('酒', '大匙2', ''), 8)
+  eq('KE-1 オイスターソース「大匙2」は60円（旧: 大さじ1ぶんの30円）', keYen('オイスターソース', '大匙2', ''), 60)
+  // 買い物メモ: 「大さじ」と「大匙」が同じ単位として足される
+  {
+    const c = buildShoppingCandidates(
+      [
+        { id: 1, ingredients: [{ name: '酒', amount: '大さじ1', unit: '' }] },
+        { id: 2, ingredients: [{ name: '酒', amount: '大匙2', unit: '' }] },
+      ],
+      [],
+    )
+    eq('KE-1 買い物メモで「大さじ1」と「大匙2」が足される', c[0]?.amount, '大さじ3')
+  }
+
+  // --- KE-2: 単位が噛み合わないとき「登録単位ぶんの満額」を乗せない ---
+  // 販売単位（1L・1玉・1本・100g…）で登録された食材は、噛み合わなかったときに
+  // 満額を乗せると桁で外れる。金額に入れず「価格が分からない材料」として数える
+  eq('KE-2 配合比の注記「砂糖 みりん 1 1 1」の醤油は金額に入れない（旧: 400円）', keYen('醤油', '砂糖 みりん 1 1 1', ''), null)
+  eq('KE-2 にんにく「少々」は金額に入れない（旧: 1玉60円）', keYen('にんにく', '少々', ''), null)
+  eq('KE-2 ねぎ「大1」(=大さじ1)は金額に入れない（旧: 1本100円）', keYen('ねぎ', '大1', ''), null)
+  eq('KE-2 鶏胸肉「1｜枚300g」は金額に入れない（旧: 100gぶんの90円）', keYen('鶏胸肉', '1', '枚300g'), null)
+  eq('KE-2 「米油 適量」が米に化けて60円にならない', keYen('米油', '適量', ''), null)
+  eq('KE-2 材料でない注記行がにんじん40円にならない', keYen('キャベツ、人参は無くてもOK。市販のもやしミックスでもOK！', '', ''), null)
+  // 「1回に使う量」で登録された食材は今までどおり（登録単位そのものが1回分なので過大にならない）
+  eq('KE-2 塩「少々」は1円のまま（登録単位が小さじ1）', keYen('塩', '少々', ''), 1)
+  eq('KE-2 塩こしょう「少々」は5円のまま（登録単位が少々）', keYen('塩こしょう', '少々', ''), 5)
+  eq('KE-2 片栗粉「適量」は5円のまま（登録単位が大さじ1）', keYen('片栗粉', '適量', ''), 5)
+  eq('KE-2 白いりごま「適量」は15円のまま（登録単位が大さじ1）', keYen('白いりごま', '適量', ''), 15)
+  eq('KE-2 揚げ油「適量」は40円のまま（登録単位が使用分）', keYen('揚げ油', '適量', ''), 40)
+  eq('KE-2 しょうが「少々」は20円のまま（登録単位が1かけ）', keYen('しょうが', '少々', ''), 20)
+  // 便JG・便BYで決めた按分はそのまま（回帰）
+  eq('KE-2 分量なしのこしょうは2円のまま（便JG-4）', keYen('こしょう', '', ''), 2)
+  eq('KE-2 分量なしのサラダ油は6円のまま（便JG-4）', keYen('サラダ油', '', ''), 6)
+  eq('KE-2 ごま油「適量」は6円のまま（便BY/COST-01）', keYen('ごま油', '適量', ''), 6)
+
+  // --- KE-3: 実データの品ぜんぶを、1食あたりの金額で見張る ---
+  {
+    // 厚揚げニラ玉（2人分・クックパッド。実勢は1食100円前後）
+    const niratama = [
+      { name: '厚揚げ 二個入りの', amount: '1', unit: '個' },
+      { name: 'ニラ', amount: '半束', unit: '' },
+      { name: '卵', amount: '1〜2', unit: '個' },
+      { name: '小松菜', amount: '2', unit: '、3茎' },
+      { name: 'オイスターソース', amount: '大匙2', unit: '' },
+      { name: '醤油', amount: '大匙1', unit: '' },
+      { name: '酒', amount: '大匙2', unit: '' },
+      { name: '中華スープの素', amount: '2', unit: '小さじ' },
+    ]
+    eq('KE-3 厚揚げニラ玉の1食が417円ではない', kePerServing(niratama, 2) !== 417, true)
+    eq('KE-3 厚揚げニラ玉の1食は150円以下', kePerServing(niratama, 2) <= 150, true)
+    // つくねの照り焼き（2人分・クックパッド。材料の最後に配合比の注記が1行入っている）
+    const tsukune = [
+      { name: '鶏ムネ肉', amount: '300', unit: 'g' },
+      { name: '玉葱', amount: '1/2', unit: '個' },
+      { name: 'すりおろし生姜（チューブＯＫ）', amount: '小1', unit: '' },
+      { name: '醤油、ごま油', amount: '各大1/2', unit: '' },
+      { name: '酒', amount: '大1', unit: '' },
+      { name: '片栗粉', amount: '大2', unit: '' },
+      { name: '塩・コショウ', amount: '少々', unit: '' },
+      { name: '酒', amount: '大4', unit: '' },
+      { name: '醤油', amount: '大3', unit: '' },
+      { name: 'みりん', amount: '大3', unit: '' },
+      { name: '砂糖', amount: '大2', unit: '' },
+      { name: '醤油', amount: '砂糖 みりん 1 1 1', unit: '' },
+    ]
+    eq('KE-3 つくねの照り焼きの1食が386円ではない', kePerServing(tsukune, 2) !== 386, true)
+    eq('KE-3 つくねの照り焼きの1食は250円以下', kePerServing(tsukune, 2) <= 250, true)
+    // 一番おかしかった2品には印が1つも付いていなかった。厚揚げニラ玉は主材料の厚揚げ・小松菜が
+    // 読めない書き方（「厚揚げ 二個入りの」「小松菜 2｜、3茎」）なので、印が出るのが正しい
+    eq('KE-3 厚揚げニラ玉に「価格が分からない材料」の印が出る', recipeCostConfidence(niratama, keIndex).shouldWarn, true)
+    // つくねの照り焼きは、配合比の注記行に乗っていた400円が消えて金額そのものが正しくなる。
+    // 材料はすべて価格が付くので印は出ない（出ないのが正しい）
+    eq('KE-3 つくねの照り焼きの1食は186円（旧386円）', kePerServing(tsukune, 2), 186)
+    // 簡単！もやしのナムル（2人分。薬味の「少々」「大1」に1玉・1本ぶんが乗っていた）
+    const namuru = [
+      { name: 'もやし', amount: '1', unit: '袋' },
+      { name: 'にんにく', amount: '少々', unit: '' },
+      { name: '生姜', amount: '少々', unit: '' },
+      { name: 'ねぎ', amount: '大1', unit: '' },
+      { name: '塩、胡椒', amount: '少々', unit: '' },
+      { name: 'ごま油', amount: '大1', unit: '' },
+      { name: 'ごま', amount: '少々', unit: '' },
+    ]
+    eq('KE-3 もやしのナムルの1食が115円ではない', kePerServing(namuru, 2) !== 115, true)
+    eq('KE-3 もやしのナムルの1食は60円以下', kePerServing(namuru, 2) <= 60, true)
+  }
+
+  // --- KE-4: この層の主力食材が食材価格マスタに無い ---
+  // 実測: 厚揚げ7回・小松菜3回・豆苗・大豆の水煮・キムチ が「価格なし」。
+  // 厚揚げは30品中8品で使われていて1品も金額に入っていなかった
+  for (const [written, expected] of [
+    ['厚揚げ', '厚揚げ'],
+    ['小松菜', '小松菜'],
+    ['豆苗', '豆苗'],
+    ['大豆の水煮', '大豆水煮'],
+    ['キムチ', 'キムチ'],
+    ['白菜キムチ', 'キムチ'],
+  ]) {
+    eq(`KE-4 「${written}」が価格マスタの「${expected}」に当たる`, matchPriceEntry(written, keIndex)?.normalizedName ?? 'なし', expected)
+  }
+  eq('KE-4 厚揚げ1枚に値段が付く', keYen('厚揚げ', '1', '枚') > 0, true)
+  eq('KE-4 小松菜1束に値段が付く', keYen('小松菜', '1', '束') > 0, true)
+  // 誤爆の見張り: 似た名前の別食材を巻き込んでいないか
+  eq('KE-4 「油揚げ」は厚揚げに化けない', matchPriceEntry('油揚げ', keIndex)?.normalizedName, '油揚げ')
+  eq('KE-4 「豆腐」は豆苗に化けない', matchPriceEntry('豆腐', keIndex)?.normalizedName, '豆腐')
+  eq('KE-4 「蒸し大豆」は蒸し大豆のまま', matchPriceEntry('蒸し大豆', keIndex)?.normalizedName, '蒸し大豆')
+  eq('KE-4 「小松菜」で「こまつな」以外に当たらない', matchPriceEntry('ほうれん草', keIndex)?.normalizedName, 'ほうれん草')
+
+  // --- KE-5: 買い物メモの名寄せ（合わせ調味料の記号・但し書きが名前に残る） ---
+  // 実測: 下書き113行のうち33行(29%)が材料でない行。19組・のべ70行が同じ食材なのに別行だった
+  {
+    const rows = (ings) =>
+      buildShoppingCandidates([{ id: 1, ingredients: ings }], []).map((c) => c.name)
+    eq('KE-5 ★〇a.の記号が付いた酒は「酒」1行にまとまる', rows([
+      { name: '酒', amount: '大さじ1', unit: '' },
+      { name: '★酒', amount: '大さじ1', unit: '' },
+      { name: '〇酒', amount: '大さじ1', unit: '' },
+      { name: 'a. 酒', amount: '大さじ1', unit: '' },
+    ]), ['酒'])
+    eq('KE-5 「厚揚げ 二個入りの」は「厚揚げ」にまとまる', rows([
+      { name: '厚揚げ', amount: '1', unit: 'パック' },
+      { name: '厚揚げ 二個入りの', amount: '1', unit: '個' },
+    ]), ['厚揚げ'])
+    // 「最後にごま油」のように**食材名の前に手順の言葉が付いた行**は、まだまとまらない
+    // （名前の頭が食材名でないため。取り込みの時点で落とすほうが筋なので次の便へ回した）
+    eq('KE-5 「★ゴマ油」「ごま油(仕上げ用) 〜」は「ごま油」にまとまる', rows([
+      { name: 'ごま油', amount: '小さじ1', unit: '' },
+      { name: '★ゴマ油', amount: '大さじ1/2', unit: '' },
+      { name: 'ごま油(仕上げ用) 〜', amount: '小さじ1', unit: '' },
+    ]), ['ごま油'])
+    // 成分表では同じ食品に寄るが、店では別に買うものは分けたまま（名寄せの誤爆を防ぐ見張り）
+    for (const [a, b] of [
+      ['塩', '塩こしょう'],
+      ['白いりごま', '白すりごま'],
+      ['焼きのり', '刻みのり'],
+      ['鶏もも肉', '鶏ももひき肉'],
+      ['だし汁', 'カツオだし（顆粒）'],
+      ['しょうが', '紅しょうが'],
+      ['赤唐辛子', '一味唐辛子'],
+      ['ピザ用チーズ', '粉チーズ'],
+      ['卵', '錦糸卵'],
+    ]) {
+      eq(`KE-5 「${a}」と「${b}」は別行のまま`, rows([
+        { name: a, amount: '1', unit: '' },
+        { name: b, amount: '1', unit: '' },
+      ]).length, 2)
+    }
+    eq('KE-5 「おろし生姜 なくてもOK」は「おろし生姜」にまとまる', rows([
+      { name: 'おろし生姜', amount: '小さじ1', unit: '' },
+      { name: 'おろし生姜 なくてもOK', amount: '大さじ3/4', unit: '' },
+    ]), ['おろし生姜'])
+    eq('KE-5 「お好みで、小ネギ」は「小ねぎ（カット）」にまとまる', rows([
+      { name: '小ねぎ（カット）', amount: '10', unit: 'g' },
+      { name: 'お好みで、小ネギ', amount: '適量', unit: '' },
+    ]).length, 1)
+    eq('KE-5 「〇コチュジャン（なくてもOK）」は「コチュジャン」にまとまる', rows([
+      { name: 'コチュジャン', amount: '小さじ1/4', unit: '' },
+      { name: '〇コチュジャン（なくてもOK）', amount: '大さじ3/4', unit: '' },
+    ]), ['コチュジャン'])
+    // 名寄せしてはいけない組（別の売り場・別の食材）
+    eq('KE-5 「豆腐」と「高野豆腐」は別行のまま', rows([
+      { name: '豆腐', amount: '1', unit: '丁' },
+      { name: '高野豆腐', amount: '2', unit: '枚' },
+    ]).length, 2)
+    eq('KE-5 「厚揚げ」と「油揚げ」は別行のまま', rows([
+      { name: '厚揚げ', amount: '1', unit: 'パック' },
+      { name: '油揚げ', amount: '2', unit: '枚' },
+    ]).length, 2)
+    eq('KE-5 「卵」と「砂糖（卵用）」は別行のまま', rows([
+      { name: '卵', amount: '2', unit: '個' },
+      { name: '砂糖（卵用）', amount: '大さじ1', unit: '' },
+    ]).length, 2)
+  }
+
+  // --- KE-6: 同じ次元の単位は足す／同じ言葉は畳む ---
+  // 実測: 36行中12行(33%)が「そのままでは何をいくつ買えばよいか決められない」行だった
+  {
+    const amountOf = (ings) =>
+      buildShoppingCandidates([{ id: 1, ingredients: ings }], [])[0]?.amount
+    eq('KE-6 酢 小さじ1＋大さじ1 が足される（旧: 「小さじ1・大さじ1」）',
+      amountOf([
+        { name: '酢', amount: '1', unit: '小さじ' },
+        { name: '酢', amount: '1', unit: '大さじ' },
+      ]), '大さじ1と1/4')
+    eq('KE-6 サラダ油 大さじ2＋小さじ1 が足される',
+      amountOf([
+        { name: 'サラダ油', amount: '2', unit: '大さじ' },
+        { name: 'サラダ油', amount: '1', unit: '小さじ' },
+      ]), '大さじ2と1/4')
+    eq('KE-6 g と kg が足される（店頭で読むgに寄せる）',
+      amountOf([
+        { name: '切り干し大根', amount: '300', unit: 'g' },
+        { name: '切り干し大根', amount: '1', unit: 'kg' },
+      ]), '1300g')
+    // 成分表の目安量（もやし1袋=200g・厚揚げ1枚=150g）があれば、袋・枚とgも足せる
+    eq('KE-6 もやし 600g＋4と1/2袋 が「7と1/2袋」になる（旧: 3つ並べて出していた）',
+      amountOf([
+        { name: 'もやし', amount: '600', unit: 'g' },
+        { name: 'もやし', amount: '4.5', unit: '袋' },
+      ]), '7と1/2袋')
+    eq('KE-6 厚揚げ 300g＋1枚 が「3枚」になる',
+      amountOf([
+        { name: '厚揚げ', amount: '300', unit: 'g' },
+        { name: '厚揚げ', amount: '1', unit: '枚' },
+      ]), '3枚')
+    eq('KE-6 「少々」が7つ並ばず1つに畳まれる',
+      amountOf(Array.from({ length: 7 }, () => ({ name: '塩コショウ', amount: '少々', unit: '' }))), '少々')
+    eq('KE-6 「適量」と「少々」は別の言葉なので両方残す',
+      amountOf([
+        { name: '塩', amount: '適量', unit: '' },
+        { name: '塩', amount: '少々', unit: '' },
+      ]), '適量・少々')
+    // 「個」と「玉」は成分表の玉ねぎがどちらも同じ重さで持っているので足せる
+    // （旧: 「1個・1/2玉」と並び、2個買えばよいのか決められなかった）
+    eq('KE-6 玉ねぎの「1個」と「1/2玉」は足して「1と1/2個」',
+      amountOf([
+        { name: '玉ねぎ', amount: '1', unit: '個' },
+        { name: '玉ねぎ', amount: '1/2', unit: '玉' },
+      ]), '1と1/2個')
+  }
+}
 
 // ---------- 結果 ----------
 console.log(`合格: ${passed}件 / 失敗: ${failures.length}件`)

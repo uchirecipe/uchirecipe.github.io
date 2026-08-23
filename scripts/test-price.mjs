@@ -75,7 +75,9 @@ for (const [name, count] of nameCounts) {
 // 2026-08-22 便JG: オーナーの実データ31品で「価格なし」だった常用食材12件を追加して169→181件
 // （卵黄・卵白・生クリーム・赤ワイン・ローリエ・えんどう豆・ホットケーキミックス・無塩バター・
 //   マッシュルーム・粉砂糖・青ねぎ・塩鮭）。「粗びき黒こしょう」→「黒こしょう」は改名なので増えない
-const PRICE_DEFAULTS_COUNT = 181
+// 2026-08-23 便KE: 影響範囲テストA(節約したい人の30品)で「価格なし」だった主力食材5件を追加して
+// 181→186件（厚揚げ・小松菜・豆苗・大豆水煮・キムチ）
+const PRICE_DEFAULTS_COUNT = 186
 check(
   PRICE_DEFAULTS.length === PRICE_DEFAULTS_COUNT,
   `PRICE_DEFAULTSの件数が想定と違う: 実際=${PRICE_DEFAULTS.length}件 / 想定=${PRICE_DEFAULTS_COUNT}件。` +

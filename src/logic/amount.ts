@@ -2,12 +2,17 @@
 // ひらがな表記「おおさじ」「こさじ」も同じ扱いにする(2026-07-28 便BW・QA S3: 「おおさじ2」と
 // 入力すると単位が後ろに回って「2おおさじ」と表示されていた。表記は原文のまま尊重し、
 // 並び順と丸め幅だけを大さじ/小さじと揃える)
-const SPOON_UNITS = new Set(['大さじ', '小さじ', 'カップ', 'おおさじ', 'こさじ'])
+// 「大匙」「小匙」(漢字表記)も同じ扱いにする(2026-08-23 便KE。クックパッドの実レシピで
+// 普通に使われる書き方。「大さじ」「大3」は読めるのに「大匙1」だけ読めず、原価では
+// 醤油 大匙1 に1L1本ぶんの400円が乗り、買い物メモでは「大さじ14と3/4・大匙2」と別枠に並んでいた)
+const SPOON_UNITS = new Set(['大さじ', '小さじ', 'カップ', 'おおさじ', 'こさじ', '大匙', '小匙'])
 // 個数として数える単位: 0.5刻み(最小0.5、0にはしない)。
 // 「房」は2026-07-21分量表記拡充で追加(「ひと房」の解釈用。src/logic/priceEstimate.tsの
 // COUNT_UNIT_NAMESには元から入っていたが、こちらは漏れていた表記ゆれ)
+// 「パック」は 2026-08-23 便KE で追加（unitGrams.ts の COUNT_UNIT_NAMES には元から入っていた
+// 取りこぼし。買い物メモに「豆苗 0.5パック」「厚揚げ 4.5パック」と小数で出ていた）
 const COUNT_UNITS = new Set([
-  '個', '本', '枚', '切れ', '丁', '缶', '袋', '束', 'かけ', '尾', '玉', '株', '合', '片', '箱', '杯', '節', '房',
+  '個', '本', '枚', '切れ', '丁', '缶', '袋', '束', 'かけ', '尾', '玉', '株', '合', '片', '箱', '杯', '節', '房', 'パック',
 ])
 // 重量・容量: 10未満は整数、10以上は5刻み、100以上は10刻み
 const WEIGHT_VOLUME_UNITS = new Set(['g', 'ml', 'cc'])
@@ -129,9 +134,25 @@ export interface AbbreviatedSpoonAmount {
   value: number
   /** 展開後の正式な単位名（convertToGrams・normalizeUnit等の計算関数にそのまま渡せる） */
   unit: '大さじ' | '小さじ'
-  /** 元の略記1文字（表示の再構成用。「大さじ」ではなく「大」のまま残す） */
-  prefix: '大' | '小'
+  /** 元の書き方（表示の再構成用。「大さじ」に開かず「大」「大匙」のまま残す） */
+  prefix: string
 }
+
+/**
+ * 分量欄の頭に付く「大さじ」の書き方（2026-08-23 便KE で「大匙」「小匙」を追加）。
+ * 長いものから順に当てる（「大」だけの略記が「大匙」より先に当たらないようにするため）。
+ * 値は増やしていない＝どれも大さじ15ml・小さじ5ml（JIS S 2052）の書き方ちがいでしかない。
+ */
+const SPOON_PREFIXES: [written: string, unit: '大さじ' | '小さじ'][] = [
+  ['大さじ', '大さじ'],
+  ['小さじ', '小さじ'],
+  ['おおさじ', '大さじ'],
+  ['こさじ', '小さじ'],
+  ['大匙', '大さじ'],
+  ['小匙', '小さじ'],
+  ['大', '大さじ'],
+  ['小', '小さじ'],
+]
 
 export function parseAbbreviatedSpoonAmount(
   amount: string,
@@ -139,16 +160,19 @@ export function parseAbbreviatedSpoonAmount(
 ): AbbreviatedSpoonAmount | null {
   if (unit && unit.trim()) return null
   const trimmed = normalizeAmountInput(amount.trim())
-  const match = trimmed.match(/^([大小])(\d+(?:\.\d+)?)(?:\s*\/\s*(\d+(?:\.\d+)?))?$/)
+  const found = SPOON_PREFIXES.find(([written]) => trimmed.startsWith(written))
+  if (!found) return null
+  const [prefix, spoonUnit] = found
+  const rest = trimmed.slice(prefix.length)
+  const match = rest.match(/^(\d+(?:\.\d+)?)(?:\s*\/\s*(\d+(?:\.\d+)?))?$/)
   if (!match) return null
-  let value = Number.parseFloat(match[2])
-  const denominator = match[3] ? Number.parseFloat(match[3]) : undefined
+  let value = Number.parseFloat(match[1])
+  const denominator = match[2] ? Number.parseFloat(match[2]) : undefined
   if (denominator !== undefined) {
     if (denominator === 0) return null
     value /= denominator
   }
-  const prefix = match[1] as '大' | '小'
-  return { value, unit: prefix === '大' ? '大さじ' : '小さじ', prefix }
+  return { value, unit: spoonUnit, prefix }
 }
 
 /**
@@ -177,7 +201,7 @@ const COUNTER_WORD_ONE: Record<string, string> = {
 }
 
 export interface CounterWordAmount {
-  value: 1
+  value: number
   unit: string
 }
 
@@ -185,7 +209,22 @@ export function parseCounterWordAmount(amount: string, unit?: string): CounterWo
   if (unit && unit.trim()) return null
   const trimmed = normalizeAmountInput(amount.trim())
   const resolvedUnit = COUNTER_WORD_ONE[trimmed]
-  return resolvedUnit ? { value: 1, unit: resolvedUnit } : null
+  if (resolvedUnit) return { value: 1, unit: resolvedUnit }
+  return parseHalfCounterAmount(trimmed)
+}
+
+/**
+ * 「半束」「半個」「半玉」のような「半＋助数詞」を 0.5 として読む（2026-08-23 便KE）。
+ * 上の COUNTER_WORD_ONE（「ひとかけ」＝1つぶん）と対になる書き方で、
+ * 影響範囲テストA では「ニラ 半束」がこれに当たり、単位として読めないまま
+ * にら1束100円の満額が1行に乗っていた（買い物メモでも「1/2束～・半束」と別枠に並んでいた）。
+ * **新しい換算値は作らない**——既にある助数詞（束・個・本…）の半分と読むだけ。
+ * 「半分」のように助数詞が続かない書き方は、何の半分か決まらないので読まない。
+ */
+function parseHalfCounterAmount(trimmed: string): CounterWordAmount | null {
+  if (!trimmed.startsWith('半') || trimmed.length < 2) return null
+  const unit = trimmed.slice(1)
+  return COUNT_UNITS.has(unit) ? { value: 0.5, unit } : null
 }
 
 /**
@@ -276,8 +315,8 @@ export function scaleAmount(
     return spoonAbbrev.prefix + formatFraction(rounded)
   }
 
-  // 「ひとかけ」「一房」のような和語の個数詞(単位欄が空の時のみ)。スケール後は「1」の意味が
-  // 崩れるため、通常の個数表記(「2かけ」等・数値→単位の順)に切り替える
+  // 「ひとかけ」「一房」「半束」のような和語の個数詞(単位欄が空の時のみ)。スケール後は
+  // 「ひと」「半」の意味が崩れるため、通常の個数表記(「2かけ」「1/2束」等・数値→単位の順)に切り替える
   const counterWord = parseCounterWordAmount(trimmed, normalizedUnit)
   if (counterWord) {
     const scaled = (counterWord.value * targetServings) / baseServings

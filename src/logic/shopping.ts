@@ -1,4 +1,4 @@
-import { toPantryKey } from './kana'
+import { stripIngredientNoise, toIngredientKey, toPantryKey } from './kana'
 import { isSeasoningLike } from './mainIngredients'
 import {
   formatAmountUnit,
@@ -8,6 +8,7 @@ import {
   resolveCalcAmount,
 } from './amount'
 import { categorizePantryName, normalizeAisleOrder } from './pantryGroups'
+import { normalizeUnit, normalizeUnitText } from './unitGrams'
 import { shiftDate } from './mealPlan'
 import { convertToGrams, matchNutritionFood } from './nutrition'
 import { ja } from '../i18n/ja'
@@ -224,12 +225,37 @@ function resolvePart(part: AmountPart): ResolvedPart {
   const original = formatAmountUnit(normalizeAmountInput(part.amount.trim()), part.unit)
   const calc = resolveCalcAmount(part.amount, part.unit)
   if (calc) return { original, unit: calc.unit, value: calc.value, scale: part.scale }
-  return { original, unit: part.unit.trim(), value: parseAmountNumber(part.amount), scale: part.scale }
+  // 単位欄は normalizeUnitText で下ごしらえする（2026-08-23 便KE）。元ページの「100g～」が
+  // 分量「100」＋単位「g～」に割れていて、同じ食材の「170g」と別枠に並んでいた
+  return {
+    original,
+    unit: normalizeUnitText(part.unit),
+    value: parseAmountNumber(part.amount),
+    scale: part.scale,
+  }
+}
+
+/**
+ * 同じ次元（質量どうし・体積どうし）の単位を1つにまとめるための表示単位を選ぶ（2026-08-23 便KE）。
+ * - 質量は g に寄せる（買い物メモは「◯g買う」で読むため。kg・mg は g に換算される）
+ * - 体積は、並んでいる単位のうち **合計が1以上になるいちばん大きい単位** を選ぶ
+ *   （小さじ1＋大さじ1＝20ml なら「大さじ1と1/4」。1未満にしかならなければいちばん小さい単位）
+ * 個数（個・本・枚…）は次元をまたいで足せないので、この関数の対象外＝従来どおり並べて出す。
+ */
+function pickMergedUnit(units: string[], totalBase: number, factorOf: (unit: string) => number | null): string {
+  // 質量どうし（g・kg・mg）は同じ単位の書き方ちがいなので、店頭で読む「g」に寄せて候補を1つにする
+  const candidates = units.map((unit) => (normalizeUnit(1, unit)?.dim === 'mass' ? 'g' : unit))
+  const factors = [...new Set(candidates)]
+    .map((unit) => ({ unit, factor: factorOf(unit) }))
+    .filter((u): u is { unit: string; factor: number } => u.factor != null && u.factor > 0)
+    .sort((a, b) => b.factor - a.factor)
+  if (factors.length === 0) return units[0]
+  return (factors.find((u) => totalBase / u.factor >= 1) ?? factors[factors.length - 1]).unit
 }
 
 /**
  * 単位ごとにグループ化し、数値化できるものはグループ内で合計する
- * （例:「大さじ2」+「大さじ3」+「小さじ1」→「大さじ5・小さじ1」）。
+ * （例:「大さじ2」+「大さじ3」+「小さじ1」→「大さじ5と1/3」）。
  * 数値化できないもの（「少々」等）はそのまま列挙する。
  * 各パーツの scale（指定食数スケール）は数値化できる分量にのみ掛ける。
  *
@@ -240,8 +266,15 @@ function resolvePart(part: AmountPart): ResolvedPart {
  *   「62.5g」「0.3箱」のような店頭で行動に移せない粒度が出ていた（C11）。
  * - 同じ単位に数値化できない分量が1つでも混ざるとグループ全体が原文列挙になり、数値側の
  *   食数スケールまで落ちていたのを、数値側と原文側を分けて両方出すようにした（C12）。
+ *
+ * 2026-08-23 便KE で2点追加（影響範囲テストA。36行のうち12行が「何をいくつ買えばよいか
+ * 決められない」行だった）:
+ * - **同じ次元の単位を足す**。`酢 小さじ1・大さじ1` `サラダ油 大さじ2・小さじ1` のように、
+ *   換算できる単位どうしが別々に並んでいた（unitGrams.ts に換算表があるのに使っていなかった）。
+ * - **同じ言葉は1つに畳む**。`塩コショウ 少々・少々・少々・少々・少々・少々・少々` のように
+ *   同じ文字が7つ並ぶことがあり、読む人が困るだけで情報が増えていなかった。
  */
-function combineAmounts(parts: AmountPart[]): string {
+function combineAmounts(parts: AmountPart[], name?: string): string {
   const nonEmpty = parts.filter((p) => p.amount.trim() || p.unit.trim())
   if (nonEmpty.length === 0) return ''
 
@@ -253,20 +286,78 @@ function combineAmounts(parts: AmountPart[]): string {
     else groups.set(resolved.unit, [resolved])
   }
 
-  const texts: string[] = []
+  // その食材の目安量（「1袋=200g」「1枚=150g」。成分表＝栄養側が持っている値）。
+  // 単位の名前だけでは足せない組（もやし「600g」と「4と1/2袋」）を足すのに使う。
+  // 新しい重さは作らず、アプリが既に持っている目安量をそのまま使う（2026-08-23 便KE）
+  const food = name ? matchNutritionFood(name) : undefined
+  /** その単位1つぶんが、まとまりの基準量（質量ならg・体積ならml）でいくつぶんか */
+  const factorOf = (unit: string): number | null => {
+    const normalized = normalizeUnit(1, unit)
+    if (normalized?.dim === 'mass' || normalized?.dim === 'volume') return normalized.base
+    return food ? convertToGrams(1, unit, food) : null
+  }
+  const dimensionKeyOf = (unit: string): string => {
+    const dim = normalizeUnit(1, unit)?.dim
+    if (dim === 'mass' || dim === 'volume') return `次元:${dim}`
+    // 個数の単位でも、その食材の目安量（もやし1袋=200g・厚揚げ1枚=150g）があればグラムに寄せて足せる
+    const grams = food ? convertToGrams(1, unit, food) : null
+    return grams != null && grams > 0 ? '次元:mass' : `単位:${unit}`
+  }
+
+  // 数値化できたぶんを次元ごとにまとめ直す。足せない単位（「1個」と「1本」のように
+  // 目安量が無くて比べられないもの）は単位名ごとに分けたまま並べる。
+  // 出す順番は元の並び（最初に出てきた順）を保つ
+  interface Bucket { units: string[]; items: ResolvedPart[] }
+  const slots: ({ kind: 'bucket'; bucket: Bucket } | { kind: 'raw'; text: string })[] = []
+  const bucketByKey = new Map<string, Bucket>()
   for (const [unit, items] of groups) {
     const numeric = items.filter((p) => p.value != null)
-    const raw = items.filter((p) => p.value == null)
-    if (numeric.length === 1 && numeric[0].scale === 1) {
-      // 等倍（指定食数＝レシピの登録人数）で1レシピ分だけなら、計算する必要がないので原文を
-      // そのまま見せる。「1/3本」を丸めて「1/2本」にしてしまわず、レシピ詳細の表示と一致する
-      texts.push(numeric[0].original)
-    } else if (numeric.length > 0) {
-      const total = numeric.reduce((sum, p) => sum + p.value! * p.scale, 0)
-      texts.push(formatAmountUnit(formatScaledAmount(total, unit), unit))
+    if (numeric.length > 0) {
+      const key = dimensionKeyOf(unit)
+      let bucket = bucketByKey.get(key)
+      if (!bucket) {
+        bucket = { units: [], items: [] }
+        bucketByKey.set(key, bucket)
+        slots.push({ kind: 'bucket', bucket })
+      }
+      if (!bucket.units.includes(unit)) bucket.units.push(unit)
+      bucket.items.push(...numeric)
     }
     // 「少々」など数値化できない分量は食数スケールを掛けられないので原文のまま併記する
-    texts.push(...raw.map((p) => p.original))
+    for (const p of items) if (p.value == null) slots.push({ kind: 'raw', text: p.original })
+  }
+
+  const texts: string[] = []
+  const push = (text: string) => {
+    // 同じ文字が並ぶだけの行（「少々・少々・…」）は1つに畳む
+    if (!texts.includes(text)) texts.push(text)
+  }
+  for (const slot of slots) {
+    if (slot.kind === 'raw') {
+      push(slot.text)
+      continue
+    }
+    const { units, items } = slot.bucket
+    if (items.length === 1 && items[0].scale === 1) {
+      // 等倍（指定食数＝レシピの登録人数）で1レシピ分だけなら、計算する必要がないので原文を
+      // そのまま見せる。「1/3本」を丸めて「1/2本」にしてしまわず、レシピ詳細の表示と一致する
+      push(items[0].original)
+      continue
+    }
+    if (units.length === 1) {
+      const unit = units[0]
+      const total = items.reduce((sum, p) => sum + p.value! * p.scale, 0)
+      push(formatAmountUnit(formatScaledAmount(total, unit), unit))
+      continue
+    }
+    // 単位が混ざっているので、いったん基準量（g・ml）で足してから表示単位を選ぶ
+    const totalBase = items.reduce(
+      (sum, p) => sum + (factorOf(p.unit) ?? 0) * p.value! * p.scale,
+      0,
+    )
+    const unit = pickMergedUnit(units, totalBase, factorOf)
+    const factor = factorOf(unit) ?? 1
+    push(formatAmountUnit(formatScaledAmount(totalBase / factor, unit), unit))
   }
   return texts.join('・')
 }
@@ -465,14 +556,87 @@ export function formatShoppingRangeLabel(input: {
  * 各レシピは任意で scale（指定食数スケール。2026-07-23 #3「食数の+/-」方式で
  * targetServings ÷ recipe.servings を渡す）を持てる。未指定は1（＝1回分そのまま）。
  */
+/**
+ * 買い物メモで「同じ食材か」を見るときの照合キー（2026-08-23 便KE）。
+ *
+ * 【なぜ toPantryKey だけでは足りないか】影響範囲テストA（節約したい人の実データ30品）の
+ * 買い物メモは113行あり、そのうち19組・のべ70行が「同じ食材なのに別の行」だった。
+ * 名寄せの仕組み自体は動いていて（醤油＝しょうゆ、しょうが＝生姜は1行になっていた）、
+ * 弾かれていたのは **名前に飾りが残った行** と **書き方が違うだけの行** の2種類:
+ *   `★酒` `〇酒` `a. 酒` が `酒` と別行（合わせ調味料の印）
+ *   `厚揚げ 二個入りの` `豚こま 約` `最後にごま油` `おろし生姜 なくてもOK` が本体と別行
+ *   `ほんだし` `和風顆粒だし` `だしの素` が3行（同じ和風だしの素）
+ *
+ * そこで①飾りを落とし（stripIngredientNoise）、②それでも文字が違うものは
+ * **成分表（栄養）の食品**に解決して、同じ食品なら同じキーにする。
+ * ②は原価側が既に持っている手当て（priceEstimate.ts の matchPriceEntryViaNutritionFood）と
+ * 同じ考え方で、成分表の名寄せは docs/47 で監査済み。**部分一致には寄せない**ので、
+ * 在庫「豆腐」が「高野豆腐」に、「卵」が「砂糖（卵用）」に当たることは起きない
+ * （どちらも成分表では別の食品に解決する＝実測で確認済み）。
+ * 成分表に無い食材（豆苗・キムチ・炒め油 など）は従来どおり toPantryKey の完全一致に落ちる。
+ */
+/**
+ * 成分表では同じ食品に解決するが、**店では別に買うもの**（2026-08-23 便KE）。
+ * 成分表の別名は「栄養の値としては同じでよい」という基準で作られているので、
+ * 買い物メモの名寄せにそのまま使うと売り場で別の商品どうしが1行になる。
+ * 影響範囲テストA・B・Cと同梱109品の材料名435種を1件ずつ見て、実際に起きた組だけを挙げる:
+ *  ・塩こしょう … 成分表に無く「塩」に解決する（食材価格マスタは別項目で持っている）
+ *  ・すりごま／白すりごま … 成分表では「いりごま」の別名。売り場では擂ったものと粒のもので別
+ *  ・刻みのり … 成分表では「焼きのり」の別名。売り場では別の袋
+ *  ・ひき肉 … 成分表では部位の肉に寄る（鶏ももひき肉→鶏もも肉）。売り場では別のパック
+ *  ・顆粒のだし … 成分表では「だし汁」に寄る（カツオだし（顆粒）→だし汁）。だし汁は作るもの
+ */
+const SHOP_SEPARATELY_WORDS = ['しおこしょう', 'すりごま', '刻みのり', 'ひきにく', 'ひき肉'].map(
+  (word) => toPantryKey(word),
+)
+/** 括弧書きに入っていることが多いので、括弧を落とす前の名前で見る語 */
+const SHOP_SEPARATELY_RAW_WORDS = ['顆粒', '粉末']
+
+function isShopSeparately(key: string, cleaned: string): boolean {
+  return (
+    SHOP_SEPARATELY_WORDS.some((word) => key.includes(word)) ||
+    SHOP_SEPARATELY_RAW_WORDS.some((word) => cleaned.includes(word))
+  )
+}
+
+export function toShoppingKey(name: string): string {
+  const cleaned = stripIngredientNoise(name)
+  const key = toPantryKey(cleaned)
+  if (isShopSeparately(key, cleaned)) return key
+  const food = matchNutritionFood(cleaned) ?? matchNutritionFood(name)
+  if (!food) return key
+  // 成分表の食品名（正式名か別名）で**始まっている**ときだけ同じ食品として扱う。
+  // 「厚揚げ 二個入りの」「豚こま 約」「おろし生姜 なくてもOK」のように但し書きが
+  // 後ろに付いただけの名前を拾い、**似た別の商品まで巻き込まない**ための線引き。
+  // 成分表の名寄せは「栄養の値としていちばん近い食品」を返すので、これを無条件に使うと
+  // 実測（材料名435種）で「粉チーズ→ピザ用チーズ」「紅しょうが→しょうが」
+  // 「一味唐辛子→赤唐辛子」「鶏ももひき肉→鶏もも肉」のように、店で別に買うものが
+  // 1行にまとまってしまう（栄養としては近くても、買い物メモとしては間違い）
+  const stems = [food.label, ...(food.aliases ?? [])].map(toIngredientKey)
+  return stems.some((stem) => stem && key.startsWith(stem)) ? `食品:${food.id}` : key
+}
+
+/**
+ * まとまった行に出す名前を選ぶ（2026-08-23 便KE）。
+ * 飾りを落とした形がいちばん短いものを採る（同じ長さなら先に出てきたほう）。
+ * `厚揚げ` と `厚揚げ 二個入りの` なら `厚揚げ`、`ごま油` と `最後にごま油` なら `ごま油`。
+ * 利用者が書いた言葉の中から選ぶだけで、こちらで名前を作り替えることはしない。
+ */
+function betterShoppingName(current: string, candidate: string): string {
+  const a = stripIngredientNoise(current)
+  const b = stripIngredientNoise(candidate)
+  return b.length < a.length ? b : a
+}
+
 export function buildShoppingCandidates(
   recipes: { id: number; ingredients: Ingredient[]; scale?: number }[],
   pantryHaveNames: string[],
 ): ShoppingCandidate[] {
-  // 在庫との照合は toPantryKey の完全一致に統一する(2026-07-29 便CC/C4)。
+  // 在庫との照合は買い物メモの照合キー(toShoppingKey)の完全一致に統一する
+  // (2026-07-29 便CC/C4 の toPantryKey 完全一致を、2026-08-23 便KE で飾り落とし＋成分表経由に広げた)。
   // 従来の toHiragana 完全一致では「長ねぎ（白い部分）」のような括弧付きの材料名が
   // 在庫チップ「長ねぎ」と別物になり、在庫「ある」にしても候補に出続けていた
-  const haveKeys = new Set(pantryHaveNames.map(toPantryKey))
+  const haveKeys = new Set(pantryHaveNames.map(toShoppingKey))
   const order: string[] = []
   const map = new Map<
     string,
@@ -487,20 +651,22 @@ export function buildShoppingCandidates(
       // 水・お湯のように店で買わないものは買い物メモに出さない（2026-08-22 便IX）。
       // レシピの材料一覧は触らないので、作るときに要る「ゆでる湯」の情報は残る
       if (isNotForShoppingName(rawName)) continue
-      if (haveKeys.has(toPantryKey(rawName))) continue // 在庫「ある」は候補に出さない
+      if (haveKeys.has(toShoppingKey(rawName))) continue // 在庫「ある」は候補に出さない
       // 炊いたごはんは、店で買える形＝生米のグラムに置き換えてから集計する
       // （2026-08-08 オーナー実機フィードバック。該当しない材料はそのまま返る）
       const ing = toRawRiceIngredient(raw)
       const trimmedName = ing.name.trim()
-      const key = toPantryKey(trimmedName)
+      const key = toShoppingKey(trimmedName)
       // 置き換え後の名前（米）で在庫「ある」にしてある場合も候補に出さない
       if (haveKeys.has(key)) continue
 
       let entry = map.get(key)
       if (!entry) {
-        entry = { name: trimmedName, parts: [], partsByRecipe: new Map() }
+        entry = { name: stripIngredientNoise(trimmedName), parts: [], partsByRecipe: new Map() }
         map.set(key, entry)
         order.push(key)
+      } else {
+        entry.name = betterShoppingName(entry.name, trimmedName)
       }
       const part = { amount: ing.amount, unit: ing.unit, scale }
       entry.parts.push(part)
@@ -515,11 +681,11 @@ export function buildShoppingCandidates(
     const entry = map.get(key)!
     const sources = [...entry.partsByRecipe].map(([recipeId, parts]) => ({
       recipeId,
-      amount: combineAmounts(parts),
+      amount: combineAmounts(parts, entry.name),
     }))
     return {
       name: entry.name,
-      amount: combineAmounts(entry.parts),
+      amount: combineAmounts(entry.parts, entry.name),
       recipeIds: sources.map((s) => s.recipeId),
       sources,
       isSeasoningLike: entry.parts.every(isSeasoningLike),

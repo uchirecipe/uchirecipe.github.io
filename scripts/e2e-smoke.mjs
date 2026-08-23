@@ -9066,6 +9066,47 @@ try {
     }
   }
 
+  // --- KECOST-01: 分量が読めない材料に「1本まるごとの値段」が乗らない（2026-08-23 便KE） ---
+  // 影響範囲テストA（食費を切り詰めたい人の実データ30品）で実測した不具合を、画面の数字で見張る。
+  // 直す前の同じレシピ: 醤油「大匙1」に しょうゆ1L1本ぶんの400円、酒「大匙2」に 260円、
+  // にんにく「少々」に1玉60円、ねぎ「大1」に1本100円が乗り、2人分で1食410円と出ていた
+  // （厚揚げは食材価格マスタに1件も無く「価格なし」だった）。
+  // 直したあと: 厚揚げ1枚60円＋醤油6円＋酒8円＝74円、1食37円。
+  // にんにく「少々」とねぎ「大さじ1」は量が決まらないので金額に入れず「価格が分からない材料」に数える
+  {
+    currentCheck = 'KECOST-01'
+    await page.goto(`${BASE}/#/recipes/new`, { waitUntil: 'networkidle' })
+    await page.waitForTimeout(500)
+    await page.getByText(ja.paste.open).click()
+    await page.waitForTimeout(300)
+    await page.locator(`textarea[placeholder="${ja.paste.placeholder}"]`).fill(
+      'KE原価確認レシピ\n\n材料（2人分）\n・厚揚げ　1枚\n・醤油　大匙1\n・酒　大匙2\n・にんにく　少々\n・ねぎ　大1\n\n作り方\n1. 炒める',
+    )
+    await page.getByRole('button', { name: ja.paste.apply }).click()
+    await page.waitForTimeout(300)
+    await page.getByRole('button', { name: ja.form.save }).click()
+    await page.waitForTimeout(800)
+    const keCostText = stripZwspText(await page.textContent('body'))
+    const perServing = (n) => ja.detail.pricePerServing.replace('{s}', '2').replace('{n}', String(n))
+    check(
+      'KECOST-01 「大匙」を大さじとして読み、1食37円になる',
+      keCostText.includes(perServing(37)),
+      keCostText.slice(0, 400),
+    )
+    check(
+      'KECOST-01 醤油1L・酒1Lの満額が乗った1食410円にならない',
+      !keCostText.includes(perServing(410)),
+    )
+    check(
+      'KECOST-01 量が決まらない2件は「価格が分からない材料」として知らせる',
+      keCostText.includes(ja.detail.costPricelessNote.replace('{n}', '2')),
+    )
+    check(
+      'KECOST-01 金額のうしろに印が付く',
+      keCostText.includes(ja.detail.costRoughMark),
+    )
+  }
+
   // --- PRICE-01: 食材価格マスタ(「食材と価格」画面。docs/20 §3)。
   // 材料に価格を入力していないレシピでも、マスタの目安価格が詳細の概算食費に反映され、
   // マスタの価格を編集すると反映結果も追従することを確認する。
