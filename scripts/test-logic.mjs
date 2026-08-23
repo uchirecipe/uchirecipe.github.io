@@ -29316,6 +29316,209 @@ import { safetyNotesFor, stepSafetyNotes, wholeRecipeSafetyNotes } from '../src/
   )
 }
 
+
+// ==========================================================================================
+// JP-1〜JP-3: 2026-08-23 便JP（オーナー実機の3件）
+// ==========================================================================================
+
+// ---------- JP-1: 今日の献立の行を包む「払いの器」が、カードの角を切り落としていない ----------
+//
+// オーナー原文: 「① 今日の献立のレシピカードの角が消えています。」
+//
+// 実測（3倍で撮り、角から斜め45度に進んで地の色から変わるまでの距離）:
+//   レシピ一覧のカード   … 上辺2px・左辺1px・斜め0.67px で線が出る（4pxの角がそのまま見える）
+//   今日なに作る？の候補 … 上辺2px・左辺1px・斜め0.67px（同上）
+//   今日の献立のカード   … 上辺10px・左辺10px・斜め10px まで**何も出ない**
+//     （斜め10pxで最初に出るのはカードの中の絵の色で、線の色ではない
+//      ＝1pxの線が角のまわり約11pxぶん切り落とされ、角そのものが無くなっていた）
+//
+// 原因は 2026-08-21 便IQ で足した「左へ払うと外すボタンが出る器」（SwipeRevealRow）。
+// **overflow-hidden で切り取る器の角丸が rounded-md（14px）のまま**で、翌日の便JEが
+// 並ぶカードを --radius-card（4px）にしたときに、この器だけ一緒に直っていなかった。
+// 切り取る側のほうが丸いと、中のカードの角（線）は弧の外に出て消える。
+//
+// ここで見張るのは「切り取る器の角丸が、中のカードと同じトークンであること」。
+// 画面の見え方そのものは e2e の JPCARD-01 が実測で受け持つ。
+{
+  const jpRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
+  const jpSwipe = readFileSync(path.join(jpRoot, 'src/components/SwipeRevealRow.tsx'), 'utf-8')
+  /** className の中の rounded-◯◯ を全部拾う（切り取る器かどうかは overflow-hidden で見る） */
+  const jpClipRounded = []
+  for (const m of jpSwipe.matchAll(/className="([^"]*)"/g)) {
+    const cls = m[1]
+    if (!/\boverflow-hidden\b|\boverflow-clip\b/.test(cls)) continue
+    jpClipRounded.push(...(cls.match(/\brounded-[a-z0-9[\]-]+/g) ?? ['(角丸なし)']))
+  }
+  eq(
+    'JP-1 払いの器の「切り取る枠」を読めている（0件ならこの見張りが壊れている）',
+    jpClipRounded.length > 0,
+    true,
+  )
+  eq(
+    'JP-1 切り取る器の角丸は、並ぶカードと同じトークン（rounded-card）だけ',
+    jpClipRounded.filter((c) => c !== 'rounded-card'),
+    [],
+  )
+}
+
+// ---------- JP-2: 栄養を計算できなかった料理を「どれか」まで返す ----------
+//
+// オーナー原文: 「② 計算できない料理が表示されるようになりましたが、どれが計算できなかったのか
+//   わかりません。折りたたみ開いたらレシピ名（カードでなく文字だけ。そのままリンクになっている）
+//   出して欲しいです。」
+//
+// 画面はいままで**件数しか受け取っていなかった**（PersonalNutritionSum は数だけを返していた）。
+// 数え方はそのままに、**その品のレシピIDと料理名**を一緒に返す＝画面が名前を出せるようにする。
+// 何品と数えるか（excludedDishCount / partialDishCount）は1文字も変えない。
+{
+  const jpNut = await import('../src/logic/nutrition.ts')
+  eq(
+    'JP-2 計算できなかった料理の一覧を作る道具がある（無ければ以下は測れていない）',
+    typeof jpNut.gapDishList,
+    'function',
+  )
+  const jpIng = (name, amount, unit) => ({ name, amount, unit })
+  // 全部計算できる品／量が書いてあるのに落ちる材料がある品／1品も計算できない品
+  const jpOk = { id: 1, title: 'ごはんだけ', servings: 1, ingredients: [jpIng('米', '150', 'g')] }
+  const jpPartial = {
+    id: 2,
+    title: '一部が落ちる品',
+    servings: 1,
+    ingredients: [jpIng('米', '150', 'g'), jpIng('うちレシピ架空調味料', '100', 'g')],
+  }
+  const jpExcluded = {
+    id: 3,
+    title: '1品も計算できない品',
+    servings: 1,
+    ingredients: [jpIng('うちレシピ架空調味料', '100', 'g')],
+  }
+  const jpSum = jpNut.sumPersonalNutrition([jpOk, jpPartial, jpExcluded])
+  eq('JP-2 数え方は変えていない（合計に入れた品数）', jpSum.dishCount, 2)
+  eq('JP-2 数え方は変えていない（1品も計算できない品数）', jpSum.excludedDishCount, 1)
+  eq('JP-2 数え方は変えていない（一部が落ちた品数）', jpSum.partialDishCount, 1)
+  eq(
+    'JP-2 計算できなかった品を、レシピIDと料理名で返す',
+    (jpSum.gapDishes ?? []).map((d) => `${d.kind}:${d.id}:${d.title}`),
+    ['partial:2:一部が落ちる品', 'excluded:3:1品も計算できない品'],
+  )
+  eq(
+    'JP-2 ぜんぶ計算できた品は一覧に入れない',
+    (jpSum.gapDishes ?? []).some((d) => d.id === 1),
+    false,
+  )
+  // 期間の合計は日ごとの合計を足して作る＝同じ料理が何日も出る。名前は1回だけ出す
+  const jpMerged = jpNut.addPersonalNutritionSum(
+    jpNut.sumPersonalNutrition([jpPartial, jpExcluded]),
+    jpNut.sumPersonalNutrition([jpPartial]),
+  )
+  eq('JP-2 足しても件数は延べで数える（2日ぶんの「一部が落ちた品」は2品）', jpMerged.partialDishCount, 2)
+  if (typeof jpNut.gapDishList === 'function') {
+    eq(
+      'JP-2 同じ料理が何日も出ても、名前の一覧では1回だけにする',
+      jpNut.gapDishList(jpMerged).map((d) => d.title),
+      ['一部が落ちる品', '1品も計算できない品'],
+    )
+    eq(
+      'JP-2 一覧は「1品も計算できない品」と「一部が落ちた品」を分けて取り出せる',
+      [
+        jpNut.gapDishList(jpMerged, 'excluded').map((d) => d.title),
+        jpNut.gapDishList(jpMerged, 'partial').map((d) => d.title),
+      ],
+      [['1品も計算できない品'], ['一部が落ちる品']],
+    )
+    // ごはん（便CW-10で足す1杯）はレシピIDを持たない擬似レシピ。名前もリンク先も無いので一覧に入れない
+    const jpBalance = await import('../src/logic/nutritionBalance.ts')
+    const jpRice = jpNut.sumPersonalNutrition([jpBalance.RICE_SERVING_RECIPE])
+    eq(
+      'JP-2 レシピIDを持たない品（足したごはん）は名前の一覧に入れない',
+      jpNut.gapDishList(jpRice).length,
+      0,
+    )
+  }
+}
+
+// ---------- JP-3: 手間レベルが「普通」の品は、カードにバッジを出さない ----------
+//
+// オーナー原文: 「③（手間レベル）推奨通り。絞り込みでどういう扱いになる？」
+//   ＝司令部の推奨（C案＋バッジを出さない）どおり。
+// 「普通」は**選ばなければそうなる既定値**（レシピ登録の未入力扱いも normal・
+// src/pages/RecipeFormPage.tsx）で、人が選んだ結果ではない。並ぶカードの大半が
+// 同じ「普通」で埋まると、見比べる手がかりにならない。
+//
+// 2026-08-23 追補（オーナー指示「絞り込みからも普通はずして」）: **絞り込みの選択肢からも外す**。
+// 既定値の「普通」には、選ばなかった品と選んだ品が混ざって落ちてくるので、条件として品を
+// 選り分けられない。**レシピのデータは触らない**（絞り込みの判定そのもの＝logic/search.ts も
+// 1文字も変えない。変えたのは「画面に出す選択肢」と「保存されていた選択の直し方」だけ）。
+{
+  const jpEffort = await import('../src/logic/effort.ts').catch(() => ({}))
+  eq(
+    'JP-3 手間レベルのバッジを出すかの決めごとがある（無ければ以下は測れていない）',
+    typeof jpEffort.showsEffortBadge,
+    'function',
+  )
+  if (typeof jpEffort.showsEffortBadge === 'function') {
+    eq('JP-3 「普通」はバッジを出さない（既定値であって選んだ結果ではない）', jpEffort.showsEffortBadge('normal'), false)
+    eq('JP-3 「超簡単」はバッジを出す', jpEffort.showsEffortBadge('easy'), true)
+    eq('JP-3 「手の込んだ」はバッジを出す', jpEffort.showsEffortBadge('fancy'), true)
+    eq(
+      'JP-3 出さないのは既定値の1つだけ（既定値の定義を1か所から読んでいる）',
+      jpEffort.DEFAULT_EFFORT_LEVEL,
+      'normal',
+    )
+    // 絞り込みの選択肢（オーナー指示「絞り込みからも普通はずして」）。
+    // バッジを出す規則と同じ1か所で決まっていること＝画面に出ない値では絞れない
+    eq(
+      'JP-3 絞り込みで選べる手間レベルに「普通」が入っていない',
+      [...(jpEffort.EFFORT_FILTER_LEVELS ?? [])],
+      ['easy', 'fancy'],
+    )
+    eq(
+      'JP-3 選択肢は、バッジを出す規則と同じ1か所で決まっている',
+      [...(jpEffort.EFFORT_LEVELS ?? [])].filter((l) => jpEffort.showsEffortBadge(l)),
+      [...(jpEffort.EFFORT_FILTER_LEVELS ?? [])],
+    )
+    // 選べなくなった値が保存に残っていても、空の一覧から必ず抜けられる
+    eq(
+      'JP-3 保存されていた「普通」の絞り込みは「すべて」に戻す（抜ける道がある）',
+      jpEffort.normalizeEffortFilter?.('normal'),
+      'all',
+    )
+    eq(
+      'JP-3 いまも選べる絞り込みは、そのまま戻す',
+      [jpEffort.normalizeEffortFilter?.('easy'), jpEffort.normalizeEffortFilter?.('fancy'), jpEffort.normalizeEffortFilter?.(undefined)],
+      ['easy', 'fancy', 'all'],
+    )
+  }
+  // 絞り込みは変えない: 「普通」で絞れば「普通」の品が出る（バッジの有無と結びつけない）
+  const jpSearch = await import('../src/logic/search.ts')
+  const jpRecipe = (id, title, effortLevel) => ({
+    id,
+    title,
+    effortLevel,
+    servings: 2,
+    tags: [],
+    ingredients: [],
+    steps: [],
+    isFavorite: false,
+    createdAt: 0,
+    updatedAt: 0,
+  })
+  const jpList = [
+    jpRecipe(1, 'ふつうの品', 'normal'),
+    jpRecipe(2, 'かんたんな品', 'easy'),
+    jpRecipe(3, '手の込んだ品', 'fancy'),
+  ]
+  const jpFind = (effort) =>
+    jpSearch
+      .searchRecipes(jpList, { ...jpSearch.defaultSearchOptions, effort, ngIngredients: [] })
+      .map((r) => r.recipe.id)
+  // 絞り込みの**判定そのもの**は変えていない（選択肢を減らしただけで、データも判定も無傷）。
+  // ここが崩れると、保存された絞り込みや将来の入口で「普通」の品が消える
+  eq('JP-3 絞り込みの判定は変えていない（「普通」で絞れば「普通」の品が出る）', jpFind('normal'), [1])
+  eq('JP-3 絞り込みの判定は変えていない（絞らなければ3品とも出る）', jpFind('all').sort(), [1, 2, 3])
+  eq('JP-3 「超簡単」で絞ればその品だけが出る', jpFind('easy'), [2])
+}
+
 // ---------- 結果 ----------
 console.log(`合格: ${passed}件 / 失敗: ${failures.length}件`)
 for (const f of failures) console.log(`  NG ${f}`)

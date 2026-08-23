@@ -50,6 +50,9 @@ import { sumCookedRecipesCost, type PriceIndexEntry } from './priceEstimate'
 export interface RangeRecipeLike {
   ingredients: Pick<Ingredient, 'name' | 'amount' | 'unit' | 'price'>[]
   servings: number
+  /** 「計算できなかった料理」の名前とリンク先を画面へ出すための任意項目（2026-08-23 便JP・②） */
+  id?: number
+  title?: string
 }
 
 /** 期間内の「作った記録」1件（日付＋レシピ＋記録時の人数） */

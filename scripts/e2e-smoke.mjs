@@ -26680,6 +26680,9 @@ try {
                     id: r.id,
                     title: r.title,
                     isStarter: !!r.isStarter,
+                    // 2026-08-23 便JP・③: 「普通」の品はカードに手間を出さなくなったので、
+                    // 何が出ているはずかを、その品の値から決める（画面の文字だけでは決まらない）
+                    effortLevel: r.effortLevel,
                     ingredients: (r.ingredients ?? []).map((i) => ({
                       name: i.name ?? '',
                       amount: i.amount ?? '',
@@ -26750,11 +26753,18 @@ try {
         cpChips.length > 0 && cpChips.every((name) => !cpCardText.includes(name)),
         `カード=${cpCardText} 主要食材=${JSON.stringify(cpChips)}`,
       )
-      // ④ 決め手になる手間は残っている（カードごと情報を落としたのではない）
+      // ④ 決め手になる手間は残っている（カードごと情報を落としたのではない）。
+      //    2026-08-23 便JP・③で「普通」だけは出さなくなったので、その品の値で期待を分ける
+      //    （画面の文字を書き写さず、端末に入っている値から「出ているはず/出ていないはず」を決める）
+      const cpEffortWords = (text) => Object.values(ja.effort).filter((w) => text.includes(w))
+      const cpSuggestEffort = cpByTitle.get(cpTitle)?.effortLevel
       check(
-        'CARDPARTS-01 候補カードには手間（超簡単/普通/手の込んだ）が残っている',
-        new RegExp(Object.values(ja.effort).join('|')).test(cpCardText),
-        `カード=${cpCardText}`,
+        'CARDPARTS-01 候補カードの手間は、既定値（普通）のときだけ出さない（便JP・③）',
+        cpSuggestEffort != null &&
+          (cpSuggestEffort === 'normal'
+            ? cpEffortWords(cpCardText).length === 0
+            : cpEffortWords(cpCardText).join(',') === ja.effort[cpSuggestEffort]),
+        `手間=${cpSuggestEffort} カードに出ている手間=${JSON.stringify(cpEffortWords(cpCardText))}`,
       )
       const cpSuggestFont = await cpTitleEl().evaluate((el) => getComputedStyle(el).fontSize)
 
@@ -26829,9 +26839,12 @@ try {
           `カード=${cpPlanText} 主要食材=${JSON.stringify(cpChips)}`,
         )
         check(
-          'CARDPARTS-01 今日の献立のカードには手間（超簡単/普通/手の込んだ）が残っている',
-          new RegExp(Object.values(ja.effort).join('|')).test(cpPlanText),
-          `カード=${cpPlanText}`,
+          'CARDPARTS-01 今日の献立のカードの手間も、既定値（普通）のときだけ出さない（便JP・③）',
+          cpTarget?.effortLevel != null &&
+            (cpTarget.effortLevel === 'normal'
+              ? cpEffortWords(cpPlanText).length === 0
+              : cpEffortWords(cpPlanText).join(',') === ja.effort[cpTarget.effortLevel]),
+          `手間=${cpTarget?.effortLevel} カードに出ている手間=${JSON.stringify(cpEffortWords(cpPlanText))}`,
         )
         // ③ 骨格は動かしていない（料理名の大きさが2か所で同じ・オーナーOKの16pxのまま）
         const cpPlanFont = await cpPage
@@ -50076,6 +50089,430 @@ try {
     }
   }
 
+
+
+  // --- JPCARD-01(2026-08-23 便JP・①): 並ぶカードの角が、切り取る器に食われていない ---
+  //
+  // オーナー原文: 「① 今日の献立のレシピカードの角が消えています。」
+  //
+  // 便JEは「角丸の値」を --radius-card（4px）の1か所にそろえたが、**カードを切り取る器**の
+  // 角丸まではそろえていなかった。器のほうが丸いと、中のカードの角（1pxの線）はその弧の外へ出て
+  // 消える＝計算値は4pxのままなのに、画面には角が無い。だから**クラス名でも計算値でもなく、
+  // 「切り取る器の角丸」と「カードの角丸」の差**で見張る（差が0より大きい＝食われている）。
+  //
+  // 掴み方は「rounded-card が効いている要素」と「その角と同じ位置で切り取っている親」だけで、
+  // 画面の名前・並び順・入れ子の段数には依らない＝**どこに出ていても同じ判定になる**。
+  currentCheck = 'JPCARD-01'
+  {
+    const jpcBrowser = await chromium.launch()
+    const jpcContext = await jpcBrowser.newContext({ viewport: { width: 390, height: 844 } })
+    const jpcPage = await jpcContext.newPage()
+    jpcPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@JPCARD-01] ${err.message}`)
+    })
+    /** その画面に出ている「並ぶカード」を全部測る（角丸／切り取る器の角丸／食われる深さ） */
+    const jpcSweep = () =>
+      jpcPage.evaluate(() => {
+        const out = []
+        for (const el of document.querySelectorAll('[class*="rounded-card"]')) {
+          const r = el.getBoundingClientRect()
+          if (r.width < 24 || r.height < 24) continue
+          const radius = parseFloat(getComputedStyle(el).borderTopLeftRadius)
+          let cut = 0
+          let clipRadius = null
+          let p = el.parentElement
+          while (p && p !== document.body) {
+            const ps = getComputedStyle(p)
+            const clips = /hidden|clip/.test(ps.overflowX) || /hidden|clip/.test(ps.overflowY)
+            if (clips) {
+              const pr = p.getBoundingClientRect()
+              // 角が同じ位置にある器だけが、そのカードの角を切り落としうる
+              if (Math.abs(pr.left - r.left) <= 1 && Math.abs(pr.top - r.top) <= 1) {
+                clipRadius = parseFloat(ps.borderTopLeftRadius)
+                cut = Math.max(cut, Math.round((clipRadius - radius) * 100) / 100)
+              }
+            }
+            p = p.parentElement
+          }
+          out.push({
+            name: el.getAttribute('data-testid') || (el.getAttribute('class') || '').slice(0, 40),
+            radius,
+            clipRadius,
+            cut,
+          })
+        }
+        return out
+      })
+    /** 測った結果を判定に流す（0件で素通りしないよう、拾えた枚数も必ず見る） */
+    const jpcCheck = async (where) => {
+      const cards = await jpcSweep()
+      check(`JPCARD-01 前提: ${where}で並ぶカードを1枚以上掴めた`, cards.length > 0, `${cards.length}枚`)
+      const eaten = cards.filter((c) => c.cut > 0)
+      check(
+        `JPCARD-01 ${where}のカードの角が、切り取る器に食われていない`,
+        cards.length > 0 && eaten.length === 0,
+        eaten.length > 0
+          ? eaten
+              .map((c) => `${c.name}: 角=${c.radius}px 器=${c.clipRadius}px 食われ=${c.cut}px`)
+              .join(' / ')
+          : `${cards.length}枚とも角のまま`,
+      )
+      return cards
+    }
+    try {
+      await jpcPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await jpcPage.waitForTimeout(2400) // 初回シード完了待ち
+      await jpcCheck('レシピ一覧')
+
+      // 今日の献立（オーナーが名指しした場所）。1品入れてから測る
+      await jpcPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+      await jpcPage.reload({ waitUntil: 'networkidle' })
+      await jpcPage.waitForTimeout(1800)
+      const jpcOne = jpcPage.locator('[data-testid="day-mode-one"]')
+      if ((await jpcOne.count()) === 1) {
+        await jpcOne.click()
+        await jpcPage.waitForTimeout(800)
+      }
+      await jpcPage.locator('[data-testid="day-suggest-apply"]').click()
+      await jpcPage.waitForTimeout(600)
+      await jpcPage.getByRole('button', { name: ja.mealPlan.slot.dinner, exact: true }).first().click()
+      await jpcPage.waitForTimeout(1800)
+      const jpcDayCards = await jpcCheck('今日の献立（日タブ）')
+      const jpcPlan = jpcDayCards.find((c) => c.name === 'day-plan-card')
+      check(
+        'JPCARD-01 前提: 今日の献立の1品カードを掴めた',
+        jpcPlan != null,
+        `拾えたカード=${jpcDayCards.map((c) => c.name).join(',')}`,
+      )
+      check(
+        'JPCARD-01 今日の献立の1品カードの角が、そのまま画面に出ている',
+        jpcPlan != null && jpcPlan.radius > 0 && jpcPlan.cut === 0,
+        `角=${jpcPlan?.radius}px 切り取る器=${jpcPlan?.clipRadius}px 食われ=${jpcPlan?.cut}px`,
+      )
+
+      // 週タブ（曜日カード → 食事の枠 → レシピカード の入れ子）
+      await jpcPage.getByRole('button', { name: ja.mealPlan.viewWeek, exact: true }).first().click()
+      await jpcPage.waitForTimeout(1600)
+      await openAllWeekDays(jpcPage)
+      await jpcPage.waitForTimeout(600)
+      await jpcCheck('週タブ')
+
+      // 月タブ（カレンダーのマス）
+      await jpcPage.getByRole('button', { name: ja.mealPlan.viewMonth, exact: true }).first().click()
+      await jpcPage.waitForTimeout(1600)
+      await jpcCheck('月タブ')
+    } finally {
+      await jpcBrowser.close()
+    }
+  }
+
+  // --- JPGAP-02(2026-08-23 便JP・②): 栄養を計算できなかった料理が「どれか」分かる ---
+  //
+  // オーナー原文:
+  //   「② 計算できない料理が表示されるようになりましたが、どれが計算できなかったのかわかりません。
+  //     折りたたみ開いたらレシピ名（カードでなく文字だけ。そのままリンクになっている）出して欲しいです。」
+  //
+  // 測るのは「利用者が確かめたいこと」:
+  //   ①畳んでいるあいだは名前を出さない（1行の要約のままにする）
+  //   ②開くと、計算できなかった料理の名前が出る
+  //   ③その名前がそのままリンクで、押すとそのレシピが開く
+  //   ④カードにしない（写真もカードの枠も出さない＝**文字だけ**）
+  currentCheck = 'JPGAP-02'
+  {
+    const jpgBrowser = await chromium.launch()
+    const jpgContext = await jpgBrowser.newContext({ viewport: { width: 390, height: 844 } })
+    const jpgPage = await jpgContext.newPage()
+    jpgPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@JPGAP-02] ${err.message}`)
+    })
+    try {
+      // 成分データを持たない材料を使う品を仕込む。料理名は ja.ts の文言と重ならない形にする
+      const JPG_OK = 'E2Eぜんぶ計算できる品'
+      const JPG_PARTIAL = 'E2E一部が計算できない品'
+      const JPG_EXCLUDED = 'E2E何も計算できない品'
+      await jpgPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await jpgPage.waitForTimeout(2400) // 初回シード完了待ち
+      const jpgIds = await jpgPage.evaluate(async (titles) => {
+        const req = indexedDB.open('uchi-recipe')
+        const idb = await new Promise((res, rej) => { req.onsuccess = () => res(req.result); req.onerror = () => rej(req.error) })
+        const P = (r) => new Promise((res, rej) => { r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error) })
+        const cur = (await P(idb.transaction('settings').objectStore('settings').get(1))) || { id: 1 }
+        await P(idb.transaction('settings', 'readwrite').objectStore('settings').put({
+          ...cur, id: 1, proCode: 'UR-E2E-TEST-ONLY', proActivatedAt: Date.now(),
+        }))
+        const mk = (title, ingredients) => ({
+          title, servings: 2, effortLevel: 'normal', tags: [], ingredients, steps: [{ text: '作る' }],
+          isFavorite: false, cookedLogs: [], searchWords: [], isStarter: false,
+          createdAt: Date.now(), updatedAt: Date.now(),
+        })
+        const rice = { name: '米', amount: '150', unit: 'g' }
+        const unknown = { name: 'うちレシピ架空調味料', amount: '100', unit: 'g' }
+        const add = (v) => P(idb.transaction('recipes', 'readwrite').objectStore('recipes').add(v))
+        const ok = await add(mk(titles.ok, [rice]))
+        const partial = await add(mk(titles.partial, [rice, unknown]))
+        const excluded = await add(mk(titles.excluded, [unknown]))
+        // 今日の献立に3品とも入れる（曜日に依らない＝今日は必ず表示中の週に入っている）
+        const d = new Date()
+        const p = (n) => String(n).padStart(2, '0')
+        const date = `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
+        await P(idb.transaction('mealPlans', 'readwrite').objectStore('mealPlans').clear())
+        const put = (v) => P(idb.transaction('mealPlans', 'readwrite').objectStore('mealPlans').add(v))
+        await put({ date, slot: 'dinner', recipeId: ok, role: 'main' })
+        await put({ date, slot: 'dinner', recipeId: partial, role: 'side' })
+        await put({ date, slot: 'lunch', recipeId: excluded, role: 'main' })
+        idb.close()
+        return { ok, partial, excluded }
+      }, { ok: JPG_OK, partial: JPG_PARTIAL, excluded: JPG_EXCLUDED })
+      // 生のIndexedDBへ書いたので必ず読み込み直す（CLAUDE.md 禁じ手⑥）
+      await jpgPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+      await jpgPage.reload({ waitUntil: 'networkidle' })
+      await jpgPage.waitForTimeout(2000)
+      await jpgPage.getByRole('button', { name: ja.mealPlan.viewWeek, exact: true }).first().click()
+      await jpgPage.waitForTimeout(1600)
+
+      const jpgGap = jpgPage.locator('[data-testid="nutrition-gap-dish"]')
+      // ① 畳んでいるあいだは名前を出さない
+      check(
+        'JPGAP-02 畳んでいるあいだは、計算できなかった料理の名前を出さない',
+        (await jpgGap.count()) === 0,
+        `名前=${await jpgGap.count()}件`,
+      )
+      // ② 週まとめの折りたたみを開く（開閉ボタンは読み上げ名で掴む＝並び順に依らない）
+      const jpgToggle = jpgPage.getByRole('button', { name: ja.nutritionBalance.weekToggleExpand })
+      check('JPGAP-02 前提: 週まとめの栄養の折りたたみがある', (await jpgToggle.count()) > 0, `${await jpgToggle.count()}件`)
+      if ((await jpgToggle.count()) > 0) {
+        await jpgToggle.first().click()
+        await jpgPage.waitForTimeout(900)
+      }
+      const jpgNames = (await jpgGap.allTextContents()).map((t) => stripZwspText(t).trim())
+      check(
+        'JPGAP-02 開くと、計算できなかった料理の名前が出る',
+        jpgNames.includes(JPG_PARTIAL) && jpgNames.includes(JPG_EXCLUDED),
+        `出ている名前=${JSON.stringify(jpgNames)}`,
+      )
+      check(
+        'JPGAP-02 ぜんぶ計算できた料理は並べない',
+        jpgNames.length > 0 && !jpgNames.includes(JPG_OK),
+        `出ている名前=${JSON.stringify(jpgNames)}`,
+      )
+      // ④ カードにしない（写真もカードの枠も無い＝文字だけ）
+      // 0件のまま「出していないから合格」に倒れないよう、拾えた件数を必ず判定に入れる
+      const jpgShape = await jpgPage.evaluate(() => {
+        const list = [...document.querySelectorAll('[data-testid="nutrition-gap-dish"]')]
+        return {
+          count: list.length,
+          images: list.filter((el) => el.querySelector('img, canvas, svg') != null).length,
+          cardLike: list.filter((el) => /rounded-card/.test(el.getAttribute('class') || '') || el.querySelector('[class*="rounded-card"]') != null).length,
+          links: list.filter((el) => el.tagName === 'A').length,
+          minHeight: list.length === 0 ? null : Math.min(...list.map((el) => Math.round(el.getBoundingClientRect().height))),
+        }
+      })
+      check(
+        'JPGAP-02 カードにしない（写真も絵もカードの枠も出さない＝文字だけ）',
+        jpgShape.count > 0 && jpgShape.images === 0 && jpgShape.cardLike === 0,
+        `名前=${jpgShape.count}件 写真や絵=${jpgShape.images}件 カードの枠=${jpgShape.cardLike}件`,
+      )
+      check(
+        'JPGAP-02 名前がそのままリンクになっている',
+        jpgShape.links > 0 && jpgShape.links === jpgNames.length,
+        `リンク=${jpgShape.links}件 名前=${jpgNames.length}件`,
+      )
+      check(
+        'JPGAP-02 指で押せる高さがある（44px以上）',
+        jpgShape.minHeight != null && jpgShape.minHeight >= 44,
+        `いちばん低い行=${jpgShape.minHeight}px`,
+      )
+      // ③ 押すとそのレシピが開く
+      const jpgTarget = jpgGap.filter({ hasText: JPG_EXCLUDED }).first()
+      if ((await jpgTarget.count()) > 0) {
+        await jpgTarget.click()
+        await jpgPage.waitForTimeout(1400)
+        check(
+          'JPGAP-02 名前を押すと、そのレシピが開く',
+          jpgPage.url().includes(`/recipes/${jpgIds.excluded}`) &&
+            stripZwspText(await jpgPage.textContent('body')).includes(JPG_EXCLUDED),
+          `URL=${jpgPage.url()}`,
+        )
+      }
+    } finally {
+      await jpgBrowser.close()
+    }
+  }
+
+  // --- JPEFFORT-03(2026-08-23 便JP・③): 手間レベルが「普通」の品はカードにバッジを出さない ---
+  //
+  // オーナー原文: 「③（手間レベル）推奨通り。絞り込みでどういう扱いになる？」
+  // 「普通」はレシピを登録するときの既定値で、人が選んだ結果ではない。並ぶカードの大半が
+  // 同じ「普通」で埋まると見比べる手がかりにならないので、**表示だけ**やめる。
+  //
+  // 測るのは: ①「普通」の品のカードに手間が出ない ②「超簡単」「手の込んだ」は出る
+  //   ③レシピ詳細は今までどおり3つとも出す（1品を読む場所なので引き算の理由が当たらない）
+  //   ④絞り込みの選択肢からも「普通」が消えている（2026-08-23 追補・オーナー指示
+  //     「絞り込みからも普通はずして」）。残るのは「すべて」「超簡単」「手の込んだ」で、
+  //     **選べる条件はちゃんと絞れる**こと・**レシピは1品も消えていない**ことまで見る
+  currentCheck = 'JPEFFORT-03'
+  {
+    const jpeBrowser = await chromium.launch()
+    const jpeContext = await jpeBrowser.newContext({ viewport: { width: 390, height: 844 } })
+    const jpePage = await jpeContext.newPage()
+    jpePage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@JPEFFORT-03] ${err.message}`)
+    })
+    try {
+      // 料理名に手間の言葉が入らないようにする（カードの文字から切り分けられなくなるため）
+      const JPE_NORMAL = 'E2E手間きていの品'
+      const JPE_EASY = 'E2E手間かんたんの品'
+      const JPE_FANCY = 'E2E手間てまひまの品'
+      const jpeWords = Object.values(ja.effort)
+      await jpePage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await jpePage.waitForTimeout(2400) // 初回シード完了待ち
+      const jpeIds = await jpePage.evaluate(async (titles) => {
+        const req = indexedDB.open('uchi-recipe')
+        const idb = await new Promise((res, rej) => { req.onsuccess = () => res(req.result); req.onerror = () => rej(req.error) })
+        const P = (r) => new Promise((res, rej) => { r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error) })
+        const mk = (title, effortLevel) => ({
+          title, servings: 2, effortLevel, tags: [], ingredients: [{ name: '米', amount: '150', unit: 'g' }],
+          steps: [{ text: '作る' }], isFavorite: false, cookedLogs: [], searchWords: [], isStarter: false,
+          createdAt: Date.now(), updatedAt: Date.now(),
+        })
+        const add = (v) => P(idb.transaction('recipes', 'readwrite').objectStore('recipes').add(v))
+        const normal = await add(mk(titles.normal, 'normal'))
+        const easy = await add(mk(titles.easy, 'easy'))
+        const fancy = await add(mk(titles.fancy, 'fancy'))
+        idb.close()
+        return { normal, easy, fancy }
+      }, { normal: JPE_NORMAL, easy: JPE_EASY, fancy: JPE_FANCY })
+      // 生のIndexedDBへ書いたので必ず読み込み直す（CLAUDE.md 禁じ手⑥）
+      await jpePage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await jpePage.reload({ waitUntil: 'networkidle' })
+      await jpePage.waitForTimeout(2000)
+
+      /** その料理名のカードに出ている、手間の言葉（超簡単／普通／手の込んだ） */
+      const jpeCardEffort = async (title) => {
+        const card = jpePage.locator('[data-testid="recipe-list-card"]').filter({
+          has: jpePage.locator('[data-testid="recipe-card-title"]', { hasText: title }),
+        })
+        if ((await card.count()) === 0) return null
+        const text = stripZwspText(await card.first().textContent())
+        return jpeWords.filter((w) => text.includes(w))
+      }
+      // 検索でその品だけに絞ってから測る（一覧の並び順・位置に依らない）
+      const jpeSearch = async (title) => {
+        await jpePage.getByPlaceholder(ja.search.placeholder).fill(title)
+        await jpePage.waitForTimeout(900)
+      }
+      await jpeSearch(JPE_NORMAL)
+      const jpeNormalWords = await jpeCardEffort(JPE_NORMAL)
+      check(
+        'JPEFFORT-03 前提: 「普通」の品のカードを掴めた',
+        jpeNormalWords != null,
+        `カード=${jpeNormalWords}`,
+      )
+      check(
+        'JPEFFORT-03 手間が「普通」の品には、カードにバッジを出さない',
+        jpeNormalWords != null && jpeNormalWords.length === 0,
+        `出ている手間=${JSON.stringify(jpeNormalWords)}`,
+      )
+      await jpeSearch(JPE_EASY)
+      const jpeEasyWords = await jpeCardEffort(JPE_EASY)
+      check(
+        'JPEFFORT-03 「超簡単」の品にはバッジを出す',
+        jpeEasyWords != null && jpeEasyWords.join(',') === ja.effort.easy,
+        `出ている手間=${JSON.stringify(jpeEasyWords)}`,
+      )
+      await jpeSearch(JPE_FANCY)
+      const jpeFancyWords = await jpeCardEffort(JPE_FANCY)
+      check(
+        'JPEFFORT-03 「手の込んだ」の品にはバッジを出す',
+        jpeFancyWords != null && jpeFancyWords.join(',') === ja.effort.fancy,
+        `出ている手間=${JSON.stringify(jpeFancyWords)}`,
+      )
+      // ③ レシピ詳細は今までどおり出す（1品を読む場所なので、見比べのための引き算は当てない）
+      await jpePage.goto(`${BASE}/#/recipes/${jpeIds.normal}`, { waitUntil: 'networkidle' })
+      await jpePage.reload({ waitUntil: 'networkidle' })
+      await jpePage.waitForTimeout(1400)
+      check(
+        'JPEFFORT-03 レシピ詳細では「普通」も今までどおり出す',
+        stripZwspText(await jpePage.textContent('body')).includes(ja.effort.normal),
+        `詳細に「${ja.effort.normal}」が無い`,
+      )
+      // ④ 絞り込みの選択肢から「普通」が消えている
+      await jpePage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await jpePage.waitForTimeout(1600)
+      await jpePage.getByPlaceholder(ja.search.placeholder).fill('E2E手間')
+      await jpePage.waitForTimeout(900)
+      await jpePage.getByRole('button', { name: ja.search.filterToggle }).first().click()
+      await jpePage.waitForTimeout(700)
+      const jpeSelect = jpePage.locator(`select[aria-label="${ja.search.effortTitle}"]`).first()
+      const jpeChoices = (await jpeSelect.locator('option').allTextContents()).map((t) =>
+        stripZwspText(t).trim(),
+      )
+      check(
+        'JPEFFORT-03 絞り込みの選択肢から「普通」が消えている',
+        jpeChoices.length > 0 && !jpeChoices.includes(ja.effort.normal),
+        `選択肢=${JSON.stringify(jpeChoices)}`,
+      )
+      check(
+        'JPEFFORT-03 「超簡単」「手の込んだ」は絞り込みに残っている',
+        jpeChoices.includes(ja.effort.easy) && jpeChoices.includes(ja.effort.fancy),
+        `選択肢=${JSON.stringify(jpeChoices)}`,
+      )
+      // 残っている条件はちゃんと絞れる
+      await jpeSelect.selectOption({ label: ja.effort.easy })
+      await jpePage.waitForTimeout(900)
+      await jpePage.locator('[data-testid="filter-panel-close"]').click()
+      await jpePage.waitForTimeout(900)
+      const jpeFilteredTitles = (
+        await jpePage.locator('[data-testid="recipe-card-title"]').allTextContents()
+      ).map((t) => stripZwspText(t).trim())
+      check(
+        'JPEFFORT-03 残った条件はちゃんと絞れる（「超簡単」で絞るとその品だけ）',
+        jpeFilteredTitles.includes(JPE_EASY) &&
+          !jpeFilteredTitles.includes(JPE_NORMAL) &&
+          !jpeFilteredTitles.includes(JPE_FANCY),
+        `絞り込みの結果=${JSON.stringify(jpeFilteredTitles)}`,
+      )
+      // 「普通」の品は消えていない（絞り込みを「すべて」に戻せば出てくる＝データは無傷）
+      await jpePage.getByRole('button', { name: ja.search.filterToggle }).first().click()
+      await jpePage.waitForTimeout(700)
+      await jpeSelect.selectOption({ label: ja.search.effortAll })
+      await jpePage.waitForTimeout(900)
+      await jpePage.locator('[data-testid="filter-panel-close"]').click()
+      await jpePage.waitForTimeout(900)
+      const jpeAllTitles = (
+        await jpePage.locator('[data-testid="recipe-card-title"]').allTextContents()
+      ).map((t) => stripZwspText(t).trim())
+      check(
+        'JPEFFORT-03 「普通」の品は1品も消えていない（絞らなければ3品とも出る）',
+        jpeAllTitles.includes(JPE_NORMAL) &&
+          jpeAllTitles.includes(JPE_EASY) &&
+          jpeAllTitles.includes(JPE_FANCY),
+        `一覧=${JSON.stringify(jpeAllTitles)}`,
+      )
+      // 「普通」で絞った状態が保存に残っていても、開き直せば必ず抜けられる（空の一覧に閉じ込めない）
+      await jpePage.evaluate(() => {
+        const KEY = 'uchirecipe:recipesListState'
+        const saved = JSON.parse(sessionStorage.getItem(KEY) ?? '{}')
+        sessionStorage.setItem(KEY, JSON.stringify({ ...saved, effort: 'normal' }))
+      })
+      await jpePage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await jpePage.reload({ waitUntil: 'networkidle' })
+      await jpePage.waitForTimeout(1800)
+      const jpeRestored = (
+        await jpePage.locator('[data-testid="recipe-card-title"]').allTextContents()
+      ).map((t) => stripZwspText(t).trim())
+      check(
+        'JPEFFORT-03 「普通」で絞った状態が残っていても、開き直せば一覧が出る（抜ける道がある）',
+        jpeRestored.length > 0 && jpeRestored.includes(JPE_NORMAL),
+        `一覧=${jpeRestored.length}件`,
+      )
+    } finally {
+      await jpeBrowser.close()
+    }
+  }
 
 } catch (err) {
   ng(`実行中断(${currentCheck})`, err.message)

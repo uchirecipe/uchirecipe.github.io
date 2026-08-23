@@ -211,7 +211,16 @@ export function SwipeRevealRow({
   const offset = dragging ? dragX : open ? -SWIPE_ACTION_WIDTH : 0
 
   return (
-    <div ref={rootRef} data-testid={testId} className="relative overflow-hidden rounded-md">
+    /* 角丸は中身のカードと**同じトークン**にする（2026-08-23 便JP・①）。
+       オーナー実機「今日の献立のレシピカードの角が消えています。」の原因はここだった。
+       この器は払った行を切り取る（overflow-hidden）ので、器のほうが丸いと、中のカードの
+       角＝1pxの線が弧の外へ出て消える。実測（3倍で撮り、角から斜め45度）:
+       レシピ一覧のカードは上辺2px・左辺1px・斜め0.67pxで線が出るのに、今日の献立の行は
+       上辺10px・左辺10px・斜め10pxまで何も出ていなかった（線が角のまわり約11pxぶん欠けていた）。
+       2026-08-21 便IQ でこの器を足したときは rounded-md（14px）で、翌日の便JEが並ぶカードを
+       --radius-card（4px）にしたときに、この器だけ一緒に直っていなかった。
+       見張りは scripts/test-logic.mjs の JP-1 と scripts/e2e-smoke.mjs の JPCARD-01 */
+    <div ref={rootRef} data-testid={testId} className="relative overflow-hidden rounded-card">
       {(open || dragging) && (
         <div
           className="absolute inset-y-0 right-0 flex items-stretch"

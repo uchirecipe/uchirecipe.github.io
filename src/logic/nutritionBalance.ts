@@ -148,8 +148,15 @@ export function roundVegetableGrams(value: number): number {
 
 // ---------- 日・期間の合計 ----------
 
-/** 集計に必要なレシピの最小形（テストから素の物体を渡せるようにRecipe全体には依存しない） */
-export type BalanceRecipeLike = Pick<Recipe, 'ingredients' | 'servings'>
+/**
+ * 集計に必要なレシピの最小形（テストから素の物体を渡せるようにRecipe全体には依存しない）。
+ * id / title は「計算できなかった料理の名前」を画面へ出すためだけの任意項目（2026-08-23 便JP・②。
+ * 数え方には関わらないので、ごはん1杯の擬似レシピのように持たない品もそのまま渡せる）。
+ */
+export type BalanceRecipeLike = Pick<Recipe, 'ingredients' | 'servings'> & {
+  id?: number
+  title?: string
+}
 
 /**
  * 「1人分」のバランス集計（8項目＋野菜量）。

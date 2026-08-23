@@ -208,6 +208,8 @@ import type { MonthDemoData } from '../logic/monthDemo'
 import Collapse from '../components/Collapse'
 import SwapLabel from '../components/SwapLabel'
 import NutritionBalancePanel from '../components/NutritionBalancePanel'
+import NutritionGapDishes from '../components/NutritionGapDishes'
+import { EFFORT_FILTER_LEVELS } from '../logic/effort'
 import RecipeCard from '../components/RecipeCard'
 import { SwipeRevealRow } from '../components/SwipeRevealRow'
 import { usePhotoUrl } from '../components/usePhotoUrl'
@@ -384,11 +386,11 @@ const PICKER_TIME_OPTIONS: { value: TimeFilter; label: string }[] = [
   { value: 'under30', label: ja.search.timeUnder30 },
   { value: 'over30', label: ja.search.timeOver30 },
 ]
+/* レシピを選ぶ画面の手間レベルも、レシピ一覧と同じ顔ぶれにする（2026-08-23 便JP・②追補）。
+   選べる手間は logic/effort.ts の EFFORT_FILTER_LEVELS が1か所で決める */
 const PICKER_EFFORT_OPTIONS: { value: EffortFilter; label: string }[] = [
   { value: 'all', label: ja.search.effortAll },
-  { value: 'easy', label: ja.effort.easy },
-  { value: 'normal', label: ja.effort.normal },
-  { value: 'fancy', label: ja.effort.fancy },
+  ...EFFORT_FILTER_LEVELS.map((level) => ({ value: level, label: ja.effort[level] })),
 ]
 const pickerChipCls = (active: boolean) =>
   `rounded-sm border px-3 py-1.5 text-sm font-bold ${
@@ -986,23 +988,31 @@ function IntakeNutritionPanel({
           .replace('{a}', String(summary.actual.nutrition.dishCount))
           .replace('{p}', String(summary.plan.nutrition.dishCount))}
       </p>
+      {/* 2026-08-23 便JP・②: 件数の1行のすぐ下に、**どの料理か**を料理名で並べる
+          （週タブの栄養パネルとまったく同じ部品・同じ並べ方。同じものを2つ作らない） */}
       {summary.nutrition.excludedDishCount > 0 && (
-        <p className="mt-0.5 text-xs text-ink-muted">
-          {ja.mealPlan.rangeIntakeNutritionExcluded.replace(
-            '{n}',
-            String(summary.nutrition.excludedDishCount),
-          )}
-        </p>
+        <>
+          <p className="mt-0.5 text-xs text-ink-muted">
+            {ja.mealPlan.rangeIntakeNutritionExcluded.replace(
+              '{n}',
+              String(summary.nutrition.excludedDishCount),
+            )}
+          </p>
+          <NutritionGapDishes sum={summary.nutrition} kind="excluded" />
+        </>
       )}
       {/* 量が書いてあるのに計算できなかった材料があるレシピは、合計を静かに下げる。
           既にある「除いた品数」の明示と同じ作法で件数を出す(2026-07-28 便BY/NUT-01) */}
       {summary.nutrition.partialDishCount > 0 && (
-        <p className="mt-0.5 text-xs font-bold text-warning">
-          {ja.mealPlan.rangeIntakeNutritionPartial.replace(
-            '{n}',
-            String(summary.nutrition.partialDishCount),
-          )}
-        </p>
+        <>
+          <p className="mt-0.5 text-xs font-bold text-warning">
+            {ja.mealPlan.rangeIntakeNutritionPartial.replace(
+              '{n}',
+              String(summary.nutrition.partialDishCount),
+            )}
+          </p>
+          <NutritionGapDishes sum={summary.nutrition} kind="partial" />
+        </>
       )}
       {notes === 'full' && <NutritionSourceNotes />}
     </div>

@@ -504,6 +504,34 @@ export function computeRecipeNutrition(
 }
 
 /**
+ * 栄養の合計に渡せるレシピの最小形（2026-08-23 便JP・②）。
+ *
+ * `id` と `title` は**「どの料理が計算できなかったか」を画面に出すためだけ**に使う。
+ * 数え方（合計に入れる／除く）には一切関わらないので任意にしてある＝
+ * ごはん1杯の擬似レシピ（logic/nutritionBalance.ts の RICE_SERVING_RECIPE）のように
+ * レシピIDを持たない品は、これまでどおり数にだけ入り、名前の一覧には並ばない。
+ */
+export type NutritionSumRecipeLike = Pick<Recipe, 'ingredients' | 'servings'> & {
+  id?: number
+  title?: string
+}
+
+/**
+ * 栄養を計算しきれなかった理由（2026-08-23 便JP・②）。
+ *  excluded … 材料が丸ごと計算対象外で、1品も計算できない（合計から除いている）
+ *  partial  … 量が書いてあるのに計算できなかった材料がある（合計には入れたが下振れしている）
+ */
+export type NutritionGapKind = 'excluded' | 'partial'
+
+/** 栄養を計算しきれなかった料理1品（画面に名前を出し、そのレシピへ飛ばすための最小情報） */
+export interface NutritionGapDish {
+  /** レシピID（リンク先） */
+  id: number
+  title: string
+  kind: NutritionGapKind
+}
+
+/**
  * 期間内に「1人が摂取した」栄養の合計（sumPersonalNutrition の戻り値）。
  * 2026-07-28 便CA・オーナー確定仕様: 従来の「1食あたりの平均（averagePerMealNutrition）」を廃止し、
  * 「期間内に作った料理を1食ずつ足した、1人分の期間合計」に置き換えた。
@@ -520,11 +548,52 @@ export interface PersonalNutritionSum {
    * 主材料が落ちたレシピは合計を静かに下げるので、件数を呼び出し側で明示する。
    */
   partialDishCount: number
+  /**
+   * 計算しきれなかった料理の一覧（2026-08-23 便JP・②）。
+   *
+   * オーナー原文: 「計算できない料理が表示されるようになりましたが、どれが計算できなかったのか
+   * わかりません。折りたたみ開いたらレシピ名（カードでなく文字だけ。そのままリンクになっている）
+   * 出して欲しいです。」
+   *
+   * **数え方は変えていない**（excludedDishCount / partialDishCount はこれまでどおり延べの品数）。
+   * ここは「どれか」を答えるための並びで、同じ料理が何日も出れば同じだけ並ぶ。
+   * 画面に出すときは gapDishList で重複を畳む。
+   */
+  gapDishes: NutritionGapDish[]
 }
 
 /** 空の PersonalNutritionSum（期間内に1品も無いときの戻り値・呼び出し側の初期値にも使う） */
 export function emptyPersonalNutritionSum(): PersonalNutritionSum {
-  return { total: emptyTotals(), dishCount: 0, excludedDishCount: 0, partialDishCount: 0 }
+  return {
+    total: emptyTotals(),
+    dishCount: 0,
+    excludedDishCount: 0,
+    partialDishCount: 0,
+    gapDishes: [],
+  }
+}
+
+/**
+ * 計算しきれなかった料理を、画面に並べる形にする（2026-08-23 便JP・②）。
+ *
+ * 期間の合計は日ごとの合計を足して作るので、同じ料理が何日も出ると同じ名前が何度も並ぶ。
+ * 知りたいのは「どの料理か」なので、レシピIDで重複を畳んで**1回だけ**返す
+ * （件数のほうは延べのままで、こちらとは役目が違う）。
+ * kind を渡すと、その理由のものだけを返す（画面では理由ごとの1行の下に並べるため）。
+ */
+export function gapDishList(
+  sum: Pick<PersonalNutritionSum, 'gapDishes'>,
+  kind?: NutritionGapKind,
+): NutritionGapDish[] {
+  const seen = new Set<number>()
+  const out: NutritionGapDish[] = []
+  for (const dish of sum.gapDishes) {
+    if (kind != null && dish.kind !== kind) continue
+    if (seen.has(dish.id)) continue
+    seen.add(dish.id)
+    out.push(dish)
+  }
+  return out
 }
 
 /**
@@ -542,20 +611,28 @@ export function emptyPersonalNutritionSum(): PersonalNutritionSum {
  * あくまで概算・めやす（医療・効能の文脈では使わない）。呼び出し側は必ず「めやす／概算」表記と、
  * excludedDishCount>0 のときはその件数を明示すること。
  */
-export function sumPersonalNutrition(
-  recipes: Pick<Recipe, 'ingredients' | 'servings'>[],
-): PersonalNutritionSum {
+export function sumPersonalNutrition(recipes: NutritionSumRecipeLike[]): PersonalNutritionSum {
   const total = emptyTotals()
   let dishCount = 0
   let excludedDishCount = 0
   let partialDishCount = 0
+  const gapDishes: NutritionGapDish[] = []
+  /** 名前とリンク先の両方が分かる品だけ、一覧に残す（ごはんのような擬似レシピは残らない） */
+  const noteGap = (recipe: NutritionSumRecipeLike, kind: NutritionGapKind) => {
+    if (recipe.id == null || recipe.title == null) return
+    gapDishes.push({ id: recipe.id, title: recipe.title, kind })
+  }
   for (const recipe of recipes) {
     const n = computeRecipeNutrition(recipe)
     if (n.items.length === 0) {
       excludedDishCount++
+      noteGap(recipe, 'excluded')
       continue
     }
-    if (hasMaterialGap(n)) partialDishCount++
+    if (hasMaterialGap(n)) {
+      partialDishCount++
+      noteGap(recipe, 'partial')
+    }
     const p = n.perServing
     total.kcal += p.kcal
     total.proteinG += p.proteinG
@@ -567,7 +644,7 @@ export function sumPersonalNutrition(
     total.calciumMg += p.calciumMg
     dishCount++
   }
-  return { total, dishCount, excludedDishCount, partialDishCount }
+  return { total, dishCount, excludedDishCount, partialDishCount, gapDishes }
 }
 
 /** 2つの PersonalNutritionSum を足す（実績（過去）＋予定（今日以降）を1つの期間合計にまとめる用） */
@@ -589,6 +666,8 @@ export function addPersonalNutritionSum(
     dishCount: a.dishCount + b.dishCount,
     excludedDishCount: a.excludedDishCount + b.excludedDishCount,
     partialDishCount: a.partialDishCount + b.partialDishCount,
+    // 名前の一覧はそのまま繋げる（重複は画面に出すときに gapDishList が畳む）
+    gapDishes: [...a.gapDishes, ...b.gapDishes],
   }
 }
 

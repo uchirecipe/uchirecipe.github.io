@@ -106,6 +106,7 @@ import {
 import { splitValues } from '../logic/textSplit'
 import Collapse from '../components/Collapse'
 import RecipeCard from '../components/RecipeCard'
+import { EFFORT_FILTER_LEVELS, normalizeEffortFilter } from '../logic/effort'
 import ChipInput from '../components/ChipInput'
 import Toast from '../components/Toast'
 import { useConfirm } from '../components/ConfirmProvider'
@@ -128,11 +129,12 @@ const timeOptions: { value: TimeFilter; label: string }[] = [
   { value: 'over30', label: ja.search.timeOver30 },
 ]
 
+/* 絞り込みに出す手間レベル（2026-08-23 便JP・②追補・オーナー指示「絞り込みからも普通はずして」）。
+   顔ぶれは logic/effort.ts の EFFORT_FILTER_LEVELS が決める＝カードにバッジを出す規則と同じ1か所。
+   既定値の「普通」には、選んだ品と選ばなかった品が混ざって落ちてくるので条件にならない */
 const effortOptions: { value: EffortFilter; label: string }[] = [
   { value: 'all', label: ja.search.effortAll },
-  { value: 'easy', label: ja.effort.easy },
-  { value: 'normal', label: ja.effort.normal },
-  { value: 'fancy', label: ja.effort.fancy },
+  ...EFFORT_FILTER_LEVELS.map((level) => ({ value: level, label: ja.effort[level] })),
 ]
 
 /**
@@ -614,7 +616,9 @@ export default function RecipesPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
   const [time, setTime] = useState<TimeFilter>(saved?.time ?? 'all')
-  const [effort, setEffort] = useState<EffortFilter>(saved?.effort ?? 'all')
+  /* 選べなくなった値（「普通」）が保存に残っていたら「すべて」に戻す＝空の一覧から必ず抜けられる
+     （2026-08-23 便JP・②追補） */
+  const [effort, setEffort] = useState<EffortFilter>(() => normalizeEffortFilter(saved?.effort))
   /**
    * タグで絞る（2026-08-19 便HZ・③ オーナー「タグ検索は、複数選択できるよにして。
    * AND検索OR検索の切り替え機能も欲しい」）。空＝絞らない。

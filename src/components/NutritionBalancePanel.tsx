@@ -19,6 +19,7 @@ import {
   type SlotBalance,
 } from '../logic/nutritionBalance'
 import Collapse from './Collapse'
+import NutritionGapDishes from './NutritionGapDishes'
 import { ProNutrientTeaser } from './NutritionTeaser'
 import { ja } from '../i18n/ja'
 
@@ -232,22 +233,31 @@ export default function NutritionBalancePanel({
                     : ja.nutritionBalance.basisNotePlan}
             </p>
             {scope === 'week' && isToday && <p>{ja.nutritionBalance.basisNoteToday}</p>}
-            {/* 計算できなかった品の件数（既存の月タブと同じ文言・同じ作法で明示する） */}
+            {/* 計算できなかった品の件数（既存の月タブと同じ文言・同じ作法で明示する）。
+                2026-08-23 便JP・②: 件数の1行のすぐ下に、**どの料理か**を料理名で並べる
+                （オーナー実機「どれが計算できなかったのかわかりません」）。
+                カードにはせず、料理名そのものをそのレシピへのリンクにする */}
             {sum.excludedDishCount > 0 && (
-              <p>
-                {ja.mealPlan.rangeIntakeNutritionExcluded.replace(
-                  '{n}',
-                  String(sum.excludedDishCount),
-                )}
-              </p>
+              <>
+                <p>
+                  {ja.mealPlan.rangeIntakeNutritionExcluded.replace(
+                    '{n}',
+                    String(sum.excludedDishCount),
+                  )}
+                </p>
+                <NutritionGapDishes sum={sum} kind="excluded" />
+              </>
             )}
             {sum.partialDishCount > 0 && (
-              <p>
-                {ja.mealPlan.rangeIntakeNutritionPartial.replace(
-                  '{n}',
-                  String(sum.partialDishCount),
-                )}
-              </p>
+              <>
+                <p>
+                  {ja.mealPlan.rangeIntakeNutritionPartial.replace(
+                    '{n}',
+                    String(sum.partialDishCount),
+                  )}
+                </p>
+                <NutritionGapDishes sum={sum} kind="partial" />
+              </>
             )}
             {/* 2026-08-02 便DE-12(オーナー指示): 「何が入っていないか」の行だけ太字にする。
                 合計に含めていないもの（ごはん・飲みもの・おやつ・外食／野菜に数えない食品群）は、

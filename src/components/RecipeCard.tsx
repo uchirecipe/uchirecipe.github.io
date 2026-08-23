@@ -25,6 +25,7 @@ import { ingredientColorToken } from '../logic/ingredientColor'
 import { pickDisplayIngredientChips } from '../logic/mainIngredients'
 import type { CardDensity } from '../logic/cardDensity'
 import { cardPartsFor, type CardPartKey, type CardPlace } from '../logic/cardParts'
+import { showsEffortBadge } from '../logic/effort'
 import { photoObjectPosition } from '../logic/photoFocus'
 import { ja } from '../i18n/ja'
 import { usePhotoUrl } from './usePhotoUrl'
@@ -473,7 +474,10 @@ export default function RecipeCard({
           {ja.recipes.minutesSuffix}
         </span>
       )}
-      {shows('effort') && (
+      {/* 手間レベルは「普通」のとき出さない（2026-08-23 便JP・③）。既定値であって
+          人が選んだ結果ではないので、並ぶカードが同じ言葉で埋まるだけになる。
+          出すかどうかの決めごとは logic/effort.ts の1か所（絞り込みはこれを見ない） */}
+      {shows('effort') && showsEffortBadge(recipe.effortLevel) && (
         <span className="rounded-sm border border-edge px-1.5 py-0.5">
           {ja.effort[recipe.effortLevel]}
         </span>
