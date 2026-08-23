@@ -32,6 +32,36 @@ export function clampServings(value: number): number {
 }
 
 /**
+ * 取り込み（URLから取り込む・文章を貼り付ける）で読み取れた人数分の扱い（2026-08-23 便KF）。
+ *
+ * 背景（影響範囲テストB「健康を気にする人」30品の実測）: 元ページに人数分が書かれていない5品が
+ * すべて黙って「2人分」（フォームの初期値）で保存されていた。うち1品はページに「(4人分)」と
+ * 書いてあるのに2人分で入り、**1人分の塩分が2倍（4.9g）**に出ていた。
+ * しかもこの品は計算対象外0件なので、栄養の注意書きも1つも出ない。
+ *
+ * 直し方は「黙って既定の人数にしない」＝**読み取れなかったことを知らせる**。
+ * 人数分を機械が推し量って入れることはしない（本文の「(4人分)」を読む話とは別問題で、
+ * 読めなかったときに黙らないことが先）。
+ */
+export interface ImportedServings {
+  /** フォームに入れる人数分。読み取れなければ今の値のまま動かさない */
+  servings: number
+  /** 取り込み元に人数分が書かれておらず、読み取れなかった */
+  unread: boolean
+}
+
+/** 取り込んだ人数分を、フォームに入れる値と「読み取れたか」に分ける */
+export function resolveImportedServings(
+  imported: number | null | undefined,
+  current: number,
+): ImportedServings {
+  if (imported == null || !Number.isFinite(imported) || imported <= 0) {
+    return { servings: current, unread: true }
+  }
+  return { servings: clampServings(imported), unread: false }
+}
+
+/**
  * 献立の枠の「既定の食数」（2026-08-03 便DK）。枠ごとに食数を決めていないときに、
  * 何人分として扱うかを返す。
  *

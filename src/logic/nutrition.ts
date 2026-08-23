@@ -185,6 +185,94 @@ export function hasMaterialGap(nutrition: Pick<RecipeNutrition, 'excluded'>): bo
   return nutrition.excluded.some((e) => e.reason === 'food' || e.reason === 'unit')
 }
 
+/**
+ * 塩分を持つ調味料だと名前から読み取れる語（2026-08-23 便KF）。
+ *
+ * 材料名は正規化（カタカナ→ひらがな・読み仮名辞書）を通したものと、素の名前の**両方**で見る。
+ * 漢字は正規化しても漢字のまま残るので、かなと漢字の両方の書き方を並べてある。
+ *
+ * **短い語・語の一部になりやすい語は入れない**。同梱109品で試したところ、
+ * 「がら」は「赤唐辛子（あかとうがらし）」に、「ルー」は「フルーツ」「ブルーベリー」に当たった
+ * （カレールー・鶏がらスープの素はどちらも成分表にあるので、この一覧に無くても落ちない）。
+ */
+const SALT_SOURCE_WORDS: readonly string[] = [
+  '塩', 'しお',
+  'しょうゆ', '醤油', 'しょう油',
+  'みそ', '味噌',
+  'だし', '出汁',
+  'つゆ', 'たれ', 'だれ', 'タレ',
+  'スープ', 'すーぷ',
+  'ブイヨン', 'ぶいよん', 'コンソメ', 'こんそめ',
+  'ソース', 'そーす', 'ドレッシング', 'どれっしんぐ',
+  'ケチャップ', 'けちゃっぷ', 'マヨネーズ', 'まよねーず',
+  'ポン酢', 'ぽん酢', 'ぽんず',
+  '醤', 'ジャン', 'じゃん',
+  '漬', 'つけもの', 'キムチ', 'きむち',
+  '梅干', 'うめぼし', '佃煮', 'つくだに', 'ふりかけ',
+  '麹', 'こうじ',
+  'ナンプラー', 'なんぷらー', 'オイスター', 'おいすたー', 'ウスター', 'うすたー',
+  '調味',
+]
+
+/**
+ * 「味つけがほとんど計算に入っていない」とみなす1人分の食塩相当量（g）。
+ *
+ * 1日のめやすは男性7.5g・女性6.5g（DAILY_GUIDES）。料理1品でこれを下回るのは
+ * 「味つけの材料がほぼ計算に入っていない」水準なので、分量が書かれていない調味料
+ * （適量・少々・分量なし）が落ちている場合にかぎり、ここを境に強い注意を出す。
+ */
+const SALT_NEGLIGIBLE_G_PER_SERVING = 0.5
+
+/**
+ * 計算に入らなかった材料のうち、**塩分を持つ調味料**だと読み取れるもの（2026-08-23 便KF）。
+ *
+ * なぜ他の材料と分けるのか（影響範囲テストB「健康を気にする人」30品の実測）:
+ * 塩分の源が丸ごと落ちると、画面には「塩分0.0g」「0.2g」という**嘘の安心**が出る。
+ * 実測では塩分0.0gが2品・0.2gが1品（うち1品は料理名が「塩レモン」）あり、
+ * どれも他の材料が落ちたときと同じ1文しか出ていなかった。
+ * 減塩したい人にとって、少なく出るのはいちばん悪い出方なので、ここだけ強く知らせる。
+ *
+ * hasMaterialGap との違いは2つ:
+ *  1. 名前から塩分を持つと読み取れるものだけに絞る（薬味・香草しか落ちていない品では出さない）。
+ *  2. **分量が書かれていない調味料（reason amount）も、計算できた塩分がごくわずかなら数える**。
+ *     『塩 適量』はまさに塩分の源が丸ごと抜けた状態で、hasMaterialGap は量が書いてある材料しか
+ *     見ないため、警告が1つも出ないまま0.0gが出ていた。
+ *     ただし他の調味料で味がついている品（塩分が計算できている品）まで数えると、
+ *     「塩こしょう 少々」だけで毎回注意が出て読まれなくなる（同梱109品で実測）。
+ * 下ごしらえ用の塩（prep・塩もみ用など洗い流すもの）は元から食べる分に残らないので数えない。
+ *
+ * 名前の判定は語だけで行う＝**当たりすぎる側に倒してある**。落ちた材料に対してだけ働くので、
+ * 多めに出ても「計算に入っていない味つけがある」という事実は必ず正しい。
+ */
+export function saltSourceGaps(
+  nutrition: Pick<RecipeNutrition, 'excluded' | 'perServing'>,
+): ExcludedIngredient[] {
+  const saltIsNegligible = nutrition.perServing.saltG < SALT_NEGLIGIBLE_G_PER_SERVING
+  return nutrition.excluded.filter((e) => {
+    if (e.reason === 'prep') return false
+    // 「お好みで」は食べるかどうかを本人が決める分なので数えない（仮の量を当てる
+    // matchAssumedGrams が同じ理由で対象外にしているのと同じ線引きにそろえる）
+    if (/お好みで/.test(e.name) || /お好みで/.test(e.amountText ?? '')) return false
+    if (e.reason === 'amount' && !saltIsNegligible) return false
+    return looksSaltSource(e.name)
+  })
+}
+
+/** 名前から「塩分を持つ調味料」と読み取れるか */
+function looksSaltSource(name: string): boolean {
+  const raw = name.trim()
+  if (!raw) return false
+  const key = normalizeName(raw)
+  return SALT_SOURCE_WORDS.some((word) => raw.includes(word) || key.includes(word))
+}
+
+/** 塩分を持つ調味料が計算に入っていない品か（画面で強い注意を出す条件・2026-08-23 便KF） */
+export function hasSaltSourceGap(
+  nutrition: Pick<RecipeNutrition, 'excluded' | 'perServing'>,
+): boolean {
+  return saltSourceGaps(nutrition).length > 0
+}
+
 /** 「少々」「適量」を仮の目安量で計算に含めたときの記録(2026-07-11オーナー要望) */
 export interface AssumedIngredient {
   name: string
@@ -243,13 +331,26 @@ function stripParens(normalized: string): string {
  * この2品にだけ出る原因になっていた）。同梱109品には1件も出てこないので既存の値は動かない。
  */
 const ZERO_INGREDIENTS = new Set(
-  ['水', 'ぬるま湯', 'お湯', '湯', '熱湯', '氷', '氷水', 'ゆで汁', '茹で汁', 'パスタのゆで汁'].map(
+  ['水', 'お水', 'ぬるま湯', 'お湯', '湯', '熱湯', '氷', '氷水', 'ゆで汁', '茹で汁', 'パスタのゆで汁'].map(
     (n) => normalizeName(n),
   ),
 )
 
+/**
+ * 「◯◯の戻し汁」「◯◯のゆで汁」「◯◯の蒸し汁」（2026-08-23 便KF）。
+ * 中身は水なので値段も栄養も付けようがない。**名前に食材が入っているのが厄介**で、
+ * 実データの五目豆『昆布の戻し汁＋水 2カップ』は「昆布」に名寄せされていた
+ * （単位を換算できずに落ちていたから助かっていただけで、当たっていれば
+ *  乾燥昆布2カップぶんの塩分が乗るところだった）。
+ * 「煮汁」は調味料が入っているので**入れない**。
+ */
+const ZERO_LIQUID_SUFFIX = /(戻し汁|もどし汁|ゆで汁|茹で汁|蒸し汁)$/
+
 export function isZeroIngredient(name: string): boolean {
-  return ZERO_INGREDIENTS.has(stripParens(normalizeName(name)))
+  const key = stripParens(normalizeName(name))
+  if (ZERO_INGREDIENTS.has(key)) return true
+  // 「昆布の戻し汁＋水」のように後ろに水が足されている書き方も同じ扱いにする
+  return ZERO_LIQUID_SUFFIX.test(key.replace(/[＋+]?(みず|水|お湯)$/, ''))
 }
 
 // 照合用の索引を起動時に一度だけ構築する。
@@ -386,6 +487,29 @@ export function convertToGrams(value: number, unit: string, food: NutritionFood)
   if (spoonMl !== undefined && food.gramsPerMl !== undefined) {
     return value * spoonMl * food.gramsPerMl
   }
+  const shorthand = shorthandUnit(u)
+  return shorthand !== null ? convertToGrams(value, shorthand, food) : null
+}
+
+/**
+ * 同じ単位の短い書き方・言い換えを、成分表が持っている単位に読み替える（2026-08-23 便KF）。
+ *
+ * **重さの数値は1つも作らない**。その食品が元から持っている単位の値をそのまま使うだけなので、
+ * 読み替えても値が変わることはない（当たらなかったときの最後の手当てにしてあり、
+ * これまで換算できていた材料の結果は1件も変わらない）。
+ *
+ * 実データ（影響範囲テストB・30品）で落ちていたもの:
+ *  - 『生鮭 2切』… 成分表は「切れ」だけを持つ。主菜なのに1人分たんぱく質1.0gになっていた
+ *  - 『しょうがのみじん切り 1かけ分』『しょうがのせん切り 1/2かけ分』… 成分表は「かけ」だけ
+ *
+ * 「◯◯分」は「1本分」「1個分」「1株分」のように広く使われる言い方なので、
+ * 末尾の「分」を落として同じ単位として読む（元の単位を持っていなければ従来どおり換算できない
+ * ＝知らない単位に勝手な重さを当てることはしない）。「皿分」のように成分表が
+ * そのまま持っている単位は、先の明示の照合で当たるのでここへ来ない。
+ */
+function shorthandUnit(unit: string): string | null {
+  if (unit === '切') return '切れ'
+  if (unit.length > 1 && unit.endsWith('分')) return unit.slice(0, -1)
   return null
 }
 

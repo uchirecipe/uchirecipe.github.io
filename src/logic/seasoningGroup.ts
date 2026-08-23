@@ -24,7 +24,10 @@ export function seasoningGroupColorToken(group: number): string {
  * 紛れるため**この一覧には入れず**、「そのレシピが実際にその英字で組を作っているとき」だけ
  * 別扱いで見る（seasoningLetterMark）。
  */
-export const SEASONING_MARK_CHARS = '☆★◎○●◇◆■□▲△▼▽'
+// 2026-08-23 便KF: 「◯」(U+25EF・大きい丸)を足した。見た目がほぼ同じ「○」(U+25CB)は
+// 元から入っていたが、実データ（つくおき「基本の切り干し大根の煮物」）が使っていたのは
+// U+25EF のほうで、印として読めずに材料名に『◯酒』のまま残っていた。
+export const SEASONING_MARK_CHARS = '☆★◎○◯●◇◆■□▲△▼▽'
 export const SEASONING_MARK_PATTERN = new RegExp(`[${SEASONING_MARK_CHARS}]`)
 
 /**

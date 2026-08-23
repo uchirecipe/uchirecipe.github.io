@@ -29832,6 +29832,215 @@ import { safetyNotesFor, stepSafetyNotes, wholeRecipeSafetyNotes } from '../src/
   }
 }
 
+
+// ==========================================================================================
+// KF-1〜KF-7(2026-08-23 便KF): 影響範囲テストB「健康を気にする人」の実データ30品で見つかった、
+// 栄養の数字が減塩の判断に使えなくなる穴。
+//
+// 実データの再現（直す前の実測）: 30品中24品(80%)で材料が一部落ち、のべ49件
+// （成分データ無し26件・単位を換算できない11件・適量少々12件）。塩分の数字だけで判断すると
+// 誤る品が11/30品(37%)。とくに「塩分の源が丸ごと落ちて 0.0g と出る」品が2品あった。
+//
+// ここで見張るのは「利用者が確かめたいこと」＝**減塩したい人が数字を見て判断できるか**。
+// ==========================================================================================
+{
+  const {
+    computeRecipeNutrition,
+    hasMaterialGap,
+    hasSaltSourceGap,
+    saltSourceGaps,
+    matchNutritionFood,
+    convertToGrams,
+  } = await import('../src/logic/nutrition.ts')
+  const { resolveImportedServings } = await import('../src/logic/servings.ts')
+
+  /** 実データの1行をそのまま材料にした1品を作る（保存されている形をそのまま渡す） */
+  const dish = (servings, ingredients) => computeRecipeNutrition({ servings, ingredients })
+
+  // ---------- KF-1: 塩分を持つ調味料が丸ごと落ちたときは、他の材料が落ちたときより強く知らせる ----------
+  // 実データ139「トマトと大葉のだしマリネ」: 唯一の塩分源『白だし 大さじ1』が落ちて塩分0.0g。
+  // 実データ132「キノコのマリネサラダ」: 塩が『適量』・酸味が『白ワインビネガー』で塩分0.0g。
+  // どちらも出るのは他の材料が落ちたときと同じ1文だけだった。
+  {
+    const saltGone = dish(2, [
+      { name: 'トマト', amount: '2', unit: '個' },
+      { name: '秘伝の合わせだし', amount: '1', unit: '大さじ' },
+    ])
+    eq('KF-1 塩分を持つ調味料が落ちた品を見分けられる', hasSaltSourceGap(saltGone), true)
+    eq('KF-1 落ちた調味料の名前を返す', saltSourceGaps(saltGone).map((e) => e.name), ['秘伝の合わせだし'])
+    // 「塩 適量」だけが落ちた品も塩分の源が落ちている（reasonがamountでも見逃さない）。
+    // 従来の hasMaterialGap は food/unit しか見ないので、この品には警告が1つも出なかった
+    const saltAmountOnly = dish(2, [
+      { name: 'しめじ', amount: '1', unit: 'パック' },
+      { name: '塩', amount: '適量', unit: '' },
+    ])
+    eq('KF-1 「塩 適量」で塩分が落ちた品も見分けられる', hasSaltSourceGap(saltAmountOnly), true)
+    eq('KF-1 従来の判定(hasMaterialGap)ではこの品を拾えない', hasMaterialGap(saltAmountOnly), false)
+    // サイト側のまとめ行（実データ118「塩、酒、みりん、しょうゆ」・119「みそ、水 各」）
+    const bundledRow = dish(2, [
+      { name: 'たら', amount: '2', unit: '切れ' },
+      { name: '塩、酒、みりん、しょうゆ', amount: '', unit: '' },
+    ])
+    eq('KF-1 サイトのまとめ行「塩、酒、みりん、しょうゆ」も塩分の源として拾う', hasSaltSourceGap(bundledRow), true)
+    // 塩分を持たない材料しか落ちていない品では出さない（毎回出ると読まれなくなる）
+    const noSalt = dish(2, [
+      { name: '鶏もも肉', amount: '250', unit: 'g' },
+      { name: '白いりごま', amount: '適量', unit: '' },
+      { name: 'ドライパセリ', amount: '少々', unit: '' },
+    ])
+    eq('KF-1 塩分を持たない材料しか落ちていない品では出さない', hasSaltSourceGap(noSalt), false)
+    // 下ごしらえ用の塩(prep・洗い流す)は塩分の源として数えない
+    const prepSalt = dish(2, [
+      { name: 'きゅうり', amount: '2', unit: '本' },
+      { name: '塩', amount: '1/4', unit: '小さじ', memo: 'きゅうりの塩もみ用' },
+    ])
+    eq('KF-1 下ごしらえ用の塩(洗い流す)では出さない', hasSaltSourceGap(prepSalt), false)
+    // 味つけが計算できている品で『塩 少々』が落ちただけでは出さない（毎回出る注意は読まれなくなる）。
+    // 同梱109品で試すと、この歯止めが無いと「塩こしょう 少々」だけで8品に出ていた
+    const seasonedEnough = dish(2, [
+      { name: 'ほうれん草', amount: '1', unit: '束' },
+      { name: 'しょうゆ', amount: '2', unit: '大さじ' },
+      { name: '塩', amount: '適量', unit: '' },
+    ])
+    eq('KF-1 味つけが計算できている品で「塩 適量」が落ちても出さない', hasSaltSourceGap(seasonedEnough), false)
+    // 「お好みで」は食べるかどうかを本人が決める分なので数えない（仮の量の線引きと同じ）
+    const optional = dish(2, [
+      { name: 'しめじ', amount: '1', unit: 'パック' },
+      { name: '塩', amount: '少々(お好みで)', unit: '' },
+    ])
+    eq('KF-1 「お好みで」の調味料では出さない', hasSaltSourceGap(optional), false)
+  }
+
+  // ---------- KF-8: 塩分の強い注意が、同梱109品では1品も出ない ----------
+  // 注意は「めったに出ないから読まれる」。同梱の基本レシピで出るようなら、
+  // 判定が当たりすぎている（薬味・果物にまで出ていた形を実際に作り込んだ）。
+  {
+    const { starterDefs } = await import('../src/db/starters.ts')
+    const noisy = starterDefs
+      .filter((d) => hasSaltSourceGap(computeRecipeNutrition(d)))
+      .map((d) => d.title)
+    eq('KF-8 同梱の基本レシピでは塩分の注意が1品も出ない', noisy, [])
+  }
+
+  // ---------- KF-2: 単位の1文字違いで主材料が丸ごと落ちない ----------
+  // 実データ138「鮭の南蛮漬け」: 『生鮭 2切』が単位換算できず、主菜なのに1人分たんぱく質1.0g。
+  // 実データ135「豚汁」: 『こんにゃく 1/2個』（成分表は「枚」だけ）。
+  // 実データ120・118: 『しょうがのみじん切り 1かけ分』（成分表は「かけ」だけ）。
+  {
+    const salmon = matchNutritionFood('生鮭')
+    eq('KF-2 前提: 生鮭は成分表の鮭に名寄せできている', salmon?.label, '鮭')
+    eq('KF-2 「切」は「切れ」と同じ重さに換算できる', convertToGrams(2, '切', salmon), convertToGrams(2, '切れ', salmon))
+    const konnyaku = matchNutritionFood('こんにゃく')
+    eq('KF-2 こんにゃくの「個」は「枚」と同じ重さに換算できる', convertToGrams(1, '個', konnyaku), convertToGrams(1, '枚', konnyaku))
+    const ginger = matchNutritionFood('しょうが')
+    eq('KF-2 「かけ分」は「かけ」と同じ重さに換算できる', convertToGrams(1, 'かけ分', ginger), convertToGrams(1, 'かけ', ginger))
+    const garlic = matchNutritionFood('にんにく')
+    eq('KF-2 にんにくの「かけ分」も換算できる', convertToGrams(1, 'かけ分', garlic), convertToGrams(1, 'かけ', garlic))
+    // 「1本分」「1個分」のように「◯◯分」と書かれた単位は、いつでも元の単位として読む
+    const negi = matchNutritionFood('長ねぎ')
+    eq('KF-2 「本分」は「本」と同じ重さに換算できる', convertToGrams(1, '本分', negi), convertToGrams(1, '本', negi))
+    // 元の単位が成分表に無いときは、換算できないまま（勝手な数字を作らない）
+    eq('KF-2 元の単位が無い「房分」は換算できないまま', convertToGrams(1, '房分', negi), null)
+    // 実データ110「鮭のちゃんちゃん焼き風」: 『塩鮭 2切れ』が成分データ無しで1人分72kcal
+    const shiozake = matchNutritionFood('塩鮭')
+    eq('KF-2 塩鮭に成分データがある', shiozake?.label, '塩鮭')
+    eq('KF-2 塩鮭は塩分を持つ（生鮭と同じ値にしない）', (shiozake?.per100g.saltG ?? 0) > 1, true)
+    // 実データ129「五目豆」: 『大豆 150g』が成分データ無しでたんぱく質1.4g
+    eq('KF-2 素の「大豆」に成分データがある', matchNutritionFood('大豆')?.id, '04028')
+    // 主材料が落ちなくなったことを、品として測る（1人分のたんぱく質で見る）
+    const nanbanzuke = dish(4, [
+      { name: '生鮭', amount: '2', unit: '切' },
+      { name: 'ピーマン', amount: '4', unit: '個' },
+      { name: '玉ねぎ', amount: '1/4', unit: '個' },
+    ])
+    eq('KF-2 「生鮭 2切」の主菜が主材料を落とさない(1人分たんぱく質8g超・旧1.0g)', nanbanzuke.perServing.proteinG > 8, true)
+  }
+
+  // ---------- KF-3: 合わせ調味料の印(◎◯☆★)が材料名に残らない ----------
+  // 実データ122〜126・138(つくおき): 『◎酒 大1』『◎白だし 大1.5』のように、分量が「大1」形式で
+  // 単位欄が空の行だけ、行頭の印が名前に残っていた（印を剥がす処理の**取りこぼし側**）。
+  {
+    eq('KF-3 「◎酒 大1」の印が名前に残らない', normalizeImportedIngredient('◎酒', '大1').name, '酒')
+    eq('KF-3 剥がした印は控えとして返る', normalizeImportedIngredient('◎酒', '大1').mark, '◎')
+    eq('KF-3 分量はそのまま残る', normalizeImportedIngredient('◎酒', '大1').amount, '大1')
+    eq('KF-3 「◯酒」(白丸)も同じ', normalizeImportedIngredient('◯酒', '大2').name, '酒')
+    eq('KF-3 「◎白だし」も同じ', normalizeImportedIngredient('◎白だし', '大1.5').name, '白だし')
+    eq('KF-3 「☆みりん」も同じ', normalizeImportedIngredient('☆みりん', '大2').name, 'みりん')
+    // 印が付いていない行は1文字も変えない
+    eq('KF-3 印が無い行は変えない', normalizeImportedIngredient('醤油', '大2').name, '醤油')
+    // 印を剥がした結果、栄養の名寄せが通る（落ちていた理由そのもの）
+    eq('KF-3 印を剥がすと栄養の名寄せが通る', matchNutritionFood(normalizeImportedIngredient('◎酒', '大1').name)?.label, '酒')
+  }
+
+  // ---------- KF-4: 人数分が読み取れないときに黙って既定の人数にしない ----------
+  // 実データ21(=128 切り干し大根とひじきのごま煮): ページに「(4人分)」と書いてあるのに2人分で保存され、
+  // 1人分の塩分が2倍(4.9g)に出た。対象外0件なので注意書きは1つも出なかった。
+  {
+    eq('KF-4 人数分が読めたらそのまま入れる', resolveImportedServings(4, 2), { servings: 4, unread: false })
+    eq('KF-4 人数分が無いときは今の人数のまま「読めなかった」印を立てる', resolveImportedServings(undefined, 2), { servings: 2, unread: true })
+    eq('KF-4 0人分・壊れた値も「読めなかった」扱い', resolveImportedServings(0, 2), { servings: 2, unread: true })
+    eq('KF-4 範囲外(24人分)は範囲に収めたうえで読めた扱い', resolveImportedServings(24, 2), { servings: 20, unread: false })
+  }
+
+  // ---------- KF-5: 素の「ねぎ」が名寄せできる（野菜量が0gにならない） ----------
+  // 実データ136・137: 『ねぎ 1/2本』『ねぎ 1/4本』が成分データ無しで落ち、137は野菜量0g。
+  {
+    eq('KF-5 素の「ねぎ」が長ねぎに名寄せできる', matchNutritionFood('ねぎ')?.label, '長ねぎ')
+    // 書き分けてある別のねぎは、これまでどおりそれぞれの食品のまま（誤爆させない）
+    eq('KF-5 「青ねぎ」は青ねぎのまま', matchNutritionFood('青ねぎ')?.label, '青ねぎ')
+    eq('KF-5 「小ねぎ」は小ねぎのまま', matchNutritionFood('小ねぎ')?.label, '小ねぎ')
+    eq('KF-5 「万能ねぎ」は小ねぎのまま', matchNutritionFood('万能ねぎ')?.label, '小ねぎ')
+    eq('KF-5 「玉ねぎ」は玉ねぎのまま', matchNutritionFood('玉ねぎ')?.label, '玉ねぎ')
+    eq('KF-5 「長ねぎ」は長ねぎのまま', matchNutritionFood('長ねぎ')?.label, '長ねぎ')
+  }
+
+  // ---------- KF-6: 塩分そのものの調味料が名寄せできる（0.0gの嘘の安心を作らない） ----------
+  // 実データ: 白だし3件・固形スープの素・丸鶏がらスープが成分データ無しで落ちていた。
+  {
+    eq('KF-6 白だしに成分データがある', matchNutritionFood('白だし')?.label, '白だし')
+    eq('KF-6 商品名付きの「香り白だし」も名寄せできる', matchNutritionFood('キッコーマン旨みひろがる 香り白だし')?.label, '白だし')
+    eq('KF-6 固形スープの素はコンソメ(固形ブイヨン)に名寄せできる', matchNutritionFood('固形スープの素')?.label, 'コンソメ')
+    eq('KF-6 「丸鶏がらスープ」は鶏がらスープの素に名寄せできる', matchNutritionFood('「丸鶏がらスープ™」')?.label, '鶏がらスープの素')
+    // 塩分が実際に計算へ入ることまで見る（名寄せできても0gなら意味がない）
+    const dashiMarine = dish(2, [
+      { name: 'トマト', amount: '2', unit: '個' },
+      { name: '白だし', amount: '1', unit: '大さじ' },
+    ])
+    eq('KF-6 白だし大さじ1で1人分の塩分が0.5g以上になる(旧: 0.0g)', dashiMarine.perServing.saltG >= 0.5, true)
+    eq('KF-6 白だししか塩分源が無い品で、塩分の警告は出ない(計算に入ったため)', hasSaltSourceGap(dashiMarine), false)
+    // 「しょう油」(かなと漢字の混ぜ書き)。読み仮名辞書では「油」が「あぶら」になるため名寄せできず、
+    // 実データC「豚バラ大根」で大さじ2(食塩相当量約5.2g)が落ち、1人分の塩分が0.15gと出ていた
+    eq('KF-6 「しょう油」もしょうゆに名寄せできる', matchNutritionFood('しょう油')?.label, 'しょうゆ')
+    eq('KF-6 「薄口しょう油」は薄口しょうゆのまま', matchNutritionFood('薄口しょう油')?.label, '薄口しょうゆ')
+  }
+
+  // ---------- KF-7: 足した別名が別の食材に誤爆していない ----------
+  // 名寄せを足すときにいちばん怖いのは「当たってはいけないものに当たる」こと。
+  // 似た名前・部分一致で巻き込みやすいものを名指しで見張る。
+  {
+    const label = (name) => matchNutritionFood(name)?.label ?? null
+    eq('KF-7 「大豆もやし」は大豆(水煮)に化けない', label('大豆もやし') !== '大豆（水煮）', true)
+    eq('KF-7 「大豆油」は大豆(水煮)に化けない', label('大豆油') !== '大豆（水煮）', true)
+    eq('KF-7 「蒸し大豆」は蒸し大豆のまま', label('蒸し大豆'), '蒸し大豆')
+    eq('KF-7 「きな粉」はきな粉のまま', label('きな粉'), 'きな粉')
+    eq('KF-7 「鮭」は生の鮭のまま(塩鮭に化けない)', label('鮭'), '鮭')
+    eq('KF-7 「生鮭」は生の鮭のまま', label('生鮭'), '鮭')
+    eq('KF-7 「酒」は酒のまま(鮭に化けない)', label('酒'), '酒')
+    eq('KF-7 「塩」は塩のまま', label('塩'), '塩')
+    eq('KF-7 「塩昆布」は塩昆布のまま', label('塩昆布'), '塩昆布')
+    eq('KF-7 「だし汁」はだし汁のまま(白だしに化けない)', label('だし汁'), 'だし汁')
+    eq('KF-7 「めんつゆ」はめんつゆのまま', label('めんつゆ'), 'めんつゆ（2倍濃縮）')
+    eq('KF-7 「鶏がらスープの素」は鶏がらスープの素のまま', label('鶏がらスープの素'), '鶏がらスープの素')
+    eq('KF-7 「和風だしの素」は和風だしの素のまま', label('だしの素'), '和風だしの素')
+    eq('KF-7 「コンソメ」はコンソメのまま', label('コンソメ'), 'コンソメ')
+    eq('KF-7 「こんにゃく」はこんにゃくのまま', label('こんにゃく'), 'こんにゃく')
+    eq('KF-7 「しらたき」はしらたきのまま', label('しらたき'), 'しらたき')
+    eq('KF-7 「米酢」は米酢のまま(ワインビネガーに化けない)', label('米酢'), '米酢')
+    eq('KF-7 「酢」は酢のまま', label('酢'), '酢')
+  }
+}
+
+
 // ---------- 結果 ----------
 console.log(`合格: ${passed}件 / 失敗: ${failures.length}件`)
 for (const f of failures) console.log(`  NG ${f}`)
