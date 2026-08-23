@@ -1,7 +1,7 @@
 import type { Ingredient } from '../db/types'
 import { leadingRangeAmount, normalizeAmountInput, resolveCalcAmount } from './amount'
-import { stripIngredientDecoration, toHiragana } from './kana'
-import { normalizeUnit, parseUnitQuantity, VOLUME_UNIT_FACTORS } from './unitGrams'
+import { stripIngredientNoise, toHiragana } from './kana'
+import { normalizeUnit, normalizeUnitText, parseUnitQuantity, VOLUME_UNIT_FACTORS } from './unitGrams'
 import { typicalAmountFor } from './amountAssumption'
 // 栄養側の「1枚=◯g」等の目安量(文部科学省 日本食品標準成分表ベース・docs/47監査済み)を
 // 原価の按分にも使うための参照。依存の向きは priceEstimate → nutrition の一方通行で、
@@ -100,11 +100,14 @@ export function buildPriceIndex(
 export function matchPriceEntry(name: string, index: PriceIndexEntry[]): PriceIndexEntry | undefined {
   const hit = matchPriceEntryExact(name, index)
   if (hit) return hit
-  // 素の名前で当たらなかったときだけ、商品名の飾り語（オーガニック・微粒子・国産…）を落として
-  // もう一度探す（2026-08-20 便IL・③）。原価側の照合は「マスタ名で始まるか」の前方一致なので、
-  // 名前の頭に飾り語が付いているだけで1件も当たらなかった（「国産たまねぎ」→ 価格なし）。
+  // 素の名前で当たらなかったときだけ、商品名の飾り語（オーガニック・微粒子・国産…）と
+  // 合わせ調味料の印（★・〇・a. など）を落としてもう一度探す
+  // （2026-08-20 便IL・③／記号は 2026-08-23 便KE で追加）。
+  // 原価側の照合は「マスタ名で始まるか」の前方一致なので、名前の頭に飾りが付いているだけで
+  // 1件も当たらなかった（「国産たまねぎ」→ 価格なし／影響範囲テストAでは `★酒` `〇酒` `a. 酒`
+  // `〇コチュジャン（なくてもOK）` など7行が同じ理由で「価格なし」になっていた）。
   // 当たらなかったときの最後の手当てなので、これまで当たっていた材料の結果は変わらない
-  const stripped = stripIngredientDecoration(name)
+  const stripped = stripIngredientNoise(name)
   const strippedHit =
     stripped !== name.trim() ? matchPriceEntryExact(stripped, index) : undefined
   if (strippedHit) return strippedHit
@@ -251,6 +254,44 @@ function prorated(rawYen: number, source: PriceSource): IngredientPriceEstimate 
 }
 
 /**
+ * 食材価格マスタの登録単位のうち「1回の調理で使う量」で登録されているもの（2026-08-23 便KE）。
+ *
+ * 【なぜ要るか】2026-08-23の影響範囲テストA（節約したい人の実データ30品）で、
+ * 分量・単位が噛み合わなかった材料に**マスタの登録単位ぶんの満額**が乗っていた:
+ *   醤油「大匙1」→ 400円（しょうゆ 400円/1L＝1本まるごと）／酒「大匙2」→ 260円
+ *   にんにく「少々」→ 60円（1玉）／ねぎ「大1」→ 100円（1本）
+ *   逆に 鶏胸肉「1｜枚300g」→ 90円（鶏むね肉 90円/100g の満額＝300gの肉が90円）
+ * 厚揚げニラ玉が1食417円、つくねの照り焼きが1食386円になり、しかも
+ * 「価格が分からない材料」は0〜1件なので**※印は1つも付かなかった**。
+ * 「安全側のフォールバック」のつもりが、マスタの登録単位が大きければ過大・小さければ過小に、
+ * 印も出さずに外れる作りだった。
+ *
+ * 【どう分けるか】マスタの登録単位は2種類ある。
+ *  ①1回に使う量（大さじ1・小さじ1・少々・1かけ・1個分・使用分・1杯）
+ *    …満額＝1回分なので、量が読めなくてもその金額でよい。現在の最高額は40円
+ *    （白練りごま・はちみつ・メープルシロップ 大さじ1／揚げ油 使用分）で、
+ *    外れても1行40円までにしか響かない。
+ *  ②販売単位（1L・1玉・1本・1袋・100g・1/4個…）
+ *    …満額＝買ってきた1つぶんなので、1行に乗せると桁で外れる。
+ * ②は金額を出さず「価格が分からない材料」に数える。
+ * **数字を出さないほうが正しい**——概算食費は利用者が買い物の判断に使う数字で、
+ * 少なく出すのも多く出すのも同じくらい悪く、分からないなら分からないと出すべきだから。
+ * 「価格が分からない材料」に数えると※印と「食材と価格を編集する」の案内が出るので、
+ * 利用者が自分の相場を入れて解消できる（黙って外れた数字を出すと解消しようがない）。
+ *
+ * 単位名はPRICE_DEFAULTSに実在するものだけを並べる（新しい単位を発明しない）。
+ * 「大匙」「小匙」は「大さじ」「小さじ」の漢字表記（便KE）。
+ */
+const SINGLE_USE_MASTER_UNITS = new Set([
+  '大さじ', '小さじ', '大匙', '小匙', 'おおさじ', 'こさじ',
+  '少々', 'かけ', '個分', '使用分', '杯',
+])
+
+function isSingleUseMasterUnit(baseUnit: string): boolean {
+  return SINGLE_USE_MASTER_UNITS.has(normalizeAmountInput((baseUnit ?? '').trim()))
+}
+
+/**
  * マスタ一致した材料1行分の金額を見積もる。
  * ingredientの分量・単位がマスタのunitと数量として噛み合えば按分計算し、
  * 最後まで噛み合わなければマスタの金額をそのまま1行分の目安として使う。
@@ -272,7 +313,10 @@ function prorated(rawYen: number, source: PriceSource): IngredientPriceEstimate 
  *    （amountAssumption.tsのtypicalAmountFor）を持っていればその量で按分する
  *    （登録単位が販売単位のサラダ油・ごま油・オリーブオイルで、「適量」1行にボトル1本分の
  *    金額が乗るのを止める）。
- * 5) 上記いずれにも当てはまらなければ、マスタの金額をそのまま使う（安全側のフォールバック）。
+ * 5) それでも量が噛み合わないときは、**マスタの登録単位が「1回に使う量」のときだけ**
+ *    その金額をそのまま1行分として使う（isSingleUseMasterUnit）。登録単位が販売単位
+ *    （1L・1玉・1本・100g…）なら金額を出さず undefined を返す＝「価格が分からない材料」に数える。
+ *    2026-08-23 便KE。詳しい理由は isSingleUseMasterUnit のコメント。
  */
 export function estimateIngredientYen(
   ingredient: Pick<Ingredient, 'name' | 'amount' | 'unit'>,
@@ -287,7 +331,8 @@ export function estimateIngredientYen(
   // 完全一致フォールバックはbaseUnit(parseUnitQuantityで正規化済み)と比較するため、ingUnit側も
   // 同じ正規化形にしておく必要がある)
   const resolved = resolveCalcAmount(ingredient.amount ?? '', ingredient.unit)
-  const ingUnit = resolved ? resolved.unit : normalizeAmountInput((ingredient.unit ?? '').trim())
+  // 単位欄は normalizeUnitText で下ごしらえする(NFKC＋末尾の範囲の印「〜」落とし。2026-08-23 便KE)
+  const ingUnit = resolved ? resolved.unit : normalizeUnitText(ingredient.unit ?? '')
   const amountNum = resolved ? resolved.value : parseNumericAmount(ingredient.amount ?? '')
   const source: PriceSource = entry.isDefault ? 'default' : 'user'
   const masterNorm = baseUnit ? normalizeUnit(baseQty, baseUnit) : null
@@ -334,7 +379,13 @@ export function estimateIngredientYen(
       }
     }
   }
-  return { yen: entry.pricePerUnit, rawYen: entry.pricePerUnit, source }
+  // 5) 量が噛み合わなかったときの最後の受け皿。
+  // 登録単位が「1回に使う量」なら、その金額＝1回分なのでそのまま使う。
+  // 販売単位（1L・1玉・1本・100g…）なら金額を出さない＝「価格が分からない材料」に数える
+  if (isSingleUseMasterUnit(baseUnit)) {
+    return { yen: entry.pricePerUnit, rawYen: entry.pricePerUnit, source }
+  }
+  return undefined
 }
 
 /** レシピ1品分の概算食費（材料ごとの内訳を集計した結果） */
@@ -599,6 +650,14 @@ export function pricelessIngredientNames<E extends { recipeId: number }>(
 }
 
 /**
+ * 「お好みで」と書かれた材料か（2026-08-23 便KE）。
+ * amountAssumption.ts の matchAssumedGrams と同じ判定（材料名・分量のどちらかに「お好みで」）。
+ */
+function isOptionalIngredient(name: string, amount?: string): boolean {
+  return /お好みで/.test(name) || /お好みで/.test(amount ?? '')
+}
+
+/**
  * レシピの配列そのものから「価格が分からない材料」の名前を返す（2026-07-30 便CH/C2）。
  * 月間サマリー・期間の集計は献立エントリではなく「作った記録＋登録した献立のレシピ」を数えるため、
  * recipeId を持たないこちらの形が要る（pricelessIngredientNames は同じ判定をこの関数に委ねる）。
@@ -625,6 +684,12 @@ export function pricelessIngredientNamesOfRecipes(
       if (ing.price != null && ing.price > 0) continue
       // 水・ぬるま湯・お湯・湯・熱湯・氷は価格を付ける対象ではない（便CK/③-1）
       if (isZeroIngredient(ing.name)) continue
+      // 「お好みで」と書かれた材料は数えない（2026-08-23 便KE）。
+      // 使うかどうかがそもそも決まっていない添え物なので、これを「価格が分からない材料」に
+      // 数えると、印と「食材と価格を編集する」の案内が出ても利用者に直しようがない。
+      // 栄養側は同じ理由で「お好みで」を仮の量の対象外にしている（amountAssumption.ts
+      // matchAssumedGrams の「お好みで表記は食べるか不明なため対象外」）。判定もそこと同じ形にする
+      if (isOptionalIngredient(ing.name, ing.amount)) continue
       const estimated = estimateIngredientYen(ing, index)
       if (estimated != null && estimated.rawYen > 0) continue
       names.add(ing.name)

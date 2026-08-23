@@ -46,6 +46,12 @@ export const VOLUME_UNIT_FACTORS: Record<string, number> = {
   大さじ: 15,
   小さじ: 5,
   カップ: 200,
+  // 「大匙」「小匙」は「大さじ」「小さじ」の漢字表記（2026-08-23 便KE）。
+  // 新しい換算値ではなく同じ値の書き方ちがいで、上のJIS値をそのまま指す。
+  // クックパッドの実レシピで普通に使われており、影響範囲テストA（30品）では
+  // 「醤油 大匙1」に しょうゆ1L1本ぶんの400円が乗っていた
+  大匙: 15,
+  小匙: 5,
 }
 
 /**
@@ -71,6 +77,23 @@ export type NormalizedUnit =
   | { dim: 'count'; unit: string; base: number }
 
 /**
+ * 単位欄を解釈するための下ごしらえ（2026-08-23 便KE）。
+ * NFKC正規化と前後の空白落としに加えて、**末尾に残った範囲の印**（「〜」「～」「~」）を落とす。
+ *
+ * 実データ（影響範囲テストA・節約したい人の30品）では、元ページの「豚こま肉 100g～」
+ * 「ニラ 1/2束～」が取り込みで分量「100」＋単位「g～」に割れており、単位として読めないため
+ * 質量・個数のどちらにも解決できず、金額が満額フォールバックへ落ちていた。
+ * 分量側の範囲は leadingRangeAmount が「先頭の値を採る（少なめ側＝過大に見せない）」という
+ * 同じ考え方で処理しているので、単位側もそれに揃える。
+ * **解釈専用**（保存データそのものは書き換えない）。
+ */
+export function normalizeUnitText(unit: string): string {
+  return normalizeAmountInput((unit ?? '').trim())
+    .replace(/[〜～~]+$/, '')
+    .trim()
+}
+
+/**
  * 数量+単位を「次元(mass/volume/count)＋基準量」に正規化する。
  * - 質量(g/kg/mg)・体積(ml/cc/l/L/リットル/大さじ/小さじ/カップ)は基準単位換算後の数値を返すので、
  *   同じ次元同士なら基準量の比でそのまま按分できる（kg↔g・L↔ml・大さじ↔小さじ 等）。
@@ -83,7 +106,7 @@ export type NormalizedUnit =
  */
 export function normalizeUnit(amount: number, unit: string): NormalizedUnit | null {
   if (!Number.isFinite(amount) || amount <= 0) return null
-  const trimmed = normalizeAmountInput((unit ?? '').trim())
+  const trimmed = normalizeUnitText(unit)
   if (!trimmed) return null
 
   const massFactor = MASS_UNIT_FACTORS[trimmed]

@@ -149,6 +149,45 @@ export function toPantryKey(name: string): string {
 }
 
 /**
+ * 合わせ調味料の印として材料名の頭に付く記号（2026-08-23 便KE）。
+ * 元のレシピページが「★の調味料を合わせる」のように使っている印で、取り込みで
+ * 名前に残ることがある（影響範囲テストAでは30品中13行が★・〇・a. 付きのまま残っていた）。
+ */
+const INGREDIENT_MARK_HEAD = /^[\s★☆〇○◯●◎◇◆■□▲△▽※＊*・･+＋\-–—]+/
+/** 「a.」「A)」「①」「(1)」のような通し番号の印 */
+const INGREDIENT_INDEX_HEAD = /^(?:[a-zA-Zａ-ｚＡ-Ｚ]\s*[.)．）]|[（(]?\d+[）)．.]|[①-⑳])\s*/
+/** 名前の頭・末尾に残る区切り記号（「お好みで、小ネギ」の読点、「ごま油 〜」の波線） */
+const INGREDIENT_PUNCT_HEAD = /^[\s、。,，:：]+/
+const INGREDIENT_PUNCT_TAIL = /[\s、。,，:：~〜～+＋\-–—]+$/
+
+/**
+ * 買い物メモで「同じ食材か」を見るために、名前から**食材名でない飾り**を落とす（2026-08-23 便KE）。
+ *
+ * 落とすのは3種類だけで、食材名そのものには手を触れない:
+ *  ①合わせ調味料の印（★・〇・a. など）… 影響範囲テストAでは `★酒` `〇酒` `a. 酒` が
+ *    `酒` と別行になり、買い物メモで酒が6行に割れていた（原価でも「価格なし」になっていた）
+ *  ②商品の飾り語（国産・市販の・お好みで など。stripIngredientDecoration）
+ *  ③頭と末尾に残った区切り記号（`お好みで、小ネギ` の読点、`ごま油(仕上げ用) 〜` の波線）
+ *
+ * **落とすと何も残らなくなるなら落とさない**（記号だけの行を空の名前にしない）。
+ * 飾りが無い名前は1文字も変わらないので、この関数を通しても名寄せの結果は悪くならない。
+ */
+export function stripIngredientNoise(name: string): string {
+  const trimmed = name.trim()
+  let rest = trimmed
+  for (let i = 0; i < 3; i++) {
+    const before = rest
+    rest = rest
+      .replace(INGREDIENT_MARK_HEAD, '')
+      .replace(INGREDIENT_INDEX_HEAD, '')
+      .replace(INGREDIENT_PUNCT_TAIL, '')
+    rest = stripIngredientDecoration(rest).replace(INGREDIENT_PUNCT_HEAD, '')
+    if (rest === before) break
+  }
+  return rest.trim() || trimmed
+}
+
+/**
  * タグでよく使う語の読み（2026-07-28 便BW・QA S3）。
  *
  * タグ候補の絞り込みは toHiragana で行っているが、その辞書（INGREDIENT_READINGS）は食材名だけで、
