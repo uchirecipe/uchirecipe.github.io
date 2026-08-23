@@ -414,7 +414,7 @@ export function buildSearchWords(
  * db/recipes.ts の rebuildSearchWordsIfNeeded が settings.searchIndexVersion と比較し、
  * 食い違っていれば起動時に全レシピのsearchWordsを再構築する。
  */
-export const SEARCH_INDEX_VERSION = 5 // v5: タグの別名(おやつ⇄デザート)も検索語に入れる(2026-08-20 便IL)
+export const SEARCH_INDEX_VERSION = 6 // v6: 料理の種別の自動判定を直した(2026-08-23 便KG。種別が未設定のレシピの検索語が変わる)
 
 /**
  * settingsに保存済みのバージョンが古く、全レシピのsearchWordsを再構築すべきかを判定する

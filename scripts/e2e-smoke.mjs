@@ -1603,6 +1603,143 @@ try {
   }
 
 
+  // --- KG-A/KG-B: 取り込んだレシピの「料理の種別」と、英小文字の合わせ調味料の印 ---
+  //   影響範囲テスト（2026-08-23・実データ90品）で3体が同じ壊れ方をした:
+  //   ・30品中19〜24品が主菜になり、「20分以内」で絞ると副菜の候補が3品まで枯れた
+  //   ・`a. 酒` `a. みりん` のように小文字で書かれた組の印が、材料名に残ったまま保存された
+  //   ここでは貼り付け経路で、①料理名に「副菜」と書いてあれば副菜が選ばれる
+  //   ②料理名から読み取れないときは種別を選ばずに知らせる ③小文字の印が組になる、を見る。
+  {
+    currentCheck = 'KG-A'
+    await page.goto(`${BASE}/#/recipes/new`, { waitUntil: 'networkidle' })
+    await page.waitForTimeout(500)
+    await page.getByText(ja.paste.open).click()
+    await page.waitForTimeout(300)
+    await page.locator(`textarea[placeholder="${ja.paste.placeholder}"]`).fill(
+      'KG小文字の印テスト 副菜\n\n材料（2人分）\nもやし　1袋\na. 酒　大さじ1\na. みりん　大さじ1\na. 砂糖　小さじ1\n\n作り方\n1. もやしをゆでる。\n2. aを混ぜて和える。',
+    )
+    await page.getByRole('button', { name: ja.paste.apply }).click()
+    await page.waitForTimeout(500)
+    // 種別のチップは「かんたん」タブにも出ている。**どの位置にあっても**同じ判定になるよう、
+    // 種別の名前（ja.dishType）と一致するボタンだけを見る（並びを決め打ちしない）
+    const dishTypeNames = [ja.dishType.main, ja.dishType.side, ja.dishType.soup, ja.dishType.dessert]
+    const readDishTypeChips = async () =>
+      await page.evaluate(
+        (names) =>
+          [...document.querySelectorAll('button[aria-pressed]')]
+            .map((el) => ({
+              label: (el.textContent ?? '').replaceAll('​', '').trim(),
+              pressed: el.getAttribute('aria-pressed') === 'true',
+            }))
+            .filter((one) => names.includes(one.label)),
+        dishTypeNames,
+      )
+    // 同じ選択が「かんたん」「くわしく」の両方に出るので、件数は決め打ちしない
+    // （選ばれている種別が副菜だけか、を見る）
+    const kgChips = await readDishTypeChips()
+    check(
+      'KG-A 料理名に「副菜」と書いてあれば、副菜が選ばれる',
+      kgChips.some((c) => c.pressed) && kgChips.filter((c) => c.pressed).every((c) => c.label === ja.dishType.side),
+      JSON.stringify(kgChips),
+    )
+    const kgMemos = await page.evaluate(() =>
+      [...document.querySelectorAll('input')].map((el) => el.value).filter((v) => v.trim() !== ''),
+    )
+    check(
+      'KG-A 英小文字の印が材料のメモに残る（手順の「aを混ぜて」と結び付く）',
+      kgMemos.filter((v) => v === 'a').length === 3,
+      JSON.stringify(kgMemos),
+    )
+    const kgGroupLabels = await page.evaluate(() =>
+      [...document.querySelectorAll('button[aria-label^="合わせ調味料グループ"]')].map(
+        (el) => el.getAttribute('aria-label') ?? '',
+      ),
+    )
+    check(
+      'KG-A 小文字の印から合わせ調味料の組ができる',
+      kgGroupLabels.filter((l) => /^合わせ調味料グループ[0-9]/.test(l)).length === 3,
+      JSON.stringify(kgGroupLabels),
+    )
+    // 保存した中身で、名前に印が残っていないことを見る（栄養・原価の名前照合を壊さないため）
+    await page.getByRole('button', { name: ja.form.save }).click()
+    await page.waitForTimeout(900)
+    const kgSaved = await page.evaluate(async () => {
+      const db = await new Promise((res, rej) => {
+        const r = indexedDB.open('uchi-recipe')
+        r.onsuccess = () => res(r.result)
+        r.onerror = () => rej(r.error)
+      })
+      const all = await new Promise((res, rej) => {
+        const q = db.transaction('recipes').objectStore('recipes').getAll()
+        q.onsuccess = () => res(q.result)
+        q.onerror = () => rej(q.error)
+      })
+      const recipe = all.find((r) => r.title.includes('KG小文字の印テスト'))
+      return recipe ? { names: recipe.ingredients.map((i) => i.name), dishType: recipe.dishType ?? null } : null
+    })
+    check(
+      'KG-A 保存した材料名に小文字の印が残らない',
+      kgSaved != null && kgSaved.names.every((name) => !/^a[.．]?\s/.test(name)),
+      JSON.stringify(kgSaved),
+    )
+    check('KG-A 保存した種別が副菜になっている', kgSaved != null && kgSaved.dishType === 'side', JSON.stringify(kgSaved))
+    await page.locator('a[href*="/edit"]').first().click()
+    await page.waitForTimeout(500)
+    await page.getByRole('button', { name: ja.form.deleteRecipe }).click()
+    await page.waitForTimeout(800)
+
+    // 料理名からは種別が読み取れない品。**機械が主菜と決めずに**、選んでもらう知らせを出す
+    currentCheck = 'KG-B'
+    await page.goto(`${BASE}/#/recipes/new`, { waitUntil: 'networkidle' })
+    await page.waitForTimeout(500)
+    await page.getByText(ja.paste.open).click()
+    await page.waitForTimeout(300)
+    await page.locator(`textarea[placeholder="${ja.paste.placeholder}"]`).fill(
+      'KGパリパリきゅうり\n\n材料（2人分）\nきゅうり　2本\n砂糖　大さじ1\n\n作り方\n1. きゅうりを切る。\n2. 調味料と混ぜる。',
+    )
+    await page.getByRole('button', { name: ja.paste.apply }).click()
+    await page.waitForTimeout(500)
+    const kgUnknownChips = await readDishTypeChips()
+    check(
+      'KG-B 料理名から読み取れないときは、種別を選ばないまま出す（主菜に倒さない）',
+      kgUnknownChips.length >= 4 && kgUnknownChips.every((c) => !c.pressed),
+      JSON.stringify(kgUnknownChips),
+    )
+    const kgUnknownText = ((await page.textContent('body')) ?? '').replaceAll('​', '')
+    check(
+      'KG-B 種別を選んでほしいことを画面で知らせる',
+      kgUnknownText.includes(ja.form.dishTypeNotGuessedHint.replaceAll('​', '')),
+      kgUnknownText.slice(0, 200),
+    )
+    await page.getByRole('button', { name: ja.form.save }).click()
+    await page.waitForTimeout(900)
+    const kgUnknownSaved = await page.evaluate(async () => {
+      const db = await new Promise((res, rej) => {
+        const r = indexedDB.open('uchi-recipe')
+        r.onsuccess = () => res(r.result)
+        r.onerror = () => rej(r.error)
+      })
+      const all = await new Promise((res, rej) => {
+        const q = db.transaction('recipes').objectStore('recipes').getAll()
+        q.onsuccess = () => res(q.result)
+        q.onerror = () => rej(q.error)
+      })
+      const recipe = all.find((r) => r.title.includes('KGパリパリきゅうり'))
+      return recipe ? recipe.dishType ?? null : 'レシピが見つからない'
+    })
+    check(
+      'KG-B 読み取れなかった種別は、レシピにも書き込まれない',
+      kgUnknownSaved === null,
+      JSON.stringify(kgUnknownSaved),
+    )
+    await page.locator('a[href*="/edit"]').first().click()
+    await page.waitForTimeout(500)
+    await page.getByRole('button', { name: ja.form.deleteRecipe }).click()
+    await page.waitForTimeout(800)
+  }
+
+
+
   // --- KW-01: 検索キーワード欄(keywords・2026-07-12バッチ)。一覧や詳細には表示されず、
   // 検索語に入力したときだけヒットすることを確認する ---
   currentCheck = 'KW-01'
@@ -19921,6 +20058,64 @@ try {
             ckDialogsOff[0].includes('残るもの: 写真・料理名・ひとこと説明・メモ') &&
             !ckDialogsOff[0].includes(ja.urlImport.confirmPhotoReplace),
           JSON.stringify(ckDialogsOff),
+        )
+
+        // --- KG-C(2026-08-23 便KG・影響範囲テストA/B/C): 取り込んだページに調理時間が
+        // 書かれていないことを知らせる／写真が届くまで保存を止める ---
+        //   ・実データではクックパッド25品すべてで調理時間が空だった（ページ側に無い。実測で確認）。
+        //     貼り付け経路には同じ知らせがあるのに、URL取り込みには無かった。
+        //   ・写真はレシピ本体の0.3〜0.8秒後に届くのに、その間も保存が押せていた
+        //     （実データBでは30品中10品が写真なしで保存されていた）。
+        currentCheck = 'KG-C'
+        await uiPage.reload({ waitUntil: 'networkidle' })
+        await uiPage.waitForTimeout(500)
+        await uiPage.getByText(ja.urlImport.open).click()
+        await uiPage.waitForTimeout(300)
+        await uiPage.locator('input[type="url"]').first().fill('https://example.com/group-marker')
+        await uiPage.getByRole('button', { name: ja.urlImport.apply }).click()
+        await uiPage.waitForTimeout(600)
+        check(
+          'KG-C 取り込んだページに調理時間が無いとき、欄が空のままであることを知らせる',
+          stripZwspText(await uiPage.textContent('body')).includes(ja.urlImport.cookMinutesNotWritten),
+        )
+        await uiPage.reload({ waitUntil: 'networkidle' })
+        await uiPage.waitForTimeout(500)
+        await uiPage.getByText(ja.urlImport.open).click()
+        await uiPage.waitForTimeout(300)
+        await uiPage.locator('input[type="url"]').first().fill('https://example.com/success-recipe')
+        await uiPage.getByRole('button', { name: ja.urlImport.apply }).click()
+        await uiPage.waitForTimeout(600)
+        check(
+          'KG-C 調理時間が読み込めたときは、その知らせを出さない',
+          !stripZwspText(await uiPage.textContent('body')).includes(ja.urlImport.cookMinutesNotWritten),
+        )
+        // 写真が遅れて届く間は保存を止める（本体の読み込み中と同じ扱い）
+        await uiPage.reload({ waitUntil: 'networkidle' })
+        await uiPage.waitForTimeout(500)
+        await uiPage.getByText(ja.urlImport.open).click()
+        await uiPage.waitForTimeout(300)
+        await uiPage.locator('input[type="url"]').first().fill('https://example.com/slow-photo-marker')
+        await uiPage.getByRole('button', { name: ja.urlImport.apply }).click()
+        await uiPage.waitForTimeout(700) // 本体は入り、写真はまだ届いていない
+        const kgPhotoWaitBody = stripZwspText(await uiPage.textContent('body'))
+        check(
+          'KG-C 写真が届くまでは「保存する」が押せない',
+          await uiPage.getByRole('button', { name: ja.form.save }).isDisabled(),
+          kgPhotoWaitBody.slice(0, 200),
+        )
+        check(
+          'KG-C 押せない理由をその場に書く（写真を読み込み中であること）',
+          kgPhotoWaitBody.includes(ja.form.urlImportPhotoBlocksSave),
+        )
+        // 写真が届いたら解ける（届かなかった場合も解ける＝待たせ続けない）
+        await uiPage.waitForTimeout(2000)
+        check(
+          'KG-C 写真が届いたら「保存する」が押せるようになる',
+          !(await uiPage.getByRole('button', { name: ja.form.save }).isDisabled()),
+        )
+        check(
+          'KG-C 写真が届いたら、待たせていた知らせは消える',
+          !stripZwspText(await uiPage.textContent('body')).includes(ja.form.urlImportPhotoBlocksSave),
         )
 
         // --- URLIMPORT-15(2026-07-30 便CK/②-2): 連続して取り込んだとき、前のURLの写真が

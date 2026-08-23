@@ -50,7 +50,7 @@ import {
 import type { ImportedStepRow } from '../logic/urlImportRows'
 import { stepMinutesFromText } from '../logic/importStepMinutes'
 import { pickIconKey, iconKeyOrder } from '../logic/icon'
-import { guessDishType } from '../logic/dishTypeGuess'
+import { suggestDishType } from '../logic/dishTypeGuess'
 import { toTagKey } from '../logic/kana'
 import {
   MAX_SEASONING_GROUP,
@@ -449,14 +449,16 @@ function RecipeFormInner() {
   const [suitableFor, setSuitableFor] = useState<MealSlot[]>([])
   const [dishType, setDishType] = useState<DishType>()
   // 種別チップをユーザーが一度でも手で押したか(2026-07-23 便BH-1)。押すまでは料理名からの
-  // 自動提案(guessDishType)を初期選択として表示し、押したら追従を止める(iconKeyの自動追従と同じ流儀)。
+  // 自動提案(suggestDishType)を初期選択として表示し、押したら追従を止める(iconKeyの自動追従と同じ流儀)。
   const [dishTypeTouched, setDishTypeTouched] = useState(false)
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
 
   // dishType の初期値提案(2026-07-23 便BH-1・docs/56 §3-2/§3-3): 料理名・タグ・材料から役割を推定する。
+  // 2026-08-23 便KG: 読み取れないときは undefined（保留）が返る。機械が決めた種別を
+  // データに書き込まないための変更で、保留のときはチップを未選択のまま出す
   const suggestedDishType = useMemo(
-    () => guessDishType({ title, tags, ingredients: ingredients.map((r) => ({ name: r.name })) }),
+    () => suggestDishType({ title, tags, ingredients: ingredients.map((r) => ({ name: r.name })) }),
     [title, tags, ingredients],
   )
   // 新規登録で、ユーザーがまだ種別チップを触っておらず・種別が未設定で・料理名が入っているときだけ
@@ -478,6 +480,16 @@ function RecipeFormInner() {
   // 成功と同じ顔にしない(件数だけを見て中身未確認のまま保存されるのを防ぐ)
   const [urlImportMessageTone, setUrlImportMessageTone] = useState<'info' | 'warn'>('info')
   const [urlImportLoading, setUrlImportLoading] = useState(false)
+  /**
+   * 写真だけがまだ届いていない（2026-08-23 便KG・影響範囲テストB）。
+   *
+   * 写真はレシピ本体の 0.3〜0.8秒後に届くのに、その間も「保存する」が押せていた。
+   * 実測では30品中10品が「写真も取り込む」をONにしたまま**写真なしで・何の知らせも無く**
+   * 保存されていた（取り込み直すと4サイトとも取得できた＝取りこぼし）。
+   * レシピ本体の読み込み中に保存を止めているのと同じ扱いにそろえる。
+   * キャンセルは止めない（写真を待つ理由が無いので、やめたい人を待たせない）。
+   */
+  const [urlImportPhotoLoading, setUrlImportPhotoLoading] = useState(false)
   // 「写真も取り込む」チェック(2026-07-21 オーナー指示)。ページローカルのその場限りの状態で、
   // 保存も設定への永続化もしない(このフォームを開くたび毎回既定ON)。OFFならapplyUrlImportが
   // importPhotoFromUrl(Worker画像プロキシ経由のfetchImportedPhoto)を呼ばない
@@ -949,6 +961,9 @@ function RecipeFormInner() {
     // 自分より後に始まった取り込みがあれば、この写真はもう「前のURLの写真」なので捨てる(便CK/②-2)。
     // 画面を離れた場合(unmount)もここで止まる
     if (generation !== urlImportGenerationRef.current) return
+    // ここから先はこの取り込みが最新＝待たせていた保存を解いてよい（便KG）。
+    // 取得に失敗した場合も解く（待たせ続けない）
+    setUrlImportPhotoLoading(false)
     // 2026-07-28 便BX/C01: 取れなかったときも完全な無言はやめる。レシピ本体は取り込めているので
     // 成功メッセージ(パネル内)はそのままにし、写真だけ入らなかったことをトーストで控えめに伝える
     if (!blob) {
@@ -995,6 +1010,8 @@ function RecipeFormInner() {
     // レシピ・写真は前のレシピ)、画面を離れた後でも古い件数のままの確認ダイアログが割り込んでいた
     const generation = ++urlImportGenerationRef.current
     setUrlImportLoading(true)
+    // 前の取り込みの写真待ちは、この取り込みで置き換わるので一旦降ろす(便KG)
+    setUrlImportPhotoLoading(false)
     setUrlImportMessage('')
     setUrlImportToast('')
     try {
@@ -1096,7 +1113,7 @@ function RecipeFormInner() {
             ? importedRows.map((row) => ({ name: row.name }))
             : ingredients.map((r) => ({ name: r.name }))
         if (guessedTitle) {
-          setDishType(guessDishType({ title: guessedTitle, tags, ingredients: guessedIngredients }))
+          setDishType(suggestDishType({ title: guessedTitle, tags, ingredients: guessedIngredients }))
         }
       }
       // 片側だけ読み込めたときは警告トーンで正直に伝える(便BW/C-02。貼り付け経路と同じ扱い)。
@@ -1106,20 +1123,33 @@ function RecipeFormInner() {
       // 人数分が読み取れなかったことは、結果の文でも言う(2026-08-23 便KF)。
       // 人数分の欄の下に出る印(ja.form.servingsNotReadNote)と対になる
       const servingsNote = importedServings.unread ? ja.urlImport.servingsNotRead : ''
+      /**
+       * 取り込んだページに調理時間が書かれておらず、欄も空のまま終わるとき(2026-08-23 便KG)。
+       *
+       * 貼り付け経路には同じ知らせ(ja.paste.cookMinutesNotWritten)があるのに、URL取り込みには
+       * 無かった。影響範囲テストの実測では、クックパッド25品すべてで調理時間が空のまま保存され
+       * (ページ側に cookTime/totalTime が無いことを実際のページで確認済み)、「時短で絞る」
+       * 「◯分以内」が効かない理由が利用者に何も伝わっていなかった。
+       * **書かれていない時間を機械が見積って入れることはしない**ので、欄が空である事実を伝える。
+       */
+      const cookMinutesNote =
+        !result.cookMinutes && cookMinutes.trim() === '' ? ja.urlImport.cookMinutesNotWritten : ''
       if (importedRows.length === 0) {
         showUrlImportMessage(
           ja.urlImport.resultNoIngredients.replace('{s}', String(importedSteps.length)) +
             alsoAppliedNote +
             minutesNote +
             notesNote +
-            servingsNote,
+            servingsNote +
+            cookMinutesNote,
           'warn',
         )
       } else if (importedSteps.length === 0) {
         showUrlImportMessage(
           ja.urlImport.resultNoSteps.replace('{i}', String(importedRows.length)) +
             alsoAppliedNote +
-            servingsNote,
+            servingsNote +
+            cookMinutesNote,
           'warn',
         )
       } else {
@@ -1139,7 +1169,8 @@ function RecipeFormInner() {
             alsoAppliedNote +
             minutesNote +
             notesNote +
-            servingsNote,
+            servingsNote +
+            cookMinutesNote,
           'info',
         )
       }
@@ -1147,7 +1178,11 @@ function RecipeFormInner() {
       // await しない: 材料・手順の取り込み結果メッセージをここで即座に確定させるため。
       // 「写真も取り込む」チェックがOFFのときは取得自体を行わない(2026-07-21 オーナー指示のスイッチ)
       if (result.imageUrl && urlImportFetchPhoto) {
+        // 写真が届くまで保存を止める(便KG)。届いた・取れなかったが決まった時点で解ける
+        setUrlImportPhotoLoading(true)
         void importPhotoFromUrl(result.imageUrl, generation, hadPhoto)
+      } else {
+        setUrlImportPhotoLoading(false)
       }
     } catch (e) {
       // 画面を離れた後・取り込み直した後のエラーは出さない(便CK/②-3)
@@ -1258,7 +1293,7 @@ function RecipeFormInner() {
           ? parsed.ingredients.map((row) => ({ name: row.name }))
           : ingredients.map((r) => ({ name: r.name }))
       if (guessedTitle) {
-        setDishType(guessDishType({ title: guessedTitle, tags, ingredients: guessedIngredients }))
+        setDishType(suggestDishType({ title: guessedTitle, tags, ingredients: guessedIngredients }))
       }
     }
     // 材料・手順のどちらもほぼ拾えなかった(段落丸ごと1文になった等)場合は、
@@ -2145,6 +2180,9 @@ function RecipeFormInner() {
             <button
               key={value}
               type="button"
+              // 選んでいるかどうかを、色だけでなく状態としても持たせる（2026-08-23 便KG）。
+              // 読み上げにも伝わり、種別が未選択（保留）のままかどうかを見張れる
+              aria-pressed={effectiveDishType === value}
               onClick={() => {
                 setDishTypeTouched(true)
                 setDishType((current) => (current === value ? undefined : value))
@@ -2159,8 +2197,10 @@ function RecipeFormInner() {
             </button>
           ))}
         </div>
-        {showDishTypeSuggestion && effectiveDishType !== undefined && (
-          <p className="mt-1 text-sm text-ink-muted">{ja.form.dishTypeAutoHint}</p>
+        {showDishTypeSuggestion && (
+          <p className="mt-1 text-sm text-ink-muted">
+            {effectiveDishType !== undefined ? ja.form.dishTypeAutoHint : ja.form.dishTypeNotGuessedHint}
+          </p>
         )}
       </div>
 
@@ -2870,6 +2910,9 @@ function RecipeFormInner() {
             <button
               key={value}
               type="button"
+              // 選んでいるかどうかを、色だけでなく状態としても持たせる（2026-08-23 便KG）。
+              // 読み上げにも伝わり、種別が未選択（保留）のままかどうかを見張れる
+              aria-pressed={effectiveDishType === value}
               onClick={() => {
                 setDishTypeTouched(true)
                 setDishType((current) => (current === value ? undefined : value))
@@ -2884,8 +2927,10 @@ function RecipeFormInner() {
             </button>
           ))}
         </div>
-        {showDishTypeSuggestion && effectiveDishType !== undefined && (
-          <p className="mt-1 text-sm text-ink-muted">{ja.form.dishTypeAutoHint}</p>
+        {showDishTypeSuggestion && (
+          <p className="mt-1 text-sm text-ink-muted">
+            {effectiveDishType !== undefined ? ja.form.dishTypeAutoHint : ja.form.dishTypeNotGuessedHint}
+          </p>
         )}
       </div>
 
@@ -3088,16 +3133,18 @@ function RecipeFormInner() {
           置き換わって消えます」の確認ダイアログが後から割り込み、いま見ている保存済みレシピが
           壊されると誤解させたうえ、取り込み結果もどこにも出ないまま消えていた。
           待ち時間はWorker側のFETCH_TIMEOUT_MS(8秒)で上限が担保されている */}
-      {urlImportLoading && (
+      {(urlImportLoading || urlImportPhotoLoading) && (
         <p role="status" className="mt-[var(--space-lg)] text-sm font-bold text-ink-muted">
-          {ja.form.urlImportBlocksSave}
+          {urlImportLoading ? ja.form.urlImportBlocksSave : ja.form.urlImportPhotoBlocksSave}
         </p>
       )}
-      <div className={`${urlImportLoading ? 'mt-[var(--space-sm)]' : 'mt-[var(--space-lg)]'} flex gap-2`}>
+      <div
+        className={`${urlImportLoading || urlImportPhotoLoading ? 'mt-[var(--space-sm)]' : 'mt-[var(--space-lg)]'} flex gap-2`}
+      >
         <button
           type="button"
           onClick={save}
-          disabled={saving || urlImportLoading}
+          disabled={saving || urlImportLoading || urlImportPhotoLoading}
           className="flex-1 rounded-md bg-accent py-4 text-lg font-bold text-on-accent shadow-md disabled:opacity-60"
         >
           {saving ? ja.form.saving : ja.form.save}

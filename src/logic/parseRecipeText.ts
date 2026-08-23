@@ -103,7 +103,9 @@ export function splitIngredientMark(rawLine: string): { mark?: string; body: str
  * 材料名の先頭に付いた英字の組の印（「Aみりん」「A.米粉」の A）。
  * 一致した先頭部分（英字＋区切り＋空白）も返し、組にしないときは名前を元のまま残せるようにする。
  */
-const LETTER_MARK_HEAD = /^([A-DＡ-Ｄ])[.．・:：、,，)）]?[ 　\t]*(?=\S)/
+// 2026-08-23 便KG: 小文字（a〜d）も対象に足した。実データA（クックパッド）が `a. 酒` の形で
+// 組を書いており、5行すべてが名前に `a. ` を残したまま保存されていた
+const LETTER_MARK_HEAD = /^([A-DＡ-Ｄa-dａ-ｄ])[.．・:：、,，)）]?[ 　\t]*(?=\S)/
 function letterMarkOf(name: string): { mark: string; prefix: string } | undefined {
   const matched = name.match(LETTER_MARK_HEAD)
   if (!matched) return undefined
@@ -968,8 +970,23 @@ const URL_ONLY_LINE = /^https?:\/\/\S+$/
  */
 const VIDEO_ONLY_LINE =
   /^(?:詳しい|くわしい)?(?:作り方|つくり方|レシピ|やり方|手順)?は?(?:こちら(?:の)?)?動画を(?:ご覧|見て|ご確認)(?:ください|下さい|くださいね)[。．.！!]?$/
+/**
+ * 手順ではなく「レシピが取り上げられた報告」の行（2026-08-23 便KG）。
+ *
+ * 実データC「こっくりおいしい豚バラ大根」（クックパッド）の**最終手順**が
+ * 「2014/01/17に日本テレビ「ヒルナンデス」で試食、紹介していただきました♪」で、
+ * 並行調理ナビでは「作った！」の直前に読む最後の工程として画面に出ていた。
+ * 読んでも料理が1歩も進まない行なので落とす。
+ *
+ * 落とす条件は**報告に固有の言い回し**だけに絞ってある（「紹介していただきました」
+ * 「話題入り」「レシピ本に掲載」）。「紹介」「掲載」の語だけでは落とさない
+ * （「お好みで七味を紹介した分量より多めにふる」のような本物の手順を消さないため）。
+ */
+const MEDIA_REPORT_LINE =
+  /(?:話題入り|殿堂入り|人気検索でトップ|レシピ本に(?:掲載|載)|(?:紹介|掲載|放送|試食|取り上げ)(?:して)?(?:いただ|頂)(?:き|け|い)まし|(?:紹介|掲載|放送)されまし)/
 const REGEX_GOMI = [
   VIDEO_ONLY_LINE,
+  MEDIA_REPORT_LINE,
   AUTHOR_HANDLE_LINE,
   PHOTO_CAPTION_LINE,
   STEP_CAPTION_LINE,

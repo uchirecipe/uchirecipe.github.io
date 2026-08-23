@@ -33,16 +33,22 @@ export const SEASONING_MARK_PATTERN = new RegExp(`[${SEASONING_MARK_CHARS}]`)
 /**
  * 「A みりん」「Ｂしょうゆ」のように英字1文字で組を示す書き方（2026-08-14 便GF）。
  * 記号と違って本文の別の意味（「A5ランク」「Lサイズ」）と紛れるので、
- *   ①大文字の A〜D だけ（色は4組までなので E 以降は組にならない）
+ *   ①A〜D だけ（色は4組までなので E 以降は組にならない）
  *   ②直後が英数字でない（「A5」「AB」は組の印ではない）
- * の2つを満たすときだけ印とみなす。全角（Ａ〜Ｄ）は半角に読み替える。
+ * の2つを満たすときだけ印とみなす。全角（Ａ〜Ｄ・ａ〜ｄ）は半角に読み替える。
+ *
+ * 2026-08-23 便KG: 小文字（a〜d）も印として読む。実データA「節約おかず。厚揚げともやしの
+ * ピリ辛みそ炒め」（クックパッド）は `a. 酒` `a. みりん` のように小文字で組を書いており、
+ * 大文字だけを見ていたため5行すべてが `a. 酒` の名前のまま保存されていた（買い物メモにも
+ * 栄養にも名前が届かない）。**書かれたとおりの字**（小文字は小文字のまま）を返す＝手順文の
+ * 「aを加えて」と材料側の印が同じ字で結び付く。
  */
 export function seasoningLetterMark(text: string): string | undefined {
   const trimmed = text.trim()
   const head = trimmed.charAt(0)
   if (!head) return undefined
-  const half = /^[Ａ-Ｄ]$/.test(head) ? String.fromCharCode(head.charCodeAt(0) - 0xfee0) : head
-  if (!/^[A-D]$/.test(half)) return undefined
+  const half = /^[Ａ-Ｄａ-ｄ]$/.test(head) ? String.fromCharCode(head.charCodeAt(0) - 0xfee0) : head
+  if (!/^[A-Da-d]$/.test(half)) return undefined
   const next = trimmed.charAt(1)
   if (next !== '' && /[0-9０-９A-Za-zＡ-Ｚａ-ｚ]/.test(next)) return undefined
   return half
