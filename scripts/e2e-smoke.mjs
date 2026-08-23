@@ -32963,8 +32963,10 @@ try {
       // （1円ぶんは片栗粉 10→5円/大さじ1 の実勢反映。按分が効いていること自体は変わらない）。
       // 「按分前の212円のままではない」を測るのがこの判定の役目なので、そこは残す
       check(
-        'EY-01 冷やし茶碗蒸しの1食あたりが生しいたけの按分後の金額になる(按分前212円→178円)',
-        eyChawanmushi.includes('2人分で作るときの1食あたり 約178円'),
+        // 2026-08-24 司令部: 便KEで「単位が噛み合わないときの満額フォールバック」をやめたので
+        // 178→128円。按分が効いていること（按分前の212円ではない）を測る役目はそのまま
+        'EY-01 冷やし茶碗蒸しの1食あたりが生しいたけの按分後の金額になる(按分前212円→128円)',
+        eyChawanmushi.includes('2人分で作るときの1食あたり 約128円'),
         eyChawanmushi.includes('約212円') ? '按分前の212円のまま' : '',
       )
       // 原価ビューで材料行そのものの金額も見る(1食あたり=全量33円÷2人分)
@@ -32984,15 +32986,18 @@ try {
       // オクラ8本(1袋10本前後のうち8本)
       const eyOkra = await eyOpen('オクラと長芋の梅肉あえ')
       check(
-        'EY-01 オクラと長芋の梅肉あえの1食あたり(修正前165円→152円)',
-        eyOkra.includes('2人分で作るときの1食あたり 約152円'),
+        // 2026-08-24 司令部: 便KEで 152→144円
+        'EY-01 オクラと長芋の梅肉あえの1食あたり(按分前165円→144円)',
+        eyOkra.includes('2人分で作るときの1食あたり 約144円'),
         eyOkra.includes('約165円') ? '修正前の165円のまま' : '',
       )
       // いちご6個(1パック280gのうち90g)
       const eyBark = await eyOpen('フルーツヨーグルトバーク')
       check(
-        'EY-01 フルーツヨーグルトバークの1食あたり(修正前395円→327円)',
-        eyBark.includes('4人分で作るときの1食あたり 約327円'),
+        // 2026-08-24 司令部: 便KEで 327→127円（いちご「6個」が販売単位のマスタに噛み合わず、
+        // 1パックまるごとの金額が乗っていた分が抜けた）
+        'EY-01 フルーツヨーグルトバークの1食あたり(按分前395円→127円)',
+        eyBark.includes('4人分で作るときの1食あたり 約127円'),
         eyBark.includes('約395円') ? '修正前の395円のまま' : '',
       )
       // 「食材と価格」の単位表記も新しい内容量になっていること
@@ -50966,7 +50971,11 @@ try {
           Array.isArray(jqWeekViewTitles) &&
             jqWeekViewTitles.length > 0 &&
             jqWeek.titleWidths.length > 0 &&
-            jqWeek.titleWidths.every((w) => jqWeekViewTitles.includes(w)),
+            // 2026-08-24 司令部: 編集モードには**まだ料理を入れていない空き枠の行**も並び、
+            // その行の料理名は0px。0pxを混ぜて比べると「幅が違う」で落ちる（便KGで種別が
+            // 「保留」になり空き枠が出る組み合わせが増えて実発）。**料理が入っている行だけ**を比べる
+            jqWeek.titleWidths.filter((w) => w > 0).length > 0 &&
+            jqWeek.titleWidths.filter((w) => w > 0).every((w) => jqWeekViewTitles.includes(w)),
           `編集=${JSON.stringify(jqWeek.titleWidths)} 通常=${JSON.stringify([...new Set(jqWeekViewTitles)])}`,
         )
         check(
@@ -51030,7 +51039,9 @@ try {
           Array.isArray(jqMonthViewTitles) &&
             jqMonthViewTitles.length > 0 &&
             jqMonth.titleWidths.length > 0 &&
-            jqMonth.titleWidths.every((w) => jqMonthViewTitles.includes(w)),
+            // 2026-08-24 司令部: 上のJQBOX-01と同じ理由（空き枠の行の料理名は0px）
+            jqMonth.titleWidths.filter((w) => w > 0).length > 0 &&
+            jqMonth.titleWidths.filter((w) => w > 0).every((w) => jqMonthViewTitles.includes(w)),
           `編集=${JSON.stringify(jqMonth.titleWidths)} 通常=${JSON.stringify([...new Set(jqMonthViewTitles)])}`,
         )
       }
