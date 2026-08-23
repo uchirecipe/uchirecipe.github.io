@@ -532,7 +532,16 @@ export function normalizeImportedIngredient(name: string, amount?: string): Pars
   const full = trimmedAmount ? `${trimmedName} ${trimmedAmount}` : trimmedName
   const parsed = parseIngredientLine(full)
   if (parsed && parsed.name) return moveSizeModifierToMemo(parsed)
-  return { name: trimmedName, amount: trimmedAmount, unit: '' }
+  // 材料行として解釈できなかったときも、行頭の合わせ調味料の印だけは名前から外す(2026-08-23 便KF)。
+  //
+  // ここは「名前と元の分量をそのまま拾う」だけの逃げ道だったが、**印を剥がす処理が
+  // parseIngredientLine の中にしか無かった**ため、この道を通った行では印が名前に残っていた。
+  // つくおき系のように分量を「大1」「大1.5」と書くサイトは単位欄が空のままここへ落ちるので、
+  // 実データ（影響範囲テストB・30品）では6品で『◎酒』『◎白だし』『◎調味酢』が名前に残り、
+  // 栄養も原価も名寄せできずに丸ごと計算から落ちていた（◎白だしは塩分そのもの）。
+  // 印は名前に戻さず mark として返す＝合わせ調味料の組・材料メモへは今までどおり引き継がれる。
+  const { mark, body } = splitIngredientMark(trimmedName)
+  return { name: body || trimmedName, amount: trimmedAmount, unit: '', ...(mark ? { mark } : {}) }
 }
 
 /**

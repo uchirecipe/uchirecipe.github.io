@@ -50952,6 +50952,192 @@ try {
     }
   }
 
+  // --- KFSALT-01 / KFSERV-02(2026-08-23 便KF): 塩分の数字が、減塩したい人の判断に使えるか ---
+  //
+  // 影響範囲テストB「健康を気にする人」30品の実測が出発点:
+  //   ・塩分の源（白だし・固形スープの素・がらスープ）が丸ごと落ちると「塩分0.0g」と出る（実測2品）
+  //   ・落ちても、出るのは他の材料が落ちたときと同じ1文だけ
+  //   ・人数分が読めないと黙って2人分になり、1人分の塩分が2倍（4.9g）に出る（警告は1つも出ない）
+  //
+  // 測るのは「利用者が確かめたいこと」:
+  //   ①塩分を持つ調味料が計算に入っていない品は、折りたたんだ1行の時点で分かる
+  //   ②その注意は**数値より上**に出る（0.0gを見て安心したあとに読む位置では意味がない）
+  //   ③塩分を持たない材料しか落ちていない品では出さない（毎回出る注意は読まれなくなる）
+  //   ④人数分が読み取れなかったら、人数分の欄のところに出る／直したら消える
+  // 禁じ手よけ: 掴むのは data-testid だけ／文言は ja.ts から読む（page.evaluate の中では使わない）／
+  //             生のIndexedDBへ書いたら必ず読み込み直す／曜日・月替わりに依らない
+  currentCheck = 'KFSALT-01'
+  {
+    const kfBrowser = await chromium.launch()
+    const kfContext = await kfBrowser.newContext({ viewport: { width: 390, height: 844 } })
+    const kfPage = await kfContext.newPage()
+    kfPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@KFSALT-01] ${err.message}`)
+    })
+    try {
+      await kfPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await kfPage.waitForTimeout(2400) // 初回シード完了待ち
+      const kfIds = await kfPage.evaluate(async () => {
+        const openDb = () =>
+          new Promise((resolve, reject) => {
+            const r = indexedDB.open('uchi-recipe')
+            r.onsuccess = () => resolve(r.result)
+            r.onerror = () => reject(r.error)
+          })
+        const db = await openDb()
+        const P = (req) => new Promise((res, rej) => { req.onsuccess = () => res(req.result); req.onerror = () => rej(req.error) })
+        const store = (name) => db.transaction(name, 'readwrite').objectStore(name)
+        const mk = (title, ingredients) => ({
+          title, servings: 2, effortLevel: 'normal', tags: [], ingredients,
+          steps: [{ text: '混ぜる' }],
+          isFavorite: false, cookedLogs: [], searchWords: [], isStarter: false,
+          createdAt: Date.now(), updatedAt: Date.now(),
+        })
+        // ①塩分の源（成分表に無い合わせだれ）が落ちる品／②薬味しか落ちない品
+        const saltGap = await P(store('recipes').add(mk('E2E塩分源が落ちる和えもの', [
+          { name: 'トマト', amount: '2', unit: '個' },
+          { name: '秘伝のみそだれ', amount: '1', unit: '大さじ' },
+        ])))
+        const clean = await P(store('recipes').add(mk('E2E薬味だけ落ちる和えもの', [
+          { name: 'ほうれん草', amount: '1', unit: '束' },
+          { name: 'しょうゆ', amount: '1', unit: '大さじ' },
+          { name: '白いりごま', amount: '適量', unit: '' },
+        ])))
+        db.close()
+        return { saltGap, clean }
+      })
+      // 生のIndexedDBへ書いたので必ず読み込み直す（Dexieのライブ購読はDexie経由の書き込みしか見ない）
+      await kfPage.goto(`${BASE}/#/recipes/${kfIds.saltGap}`)
+      await kfPage.reload({ waitUntil: 'networkidle' })
+      await kfPage.waitForTimeout(1400)
+
+      // ① 折りたたんだ1行の時点で、専用の印が出る
+      const kfSaltBadge = kfPage.locator('[data-testid="nutrition-salt-gap-badge"]')
+      check('KFSALT-01 塩分を持つ調味料が落ちた品には、専用の印が畳んだままでも出る', (await kfSaltBadge.count()) === 1)
+      const kfBadgeText = ((await kfSaltBadge.count()) === 1 ? await kfSaltBadge.textContent() : '').replaceAll('​', '')
+      check(
+        'KFSALT-01 印の文言が「計算できない調味料」であって、材料の印ではない',
+        kfBadgeText.includes(ja.nutrition.saltGapBadge.replace('{n}', '1')),
+        `印=${kfBadgeText}`,
+      )
+      check(
+        'KFSALT-01 材料の印(計算できない材料)とは差し替えになっていて、2つ並ばない',
+        (await kfPage.locator('[data-testid="nutrition-material-gap-badge"]').count()) === 0,
+      )
+
+      // ② 折りたたみを開くと、注意が**数値より上**に出る
+      await kfPage.getByRole('button', { name: ja.nutrition.toggleExpand }).click()
+      await kfPage.waitForTimeout(400)
+      const kfNote = kfPage.locator('[data-testid="nutrition-salt-gap-note"]')
+      check('KFSALT-01 折りたたみを開くと塩分の注意が出る', (await kfNote.count()) === 1)
+      const kfNoteText = ((await kfNote.count()) === 1 ? await kfNote.textContent() : '').replaceAll('​', '')
+      check(
+        'KFSALT-01 注意に「塩分を持つ調味料を計算に含めていない」と書いてある',
+        kfNoteText.includes(ja.nutrition.saltGapNote),
+        `注意=${kfNoteText}`,
+      )
+      check(
+        'KFSALT-01 注意に、落ちた調味料の名前が並ぶ（何を足せば正しくなるか分かる）',
+        kfNoteText.includes('秘伝のみそだれ'),
+        `注意=${kfNoteText}`,
+      )
+      const kfNoteBox = (await kfNote.count()) === 1 ? await kfNote.boundingBox() : null
+      const kfKcalRow = kfPage.locator('[data-nutrient-label="kcal"]')
+      const kfKcalBox = (await kfKcalRow.count()) > 0 ? await kfKcalRow.first().boundingBox() : null
+      check(
+        'KFSALT-01 注意は数値の表より上にある（数字を読む前に届く）',
+        kfNoteBox != null && kfKcalBox != null && kfNoteBox.y < kfKcalBox.y,
+        `注意y=${kfNoteBox?.y} 表y=${kfKcalBox?.y}`,
+      )
+
+      // 塩分相当量が実際に出ている状態（8項目のお試し）では、数値の向きまで言い切る
+      const kfTrial = kfPage.locator('[data-testid="nutrition-trial-button"]')
+      if ((await kfTrial.count()) > 0) {
+        await kfTrial.click()
+        await kfPage.waitForTimeout(500)
+        const kfTrialNote = ((await kfNote.count()) === 1 ? await kfNote.textContent() : '').replaceAll('​', '')
+        check(
+          'KFSALT-01 塩分相当量が出ている状態では「実際より小さい数値です」まで言う',
+          kfTrialNote.includes(ja.nutrition.saltGapNoteSalt),
+          `注意=${kfTrialNote}`,
+        )
+      }
+
+      // ③ 薬味しか落ちていない品では出さない
+      await kfPage.goto(`${BASE}/#/recipes/${kfIds.clean}`)
+      await kfPage.reload({ waitUntil: 'networkidle' })
+      await kfPage.waitForTimeout(1200)
+      check(
+        'KFSALT-01 薬味(適量)しか落ちていない品では塩分の印を出さない',
+        (await kfPage.locator('[data-testid="nutrition-salt-gap-badge"]').count()) === 0,
+      )
+      await kfPage.getByRole('button', { name: ja.nutrition.toggleExpand }).click()
+      await kfPage.waitForTimeout(400)
+      check(
+        'KFSALT-01 薬味しか落ちていない品では塩分の注意も出さない',
+        (await kfPage.locator('[data-testid="nutrition-salt-gap-note"]').count()) === 0,
+      )
+
+      // ④ 人数分が読み取れなかったことを、人数分のところで知らせる
+      currentCheck = 'KFSERV-02'
+      await kfPage.goto(`${BASE}/#/recipes/new`, { waitUntil: 'networkidle' })
+      await kfPage.waitForTimeout(600)
+      await kfPage.getByText(ja.paste.open).click()
+      await kfPage.waitForTimeout(300)
+      // 人数分を**書いていない**文章（元ページに人数分が無い状態の再現）
+      await kfPage.locator(`textarea[placeholder="${ja.paste.placeholder}"]`).fill(
+        'E2E人数分なしレシピ\n\n材料\n・切り干し大根　40g\n・しょうゆ　大さじ3\n\n作り方\n1. 戻す\n2. 煮る',
+      )
+      await kfPage.getByRole('button', { name: ja.paste.apply }).click()
+      await kfPage.waitForTimeout(500)
+      const kfServNote = kfPage.locator('[data-testid="servings-not-read"]')
+      check('KFSERV-02 人数分が書かれていない取り込みでは、人数分のところに印が出る', (await kfServNote.count()) === 1)
+      const kfServText = ((await kfServNote.count()) === 1 ? await kfServNote.textContent() : '').replaceAll('​', '')
+      check(
+        'KFSERV-02 印に「人数分が書かれていなかった」と、いま何人分なのかが書いてある',
+        kfServText.includes(ja.form.servingsNotReadNote.replace('{n}', '2')),
+        `印=${kfServText}`,
+      )
+      check(
+        'KFSERV-02 取り込みの結果の文でも人数分を読めなかったと言う',
+        ((await kfPage.textContent('body')) ?? '').replaceAll('​', '').includes(ja.paste.servingsNotRead),
+      )
+      // 人数分を直したら印は消える（確認が済んだとみなす）
+      await kfPage.getByRole('button', { name: ja.detail.servingsUp }).click()
+      await kfPage.waitForTimeout(300)
+      check(
+        'KFSERV-02 人数分を直すと印は消える',
+        (await kfPage.locator('[data-testid="servings-not-read"]').count()) === 0,
+      )
+      // 人数分が書いてある文章では、はじめから出ない。
+      // 一度レシピ一覧へ出てから入り直す（同じハッシュへの goto は同じ画面のままなので、
+      // 開いたままの貼り付け欄をそのまま使うことになる）
+      await kfPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await kfPage.waitForTimeout(600)
+      await kfPage.goto(`${BASE}/#/recipes/new`, { waitUntil: 'networkidle' })
+      await kfPage.waitForTimeout(600)
+      const kfPasteBox = kfPage.locator(`textarea[placeholder="${ja.paste.placeholder}"]`)
+      // 貼り付け欄が畳まれているときだけ開く（開いている状態で押すと閉じてしまう）
+      if ((await kfPasteBox.count()) === 0) {
+        await kfPage.getByText(ja.paste.open).click()
+        await kfPage.waitForTimeout(300)
+      }
+      await kfPasteBox.fill(
+        'E2E人数分ありレシピ\n\n材料（4人分）\n・切り干し大根　40g\n・しょうゆ　大さじ3\n\n作り方\n1. 戻す\n2. 煮る',
+      )
+      await kfPage.getByRole('button', { name: ja.paste.apply }).click()
+      await kfPage.waitForTimeout(500)
+      check(
+        'KFSERV-02 人数分が書いてある文章では印を出さない（毎回出る注意にしない）',
+        (await kfPage.locator('[data-testid="servings-not-read"]').count()) === 0,
+      )
+    } finally {
+      await kfBrowser.close()
+    }
+  }
+
+
 } catch (err) {
   ng(`実行中断(${currentCheck})`, err.message)
 } finally {

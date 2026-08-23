@@ -59,7 +59,13 @@ import {
 } from '../logic/seasoningGroup'
 import { normalizeAmountInput, normalizeDigits } from '../logic/amount'
 import { isHttpUrl } from '../logic/url'
-import { MAX_SERVINGS, MIN_SERVINGS, clampServings, isServingsInRange } from '../logic/servings'
+import {
+  MAX_SERVINGS,
+  MIN_SERVINGS,
+  clampServings,
+  isServingsInRange,
+  resolveImportedServings,
+} from '../logic/servings'
 import { buildSingleDeleteConfirm } from '../logic/recipeDelete'
 import { needsReplaceConfirm, photoReplacePlan, replaceConfirmTargets } from '../logic/replaceConfirm'
 import type { PhotoReplacePlan } from '../logic/replaceConfirm'
@@ -489,6 +495,15 @@ function RecipeFormInner() {
   // 名前を書き換えれば自然に消える
   const [cookwareImportedNames, setCookwareImportedNames] = useState<string[]>([])
   /**
+   * 取り込み元に人数分が書かれておらず、読み取れなかった（2026-08-23 便KF）。
+   *
+   * 影響範囲テストB「健康を気にする人」の実測で、人数分の無い5品がすべて黙って「2人分」で
+   * 保存され、うち1品はページに「(4人分)」と書いてあるのに2人分で入って**1人分の塩分が2倍**に
+   * 出ていた。しかも材料はすべて計算できているので、栄養側の注意書きも1つも出ない。
+   * 取り込むたびに立て直し、人数分を1回でも押したら消す（確認が済んだとみなす）。
+   */
+  const [servingsNotRead, setServingsNotRead] = useState(false)
+  /**
    * URL取り込みの世代番号(2026-07-30 便CK/②-2・②-3)。「読み込む」を押すたび、
    * およびこの画面を離れるときに繰り上げる。取り込みの途中で解決した処理は、自分の世代が
    * まだ最新かを確かめてからフォームへ書き込む。
@@ -733,6 +748,7 @@ function RecipeFormInner() {
     setPhoto(recipe.photo)
     setPhotoFocus(recipe.photoFocus)
     setServings(recipe.servings)
+    setServingsNotRead(false)
     setCookMinutes(recipe.cookMinutes != null ? String(recipe.cookMinutes) : '')
     setEffortLevel(recipe.effortLevel)
     setIngredients(toIngredientRows(recipe.ingredients))
@@ -881,6 +897,7 @@ function RecipeFormInner() {
     // 下書きの人数分も範囲に収める(便CK/①-1)。以前は素通しで、servings:99 の下書きを復元すると
     // 99人分になり、そのまま保存できていた
     setServings(clampServings(d.servings ?? 2))
+    setServingsNotRead(false)
     setCookMinutes(d.cookMinutes ?? '')
     setEffortLevel(d.effortLevel ?? 'normal')
     setIngredients(d.ingredients?.length ? d.ingredients : [{ ...emptyIngredient }])
@@ -1011,7 +1028,10 @@ function RecipeFormInner() {
       const alsoApplied: string[] = []
       // 範囲に収めた後の値で見る(便CK/①-1。48人分→20人分のように丸めた結果、実際には
       // 人数分が変わらないこともある)
-      const nextServings = result.servings ? clampServings(result.servings) : undefined
+      // 人数分は「読み取れたか」まで受け取る(2026-08-23 便KF)。読み取れなければ黙って既定の
+      // 人数のままにせず、人数分の欄の下に印を出す
+      const importedServings = resolveImportedServings(result.servings, servings)
+      const nextServings = importedServings.unread ? undefined : importedServings.servings
       if (nextServings !== undefined && nextServings !== servings) {
         alsoApplied.push(ja.urlImport.alsoAppliedServings)
       }
@@ -1044,6 +1064,7 @@ function RecipeFormInner() {
       // 取り込んだ人数分も範囲(1〜20)に収める(便CK/①-1)。Worker側のextractServingsに上限が無く、
       // 「24 cookies」等の表記から20超が入りうるが、手入力では作れない値なので保存させない
       if (nextServings !== undefined) setServings(nextServings)
+      setServingsNotRead(importedServings.unread)
       if (result.cookMinutes) setCookMinutes(String(result.cookMinutes))
       if (importedRows.length > 0) setIngredients(importedRows)
       // 自動で作った（または取り込み元から引き継いだ）合わせ調味料の組の数（2026-08-14 便GF）
@@ -1082,17 +1103,23 @@ function RecipeFormInner() {
       // どの結果文にも、材料・手順以外で置き換わった項目(便BX/C02)を書き添える
       const minutesNote = stepMinutesNote(filledMinutes)
       const notesNote = stepNotesNote(movedNotes, minutesNote)
+      // 人数分が読み取れなかったことは、結果の文でも言う(2026-08-23 便KF)。
+      // 人数分の欄の下に出る印(ja.form.servingsNotReadNote)と対になる
+      const servingsNote = importedServings.unread ? ja.urlImport.servingsNotRead : ''
       if (importedRows.length === 0) {
         showUrlImportMessage(
           ja.urlImport.resultNoIngredients.replace('{s}', String(importedSteps.length)) +
             alsoAppliedNote +
             minutesNote +
-            notesNote,
+            notesNote +
+            servingsNote,
           'warn',
         )
       } else if (importedSteps.length === 0) {
         showUrlImportMessage(
-          ja.urlImport.resultNoSteps.replace('{i}', String(importedRows.length)) + alsoAppliedNote,
+          ja.urlImport.resultNoSteps.replace('{i}', String(importedRows.length)) +
+            alsoAppliedNote +
+            servingsNote,
           'warn',
         )
       } else {
@@ -1111,7 +1138,8 @@ function RecipeFormInner() {
             .replace('{s}', String(importedSteps.length)) +
             alsoAppliedNote +
             minutesNote +
-            notesNote,
+            notesNote +
+            servingsNote,
           'info',
         )
       }
@@ -1152,7 +1180,9 @@ function RecipeFormInner() {
     // 材料・手順以外にも黙って置き換わる項目(人数分・調理時間)を、URL取り込みと同じように
     // 結果メッセージへ書き添える(2026-08-12 便FU-3)。実際に値が変わったものだけを並べる
     const pasteAlsoApplied: string[] = []
-    const nextPasteServings = parsed.servings ? clampServings(parsed.servings) : undefined
+    // 人数分は「読み取れたか」まで受け取る(2026-08-23 便KF。URL取り込みと同じ扱い)
+    const pasteServings = resolveImportedServings(parsed.servings, servings)
+    const nextPasteServings = pasteServings.unread ? undefined : pasteServings.servings
     if (nextPasteServings !== undefined && nextPasteServings !== servings) {
       pasteAlsoApplied.push(ja.paste.alsoAppliedServings)
     }
@@ -1172,7 +1202,8 @@ function RecipeFormInner() {
     const pasteCookMinutesNote =
       !parsed.cookMinutes && cookMinutes.trim() === '' ? ja.paste.cookMinutesNotWritten : ''
     // 貼り付けた「50人分」も範囲に収める(便CK/①-1。手では21人分以上を作れないのに素通りしていた)
-    if (parsed.servings) setServings(clampServings(parsed.servings))
+    if (nextPasteServings !== undefined) setServings(nextPasteServings)
+    setServingsNotRead(pasteServings.unread)
     // 「調理時間: 20分」のようなメタ情報行から拾った分数はフォームの調理時間欄へ
     if (parsed.cookMinutes) setCookMinutes(String(parsed.cookMinutes))
     if (parsed.ingredients.length > 0) {
@@ -1249,7 +1280,14 @@ function RecipeFormInner() {
     // 添える一文はどれも句点で終わる（i18n側で終端まで書いてある）。
     // 件数の一文だけ句点を持たないので、添える文がある場合に1つだけ足す
     // （2026-08-12 便FU-3。文ごとに句点を足していて「入れました。。調理時間も…」になっていた）
-    const pasteNotes = [pasteAlsoAppliedNote, stepMinutesNote, stepNotesNote, pasteCookMinutesNote]
+    const pasteServingsNote = pasteServings.unread ? ja.paste.servingsNotRead : ''
+    const pasteNotes = [
+      pasteAlsoAppliedNote,
+      stepMinutesNote,
+      stepNotesNote,
+      pasteCookMinutesNote,
+      pasteServingsNote,
+    ]
       .filter((note) => note !== '')
       .join('')
     showPasteMessage(
@@ -1659,6 +1697,7 @@ function RecipeFormInner() {
     setTitle(target.title)
     setIntro(target.intro)
     setServings(target.servings)
+    setServingsNotRead(false)
     setCookMinutes(target.cookMinutes)
     setEffortLevel(target.effortLevel)
     setIngredients(target.ingredients)
@@ -2053,7 +2092,10 @@ function RecipeFormInner() {
                 下限でも押せて無反応・上限がなく31人分まで増やせた) */}
             <button
               type="button"
-              onClick={() => setServings((n) => Math.max(MIN_SERVINGS, n - 1))}
+              onClick={() => {
+                setServings((n) => Math.max(MIN_SERVINGS, n - 1))
+                setServingsNotRead(false)
+              }}
               disabled={servings <= MIN_SERVINGS}
               className={`${iconBtnCls} disabled:opacity-40`}
               aria-label={ja.detail.servingsDown}
@@ -2066,7 +2108,10 @@ function RecipeFormInner() {
             </span>
             <button
               type="button"
-              onClick={() => setServings((n) => Math.min(MAX_SERVINGS, n + 1))}
+              onClick={() => {
+                setServings((n) => Math.min(MAX_SERVINGS, n + 1))
+                setServingsNotRead(false)
+              }}
               disabled={servings >= MAX_SERVINGS}
               className={`${iconBtnCls} disabled:opacity-40`}
               aria-label={ja.detail.servingsUp}
@@ -2075,6 +2120,18 @@ function RecipeFormInner() {
             </button>
           </div>
         </label>
+        {/* 取り込み元に人数分が書かれていなかったときだけ出す印(2026-08-23 便KF)。
+            人数分が違うと1人分の栄養がそのままの倍率でずれるので、黙って既定の人数にしない。
+            ＋−をどちらか押せば消える(確認が済んだとみなす) */}
+        {servingsNotRead && (
+          <p
+            data-testid="servings-not-read"
+            role="alert"
+            className="mt-1 text-sm font-bold text-warning"
+          >
+            {ja.form.servingsNotReadNote.replace('{n}', String(servings))}
+          </p>
+        )}
       </div>
 
       {/* 料理の種別（2026-07-28 便BW/C-05）。「くわしく」タブと同じ選択をここにも出す。

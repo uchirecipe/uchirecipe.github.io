@@ -6,6 +6,7 @@ import {
   isNutritionUnlocked,
   computeRecipeNutrition,
   hasMaterialGap,
+  saltSourceGaps,
   roundNutrient,
   nutritionSourceName,
   type ExcludedReason,
@@ -95,6 +96,12 @@ export default function NutritionTeaser({
   const gapCount = nutrition.excluded.filter(
     (e) => e.reason === 'food' || e.reason === 'unit',
   ).length
+  // 落ちたのが**塩分を持つ調味料**のときは、印のほうも専用のものに差し替える(2026-08-23 便KF)。
+  // 印は1つだけにする(2つ並べると1行に収まらず、どちらも読まれなくなる)。
+  // 塩分の側を優先するのは、少なく出るのがいちばん悪い出方だから。
+  // 内訳(材料と理由の一覧)は折りたたみの中に今までどおり全部出る
+  const saltGaps = saltSourceGaps(nutrition)
+  const saltGap = saltGaps.length > 0
 
   /**
    * 8項目のお試し表示（1回だけ・2026-08-08 便DZ）。
@@ -132,9 +139,14 @@ export default function NutritionTeaser({
             {ja.nutrition.title}
             {ja.nutrition.summaryLabel.replace('{s}', String(displayServings))}
             {summaryText}
-            {canShowSummary && materialGap && (
-              <span className="ml-1 whitespace-nowrap font-bold text-warning">
-                {ja.nutrition.materialGapBadge.replace('{n}', String(gapCount))}
+            {canShowSummary && (saltGap || materialGap) && (
+              <span
+                className="ml-1 whitespace-nowrap font-bold text-warning"
+                data-testid={saltGap ? 'nutrition-salt-gap-badge' : 'nutrition-material-gap-badge'}
+              >
+                {saltGap
+                  ? ja.nutrition.saltGapBadge.replace('{n}', String(saltGaps.length))
+                  : ja.nutrition.materialGapBadge.replace('{n}', String(gapCount))}
               </span>
             )}
           </span>
@@ -242,6 +254,40 @@ function ExcludedBlock({ nutrition }: { nutrition: Nutrition }) {
         ))}
       </ul>
       <p className="mt-1 text-xs text-ink-muted">{ja.nutrition.excludedDirectionNote}</p>
+    </div>
+  )
+}
+
+/**
+ * 塩分を持つ調味料が計算に入っていないときだけ出す、強いほうの注意（2026-08-23 便KF）。
+ *
+ * 置き場所を**数値の表の上**にしてあるのが、既存の MaterialGapNote（表の下）との違い。
+ * 数字を読む前に「この塩分は実際より小さい」と分かる位置でなければ、
+ * 「塩分0.0g」を見て安心したあとに注意書きを読むことになる。
+ *
+ * 落ちた調味料の名前も並べる（「何を足せば正しくなるか」が分かるようにする。
+ * 折りたたみの中の一覧と重複するが、こちらは数値のすぐ上で読める1行として置く）。
+ */
+function SaltGapNote({ nutrition, showsSalt }: { nutrition: Nutrition; showsSalt: boolean }) {
+  const gaps = saltSourceGaps(nutrition)
+  if (gaps.length === 0) return null
+  return (
+    <div
+      data-testid="nutrition-salt-gap-note"
+      className="rounded-md border-2 border-warning p-[var(--space-sm)]"
+    >
+      <p className="text-sm font-bold text-warning">
+        {ja.nutrition.saltGapNote}
+        {showsSalt ? ja.nutrition.saltGapNoteSalt : ''}
+      </p>
+      <p className="mt-0.5 text-sm">
+        {ja.nutrition.saltGapNames.replace(
+          '{names}',
+          gaps
+            .map((e) => (e.amountText ? `${e.name}（${e.amountText}）` : e.name))
+            .join(ja.nutrition.saltGapNameSeparator),
+        )}
+      </p>
     </div>
   )
 }
@@ -465,6 +511,9 @@ function LockedBody({
 }) {
   return (
     <div className="space-y-[var(--space-sm)]">
+      {/* 塩分を持つ調味料が落ちているときは、数値より先に読める位置に注意を置く(便KF)。
+          無料側は塩分相当量そのものが出ていないので、「小さく出ている」の1文は足さない */}
+      <SaltGapNote nutrition={nutrition} showsSalt={false} />
       {/* 計算できた材料が1つも無いレシピは「0kcal」を出さない(見出し行と同じ判定) */}
       {nutrition.items.length > 0 && (
         <NutrientTable nutrition={nutrition} displayServings={displayServings} unlocked={false} />
@@ -513,6 +562,9 @@ function UnlockedBody({
           {ja.nutrition.trialActiveNote}
         </p>
       )}
+      {/* 塩分相当量の数値を読む前に届く位置へ置く(便KF)。ここは8項目が実際に出ている状態なので、
+          「表示している塩分相当量は実際より小さい」まで言い切る */}
+      <SaltGapNote nutrition={nutrition} showsSalt />
       <NutrientTable nutrition={nutrition} displayServings={displayServings} unlocked />
 
       <MaterialGapNote nutrition={nutrition} />
