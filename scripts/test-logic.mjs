@@ -31026,6 +31026,144 @@ import { safetyNotesFor, stepSafetyNotes, wholeRecipeSafetyNotes } from '../src/
   )
 }
 
+// ---------- 便KL: 包装単位(パック・袋)が換算できず、原価も栄養も出ない ----------
+// 影響範囲テストA・B・C(実データ90品・2026-08-23)で「単位が換算できずに落ちている材料」を
+// 全部洗い出した結果を見張る。直す前はここに並べた値がすべて赤になることを確認してから直している。
+//   ・簡単！厚揚げと小松菜の煮浸し … 1食8円（実勢の約1/9）。1人分32kcal・たんぱく質0.7g。
+//     材料費のほとんどを占める『厚揚げ 1パック』『小松菜 1袋』が、成分表に「パック」「袋」の
+//     目安量が無いために原価も栄養も両方まるごと落ちていた
+//   ・節約★豚こまニラもやし … 単位欄が「g～」「束～」で主材料の豚こま肉とニラが落ちる。
+//     原価側は2026-08-23 便KEで「〜」を落とすようになったのに栄養側だけ落とせず、
+//     **同じ材料が原価では計算できて栄養では対象外**という食い違いになっていた
+//   ・お弁当に使える♪ ブロッコリー使い切り3選 … 『ブロッコリー 1個』『1個分』で野菜量0g
+// 足した目安量は**すべて、その食品が元から持っている単位の値の言い換えか倍数**で、
+// 新しい重さの数値は1つも作っていない（根拠は scripts/nutrition-foods.mjs の各noteに1件ずつ）。
+{
+  const klIndex = buildPriceIndex(PRICE_DEFAULTS.map((d) => ({ ...d, isDefault: true })))
+  const { matchNutritionFood: klFood, computeRecipeNutrition: klNut } = await import(
+    '../src/logic/nutrition.ts'
+  )
+  // 材料名から直接グラムを出す。名寄せできない材料でも検査が止まらないように空の食品で受ける
+  // （1件の中断で以降が全部走らないまま「合格◯件」で終わるのを防ぐ）
+  const klGramsOf = (value, unit, name) => convertToGrams(value, unit, klFood(name) ?? {})
+  const klPerServingYen = (ingredients, servings) =>
+    Math.round(estimateRecipeCost(ingredients, klIndex).total / servings)
+
+  // --- KL-1: 包装単位を、成分表がすでに持っている単位と同じ重さで読む ---
+  // 「新しい重さを作っていない」ことまで見張る＝右辺は必ず既存の単位からの計算にする
+  eq('KL-1 厚揚げの「1パック」は2枚入り＝「2枚」と同じ重さ', klGramsOf(1, 'パック', '厚揚げ'), klGramsOf(2, '枚', '厚揚げ'))
+  eq('KL-1 厚揚げの「1個」は「1枚」と同じ重さ', klGramsOf(1, '個', '厚揚げ'), klGramsOf(1, '枚', '厚揚げ'))
+  eq('KL-1 小松菜の「1袋」は「1束」と同じ重さ', klGramsOf(1, '袋', '小松菜'), klGramsOf(1, '束', '小松菜'))
+  eq('KL-1 水菜の「1袋」は「1束」と同じ重さ', klGramsOf(1, '袋', '水菜'), klGramsOf(1, '束', '水菜'))
+  eq('KL-1 ニラの「1袋」は「1束」と同じ重さ', klGramsOf(1, '袋', 'ニラ'), klGramsOf(1, '束', 'ニラ'))
+  eq('KL-1 糸こんにゃくの「1パック」は「1袋」と同じ重さ', klGramsOf(1, 'パック', '糸こんにゃく'), klGramsOf(1, '袋', '糸こんにゃく'))
+  eq('KL-1 ブロッコリーの「1個」は「1株」と同じ重さ', klGramsOf(1, '個', 'ブロッコリー'), klGramsOf(1, '株', 'ブロッコリー'))
+  eq('KL-1 「1個分」も同じ（既存の「◯◯分」の読み替えで拾う）', klGramsOf(1, '個分', 'ブロッコリー'), klGramsOf(1, '株', 'ブロッコリー'))
+  eq('KL-1 にんにくの「小さじ」はおろしにんにくと同じ重さ', klGramsOf(1, '小さじ', 'にんにく'), klGramsOf(1, '小さじ', 'おろしにんにく'))
+  eq('KL-1 にんにくの「大さじ」はおろしにんにくと同じ重さ', klGramsOf(1, '大さじ', 'にんにく'), klGramsOf(1, '大さじ', 'おろしにんにく'))
+  eq('KL-1 おろしにんにくの「1片」は生にんにくの「1片」と同じ重さ', klGramsOf(1, '片', 'おろしにんにく'), klGramsOf(1, '片', 'にんにく'))
+  // 知らない単位に勝手な重さを当てていないこと（分からないものは分からないまま）
+  eq('KL-1 厚揚げの知らない単位は換算しない', klGramsOf(1, '箱', '厚揚げ'), null)
+  eq('KL-1 「1/2片強分」の「強」は読み取らない（どれだけ多いか書いた人にしか分からない）', klGramsOf(0.5, '片強分', 'おろしにんにく'), null)
+
+  // --- KL-2: 単位欄に残った範囲の印「〜」を、栄養側も原価側と同じに落とす ---
+  eq('KL-2 「100g～」は「100g」と同じ重さ', klGramsOf(100, 'g～', '豚こま肉'), klGramsOf(100, 'g', '豚こま肉'))
+  eq('KL-2 全角「～」も半角「~」も同じ', klGramsOf(100, 'g~', '豚こま肉'), klGramsOf(100, 'g', '豚こま肉'))
+  eq('KL-2 「束～」も「束」と同じ', klGramsOf(0.5, '束～', 'ニラ'), klGramsOf(0.5, '束', 'ニラ'))
+  eq('KL-2 原価側と答えが同じ（同じ材料が片方だけ落ちない）', normalizeUnit(100, 'g～'), normalizeUnit(100, 'g'))
+
+  // --- KL-3: 実データの「厚揚げと小松菜の煮浸し」で、原価と栄養の両方に効く ---
+  const klNibitashi = [
+    { name: '厚揚げ', amount: '1', unit: 'パック', memo: '正方形2枚' },
+    { name: '小松菜', amount: '1', unit: '袋' },
+    { name: '醤油', amount: '1.5', unit: '大さじ' },
+    { name: 'みりん', amount: '1.5', unit: '大さじ' },
+    { name: '砂糖', amount: '1', unit: '大さじ' },
+    { name: 'だしの素', amount: '1', unit: '小さじ' },
+    { name: '水', amount: '1', unit: 'カップ' },
+  ]
+  eq('KL-3 煮浸しは1食75円（旧8円＝実勢の約1/9）', klPerServingYen(klNibitashi, 4), 75)
+  eq(
+    'KL-3 「価格が分からない材料」が0件になる（旧: 厚揚げ・小松菜の2種）',
+    pricelessIngredientNamesOfRecipes([{ ingredients: klNibitashi }], klIndex),
+    [],
+  )
+  {
+    const n = klNut({ ingredients: klNibitashi, servings: 4 })
+    eq('KL-3 栄養も対象外0件になる（旧: 厚揚げ・小松菜の2件）', n.excluded.map((e) => e.name), [])
+    eq('KL-3 1人分147kcal（旧32kcal）', Math.round(n.perServing.kcal), 147)
+    eq('KL-3 1人分のたんぱく質は9g超（旧0.7g）', n.perServing.proteinG > 9, true)
+    eq('KL-3 野菜量63g（旧0g）', Math.round(vegetableGrams({ ingredients: klNibitashi, servings: 4 })), 63)
+  }
+  // 原価と栄養が同じ量を見ていること（2エンジンの答えを食い違わせない）
+  eq(
+    'KL-3 厚揚げ1パックは原価も120円＝マスタ60円/1枚の2枚ぶん',
+    estimateIngredientYen({ name: '厚揚げ', amount: '1', unit: 'パック' }, klIndex)?.yen,
+    estimateIngredientYen({ name: '厚揚げ', amount: '2', unit: '枚' }, klIndex)?.yen,
+  )
+  eq(
+    'KL-3 小松菜1袋は原価も1束ぶんと同じ',
+    estimateIngredientYen({ name: '小松菜', amount: '1', unit: '袋' }, klIndex)?.yen,
+    estimateIngredientYen({ name: '小松菜', amount: '1', unit: '束' }, klIndex)?.yen,
+  )
+
+  // --- KL-4: 「g～」で主材料が落ちていた品（栄養だけが落ちていた＝原価は変わらない） ---
+  const klNiraMoyashi = [
+    { name: '豚コマ肉', amount: '100', unit: 'g～' },
+    { name: 'ニラ', amount: '1/2', unit: '束～' },
+    { name: 'もやし', amount: '1', unit: '袋' },
+    { name: 'ゴマ油', amount: '大1', unit: '' },
+    { name: '醤油', amount: '2', unit: '小さじ' },
+    { name: 'オイスターソース', amount: '1', unit: '小さじ' },
+    { name: '砂糖', amount: '1', unit: '小さじ' },
+    { name: '塩コショウ', amount: '少々', unit: '' },
+  ]
+  {
+    const n = klNut({ ingredients: klNiraMoyashi, servings: 2 })
+    eq('KL-4 豚こま肉とニラが対象外に残らない', n.excluded.map((e) => e.name), [])
+    eq('KL-4 1人分のたんぱく質は12g超（旧2.5g）', n.perServing.proteinG > 12, true)
+    eq('KL-4 野菜量124g（旧0g）', Math.round(vegetableGrams({ ingredients: klNiraMoyashi, servings: 2 })), 124)
+  }
+
+  // --- KL-5: 減塩しょうゆ・減塩みそ（司令部裁定。八訂に実収載があるので根拠が明確） ---
+  {
+    const genenShoyu = klFood('減塩しょうゆ')
+    const shoyu = klFood('しょうゆ')
+    eq('KL-5 減塩しょうゆに専用の成分データがある', genenShoyu?.id, '17086')
+    eq('KL-5 普通のしょうゆとは別の食品として持つ', genenShoyu?.id !== shoyu?.id, true)
+    eq('KL-5 食塩相当量は八訂の値そのまま（8.3g/100g）', genenShoyu?.per100g.saltG, 8.3)
+    eq('KL-5 普通のしょうゆより少なく出る（14.5g/100g）', shoyu?.per100g.saltG, 14.5)
+    eq('KL-5 「減塩醤油」「塩分カットしょうゆ」も同じ食品に寄る', [
+      klFood('減塩醤油')?.id,
+      klFood('減塩しょう油')?.id,
+      klFood('塩分カットしょうゆ')?.id,
+    ], ['17086', '17086', '17086'])
+    const genenMiso = klFood('減塩みそ')
+    const miso = klFood('味噌')
+    eq('KL-5 減塩みそに専用の成分データがある', genenMiso?.id, '17119')
+    eq('KL-5 食塩相当量は八訂の値そのまま（10.7g/100g）', genenMiso?.per100g.saltG, 10.7)
+    eq('KL-5 代表の味噌より少なく出る（12.4g/100g）', miso?.per100g.saltG, 12.4)
+    eq('KL-5 「減塩味噌」「塩分カットみそ」も同じ食品に寄る', [
+      klFood('減塩味噌')?.id,
+      klFood('塩分カットみそ')?.id,
+    ], ['17119', '17119'])
+    // 大さじ/小さじの重さは他のみそ類と同じ（新しい数値を作っていない）
+    eq('KL-5 減塩みその大さじは他のみそと同じ重さ', klGramsOf(1, '大さじ', '減塩みそ'), klGramsOf(1, '大さじ', '味噌'))
+    // --- 誤爆0件: 「減塩」と書いていないしょうゆ・みそを巻き込まない ---
+    eq('KL-5 誤爆0件: 「減塩」と書いていないしょうゆ・みそは今までどおり', [
+      klFood('しょうゆ')?.id, klFood('醤油')?.id, klFood('濃口醤油')?.id, klFood('こいくちしょうゆ')?.id,
+      klFood('薄口しょうゆ')?.id, klFood('だししょうゆ')?.id, klFood('ぽん酢しょうゆ')?.id,
+      klFood('みそ')?.id, klFood('味噌')?.id, klFood('合わせ味噌')?.id, klFood('信州味噌')?.id,
+      klFood('白味噌')?.id, klFood('赤味噌')?.id,
+    ], [
+      '17007', '17007', '17007', '17007',
+      '17008', '17007', '17137',
+      '17045', '17045', '17045', '17045',
+      '17044', '17046',
+    ])
+  }
+}
+
 // ---------- 結果 ----------
 console.log(`合格: ${passed}件 / 失敗: ${failures.length}件`)
 for (const f of failures) console.log(`  NG ${f}`)
