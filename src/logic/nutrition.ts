@@ -7,7 +7,7 @@ import {
   parseAmountNumber as parseAmountValue,
   resolveCalcAmount,
 } from './amount'
-import { VOLUME_UNIT_FACTORS } from './unitGrams'
+import { VOLUME_UNIT_FACTORS, normalizeUnitText } from './unitGrams'
 import { matchAssumedGrams } from './amountAssumption'
 import { ja } from '../i18n/ja'
 
@@ -473,9 +473,16 @@ const SPOON_ML: Record<string, number> = {
  * unitはNFKC正規化してから比較する(2026-07-21全角対応: 全角「ｇ」「ｍｌ」等でも半角と同じ
  * 食品データに一致させるため。全角入力欄が「アサリ 300ｇ」のように全角単位で保存されていても
  * ここで解釈できれば計算できる。保存データ自体は書き換えない)
+ *
+ * 下ごしらえは原価側と同じ normalizeUnitText に寄せる(2026-08-25 便KL)。NFKC正規化に加えて
+ * **末尾に残った範囲の印**(「〜」「～」「~」)を落とす。取り込みで「豚こま肉 100g～」「ニラ 1/2束～」が
+ * 分量「100」＋単位「g～」に割れることがあり、原価側は2026-08-23 便KEでこれを落とすようになったのに
+ * 栄養側だけが落とせず、**同じ材料が原価では計算できて栄養では対象外**という食い違いが残っていた
+ * (影響範囲テストA「節約★豚こまニラもやし」は主材料の豚こま肉とニラの両方がこれで落ち、
+ * 1人分たんぱく質2.5gと出ていた)。新しい重さの数値は1つも作らない。
  */
 export function convertToGrams(value: number, unit: string, food: NutritionFood): number | null {
-  const u = normalizeAmountInput(unit).trim()
+  const u = normalizeUnitText(unit)
   const explicit = food.unitGrams?.[u]
   if (explicit !== undefined) return value * explicit
   if (u === 'g' || u === 'グラム') return value
