@@ -57,7 +57,12 @@ export default function Toast({ message, onClose, actionLabel, onAction }: Props
           onClick={onClose}
           className="flex min-w-0 flex-1 items-start gap-2 text-left"
         >
-          <span className="min-w-0 flex-1 text-sm font-bold text-accent-ink">{message}</span>
+          {/* 改行（\n）をそのまま出す（2026-08-24 便KI・オーナー原文「トーストの文が長い上に
+              改行もないので読む前に消える」）。2文以上が地続きの1行に詰まると、どこまでが
+              1つの知らせなのか読み取れないまま消えていた */}
+          <span className="min-w-0 flex-1 whitespace-pre-line text-sm font-bold text-accent-ink">
+            {message}
+          </span>
           {!hasAction && <X size={16} className="mt-0.5 shrink-0 text-accent-ink" aria-hidden />}
         </button>
         {hasAction && (

@@ -3585,11 +3585,8 @@ eq('rangeDayCount: 月をまたぐ計算も正しい', rangeDayCount('2026-06-28
     planRoleAssign([main1, side1], 30, 'side'),
     { kind: 'add' },
   )
-  eq(
-    '主菜の料理は、その枠の主菜を差し替える(従来どおりの主菜の挙動)',
-    planRoleAssign([main1, side1], 30, 'main'),
-    { kind: 'replace', entryId: 1 },
-  )
+  // 2026-08-24 便KI: 主菜の差し替えはやめた（もとからあった主菜が消えていた）。
+  // 「主菜を差し替える」を測っていた2件は KI-1 の「消えない・足すだけ」へ引き継いである
   eq(
     '主菜の料理でも、その枠に主菜が無ければ追加する',
     planRoleAssign([side1], 30, 'main'),
@@ -3605,11 +3602,6 @@ eq('rangeDayCount: 月をまたぐ計算も正しい', rangeDayCount('2026-06-28
     '同じ料理が主菜として入っている枠に、主菜として押しても何もしない',
     planRoleAssign([main1], 10, 'main'),
     { kind: 'duplicate' },
-  )
-  eq(
-    'role未設定の既存データ(2026-07-13より前)は主菜として扱い、主菜の料理で差し替える',
-    planRoleAssign([{ id: 5, recipeId: 11 }], 30, 'main'),
-    { kind: 'replace', entryId: 5 },
   )
   eq(
     'role未設定の既存データがあっても、副菜の料理は追加(既存を消さない)',
@@ -30553,6 +30545,207 @@ import { safetyNotesFor, stepSafetyNotes, wholeRecipeSafetyNotes } from '../src/
         { name: '玉ねぎ', amount: '1/2', unit: '玉' },
       ]), '1と1/2個')
   }
+}
+
+// ---------- KI-1 / KI-2（2026-08-24 便KI・オーナー実機）----------
+// オーナー原文:
+//   「レシピ一覧から選択中から『夕食に入れる』した場合、今週の献立にもとからあった夕食の主菜と
+//     入れ替えに消える。もしくは既存レシピと入れ替えになって、全て入らない。追加のみしてください。」
+//
+// 何が起きていたか（2026-08-24 に実データで再現）:
+//   (a) 夕食に主菜「肉じゃが」がある状態で、主菜「鶏の唐揚げ」の「夕食に入れる」を押すと、
+//       肉じゃがが**行ごと差し替わって消えた**（planRoleAssign が kind:'replace' を返していた）。
+//   (b) 主菜を3品選んで順に「夕食に入れる」を押すと、押すたびに前の1品を置き換えるので
+//       最後の1品しか残らない＝「全て入らない」。
+//
+// 直しかた: この入口は**足すだけ**にする。役割が主菜でも既存の主菜を差し替えない
+//   ＝ planRoleAssign から 'replace' を無くす（返しうるのは 'add' と 'duplicate' の2つだけ）。
+// 上限は設けない。同じ枠へ入れる他の入口（週の行の「＋料理を追加」・レシピ詳細の
+//   「今日の献立に追加」→食事を選ぶ・レシピ一覧の選択→「今日の献立に入れる」）はどれも
+//   上限を持たないので、ここだけ止めると同じ枠なのに押すボタンで結果が変わる。
+// 重複（同じ料理が同じ枠にすでにある）は今までどおり足さない＝同じ料理が2行に並ぶと、
+//   作った記録の対応付け（cookedPlanEntryIds）がどちらか1行だけを「作った」に見せて読めなくなる。
+{
+  const main1 = { id: 1, recipeId: 10, role: 'main' }
+  const side1 = { id: 2, recipeId: 20, role: 'side' }
+  eq(
+    'KI-1 (a)の再発防止: 主菜の料理を入れても、その枠の主菜は消えない（差し替えず追加する）',
+    planRoleAssign([main1], 30, 'main'),
+    { kind: 'add' },
+  )
+  eq(
+    'KI-1 (a)の再発防止: 主菜と副菜が入っている枠でも、主菜の料理は追加になる',
+    planRoleAssign([main1, side1], 30, 'main'),
+    { kind: 'add' },
+  )
+  eq(
+    'KI-1 role未設定の既存データ(2026-07-13より前)も消さない＝主菜の料理は追加になる',
+    planRoleAssign([{ id: 5, recipeId: 11 }], 30, 'main'),
+    { kind: 'add' },
+  )
+  eq(
+    'KI-1 (b)の再発防止: 主菜を続けて入れても、前に入れた主菜は残る（2品目も追加になる）',
+    planRoleAssign(
+      [
+        { id: 1, recipeId: 10, role: 'main' },
+        { id: 2, recipeId: 30, role: 'main' },
+      ],
+      40,
+      'main',
+    ),
+    { kind: 'add' },
+  )
+  eq(
+    'KI-1 「入れる」が献立を消す道は1つも残っていない（返しうるのは追加と重複だけ）',
+    ['main', 'side', 'soup', 'other']
+      .map((role) => planRoleAssign([main1, side1], 30, role).kind)
+      .filter((kind) => kind !== 'add' && kind !== 'duplicate'),
+    [],
+  )
+  // 上限は設けない（2026-08-24 オーナー原文「追加のみは上限なしでいいと思います。
+  // 2回目だったら追加済みであることのお知らせを出せばよいのでは？」）。
+  // 違う料理なら、その枠にいくつ入っていても足せる＝押しても入らない枠を作らない
+  eq(
+    'KI-1 上限は無い: 主菜が5品入っている枠でも、違う主菜はさらに足せる',
+    planRoleAssign(
+      [1, 2, 3, 4, 5].map((n) => ({ id: n, recipeId: n * 10, role: 'main' })),
+      99,
+      'main',
+    ),
+    { kind: 'add' },
+  )
+  eq(
+    'KI-1 上限は無い: 主菜・副菜・汁物・その他が並んでいる枠でも足せる',
+    planRoleAssign(
+      [
+        { id: 1, recipeId: 10, role: 'main' },
+        { id: 2, recipeId: 20, role: 'side' },
+        { id: 3, recipeId: 30, role: 'soup' },
+        { id: 4, recipeId: 40, role: 'other' },
+      ],
+      50,
+      'main',
+    ),
+    { kind: 'add' },
+  )
+  // 2回目（同じ料理をもう一度）は足さずに知らせるだけ。知らせは**すでにあるものを使う**
+  // （新しい文言を足すと、同じことを2つの言い方で書くことになる）
+  eq(
+    'KI-1 2回目の知らせが用意されている（すでに入っていることを料理名つきで言う）',
+    ja.mealPlan.planMismatchAlready.includes('{title}') &&
+      ja.mealPlan.planMismatchAlready.includes('{slot}'),
+    true,
+  )
+  {
+    const kiPageSrc = readFileSync(
+      path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'src/pages/MealPlanPage.tsx'),
+      'utf-8',
+    )
+    eq(
+      'KI-1 「◯食に入れる」の2回目は、その用意された知らせを出している',
+      kiPageSrc.includes('ja.mealPlan.planMismatchAlready'),
+      true,
+    )
+    // 「すでに◯◯に入っています」を言う文言を、この機会に増やさない（同じことを2つの言い方で
+    // 書かないため。場面ごとに1本ずつあり、「◯食に入れる」の2回目は planMismatchAlready を使う）
+    eq(
+      'KI-1 「すでに入っています」と言う文言が増えていない（2回目の知らせを新しく作らない）',
+      Object.entries(ja.mealPlan)
+        .filter(([, v]) => typeof v === 'string' && v.includes('すでに') && v.includes('入っています'))
+        .map(([k]) => k)
+        .sort(),
+      ['monthDayModalDirtyNote', 'planMismatchAlready', 'todayAddOneAlready', 'todaySuggestAllAlready'],
+    )
+    eq(
+      'KI-1 レシピ詳細側の同じ知らせは、今までどおりそちらで使われている（重複して作らない）',
+      readFileSync(
+        path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'src/pages/RecipeDetailPage.tsx'),
+        'utf-8',
+      ).includes('ja.detail.todaySlotDuplicateToast'),
+      true,
+    )
+  }
+  eq(
+    'KI-1 同じ料理が既にその枠にあれば足さない（同じ料理を2行に増やさない）',
+    planRoleAssign([main1, side1], 20, 'side'),
+    { kind: 'duplicate' },
+  )
+  eq(
+    'KI-1 同じ料理が主菜として入っている枠に、主菜として押しても足さない',
+    planRoleAssign([main1], 10, 'main'),
+    { kind: 'duplicate' },
+  )
+}
+
+// ---------- KI-2: 「まとめて献立を入力」の知らせが、読み切れる長さで、嘘を含まないこと ----------
+// オーナー原文:
+//   「総入れ替え→まとめて献立入力した後のトーストの文が長い上に改行もないので読む前に消える。
+//     日の献立は変わらないとでているが、更新されているので不要な文。」
+//
+// 実装を読んで確かめた結果（2026-08-24 実測）: 日タブの「今日の献立」の「今週の献立の予定」は
+// 今日の予定（mealPlans）からその場で組み立てているので、週タブで総入れ替えすると**自動で変わる**。
+// 実測でも、押す前「夕食 肉じゃが」→押した後「夕食 鶏ひき肉の豆腐ハンバーグ・きんぴらごぼう」に
+// 変わっていた。つまり「自動では変わらない」は事実の逆＝文が嘘だったので、文ごと外す。
+// トーストは6秒で自動的に消える（components/Toast.tsx AUTO_DISMISS_MS）ので、その間に
+// 読み切れる長さを上限にする。
+{
+  const TOAST_LIMIT = 40
+  eq(
+    'KI-2 「日の献立は自動では変わらない」という嘘の知らせが残っていない',
+    'fillWeekTodayNotice' in ja.mealPlan,
+    false,
+  )
+  eq(
+    'KI-2 同じ場所で出していたもう一方の知らせ（取り込みの内部の話）も残っていない',
+    'fillWeekTodayWillImport' in ja.mealPlan,
+    false,
+  )
+  const fillWeekToasts = {
+    fillModeReplaceAllDone: ja.mealPlan.fillModeReplaceAllDone,
+    fillWeekDone: ja.mealPlan.fillWeekDone,
+    fillWeekKeptManual: ja.mealPlan.fillWeekKeptManual,
+    fillWeekNoRoom: ja.mealPlan.fillWeekNoRoom,
+    fillWeekNoAdded: ja.mealPlan.fillWeekNoAdded,
+    fillModeReplaceAllNothing: ja.mealPlan.fillModeReplaceAllNothing,
+    lockedSlotNotice: ja.mealPlan.lockedSlotNotice,
+  }
+  for (const [key, text] of Object.entries(fillWeekToasts)) {
+    eq(
+      `KI-2 ${key} が${TOAST_LIMIT}字以内（6秒で消えるトーストで読み切れる長さ）`,
+      text.replace(/\{[a-z]\}/g, '').length <= TOAST_LIMIT,
+      true,
+    )
+  }
+  // 「改行もない」への手当て: 2文以上つながるときは改行でつなぎ、トーストがその改行を出せること
+  const mealPlanSrc = readFileSync(
+    path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'src/pages/MealPlanPage.tsx'),
+    'utf-8',
+  )
+  const toastSrc = readFileSync(
+    path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'src/components/Toast.tsx'),
+    'utf-8',
+  )
+  eq('KI-2 前提: 献立の画面を読めている（0字なら見張りが壊れている）', mealPlanSrc.length > 10000, true)
+  eq(
+    'KI-2 「まとめて献立を入力」の知らせは改行でつなぐ（1行に詰めない）',
+    mealPlanSrc.includes("messages.join('\\n')"),
+    true,
+  )
+  eq(
+    'KI-2 知らせに足す一文も改行でつなぐ（withNotice）',
+    mealPlanSrc.includes('`${text}\\n${notice}`'),
+    true,
+  )
+  eq(
+    'KI-2 知らせのつなぎ目に半角スペースが戻っていない（withNotice）',
+    mealPlanSrc.includes('`${text} ${notice}`'),
+    false,
+  )
+  eq(
+    'KI-2 トーストが改行をそのまま出す（whitespace-pre-line）',
+    toastSrc.includes('whitespace-pre-line'),
+    true,
+  )
 }
 
 // ---------- 結果 ----------

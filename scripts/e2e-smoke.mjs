@@ -51607,6 +51607,476 @@ try {
 
 
 
+  // ==========================================================================================
+  // KIADD-01 / KIUNDO-02 / KIADD-03 / KILOCK-04 / KITOAST-05（2026-08-24 便KI・オーナー実機）
+  //
+  // オーナー原文:
+  //   「レシピ一覧から選択中から『夕食に入れる』した場合、今週の献立にもとからあった夕食の主菜と
+  //     入れ替えに消える。もしくは既存レシピと入れ替えになって、全て入らない。追加のみしてください。」
+  //   「総入れ替え→まとめて献立入力した後のトーストの文が長い上に改行もないので読む前に消える。
+  //     日の献立は変わらないとでているが、更新されているので不要な文。」
+  //
+  // 測るのは「利用者が確かめたいこと」＝**入れたときに、もとからあった献立が消えていないこと**。
+  // 「足せた」だけを測ると、足したそばから既存が消えていても合格になるので、
+  // 押す前の中身と押した後の中身を**端末のデータで数えて突き合わせる**形にしてある。
+  //
+  // 禁じ手よけ: 掴むのは data-testid と ja.ts から組み立てた名前だけ／page.evaluate の中では
+  //   ja を使わない（料理名は端末から読んだものを引数で渡す）／生のIndexedDBへ書いたら読み込み直す／
+  //   曜日・月替わりに依らない（今日の枠しか触らない。KITOAST-05 だけ週を触るので、
+  //   E2E_FAKE_TODAY で月曜・日曜の両方を当ててある）
+  // ==========================================================================================
+
+  // --- KIADD-01: 「◯食に入れる」で、もとからあった主菜が消えない／KIUNDO-02: 元に戻せる ---
+  currentCheck = 'KIADD-01'
+  {
+    const kiBrowser = await chromium.launch()
+    const kiContext = await kiBrowser.newContext({ viewport: { width: 390, height: 844 } })
+    const kiPage = await kiContext.newPage()
+    kiPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@KIADD-01] ${err.message}`)
+    })
+    try {
+      await kiPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+      await kiPage.waitForTimeout(2400) // 初回シード完了待ち
+      /** 主菜の料理を必要な数だけ端末から拾う（料理名を書き写さない＝並びが変わっても効く） */
+      const pickMains = (page, count) =>
+        page.evaluate(
+          (count) =>
+            new Promise((resolve, reject) => {
+              const req = indexedDB.open('uchi-recipe')
+              req.onsuccess = () => {
+                const g = req.result.transaction('recipes', 'readonly').objectStore('recipes').getAll()
+                g.onsuccess = () =>
+                  resolve(
+                    g.result
+                      .filter((r) => r.dishType === 'main')
+                      .slice(0, count)
+                      .map((r) => ({ id: r.id, title: r.title })),
+                  )
+                g.onerror = () => reject(g.error)
+              }
+              req.onerror = () => reject(req.error)
+            }),
+          count,
+        )
+      /** 今日の献立（端末のデータ）を「食事/役割/料理名」の一覧で読む */
+      const dinnerOf = (page) =>
+        page.evaluate(
+          () =>
+            new Promise((resolve, reject) => {
+              const d = new Date()
+              const date = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+              const req = indexedDB.open('uchi-recipe')
+              req.onsuccess = () => {
+                const idb = req.result
+                const tx = idb.transaction(['mealPlans', 'recipes'], 'readonly')
+                const gp = tx.objectStore('mealPlans').getAll()
+                const gr = tx.objectStore('recipes').getAll()
+                tx.oncomplete = () => {
+                  const byId = new Map(gr.result.map((r) => [r.id, r.title]))
+                  resolve(
+                    gp.result
+                      .filter((e) => e.date === date && e.slot === 'dinner')
+                      .map((e) => byId.get(e.recipeId)),
+                  )
+                }
+                tx.onerror = () => reject(tx.error)
+              }
+              req.onerror = () => reject(req.error)
+            }),
+        )
+      /** 今日の夕食に1品、レシピ一覧から選択中に何品かを仕込む（生書き込みなので必ず読み込み直す） */
+      const seed = (page, plannedId, pickedIds) =>
+        page.evaluate(
+          ({ plannedId, pickedIds }) =>
+            new Promise((resolve, reject) => {
+              const d = new Date()
+              const date = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+              const req = indexedDB.open('uchi-recipe')
+              req.onsuccess = () => {
+                const tx = req.result.transaction(['mealPlans', 'todayList'], 'readwrite')
+                if (plannedId != null)
+                  tx.objectStore('mealPlans').add({ date, slot: 'dinner', recipeId: plannedId, role: 'main' })
+                for (const id of pickedIds)
+                  tx.objectStore('todayList').add({ recipeId: id, addedAt: Date.now() })
+                tx.oncomplete = () => resolve(undefined)
+                tx.onerror = () => reject(tx.error)
+              }
+              req.onerror = () => reject(req.error)
+            }),
+          { plannedId, pickedIds },
+        )
+      const addToDinner = ja.mealPlan.planMismatchAddToSlot.replace('{slot}', ja.mealPlan.slot.dinner)
+      const mains = await pickMains(kiPage, 4)
+      check('KIADD-01 前提: 主菜の料理を4品用意できている', mains.length === 4, `用意=${mains.length}品`)
+      await seed(kiPage, mains[0].id, [mains[1].id])
+      await kiPage.reload({ waitUntil: 'networkidle' })
+      await kiPage.waitForTimeout(1600)
+      const before = await dinnerOf(kiPage)
+      check(
+        'KIADD-01 前提: 今日の夕食に主菜が1品だけ入っている',
+        before.length === 1 && before[0] === mains[0].title,
+        `押す前=${JSON.stringify(before)}`,
+      )
+      await kiPage
+        .locator('[data-testid="day-picked"] li', { hasText: mains[1].title })
+        .getByRole('button', { name: addToDinner, exact: true })
+        .first()
+        .click()
+      await kiPage.waitForTimeout(1000)
+      const after = await dinnerOf(kiPage)
+      check(
+        'KIADD-01 もとからあった夕食の主菜が消えていない（入れ替えにならない）',
+        after.includes(mains[0].title),
+        `押した後=${JSON.stringify(after)}`,
+      )
+      check(
+        'KIADD-01 押した料理も入っている（もとの1品＋足した1品＝2品）',
+        after.length === 2 && after.includes(mains[1].title),
+        `押した後=${JSON.stringify(after)}`,
+      )
+      const plannedText = stripZwspText(
+        await kiPage.locator('[data-testid="day-planned"]').first().textContent(),
+      )
+      check(
+        'KIADD-01 画面の「今週の献立の予定」にも2品とも並ぶ',
+        plannedText.includes(mains[0].title) && plannedText.includes(mains[1].title),
+      )
+
+      currentCheck = 'KIUNDO-02'
+      const kiUndo = kiPage.getByRole('button', { name: ja.common.undo, exact: true })
+      check('KIUNDO-02 入れた直後のトーストに「元に戻す」が出る', (await kiUndo.count()) === 1)
+      await kiUndo.first().click()
+      await kiPage.waitForTimeout(1000)
+      const undone = await dinnerOf(kiPage)
+      check(
+        'KIUNDO-02 「元に戻す」で押す前の姿に戻る（足した1品だけが外れる）',
+        undone.length === 1 && undone[0] === mains[0].title,
+        `戻した後=${JSON.stringify(undone)}`,
+      )
+
+      // --- KIADD-03: 主菜を続けて入れても、前に入れた分が消えない（「全て入らない」の再発防止） ---
+      currentCheck = 'KIADD-03'
+      await kiPage.evaluate(
+        () =>
+          new Promise((resolve, reject) => {
+            const req = indexedDB.open('uchi-recipe')
+            req.onsuccess = () => {
+              const tx = req.result.transaction(['mealPlans', 'todayList'], 'readwrite')
+              tx.objectStore('mealPlans').clear()
+              tx.objectStore('todayList').clear()
+              tx.oncomplete = () => resolve(undefined)
+              tx.onerror = () => reject(tx.error)
+            }
+            req.onerror = () => reject(req.error)
+          }),
+      )
+      await seed(kiPage, null, [mains[1].id, mains[2].id, mains[3].id])
+      await kiPage.reload({ waitUntil: 'networkidle' })
+      await kiPage.waitForTimeout(1600)
+      for (const m of [mains[1], mains[2], mains[3]]) {
+        await kiPage
+          .locator('[data-testid="day-picked"] li', { hasText: m.title })
+          .getByRole('button', { name: addToDinner, exact: true })
+          .first()
+          .click()
+        await kiPage.waitForTimeout(800)
+      }
+      const three = await dinnerOf(kiPage)
+      check(
+        'KIADD-03 主菜を3品つづけて入れると3品とも残る（前の分と入れ替わらない）',
+        three.length === 3 &&
+          [mains[1], mains[2], mains[3]].every((m) => three.includes(m.title)),
+        `押した後=${JSON.stringify(three)}`,
+      )
+    } finally {
+      await kiBrowser.close()
+    }
+  }
+
+  // --- KILOCK-04: 鍵の掛かった食事には、今までどおり入らない（追加のみにしても止まる） ---
+  currentCheck = 'KILOCK-04'
+  {
+    const klBrowser = await chromium.launch()
+    const klContext = await klBrowser.newContext({ viewport: { width: 390, height: 844 } })
+    const klPage = await klContext.newPage()
+    klPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@KILOCK-04] ${err.message}`)
+    })
+    try {
+      await klPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+      await klPage.waitForTimeout(2400)
+      const klSeed = await klPage.evaluate(
+        () =>
+          new Promise((resolve, reject) => {
+            const d = new Date()
+            const date = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+            const req = indexedDB.open('uchi-recipe')
+            req.onsuccess = () => {
+              const idb = req.result
+              const g = idb.transaction('recipes', 'readonly').objectStore('recipes').getAll()
+              g.onsuccess = () => {
+                const mains = g.result.filter((r) => r.dishType === 'main').slice(0, 2)
+                const tx = idb.transaction(['mealPlans', 'todayList', 'mealPlanLocks'], 'readwrite')
+                tx.objectStore('mealPlans').add({ date, slot: 'dinner', recipeId: mains[0].id, role: 'main' })
+                tx.objectStore('todayList').add({ recipeId: mains[1].id, addedAt: Date.now() })
+                tx.objectStore('mealPlanLocks').put({ key: `${date}|dinner`, date, slot: 'dinner', lockedAt: Date.now() })
+                tx.oncomplete = () => resolve(mains.map((r) => r.title))
+                tx.onerror = () => reject(tx.error)
+              }
+              g.onerror = () => reject(g.error)
+            }
+            req.onerror = () => reject(req.error)
+          }),
+      )
+      await klPage.reload({ waitUntil: 'networkidle' })
+      await klPage.waitForTimeout(1600)
+      const klAddToDinner = ja.mealPlan.planMismatchAddToSlot.replace('{slot}', ja.mealPlan.slot.dinner)
+      await klPage
+        .locator('[data-testid="day-picked"] li', { hasText: klSeed[1] })
+        .getByRole('button', { name: klAddToDinner, exact: true })
+        .first()
+        .click()
+      await klPage.waitForTimeout(900)
+      const klDinner = await klPage.evaluate(
+        () =>
+          new Promise((resolve, reject) => {
+            const d = new Date()
+            const date = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+            const req = indexedDB.open('uchi-recipe')
+            req.onsuccess = () => {
+              const idb = req.result
+              const tx = idb.transaction(['mealPlans', 'recipes'], 'readonly')
+              const gp = tx.objectStore('mealPlans').getAll()
+              const gr = tx.objectStore('recipes').getAll()
+              tx.oncomplete = () => {
+                const byId = new Map(gr.result.map((r) => [r.id, r.title]))
+                resolve(gp.result.filter((e) => e.date === date && e.slot === 'dinner').map((e) => byId.get(e.recipeId)))
+              }
+              tx.onerror = () => reject(tx.error)
+            }
+            req.onerror = () => reject(req.error)
+          }),
+      )
+      check(
+        'KILOCK-04 鍵の掛かった夕食には入らない（もとの1品のまま）',
+        klDinner.length === 1 && klDinner[0] === klSeed[0],
+        `押した後=${JSON.stringify(klDinner)}`,
+      )
+      check(
+        'KILOCK-04 入らなかったことを画面で知らせる（黙って何も起きないにしない）',
+        stripZwspText(await klPage.textContent('body')).includes(ja.mealPlan.lockedEditBlocked),
+      )
+    } finally {
+      await klBrowser.close()
+    }
+  }
+
+  // --- KITOAST-05: 総入れ替えのあとの知らせが、読み切れる長さで、事実と合っていること ---
+  //
+  // 実装を読んで確かめたこと: 日タブの「今週の献立の予定」は今日の予定からその場で組み立てるので、
+  // 週タブで総入れ替えすると**自動で変わる**。それなのに「自動では変わらない」と知らせていた。
+  // ここで測るのは ①知らせが短く読み切れること ②日タブの「今日の献立」が実際に変わっていること。
+  currentCheck = 'KITOAST-05'
+  {
+    const ktBrowser = await chromium.launch()
+    const ktContext = await ktBrowser.newContext({ viewport: { width: 390, height: 844 } })
+    const ktPage = await ktContext.newPage()
+    ktPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@KITOAST-05] ${err.message}`)
+    })
+    try {
+      await ktPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+      await ktPage.waitForTimeout(2400)
+      await ktPage.evaluate(
+        () =>
+          new Promise((resolve, reject) => {
+            const d = new Date()
+            const date = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+            const req = indexedDB.open('uchi-recipe')
+            req.onsuccess = () => {
+              const idb = req.result
+              const g = idb.transaction('recipes', 'readonly').objectStore('recipes').getAll()
+              g.onsuccess = () => {
+                const mains = g.result.filter((r) => r.dishType === 'main').slice(0, 2)
+                const tx = idb.transaction(['mealPlans', 'todayList'], 'readwrite')
+                tx.objectStore('mealPlans').add({ date, slot: 'dinner', recipeId: mains[0].id, role: 'main' })
+                tx.objectStore('todayList').add({ recipeId: mains[1].id, addedAt: Date.now() })
+                tx.oncomplete = () => resolve(undefined)
+                tx.onerror = () => reject(tx.error)
+              }
+              g.onerror = () => reject(g.error)
+            }
+            req.onerror = () => reject(req.error)
+          }),
+      )
+      await ktPage.reload({ waitUntil: 'networkidle' })
+      await ktPage.waitForTimeout(1800) // 日タブの自動取り込みが済むまで待つ（済んだ側の知らせを測るため）
+      const ktPlannedText = async () => {
+        const node = ktPage.locator('[data-testid="day-planned"]')
+        if ((await node.count()) === 0) return ''
+        return stripZwspText(await node.first().textContent())
+      }
+      const ktBeforeDay = await ktPlannedText()
+      check('KITOAST-05 前提: 日タブの「今週の献立の予定」に献立が出ている', ktBeforeDay.length > 0)
+      // 週タブへ移り、入れかたを「総入れ替え」にしてまとめて入れる
+      await ktPage.getByRole('button', { name: ja.mealPlan.viewWeek, exact: true }).click()
+      await ktPage.waitForTimeout(1200)
+      await openWeekGroup(ktPage, ja.mealPlan.weekGroupAutoTitle)
+      await ktPage.locator('[data-testid="fill-mode"]').selectOption('replaceAll')
+      await ktPage.waitForTimeout(200)
+      await ktPage.getByRole('button', { name: ja.mealPlan.fillWeek }).click()
+      await ktPage.waitForTimeout(700)
+      const ktOk = ktPage.locator('[data-testid$="-ok"]')
+      if ((await ktOk.count()) > 0) await ktOk.first().click()
+      const ktShownAt = Date.now()
+      await ktPage.waitForTimeout(700)
+      const ktToastRaw = stripZwspText(
+        (await ktPage.locator('[role="status"]').allTextContents()).join(''),
+      )
+      // トーストの本文＝出ている文字から「元に戻す」（操作のボタン）を除いたもの
+      const ktToast = ktToastRaw.replace(ja.common.undo, '').trim()
+      check('KITOAST-05 前提: トーストが出ている', ktToast.length > 0, `本文=${JSON.stringify(ktToast)}`)
+      // 6秒で消えるトーストなので、読み切れる長さに収まっていること（実測した字数を必ず残す）
+      check(
+        'KITOAST-05 知らせが40字以内（6秒で消えるあいだに読み切れる長さ）',
+        ktToast.length <= 40,
+        `${ktToast.length}字: ${JSON.stringify(ktToast)}`,
+      )
+      // 入れ替えたことと入った品数だけを言う1文になっていること（内部の取り込みの話を足さない）
+      const ktDonePattern = new RegExp(
+        `^${ja.mealPlan.fillModeReplaceAllDone
+          .replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+          .replace('\\{a\\}', '\\d+')}$`,
+      )
+      check(
+        'KITOAST-05 知らせは「入れ替えて◯品を入れました」の1文だけ',
+        ktDonePattern.test(ktToast),
+        `本文=${JSON.stringify(ktToast)}`,
+      )
+      // トーストが出ている時間を測る（短くしても、読む前に消えていないかを数字で残す）
+      let ktGoneAfter = null
+      for (let i = 0; i < 44; i++) {
+        await ktPage.waitForTimeout(250)
+        // allTextContents は待たずにその瞬間の姿を返す（count のあとに消えると textContent が
+        // 30秒待って実行中断になる＝禁じ手⑤と同じ形の事故になるため、1回の読みで済ませる）
+        const shown = (await ktPage.locator('[role="status"]').allTextContents())
+          .map((t) => stripZwspText(t).trim())
+          .filter((t) => t.length > 0)
+        if (shown.length === 0) {
+          ktGoneAfter = Date.now() - ktShownAt
+          break
+        }
+      }
+      check(
+        'KITOAST-05 トーストは5秒以上出ている（読む前に消えない）',
+        ktGoneAfter != null && ktGoneAfter >= 5000,
+        `出ていた時間=${ktGoneAfter}ms`,
+      )
+      // 日タブへ戻り、「今日の献立」が実際に更新されていること＝「自動では変わらない」は嘘だった
+      await ktPage.getByRole('button', { name: ja.mealPlan.viewDay, exact: true }).click()
+      await ktPage.waitForTimeout(1600)
+      const ktAfterDay = await ktPlannedText()
+      check(
+        'KITOAST-05 日タブの「今日の献立」は総入れ替えで自動的に変わる（知らせと食い違わない）',
+        ktAfterDay.length > 0 && ktAfterDay !== ktBeforeDay,
+        `押す前=${JSON.stringify(ktBeforeDay)} 押した後=${JSON.stringify(ktAfterDay)}`,
+      )
+    } finally {
+      await ktBrowser.close()
+    }
+  }
+
+
+  // --- KIDUP-06: 同じ料理を2回入れても行は増えず、すでに入っていることを知らせる ---
+  //
+  // オーナー原文（2026-08-24・上限と重複の裁定）:
+  //   「追加のみは上限なしでいいと思います。2回目だったら追加済みであることのお知らせを
+  //     出せばよいのでは？」
+  //
+  // 「2回目」を確実に起こすために、ボタンを**同じ瞬間に2回押す**（連打）。
+  // 押した品は「レシピ一覧から選択中」から「今週の献立の予定」へ移るので、
+  // 画面を待ってから押し直す形では2回目にならない（1回目で行が消える）。
+  currentCheck = 'KIDUP-06'
+  {
+    const kdBrowser = await chromium.launch()
+    const kdContext = await kdBrowser.newContext({ viewport: { width: 390, height: 844 } })
+    const kdPage = await kdContext.newPage()
+    kdPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@KIDUP-06] ${err.message}`)
+    })
+    try {
+      await kdPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+      await kdPage.waitForTimeout(2400)
+      const kdTitle = await kdPage.evaluate(
+        () =>
+          new Promise((resolve, reject) => {
+            const req = indexedDB.open('uchi-recipe')
+            req.onsuccess = () => {
+              const idb = req.result
+              const g = idb.transaction('recipes', 'readonly').objectStore('recipes').getAll()
+              g.onsuccess = () => {
+                const main = g.result.filter((r) => r.dishType === 'main')[0]
+                const tx = idb.transaction('todayList', 'readwrite')
+                tx.objectStore('todayList').add({ recipeId: main.id, addedAt: Date.now() })
+                tx.oncomplete = () => resolve(main.title)
+                tx.onerror = () => reject(tx.error)
+              }
+              g.onerror = () => reject(g.error)
+            }
+            req.onerror = () => reject(req.error)
+          }),
+      )
+      await kdPage.reload({ waitUntil: 'networkidle' })
+      await kdPage.waitForTimeout(1600)
+      const kdBtn = kdPage
+        .locator('[data-testid="day-picked"] li', { hasText: kdTitle })
+        .getByRole(
+          'button',
+          { name: ja.mealPlan.planMismatchAddToSlot.replace('{slot}', ja.mealPlan.slot.dinner), exact: true },
+        )
+        .first()
+      const kdHandle = await kdBtn.elementHandle()
+      // 同じ瞬間に2回（画面が描き直される前に2回目が入る＝実機の連打と同じ形）
+      await kdPage.evaluate((el) => {
+        el.click()
+        el.click()
+      }, kdHandle)
+      await kdPage.waitForTimeout(1400)
+      const kdDinner = await kdPage.evaluate(
+        () =>
+          new Promise((resolve, reject) => {
+            const d = new Date()
+            const date = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+            const req = indexedDB.open('uchi-recipe')
+            req.onsuccess = () => {
+              const g = req.result.transaction('mealPlans', 'readonly').objectStore('mealPlans').getAll()
+              g.onsuccess = () => resolve(g.result.filter((e) => e.date === date && e.slot === 'dinner').length)
+              g.onerror = () => reject(g.error)
+            }
+            req.onerror = () => reject(req.error)
+          }),
+      )
+      check('KIDUP-06 2回押しても行は1つだけ（同じ料理が2行に並ばない）', kdDinner === 1, `夕食の行=${kdDinner}件`)
+      check(
+        'KIDUP-06 2回目は「すでに入っています」と知らせる（黙って何も起きないにしない）',
+        stripZwspText(await kdPage.textContent('body')).includes(
+          ja.mealPlan.planMismatchAlready
+            .replace('{slot}', ja.mealPlan.slot.dinner)
+            .replace('{title}', kdTitle),
+        ),
+        `画面の知らせ=${JSON.stringify(stripZwspText((await kdPage.locator('[role="status"]').allTextContents()).join('')))}`,
+      )
+    } finally {
+      await kdBrowser.close()
+    }
+  }
+
+
 } catch (err) {
   ng(`実行中断(${currentCheck})`, err.message)
 } finally {

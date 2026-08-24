@@ -4089,22 +4089,27 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
   }
 
   /**
-   * 「レシピ一覧から選択中」の行の食事ボタン: その料理を今日のその食事へ登録する
-   * （2026-07-29 便CB-1・便CD報告の不具合修正）。
+   * 「レシピ一覧から選択中」の行の食事ボタン: その料理を今日のその食事へ**足す**
+   * （2026-07-29 便CB-1 → 2026-08-24 便KI）。
    *
-   * 直った点: 以前は料理の種類を見ずに必ず「その枠の主菜」を置き換えていたため、副菜（きんぴら等）を
-   * 押すと夕食の主菜（肉じゃが）が消えていた。主菜になる料理は主菜として、副菜になる料理は副菜として
-   * 入れる（副菜は既存の主菜を消さない）。主菜/副菜の判定は献立エンジンと同じ isMainDish
-   * （dishType優先・未設定はタグから推定）を使い、判定と書き込みは assignMealEntryByRole が担う。
-   * 何が起きたか（どの役割に入ったか・すでに入っていたか）は必ずトーストで伝える。
+   * 2026-08-24 便KI・オーナー原文:
+   *   「レシピ一覧から選択中から『夕食に入れる』した場合、今週の献立にもとからあった夕食の主菜と
+   *     入れ替えに消える。もしくは既存レシピと入れ替えになって、全て入らない。追加のみしてください。」
+   * 主菜の料理を押したときだけ「その枠の主菜を差し替える」作りだったので、もとからあった
+   * 主菜が消え、続けて押すと前に入れた分も消えて最後の1品しか残らなかった。
+   * **足すだけに改めた**（判断は logic/mealPlan.ts の planRoleAssign。上限は設けない。
+   * 同じ料理を2回入れたときだけ足さずに知らせる）。
+   *
+   * 入る行の役割は、主菜になる料理は主菜・それ以外は副菜（献立エンジンと同じ isMainDish。
+   * dishType優先・未設定はタグから推定）。何が起きたか（どの役割に入ったか・すでに入っていたか）は
+   * 必ずトーストで伝える。
    */
   const assignMismatchRecipe = async (slot: MealSlot, recipe: Recipe) => {
     // 日タブの「◯食に入れる」も、鍵の掛かった食事には入れない(2026-08-08 便EA)
     if (blockedByLock(today, slot, 'add')) return
     const role: MealRole = isMainDish(recipe) ? 'main' : 'side'
     // 入れる前のその食事の姿を控える（2026-08-22 便JF・⑥）。
-    // 主菜として入れると既にあった主菜を置き換えることがあるので、「足した行を消す」だけでは
-    // 押す前に戻らない。id とレシピの組を控えて、戻すときに両方（消す・戻す）を行う
+    // 「元に戻す」は、この控えに無い行＝この操作で足った行だけを外す
     const before = (todayEntries ?? [])
       .filter((e) => e.slot === slot && e.id != null)
       .map((e) => ({ id: e.id!, recipeId: e.recipeId }))
@@ -4133,6 +4138,9 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
    *
    * 戻すのは**今週の献立の予定に入れた分だけ**。「レシピ一覧から選択中」の行（今日の献立）は
    * 触らない＝押す前とまったく同じ「選んであるが、まだどの食事にも入れていない」状態に戻る。
+   *
+   * 2026-08-24 便KI: 「◯食に入れる」は足すだけになったので、戻すのも「足した行を外す」だけ
+   * （もとからあった行は押した時点で1件も動いていない）。
    */
   const [undoAssign, setUndoAssign] = useState<{
     slot: MealSlot
@@ -4144,14 +4152,11 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
   const runUndoAssign = async () => {
     if (!undoAssign) return
     const { slot, before } = undoAssign
-    const beforeById = new Map(before.map((e) => [e.id, e.recipeId]))
+    const beforeIds = new Set(before.map((e) => e.id))
     const current = (todayEntries ?? []).filter((e) => e.slot === slot && e.id != null)
     for (const entry of current) {
-      const previous = beforeById.get(entry.id!)
-      // 押す前に無かった行＝この操作で足した行なので外す
-      if (previous == null) await removeMealEntry(entry.id!)
-      // 押す前からあった行のレシピが変わっていた＝置き換わったので元の料理へ戻す
-      else if (previous !== entry.recipeId) await updateMealEntryRecipe(entry.id!, previous)
+      // 押す前に無かった行＝この操作で足した行なので外す（もとからあった行には触らない）
+      if (!beforeIds.has(entry.id!)) await removeMealEntry(entry.id!)
     }
     setUndoAssign(null)
     setMessage(
@@ -4428,8 +4433,13 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
    */
   const lockNoticeOf = (count: number) =>
     count > 0 ? ja.mealPlan.lockedSlotNotice.replace('{n}', String(count)) : ''
-  /** トーストへ一文を足す（既存の作法どおり半角スペースでつなぐ。空文字なら足さない） */
-  const withNotice = (text: string, notice: string) => (notice ? `${text} ${notice}` : text)
+  /**
+   * トーストへ一文を足す（空文字なら足さない）。
+   * 2026-08-24 便KI・オーナー原文「トーストの文が長い上に改行もないので読む前に消える」:
+   * つなぎ目を半角スペースから**改行**に変えた（トースト側は Toast.tsx が改行をそのまま出す）。
+   * 1行に詰めると2文が地続きに見えて、どこまでが1つの知らせなのか読み取れなかった。
+   */
+  const withNotice = (text: string, notice: string) => (notice ? `${text}\n${notice}` : text)
 
   /**
    * 「まとめて献立を立てる」の実行本体（2026-07-29 便CB-2・docs/59 A-5で週タブ専用から切り出した）。
@@ -4654,21 +4664,20 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
     }
     // 鍵で外した食事があるなら、結果でも必ず言う（黙って飛ばさない。便DX）
     if (lockNotice) messages.push(lockNotice)
-    // 今日を含む週で「今日の献立」(日タブ)がどうなるかの案内(2026-07-22 便BE・タスク2 →
-    // 2026-07-29 便CD/MP-01で出し分けを修正)。自動取り込みは「同じ日につき1回だけ」なので、
-    // まだ今日の取り込みが済んでいなければ、次に日タブを開いた時点で今日の分が取り込まれる。
-    // 済んでいれば自動では変わらない。日/週の同期モデル自体(週=計画・日=当日・1日1回取り込み)は
-    // 現行設計のまま維持し、案内文だけを実挙動に合わせる
-    const todayRefilled =
-      plan.slotsToFill.some((s) => s.date === today) || plan.partialFills.some((s) => s.date === today)
-    if (todayRefilled && (todayList?.length ?? 0) > 0) {
-      messages.push(
-        settings?.lastAutoImportDate === today
-          ? ja.mealPlan.fillWeekTodayNotice
-          : ja.mealPlan.fillWeekTodayWillImport,
-      )
-    }
-    const toast = messages.join(' ')
+    /*
+     * 2026-08-24 便KI・オーナー原文:
+     *   「総入れ替え→まとめて献立入力した後のトーストの文が長い上に改行もないので読む前に消える。
+     *     日の献立は変わらないとでているが、更新されているので不要な文。」
+     *
+     * ここには「『日』の画面の『今日の献立』は自動では変わらない」（fillWeekTodayNotice）と
+     * 「日の画面を開くと取り込みます」（fillWeekTodayWillImport）の2文があったが、両方外した。
+     * 実装を読んで確かめたこと: 日タブの「今週の献立の予定」は今日の予定（todayEntries）から
+     * その場で組み立てているので、**総入れ替えをした時点で自動的に変わる**（実測でも
+     * 押す前と押した後で中身が変わった）。つまり前者は事実の逆で、後者は
+     * 「今日の献立」の表への写しという内部の話＝画面の見え方はどちらでも同じ。
+     * 残ったのは「入れ替えて◯品を入れました」の1文で、6秒のトーストで読み切れる長さになった。
+     */
+    const toast = messages.join('\n')
     if (messages.length > 0) setMessage(toast)
 
     /**

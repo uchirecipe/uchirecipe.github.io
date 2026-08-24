@@ -193,31 +193,28 @@ export async function addRecipesToToday(
 }
 
 /**
- * その日・枠に、役割（主菜/副菜）を尊重してレシピを1品入れる（2026-07-29 便CB-1）。
- * 「今日の献立」との食い違い解消チップのように、枠を指定して素早く登録したい場面で使う。
+ * その日・枠に、役割（主菜/副菜/汁物/その他）の行としてレシピを1品**足す**
+ * （2026-07-29 便CB-1 → 2026-08-24 便KIで「足すだけ」に改めた）。
+ * 日タブの「◯食に入れる」のように、枠を指定して素早く登録したい場面で使う。
  *
- * 旧 setMainMeal（役割を見ずに必ず主菜を置き換える）を置き換えたもの。旧版は副菜の料理を
- * 押しても「その枠の主菜」を差し替えていたため、夕食の主菜が副菜に化けて消えていた（便CD報告）。
- * どうするかの判断は純関数 planRoleAssign（logic/mealPlan.ts）に置き、テストで固定してある。
+ * **この関数は献立を1件も消さない。** 2026-08-24 便KIまでは主菜のときだけ既存の主菜を
+ * 差し替えていたため、もとからあった夕食の主菜が消えていた（オーナー実機報告）。
+ * 何をするかの判断は純関数 planRoleAssign（logic/mealPlan.ts）に置き、テストで固定してある
+ * （そちらに「消す」結果そのものが無い＝この入口から献立が消える道を型ごと無くしてある）。
  *
- * 差し替えのときは auto を外して手動配置に戻す（updateMealEntryRecipe と同じ考え方。
- * ユーザーが自分で置いた枠は「まとめて献立を立てる」で上書きさせない）。
- * 判定と書き込みは1トランザクションにまとめ、連打しても二重追加にならないようにする。
+ * 判定と書き込みは1トランザクションにまとめ、連打しても同じ料理が二重に入らないようにする
+ * （2回目は 'duplicate' が返り、呼び出し側が「すでに入っています」と知らせる）。
  */
 export async function assignMealEntryByRole(
   date: string,
   slot: MealSlot,
   recipeId: number,
   role: MealRole,
-): Promise<'added' | 'replaced' | 'duplicate'> {
+): Promise<'added' | 'duplicate'> {
   return db.transaction('rw', db.mealPlans, async () => {
     const sameSlot = await db.mealPlans.where('[date+slot]').equals([date, slot]).toArray()
     const plan = planRoleAssign(sameSlot, recipeId, role)
     if (plan.kind === 'duplicate') return 'duplicate'
-    if (plan.kind === 'replace') {
-      await db.mealPlans.update(plan.entryId, { recipeId, auto: false })
-      return 'replaced'
-    }
     await db.mealPlans.add({ date, slot, recipeId, role })
     return 'added'
   })
