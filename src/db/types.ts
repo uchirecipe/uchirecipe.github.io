@@ -2,7 +2,7 @@
 // 月カレンダーのマスに出す栄養の項目は、栄養価の表示と同じ顔ぶれ(NutrientTotals)から選ぶ
 import type { NutrientTotals } from '../logic/nutrition'
 // 選べる料理のジャンル（型だけの読み込み＝実行時の相互参照は作らない）
-import type { MealGenre } from '../logic/mealPlan'
+import type { MealGenre, PlanFillMode } from '../logic/mealPlan'
 
 /** 手間レベル: 超簡単 / ふつう / 手の込んだ */
 export type EffortLevel = 'easy' | 'normal' | 'fancy'
@@ -866,6 +866,30 @@ export interface Settings {
    * 任意項目なのでスキーマ変更・マイグレーション不要。
    */
   planGenres?: MealGenre[]
+  /**
+   * 献立の「まとめて献立を入力」の入れかた（任意・2026-08-24 便KJ・①・オーナー原文
+   * 「提案の入れ方が、タブ移動で「空いた枠だけ」に戻る。選択保持して。
+   * 総入れ替えだと確認画面も出るので、総入れ替えに気づかない仕組みにはなっていない。」）。
+   *
+   * 未設定（既存ユーザー含む）は 'fillEmpty'＝この項目が無かった頃と同じ、非破壊の
+   * 「空いた枠だけ」から始まる。**読み出しは必ず logic/mealPlan.ts の normalizePlanFillMode を
+   * 通す**＝知らない値・壊れた値でも消える側（'replaceAll'）で始まることが無い。
+   * 覚えておくのは planPurpose・planGenres と同じ理由（開くたびに選び直させない）。
+   * 消える側を覚えても、押したあとに出る確認の窓（規約F）は今までどおり必ず通る。
+   * 任意項目なのでスキーマ変更・マイグレーション不要。
+   */
+  planFillMode?: PlanFillMode
+  /**
+   * 献立の「現在の条件」の調理時間を効かせているか（任意・2026-08-24 便KJ・①）。
+   *
+   * 分数（planQuickMinutes）だけを覚えて ON/OFF は画面の状態のままだったため、
+   * 2026-08-23 の影響範囲テストで「『20分以内』が画面を離れるたびに『指定なし』に戻る」が
+   * 見つかった（入れかたとまったく同じ型）。分数と一緒に ON/OFF も覚える。
+   * 未設定（既存ユーザー含む）は false＝「指定なし」から始まる（この項目が無かった頃と同じ）。
+   * 「条件をクリア」で外したときは false を書く＝画面だけ戻って保存が残る、を作らない。
+   * 任意項目なのでスキーマ変更・マイグレーション不要。
+   */
+  planQuickOn?: boolean
   /**
    * 並行調理ナビの「お試し」を使った回数（任意・2026-08-02 便CP-2・docs/62 決定③）。
    * 未解錠のまま COOK_NAVI_TRIAL_LIMIT 回まで本物のナビを使える（期限なし・端末内カウント）。

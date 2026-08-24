@@ -121,6 +121,8 @@ import {
   planToggleDayEdit,
   planDayEditKind,
   planViewRows,
+  planDayCardPadClass,
+  normalizePlanFillMode,
   monthDayWindowView,
   WEEK_GROUP_DEFAULT_OPEN,
   PLAN_QUICK_MINUTES_OPTIONS,
@@ -130,6 +132,7 @@ import type {
   FillWeekPlan,
   MealGenre,
   MealSlotEdit,
+  PlanFillMode,
   ProteinSource,
   SuggestPairResult,
 } from '../logic/mealPlan'
@@ -216,6 +219,7 @@ import { usePhotoUrl } from '../components/usePhotoUrl'
 import {
   DIALOG_ACTIONS_CLS,
   DIALOG_BACKDROP_CLS,
+  DIALOG_CANCEL_BUTTON_CLS,
   DIALOG_CARD_CLS,
   DIALOG_PRIMARY_BUTTON_CLS,
 } from '../components/dialogStyle'
@@ -2946,7 +2950,16 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
     void removeStaleFromPlanTodayList(todayPlanAllRecipeIds)
   }, [isDemo, todayEntries, todayList, todayPlanAllRecipeIds])
 
-  const [quickOnly, setQuickOnly] = useState(false)
+  /**
+   * 「調理時間◯分以内」を効かせているか（2026-08-24 便KJ・①）。
+   *
+   * 直す前は画面の中だけで持っていた（useState(false)）ので、献立の画面を離れるたびに
+   * 「指定なし」へ戻っていた（2026-08-23 の影響範囲テストで見つかった。オーナーの言う
+   * 「入れかたがタブ移動で戻る」とまったく同じ型）。分数（planQuickMinutes）は前から
+   * 覚えていたのに ON/OFF だけ覚えていなかったので、そこをそろえる。
+   */
+  const quickOnly = settings?.planQuickOn === true
+  const setQuickOnly = (next: boolean) => saveSettings({ planQuickOn: next })
   /**
    * 「調理時間◯分以内を優先」の分数（2026-08-19 便HT・オーナー原文
    * 「調理時間15分いないを優先は、時間だけプルダウンで変更できるようにしたい」）。
@@ -3018,15 +3031,17 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
    * クリアで消さないのと同じ作法（次に使うときの好みまでは捨てない）。
    */
   const clearSuggestConditions = () => {
-    setQuickOnly(false)
     // ジャンルは**保存も消す**（画面だけ戻って保存が残る、を作らない。2026-08-22 便IY）。
     // 未設定＝3つとも選んだ状態なので、消せばそのまま「指定なし」に戻る。
     // 栄養から組む(planPurpose)は解錠済みで選んでいるときだけ消す＝未解錠の端末で
-    // Proの保存値を巻き添えにしない（直す前と同じ扱い）。書き込みは1回にまとめる
+    // Proの保存値を巻き添えにしない（直す前と同じ扱い）。書き込みは1回にまとめる。
+    // 2026-08-24 便KJ・①: 調理時間のON/OFF（planQuickOn）も同じ書き込みで消す
+    // ＝画面だけ戻って保存が残る、をこちらにも作らない。分数（planQuickMinutes）は
+    // 今までどおり覚えたままにする（次に使うときの好みまでは捨てない）
     saveSettings(
       planPurpose != null
-        ? { planGenres: undefined, planPurpose: undefined }
-        : { planGenres: undefined },
+        ? { planGenres: undefined, planPurpose: undefined, planQuickOn: false }
+        : { planGenres: undefined, planQuickOn: false },
     )
   }
   /**
@@ -3045,8 +3060,9 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
     }
     const minutes = Number(value)
     if (!(PLAN_QUICK_MINUTES_OPTIONS as readonly number[]).includes(minutes)) return
-    if (!quickOnly) setQuickOnly(true)
-    if (minutes !== quickMinutes) saveSettings({ planQuickMinutes: minutes })
+    // 2026-08-24 便KJ・①: ON/OFF も設定に覚えるようになったので、分数と一緒に1回で書く
+    // （2回に分けると、片方だけ届いた瞬間の状態が画面に出る）
+    saveSettings({ planQuickOn: true, planQuickMinutes: minutes })
   }
   const [message, setMessage] = useState('')
   /**
@@ -5352,9 +5368,16 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
    * 既定を 'fillEmpty' にしたのは、可逆・非破壊の側を既定にする運用（規約C）に合わせるため。
    * 従来の「押すたびに自動提案の枠だけ振り直す」（2026-07-14確定）は 'replaceAll' 側に含まれる
    * （総入れ替えは自動・手動を問わず入れ直すので、振り直したい人はこちらを選ぶ）。
-   * 画面を離れると既定に戻す＝消す側の選択を黙って覚えない。
+   *
+   * 2026-08-24 便KJ・①（オーナー原文「提案の入れ方が、タブ移動で「空いた枠だけ」に戻る。
+   * 選択保持して。総入れ替えだと確認画面も出るので、総入れ替えに気づかない仕組みには
+   * なっていない。」）: **設定に覚える**。直す前は画面を離れると既定へ戻していた（消す側の
+   * 選択を黙って覚えない、という判断）が、オーナーは「消える操作は押したあとに必ず確認の窓が
+   * 出る」ことまで見たうえで残すよう求めている。覚え先は planPurpose・planGenres と同じ設定。
+   * 読み出しは normalizePlanFillMode を通す＝壊れた値でも消える側から始まることが無い。
    */
-  const [fillMode, setFillMode] = useState<'fillEmpty' | 'replaceAll'>('fillEmpty')
+  const fillMode = normalizePlanFillMode(settings?.planFillMode)
+  const setFillMode = (next: PlanFillMode) => saveSettings({ planFillMode: next })
 
 
   // 週タブ「この週の◯◯をまとめて空にする」(便U-4 Fable設計: 「朝のみ削除したい」への回答)。
@@ -8170,7 +8193,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                 <select
                   data-testid="fill-mode"
                   value={fillMode}
-                  onChange={(e) => setFillMode(e.target.value as 'fillEmpty' | 'replaceAll')}
+                  onChange={(e) => setFillMode(e.target.value as PlanFillMode)}
                   className="select-control mt-1 w-full"
                 >
                   <option value="fillEmpty">{ja.mealPlan.fillModeFillEmpty}</option>
@@ -8397,7 +8420,16 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
             // 日付の見出しが潜り込まないよう、その分＋わずかな余白を空ける(2026-08-09 便ET)
             // 2026-08-22 便JE（オーナー確定）: ②角丸を --radius-card（4px）に、
             // ⑥読むだけの入れ物なので影を外す
-            className={`scroll-mt-16 rounded-card p-[var(--space-md)] ${
+            /* 2026-08-24 便KJ・②（オーナー原文「過去に日付は折りたたみ時の枠を一回り細く
+               してほしい。一番下が今日の時にスクロールが長い。」）: 過ぎた日を畳んでいるあいだ
+               だけ内側の余白を詰める（16px→8px。1日ぶん 78px→62px・390×844の実測）。
+               どの日をどれだけにするかは logic/mealPlan.ts の planDayCardPadClass が持つ
+               ＝見張れる形にする。押して開く見出しは min-h-11（44px）のままなので、
+               細くしても畳んだ行を押して開ける */
+            className={`scroll-mt-16 rounded-card ${planDayCardPadClass({
+              folded: dayCollapsed,
+              past: isPastDate(date, today),
+            })} ${
               date === today
                 ? 'border-2 border-accent bg-surface'
                 : 'border border-edge bg-surface'
@@ -9694,11 +9726,14 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                   </button>
                 </>
               ) : (
+                /* 2026-08-24 便KJ・③: 見た目の値をここに書き写したままだと、
+                   同じ形にそろえた作った記録の窓（DIALOG_CANCEL_BUTTON_CLS）と
+                   片方だけ直したときに別物になる。同じ1本から取る（値は1文字も変えていない） */
                 <button
                   type="button"
                   data-testid="day-modal-close"
                   onClick={() => setDayModalDate(null)}
-                  className="w-full rounded-md border border-edge bg-surface py-3 font-bold text-ink-muted shadow-sm"
+                  className={DIALOG_CANCEL_BUTTON_CLS}
                 >
                   {ja.common.close}
                 </button>

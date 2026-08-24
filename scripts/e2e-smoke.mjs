@@ -52077,6 +52077,583 @@ try {
   }
 
 
+
+  // --- KJSTATE-01(2026-08-24 便KJ・①): 提案の「入れかた」と「調理時間」が、画面を離れても選んだまま ---
+  //
+  // オーナー原文: 「提案の入れ方が、タブ移動で「空いた枠だけ」に戻る。選択保持して。
+  //   総入れ替えだと確認画面も出るので、総入れ替えに気づかない仕組みにはなっていない。」
+  // 2026-08-23 の影響範囲テストで見つかった同じ型（「20分以内」が画面を離れるたびに「指定なし」に
+  // 戻る）も、同じ節で一緒に見張る。
+  //
+  // 測るのは**選んだものが選んだままか**だけで、覚え方（設定に持つのか画面の状態か）には触れない。
+  // あわせて、覚えたせいで**消える操作が黙って走らない**こと＝総入れ替えを選んだまま実行しても
+  // 確認の窓が必ず出ること（オーナーが安全と判断した根拠そのもの）も同じ節で見る。
+  currentCheck = 'KJSTATE-01'
+  {
+    const kjBrowser = await chromium.launch()
+    const kjContext = await kjBrowser.newContext({ viewport: { width: 390, height: 844 } })
+    const kjPage = await kjContext.newPage()
+    kjPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@KJSTATE-01] ${err.message}`)
+    })
+    try {
+      /** 週タブを開いて「献立を提案」の節まで出す（畳んでいるときだけ押す＝押す回数を決め打ちしない） */
+      const kjGoWeek = async () => {
+        await kjPage.getByRole('button', { name: ja.mealPlan.viewWeek, exact: true }).click()
+        await kjPage.waitForTimeout(1100)
+        await openWeekGroup(kjPage, ja.mealPlan.weekGroupAutoTitle)
+      }
+      const kjFillValue = async () =>
+        (await kjPage.locator('[data-testid="fill-mode"]').first().inputValue())
+      /** 「現在の条件」の窓を開いて調理時間の値を読み、閉じる */
+      const kjMinutesValue = async () => {
+        await kjPage.locator('[data-testid="plan-conditions-open"]').first().click()
+        await kjPage.waitForTimeout(600)
+        const value = await kjPage.locator('[data-testid="plan-quick-minutes"]').first().inputValue()
+        await kjPage.locator('[data-testid="plan-conditions-close"]').first().click()
+        await kjPage.waitForTimeout(400)
+        return value
+      }
+
+      await kjPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+      await kjPage.waitForTimeout(2400)
+      await kjGoWeek()
+      check(
+        'KJSTATE-01 前提: 「入れかた」の選び口を掴めた',
+        (await kjPage.locator('[data-testid="fill-mode"]').count()) === 1,
+      )
+      check(
+        'KJSTATE-01 触る前は非破壊の「空いた枠だけ」から始まる（既定は変えない）',
+        (await kjFillValue()) === 'fillEmpty',
+        `値=${await kjFillValue()}`,
+      )
+      // 消える側を選ぶ前に、この週を献立で埋めておく（消すものが無いと確認の窓が出ないため）
+      await kjPage.locator('[data-testid="week-fill-run"]').first().click()
+      await kjPage.waitForTimeout(2600)
+      await kjPage.locator('[data-testid="fill-mode"]').first().selectOption('replaceAll')
+      await kjPage.waitForTimeout(500)
+      await kjPage.locator('[data-testid="plan-conditions-open"]').first().click()
+      await kjPage.waitForTimeout(600)
+      await kjPage.locator('[data-testid="plan-quick-minutes"]').first().selectOption('20')
+      await kjPage.waitForTimeout(500)
+      await kjPage.locator('[data-testid="plan-conditions-close"]').first().click()
+      await kjPage.waitForTimeout(400)
+
+      // ①「タブ移動」＝下の並びで別のタブへ移って戻る（オーナーが実機で踏んだ順番）
+      await kjPage.getByRole('link', { name: ja.nav.recipes }).first().click()
+      await kjPage.waitForTimeout(1600)
+      await kjPage.getByRole('link', { name: ja.nav.mealPlan }).first().click()
+      await kjPage.waitForTimeout(1800)
+      await kjGoWeek()
+      check(
+        'KJSTATE-01 タブを移って戻っても「入れかた」は選んだまま（総入れ替え）',
+        (await kjFillValue()) === 'replaceAll',
+        `値=${await kjFillValue()}`,
+      )
+      check(
+        'KJSTATE-01 タブを移って戻っても「調理時間」は選んだまま（20分）',
+        (await kjMinutesValue()) === '20',
+        `値=${await kjMinutesValue()}`,
+      )
+
+      // ②アプリを開き直しても同じ（画面の中だけで覚えていないこと）
+      await kjPage.reload({ waitUntil: 'networkidle' })
+      await kjPage.waitForTimeout(2200)
+      await kjGoWeek()
+      check(
+        'KJSTATE-01 開き直しても「入れかた」は選んだまま',
+        (await kjFillValue()) === 'replaceAll',
+        `値=${await kjFillValue()}`,
+      )
+      check(
+        'KJSTATE-01 開き直しても「調理時間」は選んだまま',
+        (await kjMinutesValue()) === '20',
+        `値=${await kjMinutesValue()}`,
+      )
+
+      // ③覚えていても、消える操作は黙って走らない（規約F・オーナーの安全の読みが崩れていないこと）。
+      // オーナーは「総入れ替えだと確認画面も出るので、総入れ替えに気づかない仕組みには
+      // なっていない」と**安全まで見たうえで**選択を残すよう求めているので、そこが崩れて
+      // いないことを同じ節で測る。
+      // e2e の仕掛けは確認の窓を出た瞬間に押してしまう（installConfirmAutoPress）ので、
+      // 「出たかどうか」は画面を掴みにいかず、貯め口（window.__confirmDialogs）で見る
+      await kjPage.evaluate(() => {
+        window.__confirmDialogs = []
+      })
+      await kjPage.locator('[data-testid="week-fill-run"]').first().click()
+      await kjPage.waitForTimeout(2800)
+      const kjConfirms = (await readConfirms(kjPage)).map(stripZwspText)
+      check(
+        'KJSTATE-01 総入れ替えを選んだまま実行しても、消える前に確認の窓が出る',
+        kjConfirms.some((t) => t.includes(ja.mealPlan.fillModeReplaceAllConfirmTitle)),
+        JSON.stringify(kjConfirms),
+      )
+      check(
+        'KJSTATE-01 その確認は「消えるもの」と「残るもの」を両方書く（規約F）',
+        kjConfirms.some(
+          (t) =>
+            t.includes(ja.mealPlan.fillModeReplaceAllGoneLabel) &&
+            t.includes(ja.mealPlan.fillModeReplaceAllKeptLabel),
+        ),
+        JSON.stringify(kjConfirms),
+      )
+
+      // ④「条件をクリア」で消したら、消えたことも覚える（画面だけ戻って保存が残る、を作らない）。
+      // 「条件をクリア」は条件を1つも選んでいないあいだ見えない（場所だけ取る）ので、
+      // 押す直前にこの画面でもう一度選んでから押す＝直す前・直したあとのどちらでも押せる形にする
+      await kjPage.locator('[data-testid="plan-conditions-open"]').first().click()
+      await kjPage.waitForTimeout(600)
+      await kjPage.locator('[data-testid="plan-quick-minutes"]').first().selectOption('20')
+      await kjPage.waitForTimeout(600)
+      const kjClear = kjPage.locator('[data-testid="plan-conditions-clear"]').first()
+      check('KJSTATE-01 前提: 条件を選んでいるので「条件をクリア」が押せる', await kjClear.isVisible())
+      if (await kjClear.isVisible()) {
+        await kjClear.click({ timeout: 5000 })
+        await kjPage.waitForTimeout(700)
+      }
+      await kjPage.locator('[data-testid="plan-conditions-close"]').first().click()
+      await kjPage.waitForTimeout(400)
+      await kjPage.reload({ waitUntil: 'networkidle' })
+      await kjPage.waitForTimeout(2200)
+      await kjGoWeek()
+      check(
+        'KJSTATE-01 「条件をクリア」で外した調理時間は、開き直しても外れたまま',
+        (await kjMinutesValue()) === '',
+        `値=${await kjMinutesValue()}`,
+      )
+    } finally {
+      await kjBrowser.close()
+    }
+  }
+
+  // --- KJFOLD-02(2026-08-24 便KJ・②): 過ぎた日を畳んだカードは、一回り細い ---
+  //
+  // オーナー原文: 「過去に日付は折りたたみ時の枠を一回り細くしてほしい。
+  //   一番下が今日の時にスクロールが長い。」＝**実用の問題**（今日へたどり着くまでが長い）。
+  //
+  // 曜日に依らない測り方にする（禁じ手①）: 前の週へ送れば7日とも過ぎた日、
+  // 次の週へ送れば7日とも先の日になる。どちらも献立が無ければ既定で畳んである。
+  // 測るのは「畳んだ1日ぶんの高さ」と「7日ぶんの縦の長さ」、そして**押して開く見出しが
+  // 44px（--tap-min）を保っているか**。細くしたせいで押せなくなっては本末転倒なので必ず一緒に見る。
+  currentCheck = 'KJFOLD-02'
+  {
+    const kfBrowser = await chromium.launch()
+    const kfContext = await kfBrowser.newContext({ viewport: { width: 390, height: 844 } })
+    const kfPage = await kfContext.newPage()
+    kfPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@KJFOLD-02] ${err.message}`)
+    })
+    try {
+      await kfPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+      await kfPage.waitForTimeout(2400)
+      await kfPage.getByRole('button', { name: ja.mealPlan.viewWeek, exact: true }).click()
+      await kfPage.waitForTimeout(1200)
+      /** 畳み方が落ち着く（2回続けて同じになる）まで待ってから測る（禁じ手⑤） */
+      const kfSettle = async () => {
+        let prev = ''
+        for (let i = 0; i < 20; i++) {
+          await kfPage.waitForTimeout(150)
+          const now = await kfPage
+            .locator('[data-testid="week-day-toggle"]')
+            .evaluateAll((els) =>
+              els.map((el) => `${el.getAttribute('data-date')}:${el.getAttribute('aria-expanded')}`).join(','),
+            )
+          if (now === prev) return now
+          prev = now
+        }
+        return prev
+      }
+      /** 畳んでいる7日ぶんの実測（1日ぶんの高さ・見出しの押せる高さ・7日ぶんの縦の長さ） */
+      const kfMeasure = async () => {
+        await kfSettle()
+        return await kfPage.evaluate(() => {
+          const secs = [...document.querySelectorAll('section[data-date]')]
+          const folded = secs.filter(
+            (s) => s.querySelector('[data-testid="week-day-toggle"]')?.getAttribute('aria-expanded') === 'false',
+          )
+          if (folded.length === 0) return null
+          const heights = folded.map((s) => Math.round(s.getBoundingClientRect().height * 10) / 10)
+          const taps = folded.map((s) => {
+            const b = s.querySelector('[data-testid="week-day-toggle"]')
+            return b ? Math.round(b.getBoundingClientRect().height * 10) / 10 : 0
+          })
+          const first = secs[0].getBoundingClientRect()
+          const last = secs[secs.length - 1].getBoundingClientRect()
+          return {
+            foldedCount: folded.length,
+            cardHeight: Math.max(...heights),
+            tapHeight: Math.min(...taps),
+            span: Math.round((last.bottom - first.top) * 10) / 10,
+          }
+        })
+      }
+      // 前の週＝7日とも過ぎた日
+      await kfPage.getByRole('button', { name: ja.mealPlan.prevWeek }).first().click()
+      const kfPast = await kfMeasure()
+      // 次の週へ2回送る＝7日とも先の日
+      await kfPage.getByRole('button', { name: ja.mealPlan.nextWeek }).first().click()
+      await kfPage.waitForTimeout(400)
+      await kfPage.getByRole('button', { name: ja.mealPlan.nextWeek }).first().click()
+      const kfFuture = await kfMeasure()
+      check(
+        'KJFOLD-02 前提: 過ぎた週も先の週も7日とも畳んだ状態を測れた',
+        kfPast !== null && kfFuture !== null && kfPast.foldedCount === 7 && kfFuture.foldedCount === 7,
+        `過ぎた週=${JSON.stringify(kfPast)} 先の週=${JSON.stringify(kfFuture)}`,
+      )
+      if (kfPast !== null && kfFuture !== null) {
+        check(
+          'KJFOLD-02 過ぎた日の畳んだカードは、先の日の畳んだカードより一回り細い（8px以上低い）',
+          kfPast.cardHeight <= kfFuture.cardHeight - 8,
+          `過ぎた日=${kfPast.cardHeight}px 先の日=${kfFuture.cardHeight}px 差=${Math.round((kfFuture.cardHeight - kfPast.cardHeight) * 10) / 10}px`,
+        )
+        check(
+          'KJFOLD-02 細くしても、押して開く見出しは44px（--tap-min）を保っている',
+          kfPast.tapHeight >= 44,
+          `見出しの押せる高さ=${kfPast.tapHeight}px`,
+        )
+        check(
+          'KJFOLD-02 7日ぶんの縦の長さが、細くした分だけ縮んでいる（56px以上）',
+          kfPast.span <= kfFuture.span - 56,
+          `過ぎた週=${kfPast.span}px 先の週=${kfFuture.span}px 差=${Math.round((kfFuture.span - kfPast.span) * 10) / 10}px`,
+        )
+      }
+      // 細くしたのは畳んでいるあいだだけ＝開けば今までどおりの余白に戻る（行き止まりを作らない）
+      await kfPage.getByRole('button', { name: ja.mealPlan.prevWeek }).first().click()
+      await kfPage.waitForTimeout(400)
+      await kfPage.getByRole('button', { name: ja.mealPlan.prevWeek }).first().click()
+      await kfSettle()
+      await openAllWeekDays(kfPage)
+      await kfPage.waitForTimeout(600)
+      const kfOpened = await kfPage.evaluate(() => {
+        const s = document.querySelector('section[data-date]')
+        if (!s) return null
+        const cs = getComputedStyle(s)
+        return { padTop: Math.round(parseFloat(cs.paddingTop)), height: Math.round(s.getBoundingClientRect().height) }
+      })
+      check(
+        'KJFOLD-02 開けば過ぎた日のカードも今までどおりの余白に戻る（16px）',
+        kfOpened !== null && kfOpened.padTop === 16,
+        JSON.stringify(kfOpened),
+      )
+    } finally {
+      await kfBrowser.close()
+    }
+  }
+
+  // --- KJTHEME-03(2026-08-24 便KJ・②): 細くした過ぎた日のカードが、5テーマとも枠線で見分けられる ---
+  //
+  // 便IU・③（プルダウンの地色が置かれている面と枠1本しか違わなかった）と同じ見落としを、
+  // 「細くしたら線が見えなくなっていないか」で見張る。測るのは**実際に塗られる色**
+  // （過ぎた日の面は color-mix() で作っているので、キャンバスに1px塗ってブラウザが描く値を読む）。
+  // 直接の色の値は書かない＝**見分けが付くか**と**文字が読めるか**だけを測る。
+  currentCheck = 'KJTHEME-03'
+  {
+    const ktDist = (a, b) => Math.sqrt((a.r - b.r) ** 2 + (a.g - b.g) ** 2 + (a.b - b.b) ** 2)
+    const ktLum = (c) => {
+      const f = (v) => {
+        const x = v / 255
+        return x <= 0.03928 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4
+      }
+      return 0.2126 * f(c.r) + 0.7152 * f(c.g) + 0.0722 * f(c.b)
+    }
+    const ktRatio = (a, b) => (Math.max(ktLum(a), ktLum(b)) + 0.05) / (Math.min(ktLum(a), ktLum(b)) + 0.05)
+    const ktHex = (c) => `#${[c.r, c.g, c.b].map((v) => v.toString(16).padStart(2, '0')).join('')}`
+    const ktBrowser = await chromium.launch()
+    try {
+      for (const [ktTheme, ktLabel, ktScheme] of [
+        ['auto', '自動（端末=ライト）', 'light'],
+        ['auto', '自動（端末=ダーク）', 'dark'],
+        ['light', 'ライト', 'dark'],
+        ['dark', 'ダーク', 'light'],
+        ['brown', 'ブラウン', 'light'],
+        ['green', 'グリーン', 'dark'],
+      ]) {
+        const ktContext = await ktBrowser.newContext({
+          viewport: { width: 390, height: 844 },
+          colorScheme: ktScheme,
+        })
+        const ktPage = await ktContext.newPage()
+        try {
+          await ktPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+          await ktPage.waitForTimeout(2400)
+          await ktPage.evaluate(async (theme) => {
+            const req = indexedDB.open('uchi-recipe')
+            const idb = await new Promise((resolve, reject) => {
+              req.onsuccess = () => resolve(req.result)
+              req.onerror = () => reject(req.error)
+            })
+            const P = (r) => new Promise((res, rej) => { r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error) })
+            const cur = await P(idb.transaction('settings').objectStore('settings').get(1))
+            await P(idb.transaction('settings', 'readwrite').objectStore('settings').put({ ...(cur || {}), id: 1, theme }))
+            idb.close()
+          }, ktTheme)
+          await ktPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+          await ktPage.reload({ waitUntil: 'networkidle' })
+          await ktPage.waitForTimeout(2000)
+          await ktPage.getByRole('button', { name: ja.mealPlan.viewWeek, exact: true }).click()
+          await ktPage.waitForTimeout(1200)
+          await ktPage.getByRole('button', { name: ja.mealPlan.prevWeek }).first().click()
+          await ktPage.waitForTimeout(1400)
+          const ktSeen = await ktPage.evaluate(() => {
+            const cvs = document.createElement('canvas').getContext('2d')
+            const toRgb = (v) => {
+              cvs.clearRect(0, 0, 1, 1)
+              cvs.fillStyle = v
+              cvs.fillRect(0, 0, 1, 1)
+              const d = cvs.getImageData(0, 0, 1, 1).data
+              return { r: d[0], g: d[1], b: d[2], a: d[3] / 255 }
+            }
+            const behindOf = (el) => {
+              let p = el.parentElement
+              while (p) {
+                const bg = getComputedStyle(p).backgroundColor
+                if (toRgb(bg).a > 0) return toRgb(bg)
+                p = p.parentElement
+              }
+              return toRgb('rgb(255,255,255)')
+            }
+            const section = [...document.querySelectorAll('section[data-date]')].find(
+              (s) => s.querySelector('[data-testid="week-day-toggle"]')?.getAttribute('aria-expanded') === 'false',
+            )
+            if (!section) return null
+            const cs = getComputedStyle(section)
+            const label = section.querySelector('[data-testid="week-day-toggle"] span')
+            return {
+              border: toRgb(cs.borderTopColor),
+              face: toRgb(cs.backgroundColor),
+              behind: behindOf(section),
+              height: Math.round(section.getBoundingClientRect().height),
+              text: label ? toRgb(getComputedStyle(label).color) : null,
+            }
+          })
+          check(
+            `KJTHEME-03 [${ktLabel}] 前提: 畳んだ過ぎた日のカードを掴めた`,
+            ktSeen !== null && ktSeen.text !== null,
+            JSON.stringify(ktSeen),
+          )
+          if (ktSeen === null || ktSeen.text === null) {
+            await ktContext.close()
+            continue
+          }
+          check(
+            `KJTHEME-03 [${ktLabel}] 細くしたカードの枠線が、後ろの画面と見分けられる`,
+            ktDist(ktSeen.border, ktSeen.behind) >= 20,
+            `線=${ktHex(ktSeen.border)} 後ろ=${ktHex(ktSeen.behind)} 差=${ktDist(ktSeen.border, ktSeen.behind).toFixed(1)}`,
+          )
+          // 下限8は「線が面に溶けていない」ことだけを見る値（枠線は1pxの細い線なので、
+          // 塗りつぶしの印を測る IZTHEME-02 の20とは別に決める）。
+          // この節を足した時点の実測（390×844・過ぎた日の畳んだカード）:
+          // ライト39.2 / 自動ライト39.2 / ダーク15.2 / 自動ダーク15.2 / ブラウン12.3 / グリーン27.5。
+          // いちばん薄いブラウンでも12.3あるので、8を割るのは線の色を面に近づけたときだけになる
+          check(
+            `KJTHEME-03 [${ktLabel}] 枠線がカードの面とも見分けられる（線が面に溶けない）`,
+            ktDist(ktSeen.border, ktSeen.face) >= 8,
+            `線=${ktHex(ktSeen.border)} 面=${ktHex(ktSeen.face)} 差=${ktDist(ktSeen.border, ktSeen.face).toFixed(1)}`,
+          )
+          check(
+            `KJTHEME-03 [${ktLabel}] 細くしても日付の文字が読める（AA 4.5:1以上）`,
+            ktRatio(ktSeen.text, ktSeen.face) >= 4.5,
+            `${ktRatio(ktSeen.text, ktSeen.face).toFixed(2)}:1`,
+          )
+        } finally {
+          await ktContext.close()
+        }
+      }
+    } finally {
+      await ktBrowser.close()
+    }
+  }
+
+  // --- KJLOG-04(2026-08-24 便KJ・③): 「作った記録」の窓の作法を、他の窓にそろえる ---
+  //
+  // オーナー原文: 「週や月から出る窓の「作った記録」の一番下を「閉じる」にして。
+  //   他の窓の一番下が「閉じる」なのにここだけ違うと誤タップしそう。
+  //   「レシピを見る」はボタンではなく文字のリンクにして小さく。ばしょも日付横右端あたりに移動。」
+  //
+  // 誤タップの中身は「他の窓で閉じるがある場所に、別の場所へ移る大きなボタンが置いてある」こと。
+  // なので測るのは①窓の一番下にあるものが「閉じる」か ②「レシピを見る」が日付の行の右端の
+  // 小さな文字リンクになっているか ③それでも押せる大きさ（44px）か ④レシピへ行く道が残っているか。
+  currentCheck = 'KJLOG-04'
+  {
+    const klBrowser = await chromium.launch()
+    const klContext = await klBrowser.newContext({ viewport: { width: 390, height: 844 } })
+    const klPage = await klContext.newPage()
+    klPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@KJLOG-04] ${err.message}`)
+    })
+    try {
+      const klPad = (n) => String(n).padStart(2, '0')
+      const klYd = new Date()
+      klYd.setDate(klYd.getDate() - 1)
+      const klYesterday = `${klYd.getFullYear()}-${klPad(klYd.getMonth() + 1)}-${klPad(klYd.getDate())}`
+      const klTitle = '肉じゃが'
+      await klPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await klPage.waitForTimeout(2400)
+      await klPage.evaluate(async ([date, title]) => {
+        const req = indexedDB.open('uchi-recipe')
+        const idb = await new Promise((res, rej) => {
+          req.onsuccess = () => res(req.result)
+          req.onerror = () => rej(req.error)
+        })
+        await new Promise((res, rej) => {
+          const tx = idb.transaction('recipes', 'readwrite')
+          const store = tx.objectStore('recipes')
+          const g = store.getAll()
+          g.onsuccess = () => {
+            const r = g.result.find((x) => x.title === title)
+            if (!r) {
+              rej(new Error('仕込むレシピが見つからない'))
+              return
+            }
+            r.cookedLogs = [{ date, servings: 3 }, ...(r.cookedLogs ?? [])]
+            store.put(r)
+          }
+          tx.oncomplete = () => res(undefined)
+          tx.onerror = () => rej(tx.error)
+        })
+        idb.close()
+      }, [klYesterday, klTitle])
+      // 生のIndexedDBへ書いたので必ず読み込み直す（禁じ手⑥）
+      await klPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+      await klPage.reload({ waitUntil: 'networkidle' })
+      await klPage.waitForTimeout(2200)
+      await klPage.getByRole('button', { name: ja.mealPlan.viewWeek, exact: true }).click()
+      await klPage.waitForTimeout(1200)
+      // 仕込んだ日のカードが出る週まで送る（曜日に依らない。禁じ手①）
+      for (let i = 0; i < 2; i++) {
+        if ((await klPage.locator(`section[data-date="${klYesterday}"]`).count()) > 0) break
+        await klPage.getByRole('button', { name: ja.mealPlan.prevWeek }).first().click()
+        await klPage.waitForTimeout(1200)
+      }
+      check(
+        'KJLOG-04 前提: 記録を仕込んだ日のカードが週タブに出ている',
+        (await klPage.locator(`section[data-date="${klYesterday}"]`).count()) === 1,
+      )
+      await openAllWeekDays(klPage)
+      await klPage.waitForTimeout(700)
+      await klPage
+        .getByRole('button', { name: ja.cookedDetail.openAria.replace('{title}', klTitle) })
+        .first()
+        .click()
+      await klPage.waitForTimeout(900)
+      const klDialogName = ja.cookedDetail.dialogAria.replace('{title}', klTitle)
+      check(
+        'KJLOG-04 前提: 週タブから「作った記録」の窓が開いた',
+        (await klPage.getByRole('dialog', { name: klDialogName }).count()) === 1,
+      )
+      const klSeen = await klPage.evaluate((name) => {
+        const dialog = document.querySelector(`div[role="dialog"][aria-label="${name}"]`)
+        if (!dialog) return null
+        const dr = dialog.getBoundingClientRect()
+        const items = [...dialog.querySelectorAll('button, a')].filter((el) => {
+          const r = el.getBoundingClientRect()
+          return r.width > 0 && r.height > 0
+        })
+        const bottom = items.reduce((acc, el) =>
+          el.getBoundingClientRect().bottom > acc.getBoundingClientRect().bottom ? el : acc,
+        items[0])
+        const link = dialog.querySelector('[data-testid="cooked-detail-open-recipe"]')
+        const date = dialog.querySelector('[data-testid="cooked-detail-date"]')
+        const dateRow = dialog.querySelector('[data-testid="cooked-detail-date-row"]')
+        const title = dialog.querySelector('[data-testid="cooked-detail-title"]')
+        const rectOf = (el) => {
+          if (!el) return null
+          const r = el.getBoundingClientRect()
+          return { top: r.top, bottom: r.bottom, left: r.left, right: r.right, h: Math.round(r.height * 10) / 10 }
+        }
+        /** .tap-target で広げた当たり判定も含めた高さ（::after の指定値を読む） */
+        const tapHeightOf = (el) => {
+          if (!el) return 0
+          const own = el.getBoundingClientRect().height
+          const after = getComputedStyle(el, '::after')
+          const grown = parseFloat(after.height)
+          return Math.round(Math.max(own, Number.isFinite(grown) ? grown : 0) * 10) / 10
+        }
+        return {
+          dialog: { left: dr.left, right: dr.right, width: dr.width },
+          bottomText: (bottom?.textContent ?? '').trim(),
+          bottomTag: bottom?.tagName ?? null,
+          link: link
+            ? {
+                tag: link.tagName,
+                rect: rectOf(link),
+                tapHeight: tapHeightOf(link),
+                fontSize: Math.round(parseFloat(getComputedStyle(link).fontSize) * 10) / 10,
+                borderWidth: Math.round(parseFloat(getComputedStyle(link).borderTopWidth) * 10) / 10,
+                href: link.getAttribute('href'),
+              }
+            : null,
+          dateRect: rectOf(date),
+          dateRowRect: rectOf(dateRow),
+          titleFontSize: title ? Math.round(parseFloat(getComputedStyle(title).fontSize) * 10) / 10 : null,
+        }
+      }, klDialogName)
+      check('KJLOG-04 前提: 窓の中身を測れた', klSeen !== null, JSON.stringify(klSeen))
+      if (klSeen !== null) {
+        check(
+          'KJLOG-04 窓の一番下は「閉じる」（他の窓と同じものが同じ場所にある）',
+          stripZwspText(klSeen.bottomText) === ja.common.close,
+          `一番下=${JSON.stringify(klSeen.bottomText)}`,
+        )
+        check(
+          'KJLOG-04 「レシピを見る」が窓の中にある（小さくしただけで、行けなくしていない）',
+          klSeen.link !== null,
+          JSON.stringify(klSeen.link),
+        )
+      }
+      if (klSeen !== null && klSeen.link !== null && klSeen.dateRect !== null) {
+        check(
+          'KJLOG-04 「レシピを見る」はボタンではなく文字のリンク（枠線を持たない<a>）',
+          klSeen.link.tag === 'A' && klSeen.link.borderWidth === 0,
+          `tag=${klSeen.link.tag} 枠線=${klSeen.link.borderWidth}px`,
+        )
+        check(
+          'KJLOG-04 「レシピを見る」は日付と同じ行にある（縦に重なっている）',
+          Math.min(klSeen.link.rect.bottom, klSeen.dateRect.bottom) -
+            Math.max(klSeen.link.rect.top, klSeen.dateRect.top) >
+            0,
+          `リンク=${JSON.stringify(klSeen.link.rect)} 日付=${JSON.stringify(klSeen.dateRect)}`,
+        )
+        check(
+          'KJLOG-04 「レシピを見る」は日付の右・その行の右端にある',
+          klSeen.link.rect.left > klSeen.dateRect.right &&
+            klSeen.dateRowRect !== null &&
+            klSeen.dateRowRect.right - klSeen.link.rect.right <= 4 &&
+            klSeen.link.rect.left > klSeen.dialog.left + klSeen.dialog.width / 2,
+          `リンクの右端から行の右端まで=${klSeen.dateRowRect === null ? '測れず' : Math.round(klSeen.dateRowRect.right - klSeen.link.rect.right)}px 窓の中央=${Math.round(klSeen.dialog.left + klSeen.dialog.width / 2)} リンクの左端=${Math.round(klSeen.link.rect.left)}`,
+        )
+        check(
+          'KJLOG-04 「レシピを見る」の字は料理名より小さい（14px以下）',
+          klSeen.link.fontSize <= 14 &&
+            klSeen.titleFontSize !== null &&
+            klSeen.link.fontSize < klSeen.titleFontSize,
+          `リンク=${klSeen.link.fontSize}px 料理名=${klSeen.titleFontSize}px`,
+        )
+        check(
+          'KJLOG-04 小さくしても指で押せる（当たり判定44px以上）',
+          klSeen.link.tapHeight >= 44,
+          `当たり判定=${klSeen.link.tapHeight}px`,
+        )
+      }
+      // 行き止まりにしない: 押せばレシピ詳細へ移る
+      if ((await klPage.locator('[data-testid="cooked-detail-open-recipe"]').count()) === 1) {
+        await klPage.locator('[data-testid="cooked-detail-open-recipe"]').first().click()
+        await klPage.waitForTimeout(1200)
+        check(
+          'KJLOG-04 「レシピを見る」を押すとレシピ詳細へ移る（道は残っている）',
+          /#\/recipes\/\d+/.test(klPage.url()),
+          `url=${klPage.url()}`,
+        )
+      }
+    } finally {
+      await klBrowser.close()
+    }
+  }
+
+
 } catch (err) {
   ng(`実行中断(${currentCheck})`, err.message)
 } finally {

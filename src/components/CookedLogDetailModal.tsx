@@ -8,6 +8,7 @@ import { usePhotoUrl } from './usePhotoUrl'
 import { useOverlayDismiss } from './useOverlayDismiss'
 import { useScrollLock } from './useScrollLock'
 import { useConfirm } from './ConfirmProvider'
+import { DIALOG_CANCEL_BUTTON_CLS } from './dialogStyle'
 import CookedLogEditor from './CookedLogEditor'
 import { deleteDetachedLog } from '../db/detachedLogs'
 import { ja } from '../i18n/ja'
@@ -187,7 +188,10 @@ export default function CookedLogDetailModal({
           className="max-h-[90vh] w-full max-w-sm min-w-0 overflow-x-hidden overflow-y-auto overscroll-contain rounded-md border border-edge bg-surface p-[var(--space-md)] shadow-md"
         >
           <div className="flex items-start justify-between gap-2">
-            <div className="min-w-0">
+            {/* 2026-08-24 便KJ・③: 日付の行を窓の幅いっぱいまで伸ばす（flex-1）。
+                こうしないと「レシピを見る」が料理名の右端で止まり、行の右端まで届かない。
+                右上の✕は別の列のままなので、閉じるつもりで押して別の画面へ移ることは起きない */}
+            <div className="min-w-0 flex-1">
               <p className="text-xs font-bold text-ink-muted">{ja.cookedDetail.label}</p>
               {/* 食数は料理名の横に添える（2026-08-10 便FD・オーナー実機
                   「「きんぴらごぼう　（3食分）」のように食数は簡略」）。
@@ -200,7 +204,34 @@ export default function CookedLogDetailModal({
                   </span>
                 )}
               </h3>
-              <p className="mt-0.5 text-sm text-ink-muted">{log.date.replaceAll('-', '/')}</p>
+              {/* 日付の行（2026-08-24 便KJ・③・オーナー原文「「レシピを見る」はボタンでは
+                  なく文字のリンクにして小さく。ばしょも日付横右端あたりに移動。」）。
+                  日付を左、レシピ詳細への文字リンクをこの行の右端に置く。
+                  直す前は窓の下端に、他の窓なら「閉じる」がある場所へ横いっぱいの大きな
+                  ボタンとして並んでいた＝閉じるつもりで押すと別の画面へ移っていた */}
+              <div
+                data-testid="cooked-detail-date-row"
+                className="mt-0.5 flex items-center justify-between gap-2"
+              >
+                <p data-testid="cooked-detail-date" className="text-sm text-ink-muted">
+                  {log.date.replaceAll('-', '/')}
+                </p>
+                {recipePath && (
+                  <Link
+                    to={recipePath}
+                    state={linkState}
+                    onClick={onNavigate}
+                    data-testid="cooked-detail-open-recipe"
+                    /* 文字のリンク（枠も地色も持たない）。小さくしても指で押せるよう、
+                       高さだけ44px（--tap-min）を確保する＝2026-08-22 に「38×36pxで押せない」が
+                       出ているので、字を小さくするときは当たり判定を別に持たせる */
+                    className="inline-flex min-h-[var(--tap-min)] shrink-0 items-center gap-0.5 text-sm font-bold text-accent-ink underline"
+                  >
+                    {ja.cookedDetail.openRecipe}
+                    <ChevronRight size={14} aria-hidden />
+                  </Link>
+                )}
+              </div>
             </div>
             <button
               type="button"
@@ -291,17 +322,6 @@ export default function CookedLogDetailModal({
                     {ja.cookedDetail.edit}
                   </button>
                 )}
-                {recipePath && (
-                  <Link
-                    to={recipePath}
-                    state={linkState}
-                    onClick={onNavigate}
-                    className="flex w-full items-center justify-center gap-1 rounded-md border border-edge bg-app py-3 font-bold text-accent-ink shadow-sm"
-                  >
-                    {ja.cookedDetail.openRecipe}
-                    <ChevronRight size={18} aria-hidden />
-                  </Link>
-                )}
                 {/* 残った記録を減らす唯一の手立て（2026-08-16 便GZ）。
                     レシピ側の「この記録を削除」と同じ位置づけなので、同じ確認の作法で消す */}
                 {detachedRecordId != null && (
@@ -315,6 +335,22 @@ export default function CookedLogDetailModal({
                     {ja.cookedDetail.deletedRecipeLogDelete}
                   </button>
                 )}
+                {/* 窓の一番下は「閉じる」（2026-08-24 便KJ・③・オーナー原文「週や月から出る窓の
+                    「作った記録」の一番下を「閉じる」にして。他の窓の一番下が「閉じる」なのに
+                    ここだけ違うと誤タップしそう。」）。
+                    そろえる先は、この窓が重なっている日の窓（週・月の日付を押して開くもの）の
+                    下端の「閉じる」。見た目の値を書き写さず dialogStyle の1本から取る
+                    ＝片方だけ直して別物になることが起きない。
+                    直しているあいだ（下の CookedLogEditor）は出さない＝
+                    「保存」「やめる」の下に3つ目の出口を並べない */}
+                <button
+                  type="button"
+                  data-testid="cooked-detail-close"
+                  onClick={onClose}
+                  className={DIALOG_CANCEL_BUTTON_CLS}
+                >
+                  {ja.common.close}
+                </button>
               </div>
             </>
           )}

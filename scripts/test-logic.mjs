@@ -93,6 +93,8 @@ import {
   staleTodayListFromPlanIds,
   recipeDishType,
   mealRoleForRecipe,
+  normalizePlanFillMode,
+  planDayCardPadClass,
 } from '../src/logic/mealPlan.ts'
 import { suggestionCandidates, DISH_TYPE_OPTIONS } from '../src/logic/homeSuggest.ts'
 import {
@@ -30744,6 +30746,141 @@ import { safetyNotesFor, stepSafetyNotes, wholeRecipeSafetyNotes } from '../src/
   eq(
     'KI-2 トーストが改行をそのまま出す（whitespace-pre-line）',
     toastSrc.includes('whitespace-pre-line'),
+    true,
+  )
+}
+
+
+// ==========================================================================================
+// KJ-1〜KJ-3（2026-08-24 便KJ・オーナー書き溜め）
+// ==========================================================================================
+{
+  const kjRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
+  const kjRead = (rel) => readFileSync(path.join(kjRoot, rel), 'utf-8')
+  const kjPlanSrc = kjRead('src/pages/MealPlanPage.tsx')
+  const kjTypesSrc = kjRead('src/db/types.ts')
+  const kjLogSrc = kjRead('src/components/CookedLogDetailModal.tsx')
+  eq('KJ 前提: 献立の画面を読めている（0字なら見張りが壊れている）', kjPlanSrc.length > 10000, true)
+  eq('KJ 前提: 設定の型を読めている', kjTypesSrc.length > 5000, true)
+  eq('KJ 前提: 作った記録の窓を読めている', kjLogSrc.length > 3000, true)
+
+  // ---- KJ-1: 提案の「入れかた」と「調理時間」を、画面を離れても覚えている ----
+  //
+  // オーナー原文「提案の入れ方が、タブ移動で「空いた枠だけ」に戻る。選択保持して。
+  // 総入れ替えだと確認画面も出るので、総入れ替えに気づかない仕組みにはなっていない。」
+  // 2026-08-23 の影響範囲テストで見つかった同じ型（「20分以内」が画面を離れると「指定なし」に
+  // 戻る）も一緒に直したので、両方をここで見張る。
+  // 置き場所は planPurpose・planGenres と同じ「設定」（開くたびに選び直させない）。
+  eq(
+    'KJ-1 「入れかた」の覚え先が設定にある（planFillMode）',
+    kjTypesSrc.includes('planFillMode?:'),
+    true,
+  )
+  eq(
+    'KJ-1 「調理時間」を効かせているかの覚え先が設定にある（planQuickOn）',
+    kjTypesSrc.includes('planQuickOn?:'),
+    true,
+  )
+  eq(
+    'KJ-1 「入れかた」を画面の中だけで持っていない（useState に戻っていない）',
+    /useState<'fillEmpty' \| 'replaceAll'>/.test(kjPlanSrc),
+    false,
+  )
+  eq(
+    'KJ-1 「調理時間」のON/OFFを画面の中だけで持っていない（useState に戻っていない）',
+    /const \[quickOnly, setQuickOnly\] = useState/.test(kjPlanSrc),
+    false,
+  )
+  // 読み替えの規則（未設定・壊れた値でも、必ず非破壊の「空いた枠だけ」から始まる）
+  eq('KJ-1 未設定は「空いた枠だけ」（既定は変えない）', normalizePlanFillMode(undefined), 'fillEmpty')
+  eq('KJ-1 保存されていれば「総入れ替え」を覚えている', normalizePlanFillMode('replaceAll'), 'replaceAll')
+  eq('KJ-1 「空いた枠だけ」も覚えている', normalizePlanFillMode('fillEmpty'), 'fillEmpty')
+  eq('KJ-1 知らない値は「空いた枠だけ」に倒す', normalizePlanFillMode('replaceEverything'), 'fillEmpty')
+  eq('KJ-1 壊れた値（数値）でも「空いた枠だけ」に倒す', normalizePlanFillMode(3), 'fillEmpty')
+  eq('KJ-1 壊れた値（null）でも「空いた枠だけ」に倒す', normalizePlanFillMode(null), 'fillEmpty')
+  // 消える側を覚えても、確認の窓は必ず通る（オーナーが安全と判断した根拠）
+  eq(
+    'KJ-1 総入れ替えは消す前に確認を出す道が残っている（規約F）',
+    kjPlanSrc.includes('ja.mealPlan.fillModeReplaceAllConfirmTitle'),
+    true,
+  )
+
+  // ---- KJ-2: 過ぎた日を畳んだカードの余白 ----
+  //
+  // オーナー原文「過去に日付は折りたたみ時の枠を一回り細くしてほしい。
+  // 一番下が今日の時にスクロールが長い。」
+  // 細くするのは**過ぎた日を畳んでいるあいだだけ**（開けば今までどおり）。
+  // 押して開く見出しは44px（--tap-min）のままなので、細くしても押せなくならない。
+  eq(
+    'KJ-2 過ぎた日を畳んでいるあいだは余白を詰める',
+    planDayCardPadClass({ folded: true, past: true }),
+    'p-[var(--space-sm)]',
+  )
+  eq(
+    'KJ-2 過ぎた日でも開いていれば今までどおりの余白',
+    planDayCardPadClass({ folded: false, past: true }),
+    'p-[var(--space-md)]',
+  )
+  eq(
+    'KJ-2 先の日は畳んでいても今までどおりの余白（指示は過去の日付だけ）',
+    planDayCardPadClass({ folded: true, past: false }),
+    'p-[var(--space-md)]',
+  )
+  eq(
+    'KJ-2 先の日を開いているときも今までどおりの余白',
+    planDayCardPadClass({ folded: false, past: false }),
+    'p-[var(--space-md)]',
+  )
+  eq(
+    'KJ-2 詰めるのは余白だけ＝見出しの押せる高さ(min-h-11=44px)は残っている',
+    kjPlanSrc.includes('data-testid="week-day-toggle"') && kjPlanSrc.includes('min-h-11 min-w-40'),
+    true,
+  )
+
+  // ---- KJ-3: 「作った記録」の窓の作法を、他の窓にそろえる ----
+  //
+  // オーナー原文「週や月から出る窓の「作った記録」の一番下を「閉じる」にして。
+  // 他の窓の一番下が「閉じる」なのにここだけ違うと誤タップしそう。
+  // 「レシピを見る」はボタンではなく文字のリンクにして小さく。ばしょも日付横右端あたりに移動。」
+  //
+  // そろえる先は**同じ場所から開く日の窓**（週・月の日付を押して開くもの）。
+  // 窓の一番下の「閉じる」は、その日の窓とまったく同じ見た目にする＝
+  // 見た目の値を2か所に書き写さず dialogStyle の1本（DIALOG_CANCEL_BUTTON_CLS）から取る。
+  eq(
+    'KJ-3 作った記録の窓が、下端の「閉じる」を出している',
+    kjLogSrc.includes('data-testid="cooked-detail-close"') && kjLogSrc.includes('ja.common.close'),
+    true,
+  )
+  eq(
+    'KJ-3 その「閉じる」の見た目は共通の1本から取る（日の窓と別物にならない）',
+    kjLogSrc.includes('DIALOG_CANCEL_BUTTON_CLS'),
+    true,
+  )
+  eq(
+    'KJ-3 日の窓の「閉じる」も同じ1本から取っている（そろえた先が書き写しのままにならない）',
+    kjPlanSrc.includes('data-testid="day-modal-close"') &&
+      kjPlanSrc.includes('className={DIALOG_CANCEL_BUTTON_CLS}'),
+    true,
+  )
+  eq(
+    'KJ-3 「レシピを見る」は文字のリンク＝枠線も地色も持たない',
+    /data-testid="cooked-detail-open-recipe"[\s\S]{0,400}?className="[^"]*underline[^"]*"/.test(kjLogSrc) &&
+      !/data-testid="cooked-detail-open-recipe"[\s\S]{0,400}?className="[^"]*border-edge[^"]*"/.test(kjLogSrc),
+    true,
+  )
+  eq(
+    'KJ-3 「レシピを見る」は小さくしても指で押せる（44px＝--tap-min の当たり判定）',
+    /data-testid="cooked-detail-open-recipe"[\s\S]{0,400}?min-h-\[var\(--tap-min\)\]/.test(kjLogSrc),
+    true,
+  )
+  eq(
+    'KJ-3 「レシピを見る」の行き先は今までどおり（道を消していない）',
+    kjLogSrc.includes('to={recipePath}') && kjLogSrc.includes('ja.cookedDetail.openRecipe'),
+    true,
+  )
+  eq(
+    'KJ-3 日付の行に検査用の目印があり、その行に「レシピを見る」を並べている',
+    kjLogSrc.includes('data-testid="cooked-detail-date"'),
     true,
   )
 }
