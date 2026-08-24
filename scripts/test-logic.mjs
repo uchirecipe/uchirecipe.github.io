@@ -2352,10 +2352,22 @@ eq('news: 未記録(起動直後の一瞬)は抑制', isNewsSuppressed(undefined
       mkRecipe(4, { tags: [] }), // ジャンルタグの無い品(どのジャンルにも合う万能枠)
     ]
     const idsOf = (list) => list.map((r) => r.id).sort((a, b) => a - b).join(',')
+    // IY-1 は 2026-08-24 便KK で**向きを立て直した**。
+    // 便IYのときは「その2つのジャンルの品だけが候補になる」＝タグ無しの品(id 4)も落ちることを
+    // 固定していたが、それが「取り込んだ品が全部消える」を守る形になっていた
+    // （取り込んだレシピにはジャンルタグが1件も付かない。実測90品すべて0件）。
+    // 測るのは「**選ばなかったジャンルが落ちること**」と「**タグ無しの品は落ちないこと**」の2つに分ける
     eq(
-      'IY-1 ジャンルを2つ選ぶと、その2つのジャンルの品だけが候補になる',
+      'IY-1 ジャンルを2つ選ぶと、選ばなかったジャンル(中華)の品は候補から外れる',
+      suggestCandidates(genreRecipes, opts({ genres: ['和食', '洋食'] })).some((r) =>
+        r.tags.includes('中華'),
+      ),
+      false,
+    )
+    eq(
+      'IY-1 ジャンルを2つ選んでも、ジャンルタグの無い品は落とさない(どのジャンルにも合う万能枠)',
       idsOf(suggestCandidates(genreRecipes, opts({ genres: ['和食', '洋食'] }))),
-      '1,2',
+      '1,2,4',
     )
     eq(
       'IY-2 ジャンルを1つだけ選んだときは、これまでの単一指定(genre)と同じ候補になる',
@@ -2454,6 +2466,71 @@ eq('news: 未記録(起動直後の一瞬)は抑制', isNewsSuppressed(undefined
   eq('IY-10 保存の並びが崩れていても、選べる並びにそろえて読む',
     normalizePlanGenres(['中華', '和食']).join(','), '和食,中華')
 
+
+  // ---- KK: ジャンルで絞っても、ジャンルタグを持たない品は落とさない ----
+  // (2026-08-24 便KK・オーナー裁定B案「タグを持たない品は『どのジャンルにも合う』として落とさない」)
+  //
+  // 何が起きていたか(実データ90品＋同梱109品での実測):
+  //   自分の取り込んだ品だけ … 「和食だけ」を選んでも絞られない(0件緩和で全部出る)
+  //   同梱109品が入った実運用 … 「和食だけ」を選ぶと自分の品が0件になる
+  // 取り込んだ90品にはジャンルタグが1件も付かないため、**同じボタンが状況で正反対に効いていた**。
+  //
+  // アプリはもともと「ジャンルタグの無い品はどのジャンルにも合う万能枠」という考え方を採っている
+  // (detectGenreMix は「主菜と別ジャンル」の印にタグ無しを数えない)。同じ考え方を絞り込みにも当てる。
+  // **選ばなかったジャンルのタグが付いた品は今までどおり落ちる**(「中華は入れたくない」は守る)。
+  {
+    const kkList = [
+      mkRecipe(1, { tags: ['和食'] }),
+      mkRecipe(2, { tags: ['洋食'] }),
+      mkRecipe(3, { tags: ['中華'] }),
+      mkRecipe(4, { tags: [] }), // 取り込んだ品(タグ0件)
+      mkRecipe(5, { tags: ['作り置き'] }), // ジャンル以外のタグだけ付いた品
+    ]
+    const kkIds = (list) => list.map((r) => r.id).sort((a, b) => a - b).join(',')
+    eq(
+      'KK-1 ジャンルを1つ選んでも、ジャンルタグの無い品は候補に残る',
+      kkIds(suggestCandidates(kkList, opts({ genres: ['和食'] }))),
+      '1,4,5',
+    )
+    eq(
+      'KK-1 ジャンルを2つ選んだときも、ジャンルタグの無い品は候補に残る',
+      kkIds(suggestCandidates(kkList, opts({ genres: ['和食', '洋食'] }))),
+      '1,2,4,5',
+    )
+    eq(
+      'KK-2 選ばなかったジャンルのタグが付いた品は落ちる(中華を外せば中華の品は出ない)',
+      suggestCandidates(kkList, opts({ genres: ['和食', '洋食'] })).some((r) => r.tags.includes('中華')),
+      false,
+    )
+    // 0件緩和の崖: タグの付いた品が1品でも混ざると、タグ無しの品が全部消えていた。
+    // 「タグ無しの品が何品残るか」は、まわりにタグ付きの品があるかどうかで変わってはいけない
+    {
+      const onlyTagless = [mkRecipe(4, { tags: [] }), mkRecipe(5, { tags: ['作り置き'] })]
+      const taglessLeft = (list) =>
+        suggestCandidates(list, opts({ genres: ['和食'] })).filter((r) => r.tags.every((t) => !MEAL_GENRES.includes(t)))
+          .length
+      eq(
+        'KK-3 タグ無しの品が何品残るかは、タグ付きの品が混ざっても変わらない(0件緩和の崖が立たない)',
+        [taglessLeft(onlyTagless), taglessLeft(kkList)],
+        [2, 2],
+      )
+    }
+    eq(
+      'KK-4 絞り込みの考え方は「主菜と別ジャンル」の印(detectGenreMix)とそろえる＝タグ無しは万能枠',
+      [
+        detectGenreMix({ tags: ['和食'] }, [{ tags: [] }]),
+        suggestCandidates([mkRecipe(4, { tags: [] })], opts({ genres: ['和食'] })).length,
+      ],
+      [false, 1],
+    )
+    // 1食の中で副菜を主菜のジャンルに寄せる側(options.genre)も同じ考え方にそろえる。
+    // ここを直さないと、同梱レシピのように和食タグの副菜がある限り、取り込んだ品は副菜に出ない
+    eq(
+      'KK-5 主菜のジャンルに寄せるときも、タグ無しの品は「そろっている」として残す',
+      kkIds(suggestCandidates(kkList, opts({ genre: '和食' }))),
+      '1,4,5',
+    )
+  }
   // ---- 便BH-2: 一品もの・副菜純化・たんぱく源分散・ジャンル混在(docs/56) ----
 
   // 一品もの(丼・麺・鍋・カレー・シチュー)の主菜が選ばれた枠は副菜を空ける(主菜1品で完結)
@@ -5541,6 +5618,70 @@ eq('rangeDayCount: 月をまたぐ計算も正しい', rangeDayCount('2026-06-28
     eq('ナビ器具: 待ちが無いだけのときは器具のせいにしない', noWait.limitedByEquipment, false)
   }
 
+
+  // ---- (4b-2) 縮まなかった理由を「どの器具か」まで書き分ける（2026-08-24 便KK） ----
+  // オーナー裁定A案「レンジが1台なので縮みません」＝理由を出す。
+  //
+  // なぜ要るか: 2026-08-23 便KDで電子レンジの二重予約を直した結果、**待ちはあるのに
+  // レンジが空かない**ために1品ずつへ落ちる組が出た。便GCの見分け（isLimitedByEquipment）は
+  // **コンロの口数に余裕を持たせて組み直す**やり方なので、レンジ・グリル・トースターのように
+  // 「持っていても1台」の器具が理由のときは見つけられず、
+  // 「手が空く待ち時間が見つかりませんでした」＝**利用者が自分のレシピを疑う文**が出ていた。
+  {
+    const applianceOnly = (id, title, text, minutes) => ({
+      id,
+      title,
+      steps: [{ text, minutes }],
+    })
+    // 電子レンジしか使わない2品。レンジは1台なので、2品目は1品目が終わるまで始められない
+    const microwavePair = () => [
+      applianceOnly(1, 'レンジ蒸し野菜', '耐熱ボウルに野菜を入れ、ラップをかけて電子レンジで15分加熱する。', 15),
+      applianceOnly(2, 'レンジ肉じゃが', '耐熱皿に材料を入れ、ラップをかけて電子レンジで15分加熱する。', 15),
+    ]
+    const mw = buildCookPlan(microwavePair(), kitchen(2))
+    eq('KK-6 レンジ2品は1品ずつ作る順番になる', mw.mode, 'sequential')
+    eq('KK-6 その理由は「待ちが無い」ではなく器具だと分かる', mw.limitedByEquipment, true)
+    eq('KK-6 どの器具かまで分かる（コンロの口数に余裕があっても見つける）', mw.limitingAppliance, 'microwave')
+    // 魚焼きグリルも同じ（1台しか無い器具はコンロと同じ理由で縮まない）
+    const grillPair = () => [
+      applianceOnly(1, '焼き魚', '魚焼きグリルで15分焼く。', 15),
+      applianceOnly(2, '焼きなす', '魚焼きグリルで15分焼く。', 15),
+    ]
+    eq('KK-7 グリル2品も器具が理由だと分かる', buildCookPlan(grillPair(), kitchen(2)).limitingAppliance, 'grill')
+    // コンロが理由のときは便GCのときと同じ「コンロ◯口では」の文を出す（名前が変わらない）
+    const stovePair = () => [
+      recipe(1, 'ゆで卵', ['鍋に湯を沸かし、卵を10分ゆでる。', '冷水にとって殻をむく。']),
+      recipe(2, '照り焼き', ['フライパンで鶏もも肉を焼く。', 'たれをからめる。']),
+    ]
+    eq('KK-8 コンロが理由のときはコンロだと分かる', buildCookPlan(stovePair(), kitchen(1)).limitingAppliance, 'stove')
+    // 嘘をつかない: 待ちがそもそも無い組は、今までどおりの文（器具のせいにしない）
+    const noWait = buildCookPlan(
+      [
+        recipe(1, 'あえもの', ['きゅうりを薄切りにする。', '調味料と和える。']),
+        recipe(2, 'サラダ', ['レタスをちぎる。', 'ドレッシングをかける。']),
+      ],
+      kitchen(1),
+    )
+    eq('KK-9 待ちが無いだけの組は器具の名前を出さない', noWait.limitingAppliance, undefined)
+    eq('KK-9 待ちが無いだけの組は器具のせいにもしない', noWait.limitedByEquipment, false)
+    // 並行に組めた組は理由そのものを出さない
+    eq('KK-9 並行に組めた組は器具の名前を出さない', buildCookPlan(stovePair(), kitchen(2)).limitingAppliance, undefined)
+    // 持っていない器具の名前は出さない（その工程はコンロとして数えているので、理由もコンロ）
+    eq(
+      'KK-10 グリルを持っていない家では、グリルの名前ではなくコンロが理由になる',
+      buildCookPlan(grillPair(), kitchen(1, { grill: false })).limitingAppliance,
+      'stove',
+    )
+    // 画面の文（器具の名前を入れられる形になっているか）
+    eq(
+      'KK-11 器具の名前を入れる文が用意されている',
+      [
+        (ja.cookNavi.noParallelByApplianceNote ?? '').includes('{appliance}'),
+        (ja.cookNavi.noParallelByApplianceNote ?? '').includes('{n}'),
+      ],
+      [true, true],
+    )
+  }
   // ---- (4c) 火にかけた鍋は、火を止めるまで口をふさぎ続ける（2026-08-14 便GI） ----
   // 直した不具合（docs/68 の合格ライン引き直しで見つけた）:
   //   口をふさぐ長さを**その工程の長さ**だけで数えていたため、「中火で15分煮る」が終われば

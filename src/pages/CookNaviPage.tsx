@@ -110,7 +110,7 @@ import Toast from '../components/Toast'
 import { effectiveMealServings } from '../logic/servings'
 import type { Recipe } from '../db/types'
 import { settingsLinkWithBack } from '../logic/backLink'
-import { kitchenFromSettings } from '../logic/cookAppliance'
+import { kitchenFromSettings, type ApplianceKey } from '../logic/cookAppliance'
 import { ja } from '../i18n/ja'
 
 /** レシピの色分け（最大3品）。常駐タイマーと同じ定義を使う（logic/naviColors.ts） */
@@ -1119,6 +1119,47 @@ export default function CookNaviPage() {
   const isSequential = timeline?.mode === 'sequential'
 
   /**
+   * 1品ずつ作る順番になったときに出す「なぜ縮まなかったか」（2026-08-24 便KK）。
+   * 器具の名前まで分かるならその名前で言う（「器具が足りません」だと、どれのことか分からない）。
+   * 分からないものは器具のせいにしない＝従来どおり「手が空く待ち時間が見つかりませんでした」。
+   */
+  const noParallelReason = useMemo(() => {
+    if (!timeline || timeline.mode !== 'sequential') return null
+    const n = String(timeline.recipes.length)
+    const applianceName: Record<Exclude<ApplianceKey, 'stove'>, string> = {
+      microwave: ja.settings.kitchenMicrowave,
+      grill: ja.settings.kitchenGrill,
+      toaster: ja.settings.kitchenToaster,
+    }
+    if (timeline.limitingAppliance === 'stove') {
+      return {
+        note: ja.cookNavi.noParallelByEquipmentNote
+          .replace('{b}', String(kitchen.burners))
+          .replace('{n}', n),
+        hint: ja.cookNavi.noParallelByEquipmentHint,
+      }
+    }
+    if (timeline.limitingAppliance) {
+      return {
+        note: ja.cookNavi.noParallelByApplianceNote
+          .replace('{appliance}', applianceName[timeline.limitingAppliance])
+          .replace('{n}', n),
+        hint: '',
+      }
+    }
+    if (timeline.limitedByEquipment) {
+      return {
+        note: ja.cookNavi.noParallelByKitchenNote.replace('{n}', n),
+        hint: ja.cookNavi.noParallelByKitchenHint,
+      }
+    }
+    return {
+      note: ja.cookNavi.noParallelNote.replace('{n}', n),
+      hint: ja.cookNavi.noParallelHint,
+    }
+  }, [timeline, kitchen.burners])
+
+  /**
    * 品ごとのできあがりの目安（2026-08-14 便GF・利用者テスト「各品が何分後にできるかは
    * 表示しません。（中略）この開きが出ること自体を画面に出してほしい」）。
    * 数え方は docs/72 の N1（完成の揃い）と同じ＝logic/cookFinish.ts に集めてある。
@@ -2080,26 +2121,21 @@ export default function CookNaviPage() {
                     )}
 
                     {/* 並行の余地が無かったときの説明（2026-08-08 便ED・docs/68 打ち手#4）。
-                        縮んでいないのに縮んだように見せないため、理由と次の一手を書く */}
-                    {isSequential && (
+                        縮んでいないのに縮んだように見せないため、理由と次の一手を書く。
+                        理由ごとに書き分ける（2026-08-24 便KK）＝コンロの口数／1台しか無い器具
+                        （電子レンジ等）／器具だとまでしか分からない／そもそも手が空く待ちが無い。
+                        分からないものを器具のせいにはしない */}
+                    {isSequential && noParallelReason && (
                       <div
                         data-testid="navi-no-parallel"
                         className="mt-[var(--space-sm)] rounded-md border border-edge bg-surface p-[var(--space-md)]"
                       >
-                        <p className="ja-phrase font-bold">
-                          {(timeline.limitedByEquipment
-                            ? ja.cookNavi.noParallelByEquipmentNote.replace(
-                                '{b}',
-                                String(kitchen.burners),
-                              )
-                            : ja.cookNavi.noParallelNote
-                          ).replace('{n}', String(timeline.recipes.length))}
-                        </p>
-                        <p className="ja-phrase mt-[var(--space-sm)] text-sm text-ink-muted">
-                          {timeline.limitedByEquipment
-                            ? ja.cookNavi.noParallelByEquipmentHint
-                            : ja.cookNavi.noParallelHint}
-                        </p>
+                        <p className="ja-phrase font-bold">{noParallelReason.note}</p>
+                        {noParallelReason.hint !== '' && (
+                          <p className="ja-phrase mt-[var(--space-sm)] text-sm text-ink-muted">
+                            {noParallelReason.hint}
+                          </p>
+                        )}
                       </div>
                     )}
 

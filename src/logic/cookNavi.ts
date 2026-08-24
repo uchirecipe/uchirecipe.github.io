@@ -2,9 +2,10 @@ import type { Recipe, Step } from '../db/types'
 import { findTimeTokens } from './time'
 import { ja } from '../i18n/ja'
 import {
+  APPLIANCE_KEYS,
+  applianceCapacity,
   ApplianceSchedule,
   DEFAULT_KITCHEN,
-  MAX_BURNERS,
   stepApplianceFor,
   type ApplianceKey,
   type KitchenEquipment,
@@ -2919,6 +2920,19 @@ export interface CookPlan extends CookTimeline {
    * 縮まなかった理由は待ちの不足ではなく台数。
    */
   limitedByEquipment: boolean
+  /**
+   * 縮まなかった理由になった**器具の種類**（2026-08-24 便KK・オーナー裁定A案「理由を出す」）。
+   *
+   * limitedByEquipment だけでは「器具のせい」までしか言えず、画面には
+   * 「コンロ◯口では」としか出せなかった。**電子レンジ・魚焼きグリル・トースターは
+   * 持っていても1台**なので、口数に余裕がある家でもここが理由で縮まないことがある
+   * （2026-08-23 便KDでレンジの二重予約を直してから増えた）。
+   *
+   * その器具**1つだけ**台数の制約を外して組み直したときに段取りが短くなるなら、
+   * 足りなかったのはその器具。2つ以上の器具が絡んでいて1つに絞れないときは undefined
+   * （**嘘をつかない**＝名前を挙げずに「台所の器具」とだけ言う）。
+   */
+  limitingAppliance?: ApplianceKey
 }
 
 /**
@@ -3030,6 +3044,7 @@ export function buildCookPlan(
     }
   }
   const sequential = buildSequentialTimeline(valid, kitchen)
+  const reason = diagnoseNoParallel(valid, kitchen, parallelMinutes)
   return {
     ...sequential,
     recipes: withSolo(sequential),
@@ -3038,36 +3053,47 @@ export function buildCookPlan(
     parallelMinutes,
     gainPercent,
     awayMinutes: awayWaitMinutes(sequential.items),
-    limitedByEquipment: isLimitedByEquipment(valid, kitchen, parallelMinutes),
+    limitedByEquipment: reason.limitedByEquipment,
+    limitingAppliance: reason.limitingAppliance,
   }
 }
 
-/** 台数にいちばん余裕のある台所（正直表示の理由を見分けるためだけに使う） */
-const ROOMY_KITCHEN: KitchenEquipment = {
-  burners: MAX_BURNERS,
-  microwave: true,
-  grill: true,
-  toaster: true,
+/** その台所が持っている器具（持っていない器具の工程はコンロとして数えるので、ここには出さない） */
+function ownedAppliances(kitchen: KitchenEquipment): ApplianceKey[] {
+  return APPLIANCE_KEYS.filter((key) => applianceCapacity(kitchen, key) > 0)
 }
 
 /**
- * 縮まなかった理由が器具の台数か（2026-08-13 便GC）。
- * 台数に余裕のある台所で組み直して段取りが短くなるなら、足りなかったのは待ちではなく口。
+ * 1品ずつ作る順番になった理由を見分ける（2026-08-13 便GC → 2026-08-24 便KKで器具の種類まで）。
+ *
+ * やり方は「**台数の制約を外して組み直し、短くなるかを見る**」の1つだけ。
+ *   - 持っている器具**すべて**の制約を外して短くなる → 理由は器具の台数（limitedByEquipment）
+ *   - **1つだけ**外して短くなる器具があれば、それが理由（limitingAppliance）。
+ *     いちばん短くなる器具を採る（同じなら数える順＝コンロ→レンジ→グリル→トースター）
+ *   - どちらも短くならない → そもそも手が空く待ちが無い（＝従来の文を出す）
+ *
+ * **持っていない器具は見ない**。その工程はコンロ1口として数えているので（stepApplianceFor）、
+ * 理由も「コンロ」になるのが正しい。持っていない器具の名前を出すと嘘になる。
  */
-function isLimitedByEquipment(
+function diagnoseNoParallel(
   recipes: Recipe[],
   kitchen: KitchenEquipment,
   parallelMinutes: number,
-): boolean {
-  if (
-    kitchen.burners >= ROOMY_KITCHEN.burners &&
-    kitchen.microwave &&
-    kitchen.grill &&
-    kitchen.toaster
-  ) {
-    return false
+): { limitedByEquipment: boolean; limitingAppliance?: ApplianceKey } {
+  const owned = ownedAppliances(kitchen)
+  const shortenedBy = (unlimited: ApplianceKey[]): number =>
+    parallelMinutes - buildCookTimeline(recipes, { ...kitchen, unlimited }).totalMinutes
+  if (shortenedBy(owned) <= 0) return { limitedByEquipment: false }
+  let best: ApplianceKey | undefined
+  let bestGain = 0
+  for (const key of owned) {
+    const gain = shortenedBy([key])
+    if (gain > bestGain) {
+      best = key
+      bestGain = gain
+    }
   }
-  return buildCookTimeline(recipes, ROOMY_KITCHEN).totalMinutes < parallelMinutes
+  return { limitedByEquipment: true, limitingAppliance: best }
 }
 
 /**

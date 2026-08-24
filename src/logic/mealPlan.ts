@@ -1014,25 +1014,40 @@ export function suggestCandidates(recipes: Recipe[], options: SuggestOptions): R
   }
 
   // 利用者が選んだ料理のジャンルの枠（2026-08-22 便IY）。選んだジャンルの品だけに絞る。
-  // 全ジャンルを選んだ状態・空・読み取れない値は絞り込まない＝「指定なし」と同じ
-  // （ジャンルタグを持たない品を候補から落とさないため）。
-  // 選んだジャンルの品が0件なら絞り込みを解く＝提案0件にはしない
+  // 全ジャンルを選んだ状態・空・読み取れない値は絞り込まない＝「指定なし」と同じ。
+  // 選んだジャンルの品が0件なら絞り込みを解く＝提案0件にはしない。
+  //
+  // **ジャンルタグを持たない品は落とさない**（2026-08-24 便KK・オーナー裁定B案）。
+  // 取り込んだレシピにはジャンルタグが1件も付かない（実測: 90品すべて0件）ので、
+  // タグの有無で切ると、同梱109品が入った端末では**自分の品だけが全部消えていた**。
+  // しかも自分の品しか無い端末では0件緩和が働いて全部出るので、
+  // **同じボタンが状況で正反対に効く**状態だった。アプリはもともと
+  // 「ジャンルタグの無い品はどのジャンルにも合う万能枠」という考え方を採っている
+  // （detectGenreMix は「主菜と別ジャンル」の印にタグ無しを数えない）ので、そちらへそろえる。
+  // **選ばなかったジャンルのタグが付いた品は今までどおり落ちる**（「中華は入れたくない」は守る）。
   const pickedGenres = [...new Set(options.genres ?? [])].filter((g) =>
     (MEAL_GENRES as readonly string[]).includes(g),
   )
   let allowedGenrePool = rolePool
   if (pickedGenres.length > 0 && pickedGenres.length < MEAL_GENRES.length) {
-    const matched = rolePool.filter((r) => pickedGenres.some((g) => r.tags.includes(g)))
+    const matched = rolePool.filter(
+      (r) => recipeGenre(r) === undefined || pickedGenres.some((g) => r.tags.includes(g)),
+    )
     if (matched.length > 0) allowedGenrePool = matched
   }
 
   // ジャンル（和食/洋食/中華）の優先指定。枠（genres）で絞ったあと、その中で1つに寄せる
   // ＝1食の中は主菜のジャンルに揃え、揃わなければ枠の中の別ジャンルで埋める
-  // （その枠には「主菜と別ジャンル」の印が出る＝detectGenreMix）
+  // （その枠には「主菜と別ジャンル」の印が出る＝detectGenreMix）。
+  // ここでもジャンルタグの無い品は「そろっている」側に数える（2026-08-24 便KK）。
+  // 数えないと、和食タグの副菜が1品でもある限り取り込んだ品は副菜に出てこない
+  // ＝上の枠でせっかく残した品が、この一手でまた全部落ちる
   let genrePool = allowedGenrePool
   if (options.genre) {
     const genre = options.genre
-    const matched = allowedGenrePool.filter((r) => r.tags.includes(genre))
+    const matched = allowedGenrePool.filter(
+      (r) => recipeGenre(r) === undefined || r.tags.includes(genre),
+    )
     if (matched.length > 0) genrePool = matched
   }
 

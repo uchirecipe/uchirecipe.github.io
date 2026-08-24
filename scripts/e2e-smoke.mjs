@@ -20612,6 +20612,82 @@ try {
     }
   }
 
+  // --- KKNAVI-01（2026-08-24 便KK・オーナー裁定A案「レンジが1台なので縮みません」＝理由を出す）。
+  //
+  // 2026-08-23 便KDで電子レンジの二重予約を直した結果、**待ちはあるのにレンジが空かない**ために
+  // 1品ずつへ落ちる組が出た（実データ C_時短の人 30品では、並行に組める組が385→371へ）。
+  // それまで画面に出ていたのは「手が空く待ち時間が見つかりませんでした」の1文だけで、
+  // 器具が理由のときも同じ文だった＝利用者が自分のレシピを疑う。
+  //
+  // 測るのは「**理由ごとに違う文が出るか**」。文言は ja.ts から組み立てて突き合わせる（書き写さない）---
+  currentCheck = 'KKNAVI-01'
+  {
+    const kkNaviBrowser = await chromium.launch()
+    const kkNaviContext = await kkNaviBrowser.newContext({ viewport: { width: 390, height: 820 } })
+    const kkNaviPage = await kkNaviContext.newPage()
+    kkNaviPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin'))
+        return
+      errors.push(`[pageerror@KKNAVI-01] ${err.message}`)
+    })
+    try {
+      await kkNaviPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await kkNaviPage.waitForTimeout(1800)
+      await kkNaviPage.evaluate(async () => {
+        const openDb = () =>
+          new Promise((resolve, reject) => {
+            const r = indexedDB.open('uchi-recipe')
+            r.onsuccess = () => resolve(r.result)
+            r.onerror = () => reject(r.error)
+          })
+        const db = await openDb()
+        const P = (req) => new Promise((res, rej) => { req.onsuccess = () => res(req.result); req.onerror = () => rej(req.error) })
+        const store = (name) => db.transaction(name, 'readwrite').objectStore(name)
+        const mk = (title, steps) => ({
+          title, servings: 2, effortLevel: 'normal', tags: [], ingredients: [], steps,
+          isFavorite: false, cookedLogs: [], searchWords: [], isStarter: false, updatedAt: Date.now(),
+        })
+        // 電子レンジしか使わない2品。レンジは1台なので、2品目は1品目が終わるまで始められない
+        const idA = await P(store('recipes').add(mk('E2Eレンジ蒸し野菜', [
+          { text: '耐熱ボウルに野菜を入れ、ラップをかけて電子レンジで15分加熱する。', minutes: 15 },
+        ])))
+        const idB = await P(store('recipes').add(mk('E2Eレンジ肉じゃが', [
+          { text: '耐熱皿に材料を入れ、ラップをかけて電子レンジで15分加熱する。', minutes: 15 },
+        ])))
+        let addedAt = Date.now()
+        await P(store('todayList').add({ recipeId: idA, addedAt: addedAt++ }))
+        await P(store('todayList').add({ recipeId: idB, addedAt: addedAt++ }))
+        const cur = (await P(store('settings').get(1))) || { id: 1 }
+        await P(store('settings').put({ ...cur, id: 1, proCode: 'UR-E2E-TEST-ONLY', proActivatedAt: Date.now() }))
+        db.close()
+      })
+      await kkNaviPage.goto(`${BASE}/#/cook-navi`)
+      await kkNaviPage.reload({ waitUntil: 'networkidle' })
+      await kkNaviPage.waitForTimeout(1200)
+      await kkNaviPage.getByRole('button', { name: ja.cookNavi.build }).click()
+      await kkNaviPage.waitForTimeout(600)
+      const kkNaviBody = stripZwspText(await kkNaviPage.textContent('body'))
+      const kkExpected = ja.cookNavi.noParallelByApplianceNote
+        .replace('{appliance}', ja.settings.kitchenMicrowave)
+        .replace('{n}', '2')
+      check(
+        'KKNAVI-01 レンジ2品では、器具の名前を出して理由を書く',
+        kkNaviBody.includes(kkExpected),
+        `画面=${kkNaviBody.slice(0, 240)}`,
+      )
+      check(
+        'KKNAVI-01 「待ち時間が見つかりませんでした」の文はもう出さない（理由が違うので嘘になる）',
+        !kkNaviBody.includes(ja.cookNavi.noParallelNote.replace('{n}', '2')),
+      )
+      check(
+        'KKNAVI-01 正直表示の枠そのものは出ている',
+        (await kkNaviPage.locator('[data-testid="navi-no-parallel"]').count()) === 1,
+      )
+    } finally {
+      await kkNaviBrowser.close()
+    }
+  }
+
   // --- NAVI-06: 取り込み時の分数自動入力(2026-08-08 便ED・docs/68 打ち手#2)。
   //     貼り付け取り込みは手順の「分」の欄が必ず空になり、本文に「15分煮る」と書いてあっても
   //     タイマーにも並行調理ナビにも使えていなかった。本文にある時間を「分」の欄へ写し、
@@ -26641,6 +26717,135 @@ try {
       )
     } finally {
       await wsBrowser.close()
+    }
+  }
+
+  // --- KKGENRE-01（2026-08-24 便KK・オーナー裁定B案「タグを持たない品は『どのジャンルにも合う』
+  //     として落とさない」）。
+  //
+  // 何が起きていたか（実データ90品＋同梱109品での実測）: 取り込んだレシピにはジャンルタグが
+  // 1件も付かないので、「和食だけ」を選ぶと**自分の品だけが全部消えていた**。しかも自分の品しか
+  // 無い端末では0件緩和が働いて全部出るので、**同じボタンが状況で正反対に効いて**いた。
+  //
+  // 測るのは画面に出る「主菜の候補◯品」の**動き**だけ（数そのものは決め打ちしない）。
+  //   ① ジャンルタグの無い品を1品足すと、「和食だけ」の候補が1品ぶん増える（落とさない）
+  //   ② 中華タグの品を1品足しても、「和食だけ」の候補は増えない（選ばなかったジャンルは落ちる）
+  // 生のIndexedDBへ書いたあとは必ず reload する（Dexieの購読は生書き込みを見ないため。禁じ手⑥）---
+  currentCheck = 'KKGENRE-01'
+  {
+    const kkBrowser = await chromium.launch()
+    const kkContext = await kkBrowser.newContext({ viewport: { width: 390, height: 844 } })
+    const kkPage = await kkContext.newPage()
+    kkPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin'))
+        return
+      errors.push(`[pageerror@KKGENRE-01] ${err.message}`)
+    })
+    /** 「今日なに作る？」の献立側に出ている主菜の候補数。読めなければ null（＝必ず不合格になる） */
+    const kkMainCandidates = async () => {
+      await kkPage.getByRole('button', { name: ja.mealPlan.viewDay, exact: true }).click()
+      await kkPage.waitForTimeout(1200)
+      const body = stripZwspText(await kkPage.textContent('body'))
+      // 画面の字は書き写さず、ja.ts の文型から探す形にする（JM-1〜JM-5）
+      const [head, tail] = ja.mealPlan.todaySuggestCandidateCount.split('{n}')
+      const m = body.match(new RegExp(`${head}\\s*(\\d+)\\s*${tail}`))
+      return m ? Number(m[1]) : null
+    }
+    /** 主菜になる品を1品足す（生のIndexedDB→そのあと必ず reload する） */
+    const kkAddMain = async (title, tags) => {
+      await kkPage.evaluate(
+        async ({ title, tags }) => {
+          const db = await new Promise((resolve, reject) => {
+            const r = indexedDB.open('uchi-recipe')
+            r.onsuccess = () => resolve(r.result)
+            r.onerror = () => reject(r.error)
+          })
+          await new Promise((res, rej) => {
+            const req = db
+              .transaction('recipes', 'readwrite')
+              .objectStore('recipes')
+              .add({
+                title,
+                servings: 2,
+                effortLevel: 'normal',
+                tags,
+                dishType: 'main',
+                ingredients: [{ name: 'とりもも肉', amount: '200', unit: 'g' }],
+                steps: [{ text: 'フライパンで焼く' }],
+                isFavorite: false,
+                cookedLogs: [],
+                searchWords: [],
+                isStarter: false,
+                createdAt: Date.now(),
+                updatedAt: Date.now(),
+              })
+            req.onsuccess = () => res(req.result)
+            req.onerror = () => rej(req.error)
+          })
+          db.close()
+        },
+        { title, tags },
+      )
+      await kkPage.reload({ waitUntil: 'networkidle' })
+      await kkPage.waitForTimeout(1500)
+    }
+    try {
+      await kkPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await kkPage.waitForTimeout(2400) // 初回シード完了待ち
+      await kkPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+      await kkPage.reload({ waitUntil: 'networkidle' })
+      await kkPage.waitForTimeout(1800)
+      // 「和食だけ」にする（既定は3つとも選んだ状態＝指定なし）
+      const kkTab = kkPage.getByRole('button', { name: ja.mealPlan.viewWeek, exact: true })
+      if ((await kkTab.getAttribute('aria-pressed')) !== 'true') {
+        await kkTab.click()
+        await kkPage.waitForTimeout(800)
+      }
+      const kkGroup = kkPage.getByRole('button', { name: '献立を提案を開く' })
+      if ((await kkGroup.count()) > 0) {
+        await kkGroup.click()
+        await kkPage.waitForTimeout(400)
+      }
+      if ((await kkPage.locator('[data-testid="plan-conditions-modal"]').count()) === 0) {
+        await kkPage.locator('[data-testid="plan-conditions-open"]').click()
+        await kkPage.waitForTimeout(500)
+      }
+      for (const off of MEAL_GENRES.filter((g) => g !== '和食')) {
+        const chip = kkPage.locator(`[data-testid="plan-genre-chip"][data-genre="${off}"]`)
+        if ((await chip.count()) === 1) {
+          await chip.click()
+          await kkPage.waitForTimeout(400)
+        }
+      }
+      const kkClose = kkPage.locator('[data-testid="plan-conditions-close"]')
+      if ((await kkClose.count()) > 0) {
+        await kkClose.click()
+        await kkPage.waitForTimeout(500)
+      }
+      const kkBase = await kkMainCandidates()
+      check(
+        'KKGENRE-01 前提: 「和食だけ」で主菜の候補が読める',
+        kkBase != null && kkBase > 0,
+        `和食だけ=${kkBase ?? '読めず'}`,
+      )
+      // ① ジャンルタグの無い品は落とさない
+      await kkAddMain('KKタグ無しの主菜', [])
+      const kkAfterTagless = await kkMainCandidates()
+      check(
+        'KKGENRE-01 ジャンルタグの無い品を足すと、「和食だけ」の候補が1品ぶん増える（落とさない）',
+        kkBase != null && kkAfterTagless != null && kkAfterTagless === kkBase + 1,
+        `足す前=${kkBase ?? '読めず'} 足したあと=${kkAfterTagless ?? '読めず'}`,
+      )
+      // ② 選ばなかったジャンルのタグが付いた品は今までどおり落ちる
+      await kkAddMain('KK中華の主菜', ['中華'])
+      const kkAfterChuka = await kkMainCandidates()
+      check(
+        'KKGENRE-01 中華タグの品を足しても、「和食だけ」の候補は増えない（選ばなかったジャンルは落ちる）',
+        kkAfterTagless != null && kkAfterChuka != null && kkAfterChuka === kkAfterTagless,
+        `足す前=${kkAfterTagless ?? '読めず'} 足したあと=${kkAfterChuka ?? '読めず'}`,
+      )
+    } finally {
+      await kkBrowser.close()
     }
   }
 

@@ -35,6 +35,15 @@ export interface KitchenEquipment {
   grill: boolean
   /** トースターがある */
   toaster: boolean
+  /**
+   * 台数を数えない器具（**診断専用**・2026-08-24 便KK）。
+   *
+   * 「1品ずつ作る順番になったのは、どの器具の台数が理由か」を見分けるために、
+   * **その器具だけ台数の制約を外して段取りを組み直す**のに使う（外して短くなるなら、
+   * 足りなかったのはその器具）。設定画面からは作られず、保存もされない。
+   * 段取りの本体（cookNavi.ts）はここを直接見ず、applianceCapacity 越しにだけ効く。
+   */
+  unlimited?: readonly ApplianceKey[]
 }
 
 /** コンロの口数として選べる範囲 */
@@ -83,8 +92,15 @@ export function kitchenFromSettings(
   }
 }
 
+/**
+ * 台数の制約を外したときに使う数（診断専用。2026-08-24 便KK）。
+ * 実際の台所には存在しない台数だが、段取りの上で「この器具は待たなくてよい」と読ませるためだけに使う。
+ */
+export const UNLIMITED_APPLIANCE_CAPACITY = 99
+
 /** その器具を同時にいくつ使えるか（持っていない器具は0） */
 export function applianceCapacity(kitchen: KitchenEquipment, key: ApplianceKey): number {
+  if (kitchen.unlimited?.includes(key)) return UNLIMITED_APPLIANCE_CAPACITY
   switch (key) {
     case 'stove':
       return clampBurners(kitchen.burners)
