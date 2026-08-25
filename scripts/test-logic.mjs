@@ -104,6 +104,15 @@ import {
 } from '../src/logic/cookingSupport.ts'
 import { preferSeasonWithFallback, SEASON_MIN_CANDIDATES } from '../src/logic/season.ts'
 import { guessDishType, suggestDishType } from '../src/logic/dishTypeGuess.ts'
+// 便KO（2026-08-25）: 取り込みで入らない項目と、1品に複数料理が入った品の見分け
+import {
+  missingImportFields,
+  recipeGenreTag,
+  tagsWithGenre,
+  IMPORT_FIELD_KEYS,
+  IMPORT_FIELD_NOTICE_SEEN_KEY,
+} from '../src/logic/importFieldGaps.ts'
+import { detectMultiDish, multiDishCount } from '../src/logic/multiDishImport.ts'
 import { PRICE_DEFAULTS } from '../src/data/priceDefaults.ts'
 import {
   PRICE_DEFAULTS_VERSION as PRICE_DEFAULTS_VERSION_FOR_JG,
@@ -31466,6 +31475,261 @@ import { safetyNotesFor, stepSafetyNotes, wholeRecipeSafetyNotes } from '../src/
     true,
   )
 }
+
+// ==========================================================================================
+// KO-1〜KO-6（2026-08-25 便KO）: 取り込んだレシピに「献立の絞り込みに要る項目」が入らない件
+//
+// 影響範囲テストの取り込み実データ90品の実測: ジャンル0件・季節0件・時間帯0件・
+// 手間レベルは全品が既定値の「普通」のまま。その結果「和食だけ」で絞ると自分の品が全部消え、
+// 「20分以内」で絞ると候補が枯れる。
+//
+// オーナーの裁定（3件・すべて推奨通り）:
+//   ①タグを付ける道を作る（取り込み直後に1タップ）。絞り込みの挙動はいまのまま
+//   ②自動で入らない項目の説明を、取り込みが終わった直後に。初回のみ・「今後表示しない」で消せる
+//   ④1品に複数料理が入った品は、取り込みのときに知らせるだけ（機械で分けない）
+//
+//   KO-1 入らなかった項目だけを数える（入ったものを出さない）
+//   KO-2 ジャンルはタグ1つで持ち、押し直すと外れる
+//   KO-3 取り込みの結果に、入らなかった項目の並びと説明が出る（登録画面）
+//   KO-4 説明は初回のみ・「今後表示しない」で消せて、設定から戻せる
+//   KO-5 1品に複数料理が入った品を見分ける（同梱109品で誤検出0）
+//   KO-6 足した文言が長文の規約（続けて読ませる本文160字まで）に収まっている
+// ==========================================================================================
+{
+  const koRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
+  const koFormSrc = readFileSync(path.join(koRoot, 'src/pages/RecipeFormPage.tsx'), 'utf-8')
+  const koSettingsSrc = readFileSync(path.join(koRoot, 'src/pages/SettingsPage.tsx'), 'utf-8')
+
+  // ---- KO-1: 入らなかった項目だけを数える ----
+  const koEmpty = {
+    tags: [],
+    season: undefined,
+    suitableFor: [],
+    dishType: undefined,
+    effortLevel: 'normal',
+  }
+  eq('KO-1 取り込んだ直後（何も入っていない）は5項目とも足りない', missingImportFields(koEmpty), [
+    'genre',
+    'season',
+    'suitableFor',
+    'dishType',
+    'effort',
+  ])
+  eq(
+    'KO-1 ジャンルのタグが付いている品では、ジャンルを出さない',
+    missingImportFields({ ...koEmpty, tags: ['中華', '作り置き'] }).includes('genre'),
+    false,
+  )
+  eq(
+    'KO-1 料理名から種別を当てられた品では、種別を出さない',
+    missingImportFields({ ...koEmpty, dishType: 'side' }).includes('dishType'),
+    false,
+  )
+  eq(
+    'KO-1 手間レベルは既定値の「普通」なら足りない扱い（人が選んでいない）',
+    [
+      missingImportFields({ ...koEmpty, effortLevel: 'normal' }).includes('effort'),
+      missingImportFields({ ...koEmpty, effortLevel: 'easy' }).includes('effort'),
+    ],
+    [true, false],
+  )
+  eq(
+    'KO-1 全部そろっていれば1つも出さない',
+    missingImportFields({
+      tags: ['和食'],
+      season: 'summer',
+      suitableFor: ['dinner'],
+      dishType: 'main',
+      effortLevel: 'fancy',
+    }),
+    [],
+  )
+  eq('KO-1 出す順は画面の並びと同じ', [...IMPORT_FIELD_KEYS], ['genre', 'season', 'suitableFor', 'dishType', 'effort'])
+
+  // ---- KO-2: ジャンルはタグ1つ（絞り込みが読むのと同じ形） ----
+  eq('KO-2 ジャンルはタグから読む', recipeGenreTag(['作り置き', '洋食']), '洋食')
+  eq('KO-2 ジャンルのタグが無ければ undefined', recipeGenreTag(['作り置き']), undefined)
+  eq('KO-2 選ぶと、他のタグを残したままジャンルのタグが1つ付く', tagsWithGenre(['作り置き'], '和食'), ['作り置き', '和食'])
+  eq('KO-2 別のジャンルを選ぶと入れ替わる（2つ付かない）', tagsWithGenre(['和食', '作り置き'], '中華'), ['作り置き', '中華'])
+  eq('KO-2 同じものを押すと外れる（季節・種別と同じ操作）', tagsWithGenre(['和食', '作り置き'], '和食'), ['作り置き'])
+
+  // ---- KO-3: 取り込みの結果に、入らなかった項目の並びが出る ----
+  eq(
+    'KO-3 登録画面が「入らなかった項目」を数えている',
+    koFormSrc.includes('missingImportFields('),
+    true,
+  )
+  eq(
+    'KO-3 取り込みの結果に、1タップで選べる並びを出している',
+    koFormSrc.includes('data-testid="import-field-gaps"'),
+    true,
+  )
+  eq(
+    'KO-3 選ぶ部品は、登録画面の季節・時間帯・種別と同じもの（新しい形を作らない）',
+    [koFormSrc.includes("from '../components/OptionPicker'"), existsSync(path.join(koRoot, 'src/components/OptionPicker.tsx'))],
+    [true, true],
+  )
+  eq(
+    'KO-3 取り込みの並びでは、既定の「普通」を選択中の色で塗らない（選んでいないのに選んだ顔にしない）',
+    koFormSrc.includes('isPicked={(level) => effortPicked && effortLevel === level}'),
+    true,
+  )
+  eq(
+    'KO-3 「くわしく」の季節・時間帯・種別・手間レベルも同じ部品で描いている',
+    (koFormSrc.match(/<OptionPicker/g) ?? []).length >= 5,
+    true,
+  )
+  eq(
+    'KO-3 5項目の見出しの文言がそろっている',
+    IMPORT_FIELD_KEYS.map((key) => typeof ja.form.importGapField?.[key] === 'string' && ja.form.importGapField[key].length > 0),
+    [true, true, true, true, true],
+  )
+
+  // ---- KO-4: 説明は初回のみ・消せる・戻せる ----
+  eq(
+    'KO-4 見た記録は他の案内と重ならない鍵で持つ',
+    IMPORT_FIELD_NOTICE_SEEN_KEY,
+    'uchirecipe:importFieldNoticeSeen',
+  )
+  eq(
+    'KO-4 見た記録の読み書きは、初回だけ出す案内の共通の作法（logic/noticeSeen.ts）に乗る',
+    (() => {
+      const src = readFileSync(path.join(koRoot, 'src/logic/importFieldGaps.ts'), 'utf-8')
+      return (
+        src.includes('hasSeenNotice(IMPORT_FIELD_NOTICE_SEEN_KEY)') &&
+        src.includes('markNoticeSeen(IMPORT_FIELD_NOTICE_SEEN_KEY)') &&
+        src.includes('forgetNoticeSeen(IMPORT_FIELD_NOTICE_SEEN_KEY)')
+      )
+    })(),
+    true,
+  )
+  eq(
+    'KO-4 登録画面に「今後表示しない」がある',
+    koFormSrc.includes('ja.form.importGapNoticeHide') && typeof ja.form.importGapNoticeHide === 'string',
+    true,
+  )
+  eq(
+    'KO-4 押すと、その場で消えて見た記録も残る（2回目の取り込みでは出ない）',
+    koFormSrc.includes('markImportFieldNoticeSeen()'),
+    true,
+  )
+  eq(
+    'KO-4 設定に戻せる場所がある（押した瞬間に二度と出せない形にしない）',
+    [
+      koSettingsSrc.includes('forgetImportFieldNoticeSeen'),
+      koSettingsSrc.includes('data-testid="import-gap-notice-switch"'),
+      typeof ja.settings.importGapNoticeTitle === 'string' && ja.settings.importGapNoticeTitle.length > 0,
+    ],
+    [true, true, true],
+  )
+
+  // ---- KO-5: 1品に複数料理が入った品を見分ける ----
+  // 実データ（影響範囲テスト・90品）で測ってから決めた形をそのまま置く。
+  // 実データそのものはリポジトリに入れないので、測って分かった「形」で書く
+  eq(
+    'KO-5 手順の行頭の見出しが2種類以上あれば複数料理',
+    detectMultiDish({
+      title: 'ねぎを使い切る',
+      steps: [
+        { text: '＜豚肉とねぎのごまポン酢しょうゆ＞ ねぎは4cm幅に切る。' },
+        { text: 'フライパンにごま油を入れて熱し、豚肉を焼く。' },
+        { text: '【ねぎ味噌】ねぎは小口切りにする。' },
+      ],
+    })?.headings,
+    ['豚肉とねぎのごまポン酢しょうゆ', 'ねぎ味噌'],
+  )
+  eq(
+    'KO-5 料理名が「◯選」「献立」なら、見出しが無くても知らせる',
+    [
+      detectMultiDish({ title: 'ブロッコリー使い切り3選', steps: [{ text: 'ゆでる。' }] }) !== undefined,
+      detectMultiDish({ title: 'ねぎ3本使い切り献立', steps: [{ text: 'ゆでる。' }] }) !== undefined,
+    ],
+    [true, true],
+  )
+  eq(
+    'KO-5 合わせ調味料の印は料理名ではない（文の途中の【A】【B】で誤検出しない）',
+    detectMultiDish({
+      title: '鶏むね肉の柔らか甘辛煮',
+      steps: [
+        { text: '保存袋に【A】を入れて混ぜ、鶏肉を加えて揉み込む。' },
+        { text: '合わせておいた【B】を加えて照りが出るまで煮る。' },
+      ],
+    }),
+    undefined,
+  )
+  eq(
+    'KO-5 行頭でも料理名でない見出し（お好みで・調味料・煮汁）では知らせない',
+    detectMultiDish({
+      title: '五目豆',
+      steps: [
+        { text: '【調味料】を合わせる。' },
+        { text: '【煮汁】が少なくなるまで煮る。' },
+        { text: '【お好みで】大葉を添えても◯' },
+      ],
+    }),
+    undefined,
+  )
+  eq(
+    'KO-5 ふつうの1品では知らせない',
+    detectMultiDish({ title: '麻婆豆腐', steps: [{ text: '豆腐を切る。' }, { text: '炒める。' }] }),
+    undefined,
+  )
+  eq(
+    'KO-5 数を言えるのは見出しから数えられたときだけ',
+    [
+      multiDishCount({ headings: ['あ', 'い', 'う'], titleSaysMany: false }),
+      multiDishCount({ headings: [], titleSaysMany: true }),
+    ],
+    [3, undefined],
+  )
+  {
+    // 同梱の基本レシピ109品は、どれも1品ぶんの原稿。1品でも複数料理と言ったら赤
+    const { starterDefs: koStarters } = await import('../src/db/starters.ts')
+    eq('KO-5 前提: 同梱の基本レシピを読めている', koStarters.length > 100, true)
+    eq(
+      'KO-5 同梱の基本レシピで誤検出0件',
+      koStarters.filter((r) => detectMultiDish({ title: r.title, steps: r.steps }) !== undefined).map((r) => r.title),
+      [],
+    )
+  }
+  eq(
+    'KO-5 知らせるだけ（材料・手順を機械で分ける処理を持たない）',
+    /split|divide|分割/.test(readFileSync(path.join(koRoot, 'src/logic/multiDishImport.ts'), 'utf-8')),
+    false,
+  )
+  eq(
+    'KO-5 登録画面が取り込みの結果で知らせている',
+    koFormSrc.includes('detectMultiDish(') && koFormSrc.includes('data-testid="import-multi-dish"'),
+    true,
+  )
+
+  // ---- KO-6: 足した文言が長文の規約に収まっている ----
+  {
+    const KO_LIMIT = 160
+    const koTexts = [
+      ['ja.form.importGapNoticeBody', ja.form.importGapNoticeBody],
+      ['ja.form.importGapTitle', ja.form.importGapTitle],
+      ['ja.form.importGapNoticeHide', ja.form.importGapNoticeHide],
+      ['ja.form.importMultiDish', ja.form.importMultiDish],
+      ['ja.form.importMultiDishUnknown', ja.form.importMultiDishUnknown],
+      ['ja.settings.importGapNoticeTitle', ja.settings.importGapNoticeTitle],
+      ['ja.settings.importGapNoticeDescription', ja.settings.importGapNoticeDescription],
+      ['ja.settings.importGapNoticeShow', ja.settings.importGapNoticeShow],
+      ['ja.settings.importGapNoticeOnce', ja.settings.importGapNoticeOnce],
+    ]
+    eq(
+      'KO-6 足した文言がすべて書かれている',
+      koTexts.filter(([, text]) => typeof text !== 'string' || text.length === 0).map(([name]) => name),
+      [],
+    )
+    eq(
+      `KO-6 続けて読ませる本文が${KO_LIMIT}字以内`,
+      koTexts.filter(([, text]) => typeof text === 'string' && text.length > KO_LIMIT).map(([name, text]) => `${name} ${text.length}字`),
+      [],
+    )
+  }
+}
+
 
 // ---------- 結果 ----------
 console.log(`合格: ${passed}件 / 失敗: ${failures.length}件`)

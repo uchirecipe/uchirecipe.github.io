@@ -51,6 +51,19 @@ import type { ImportedStepRow } from '../logic/urlImportRows'
 import { stepMinutesFromText } from '../logic/importStepMinutes'
 import { pickIconKey, iconKeyOrder } from '../logic/icon'
 import { suggestDishType } from '../logic/dishTypeGuess'
+// 取り込みで入らない項目（2026-08-25 便KO・①②）と、1品に複数料理が入った品の見分け（④）
+import {
+  isImportFieldNoticeSeen,
+  markImportFieldNoticeSeen,
+  missingImportFields,
+  recipeGenreTag,
+  tagsWithGenre,
+} from '../logic/importFieldGaps'
+import type { ImportFieldKey } from '../logic/importFieldGaps'
+import { detectMultiDish, multiDishCount } from '../logic/multiDishImport'
+import type { MultiDishSignal } from '../logic/multiDishImport'
+import { MEAL_GENRES } from '../logic/mealPlan'
+import OptionPicker from '../components/OptionPicker'
 import { toTagKey } from '../logic/kana'
 import {
   MAX_SEASONING_GROUP,
@@ -317,6 +330,13 @@ const seasons: Exclude<Season, 'all'>[] = ['spring', 'summer', 'autumn', 'winter
 const mealSlots: MealSlot[] = ['breakfast', 'lunch', 'dinner']
 const dishTypes: DishType[] = ['main', 'side', 'soup', 'dessert']
 
+// 選ぶ並びに渡す形（2026-08-25 便KO。値と画面に出す文字の組を1か所にまとめる）
+const effortOptions = effortLevels.map((value) => ({ value, label: ja.effort[value] }))
+const seasonOptions = seasons.map((value) => ({ value, label: ja.season[value] }))
+const mealSlotOptions = mealSlots.map((value) => ({ value, label: ja.mealPlan.slot[value] }))
+const dishTypeOptions = dishTypes.map((value) => ({ value, label: ja.dishType[value] }))
+const genreOptions = MEAL_GENRES.map((value) => ({ value, label: value }))
+
 const inputCls =
   'mt-1 block w-full rounded-sm border border-edge bg-surface px-3 py-3 text-base text-ink placeholder:text-ink-muted/60'
 const labelCls = 'block text-sm font-bold text-ink-muted'
@@ -467,6 +487,99 @@ function RecipeFormInner() {
     !isEdit && !dishTypeTouched && dishType === undefined && title.trim() !== ''
   // 実際に「選択中」として扱う種別。未設定でも提案表示中なら提案値を使い、保存時もこの値を採用する。
   const effectiveDishType = dishType ?? (showDishTypeSuggestion ? suggestedDishType : undefined)
+
+  /** 種別を押したとき（もう一度押すと外れる。「かんたん」「くわしく」の両方から呼ぶ） */
+  const pickDishType = (value: DishType) => {
+    setDishTypeTouched(true)
+    setDishType((current) => (current === value ? undefined : value))
+  }
+  /**
+   * 手間レベルを人が押したか（2026-08-25 便KO）。
+   *
+   * 手間レベルは「選ばなければ普通」で、取り込んだ品はすべて普通のまま入る
+   * （logic/effort.ts が同じ理由でカードのバッジも絞り込みの選択肢も出していない）。
+   * 取り込みの直後の並びで「普通」を選択中の色で塗ると、**選んでいないのに選んだ顔**になるので、
+   * 押されるまではどれも塗らない。「くわしく」の手間レベルは今までどおり常に1つ塗る
+   * （そちらは登録画面の入力欄で、いまの保存値を見せる場所なので意味が違う）。
+   */
+  const [effortPicked, setEffortPicked] = useState(false)
+  const pickEffort = (level: EffortLevel) => {
+    setEffortPicked(true)
+    setEffortLevel(level)
+  }
+  /** 季節を押したとき（もう一度押すと外れる） */
+  const pickSeason = (value: Exclude<Season, 'all'>) => {
+    setSeason((current) => (current === value ? undefined : value))
+  }
+  /** 向いている時間帯を押したとき（複数選べる。もう一度押すと外れる） */
+  const pickSuitableFor = (slot: MealSlot) => {
+    setSuitableFor((current) =>
+      current.includes(slot) ? current.filter((s) => s !== slot) : [...current, slot],
+    )
+  }
+  /**
+   * ジャンルを押したとき（2026-08-25 便KO・①）。ジャンルは献立の絞り込みが読む
+   * タグ（「和食」「洋食」「中華」）そのものなので、タグを1つだけ入れ替える。
+   * 他のタグは残る＝取り込みで付いたタグを消さない。
+   */
+  const pickGenre = (genre: (typeof MEAL_GENRES)[number]) => {
+    setTags((current) => tagsWithGenre(current, genre))
+  }
+
+  /**
+   * 取り込みの直後に「入らなかった項目」だけを並べる（2026-08-25 便KO・①）。
+   *
+   * 取り込みのときに1回だけ数えて覚えておく（毎レンダー数え直さない）。数え直すと、
+   * 1つ押した瞬間にその並びが画面から消えて、押し直しも選び直しもできなくなる。
+   */
+  const [importGapFields, setImportGapFields] = useState<ImportFieldKey[]>([])
+  /** 入らない項目の説明を、いま出しているか（この端末での初回だけ true になる） */
+  const [importGapNoticeOpen, setImportGapNoticeOpen] = useState(false)
+  /** 1品に複数の料理が入っていそうな取り込みの知らせ（2026-08-25 便KO・④。知らせるだけ） */
+  const [importMultiDish, setImportMultiDish] = useState<MultiDishSignal>()
+
+  /** 取り込みをやり直したときに、前の取り込みの知らせが残らないよう先に片付ける */
+  const clearImportFollowUp = () => {
+    setEffortPicked(false)
+    setImportGapFields([])
+    setImportGapNoticeOpen(false)
+    setImportMultiDish(undefined)
+  }
+
+  /**
+   * 取り込みが終わった直後に、入らなかった項目を数えて覚える（①）と、
+   * 1品に複数の料理が入っていそうかを見る（④）。
+   *
+   * 種別・料理名は取り込み直後の値を呼ぶ側から受け取る（setState はこの時点ではまだ
+   * 反映されていないので、state から読むと1回前の値になる）。
+   */
+  const noteImportFollowUp = (params: {
+    title: string
+    ingredients: readonly { name: string }[]
+    steps: readonly { text: string }[]
+  }) => {
+    // 種別は取り込み後に画面が「選択中」として扱う値と同じにする
+    // （料理名から読み取れた品は「入った」ので並びに出さない）
+    const guessed =
+      dishType ??
+      (params.title
+        ? suggestDishType({ title: params.title, tags, ingredients: params.ingredients })
+        : undefined)
+    const gaps = missingImportFields({
+      tags,
+      season,
+      suitableFor,
+      dishType: guessed,
+      effortLevel,
+    })
+    setImportGapFields(gaps)
+    // 説明はこの端末での初回だけ（オーナー指示「毎回表示されると邪魔なので、初回のみ」）。
+    // 出したその場で見た記録を残すので、次の取り込みからは並びだけになる
+    const firstTime = gaps.length > 0 && !isImportFieldNoticeSeen()
+    setImportGapNoticeOpen(firstTime)
+    if (firstTime) markImportFieldNoticeSeen()
+    setImportMultiDish(detectMultiDish({ title: params.title, steps: params.steps }))
+  }
 
   // 「かんたん / くわしく」タブ(2026-07-16 Fable裁定docs/26・案A)。ページローカルの表示状態のみで、
   // 保存対象にも下書き対象にもしない(URLにも載せない)。新規・編集とも初期表示は常に「かんたん」
@@ -1009,6 +1122,7 @@ function RecipeFormInner() {
     // 従来は連続して取り込むと、前のURLの写真が後から現在の内容の上に着弾し(材料は新しい
     // レシピ・写真は前のレシピ)、画面を離れた後でも古い件数のままの確認ダイアログが割り込んでいた
     const generation = ++urlImportGenerationRef.current
+    clearImportFollowUp()
     setUrlImportLoading(true)
     // 前の取り込みの写真待ちは、この取り込みで置き換わるので一旦降ろす(便KG)
     setUrlImportPhotoLoading(false)
@@ -1153,6 +1267,12 @@ function RecipeFormInner() {
           'warn',
         )
       } else {
+        // 取り込みで入らなかった項目と、複数料理の知らせ（2026-08-25 便KO・①④）
+        noteImportFollowUp({
+          title: title.trim() || (result.title ? stripImportedMarkup(result.title) : ''),
+          ingredients: importedRows.map((row) => ({ name: row.name })),
+          steps: importedSteps.map((step) => ({ text: typeof step === 'string' ? step : step.text })),
+        })
         // 件数だけでは「どこを直せばよいか」が分からないという5体一致の指摘への最小限の答え
         // (便BX/C09ライト版)。分量を読み取れなかった件数だけ内訳として添える
         const amountless = countAmountlessRows(importedRows)
@@ -1202,6 +1322,7 @@ function RecipeFormInner() {
     }
     // 貼り付けた文章にもHTMLの印が混ざることがある（写真取り込みのBYO-AIで作った文章・
     // ページから範囲選択して貼った文章）。URL取り込みと同じ手当てを通してから解釈する（便IL/①）
+    clearImportFollowUp()
     const parsed = parseRecipeText(stripPastedMarkup(pasteText))
     if (parsed.ingredients.length === 0 && parsed.steps.length === 0) {
       showPasteMessage(ja.paste.resultNone, 'warn')
@@ -1315,6 +1436,12 @@ function RecipeFormInner() {
     // 添える一文はどれも句点で終わる（i18n側で終端まで書いてある）。
     // 件数の一文だけ句点を持たないので、添える文がある場合に1つだけ足す
     // （2026-08-12 便FU-3。文ごとに句点を足していて「入れました。。調理時間も…」になっていた）
+    // 取り込みで入らなかった項目と、複数料理の知らせ（2026-08-25 便KO・①④）
+    noteImportFollowUp({
+      title: title.trim() || parsed.title || '',
+      ingredients: parsed.ingredients.map((row) => ({ name: row.name })),
+      steps: pastedStepRows.map((row) => ({ text: row.text })),
+    })
     const pasteServingsNote = pasteServings.unread ? ja.paste.servingsNotRead : ''
     const pasteNotes = [
       pasteAlsoAppliedNote,
@@ -1861,6 +1988,106 @@ function RecipeFormInner() {
     showIconInsteadOfPhoto,
   })
 
+  /**
+   * 取り込みが終わった直後に出すもの（2026-08-25 便KO）。URL取り込み・貼り付けの
+   * どちらの結果の下にも同じものを置く（2つの経路で見え方を変えない）。
+   *
+   *  ④ 1品に複数の料理が入っていそうなら知らせる（知らせるだけ・機械では分けない）
+   *  ① 入らなかった項目だけを、登録画面と同じ選ぶ並びで出す（押さなくても保存できる）
+   *  ② 入らない項目があることの説明は、この端末での初回だけ。「今後表示しない」で消せて、
+   *     設定の「取り込みのあとの説明」で戻せる
+   */
+  const importFollowUp =
+    importMultiDish === undefined && importGapFields.length === 0 ? null : (
+      <div data-testid="import-follow-up">
+        {importMultiDish && (
+          <p
+            data-testid="import-multi-dish"
+            role="status"
+            className="ja-phrase mt-[var(--space-sm)] rounded-sm border border-edge bg-app px-3 py-2 text-sm text-ink"
+          >
+            {multiDishCount(importMultiDish) !== undefined
+              ? ja.form.importMultiDish.replace('{n}', String(multiDishCount(importMultiDish)))
+              : ja.form.importMultiDishUnknown}
+          </p>
+        )}
+        {importGapFields.length > 0 && (
+          <div
+            data-testid="import-field-gaps"
+            className="mt-[var(--space-sm)] rounded-md border border-edge bg-app p-[var(--space-md)]"
+          >
+            <p className="text-sm font-bold text-ink">{ja.form.importGapTitle}</p>
+            {importGapNoticeOpen && (
+              <div data-testid="import-gap-notice">
+                <p className="ja-phrase mt-1 text-sm text-ink-muted">{ja.form.importGapNoticeBody}</p>
+                <button
+                  type="button"
+                  data-testid="import-gap-notice-hide"
+                  onClick={() => {
+                    setImportGapNoticeOpen(false)
+                    markImportFieldNoticeSeen()
+                  }}
+                  className="tap-target mt-1 inline-flex min-h-[var(--tap-min)] items-center rounded-sm border border-edge bg-surface px-3 text-sm font-bold text-ink-muted"
+                >
+                  {ja.form.importGapNoticeHide}
+                </button>
+              </div>
+            )}
+            {importGapFields.includes('genre') && (
+              <OptionPicker
+                label={ja.form.importGapField.genre}
+                options={genreOptions}
+                cols={3}
+                isPicked={(genre) => recipeGenreTag(tags) === genre}
+                onPick={pickGenre}
+                testId="import-gap-genre"
+              />
+            )}
+            {importGapFields.includes('season') && (
+              <OptionPicker
+                label={ja.form.importGapField.season}
+                options={seasonOptions}
+                cols={4}
+                isPicked={(value) => season === value}
+                onPick={pickSeason}
+                testId="import-gap-season"
+              />
+            )}
+            {importGapFields.includes('suitableFor') && (
+              <OptionPicker
+                label={ja.form.importGapField.suitableFor}
+                options={mealSlotOptions}
+                cols={3}
+                isPicked={(slot) => suitableFor.includes(slot)}
+                onPick={pickSuitableFor}
+                testId="import-gap-suitable-for"
+              />
+            )}
+            {importGapFields.includes('dishType') && (
+              <OptionPicker
+                label={ja.form.importGapField.dishType}
+                options={dishTypeOptions}
+                cols={4}
+                isPicked={(value) => effectiveDishType === value}
+                onPick={pickDishType}
+                testId="import-gap-dish-type"
+              />
+            )}
+            {importGapFields.includes('effort') && (
+              <OptionPicker
+                label={ja.form.importGapField.effort}
+                options={effortOptions}
+                cols={3}
+                isPicked={(level) => effortPicked && effortLevel === level}
+                onPick={pickEffort}
+                testId="import-gap-effort"
+              />
+            )}
+          </div>
+        )}
+      </div>
+    )
+
   return (
     <div className="mx-auto w-full max-w-md pb-[var(--space-lg)]">
       <BackHeader fallback={isEdit && editId !== undefined ? `/recipes/${editId}` : '/recipes'} />
@@ -1985,6 +2212,7 @@ function RecipeFormInner() {
               {urlImportMessage && urlImportMessageTone === 'info' && (
                 <ImportSeasoningGuide groupCount={importedSeasoningGroups} />
               )}
+              {urlImportMessage && urlImportMessageTone === 'info' && importFollowUp}
               <div className="mt-[var(--space-sm)] flex gap-2">
                 <button
                   type="button"
@@ -2048,6 +2276,7 @@ function RecipeFormInner() {
           {pasteMessage && pasteMessageTone === 'info' && (
             <ImportSeasoningGuide groupCount={importedSeasoningGroups} />
           )}
+          {pasteMessage && pasteMessageTone === 'info' && importFollowUp}
           <div className="mt-[var(--space-sm)] flex gap-2">
             <button
               type="button"
@@ -2173,36 +2402,23 @@ function RecipeFormInner() {
           実機QAでは麦茶・ぬか漬け・みそ汁などが自動で「主菜」に決まったまま保存され、
           献立プランナーの提案に効いていた。自動で決まった値が見えて、1タップで直せるようにする
           （state は detail タブ側と共有。どちらで押しても同じ値が変わる） */}
-      <div className="mt-[var(--space-md)]">
-        <span className={labelCls}>{ja.form.dishTypeShortLabel}</span>
-        <div className="mt-1 grid grid-cols-4 gap-[var(--space-sm)]">
-          {dishTypes.map((value) => (
-            <button
-              key={value}
-              type="button"
-              // 選んでいるかどうかを、色だけでなく状態としても持たせる（2026-08-23 便KG）。
-              // 読み上げにも伝わり、種別が未選択（保留）のままかどうかを見張れる
-              aria-pressed={effectiveDishType === value}
-              onClick={() => {
-                setDishTypeTouched(true)
-                setDishType((current) => (current === value ? undefined : value))
-              }}
-              className={`rounded-md border py-2.5 text-sm font-bold shadow-sm ${
-                effectiveDishType === value
-                  ? 'border-accent bg-accent text-on-accent'
-                  : 'border-edge bg-surface text-ink-muted'
-              }`}
-            >
-              {ja.dishType[value]}
-            </button>
-          ))}
-        </div>
-        {showDishTypeSuggestion && (
-          <p className="mt-1 text-sm text-ink-muted">
-            {effectiveDishType !== undefined ? ja.form.dishTypeAutoHint : ja.form.dishTypeNotGuessedHint}
-          </p>
-        )}
-      </div>
+      {/* 選んでいるかどうかは色だけでなく aria-pressed でも伝える（2026-08-23 便KG）。
+          並びそのものは共通の部品（components/OptionPicker.tsx・2026-08-25 便KO） */}
+      <OptionPicker
+        label={ja.form.dishTypeShortLabel}
+        options={dishTypeOptions}
+        cols={4}
+        compact
+        isPicked={(value) => effectiveDishType === value}
+        onPick={pickDishType}
+        hint={
+          showDishTypeSuggestion ? (
+            <p className="mt-1 text-sm text-ink-muted">
+              {effectiveDishType !== undefined ? ja.form.dishTypeAutoHint : ja.form.dishTypeNotGuessedHint}
+            </p>
+          ) : undefined
+        }
+      />
 
       {/* 材料（追加・削除・並べ替え） */}
       <div className="mt-[var(--space-lg)]">
@@ -2829,110 +3045,54 @@ function RecipeFormInner() {
         />
       </label>
 
-      {/* 手間レベル（3段階） */}
-      <div className="mt-[var(--space-md)]">
-        <span className={labelCls}>{ja.form.effortLabel}</span>
-        <div className="mt-1 grid grid-cols-3 gap-[var(--space-sm)]">
-          {effortLevels.map((level) => (
-            <button
-              key={level}
-              type="button"
-              onClick={() => setEffortLevel(level)}
-              className={`rounded-md border py-3 font-bold shadow-sm ${
-                effortLevel === level
-                  ? 'border-accent bg-accent text-on-accent'
-                  : 'border-edge bg-surface text-ink-muted'
-              }`}
-            >
-              {ja.effort[level]}
-            </button>
-          ))}
-        </div>
-      </div>
+      {/* 手間レベル（3段階。3つのどれかに必ず入るので、押しても外れない） */}
+      <OptionPicker
+        label={ja.form.effortLabel}
+        options={effortOptions}
+        cols={3}
+        isPicked={(level) => effortLevel === level}
+        onPick={pickEffort}
+      />
 
       <h2 className={sectionHeadingCls}>{ja.form.detailSectionPlanning}</h2>
 
       {/* 季節（任意・もう一度押すと解除） */}
-      <div className="mt-[var(--space-md)]">
-        <span className={labelCls}>{ja.form.seasonLabel}</span>
-        <p className="mt-1 text-sm text-ink-muted">{ja.form.seasonDescription}</p>
-        <div className="mt-1 grid grid-cols-4 gap-[var(--space-sm)]">
-          {seasons.map((value) => (
-            <button
-              key={value}
-              type="button"
-              onClick={() => setSeason((current) => (current === value ? undefined : value))}
-              className={`rounded-md border py-3 font-bold shadow-sm ${
-                season === value
-                  ? 'border-accent bg-accent text-on-accent'
-                  : 'border-edge bg-surface text-ink-muted'
-              }`}
-            >
-              {ja.season[value]}
-            </button>
-          ))}
-        </div>
-      </div>
+      <OptionPicker
+        label={ja.form.seasonLabel}
+        description={ja.form.seasonDescription}
+        options={seasonOptions}
+        cols={4}
+        isPicked={(value) => season === value}
+        onPick={pickSeason}
+      />
 
       {/* 向いている時間帯（任意・複数選択可） */}
-      <div className="mt-[var(--space-md)]">
-        <span className={labelCls}>{ja.form.suitableForLabel}</span>
-        <p className="mt-1 text-sm text-ink-muted">{ja.form.suitableForDescription}</p>
-        <div className="mt-1 grid grid-cols-3 gap-[var(--space-sm)]">
-          {mealSlots.map((slot) => (
-            <button
-              key={slot}
-              type="button"
-              onClick={() =>
-                setSuitableFor((current) =>
-                  current.includes(slot) ? current.filter((s) => s !== slot) : [...current, slot],
-                )
-              }
-              className={`rounded-md border py-3 font-bold shadow-sm ${
-                suitableFor.includes(slot)
-                  ? 'border-accent bg-accent text-on-accent'
-                  : 'border-edge bg-surface text-ink-muted'
-              }`}
-            >
-              {ja.mealPlan.slot[slot]}
-            </button>
-          ))}
-        </div>
-      </div>
+      <OptionPicker
+        label={ja.form.suitableForLabel}
+        description={ja.form.suitableForDescription}
+        options={mealSlotOptions}
+        cols={3}
+        isPicked={(slot) => suitableFor.includes(slot)}
+        onPick={pickSuitableFor}
+      />
 
       {/* 料理の種別（任意・もう一度押すと解除。献立プランナーの主菜/副菜提案に使う）。
           同じ選択は「かんたん」タブにも出している(2026-07-28 便BW/C-05)。stateは共通 */}
-      <div className="mt-[var(--space-md)]">
-        <span className={labelCls}>{ja.form.dishTypeLabel}</span>
-        <p className="mt-1 text-sm text-ink-muted">{ja.form.dishTypeDescription}</p>
-        <div className="mt-1 grid grid-cols-4 gap-[var(--space-sm)]">
-          {dishTypes.map((value) => (
-            <button
-              key={value}
-              type="button"
-              // 選んでいるかどうかを、色だけでなく状態としても持たせる（2026-08-23 便KG）。
-              // 読み上げにも伝わり、種別が未選択（保留）のままかどうかを見張れる
-              aria-pressed={effectiveDishType === value}
-              onClick={() => {
-                setDishTypeTouched(true)
-                setDishType((current) => (current === value ? undefined : value))
-              }}
-              className={`rounded-md border py-3 font-bold shadow-sm ${
-                effectiveDishType === value
-                  ? 'border-accent bg-accent text-on-accent'
-                  : 'border-edge bg-surface text-ink-muted'
-              }`}
-            >
-              {ja.dishType[value]}
-            </button>
-          ))}
-        </div>
-        {showDishTypeSuggestion && (
-          <p className="mt-1 text-sm text-ink-muted">
-            {effectiveDishType !== undefined ? ja.form.dishTypeAutoHint : ja.form.dishTypeNotGuessedHint}
-          </p>
-        )}
-      </div>
+      <OptionPicker
+        label={ja.form.dishTypeLabel}
+        description={ja.form.dishTypeDescription}
+        options={dishTypeOptions}
+        cols={4}
+        isPicked={(value) => effectiveDishType === value}
+        onPick={pickDishType}
+        hint={
+          showDishTypeSuggestion ? (
+            <p className="mt-1 text-sm text-ink-muted">
+              {effectiveDishType !== undefined ? ja.form.dishTypeAutoHint : ja.form.dishTypeNotGuessedHint}
+            </p>
+          ) : undefined
+        }
+      />
 
       {/* タグ（自由追加） */}
       <div className="mt-[var(--space-lg)]">

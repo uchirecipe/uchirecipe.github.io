@@ -32,3 +32,18 @@ export function markNoticeSeen(key: string): void {
     // プライベートブラウズ等で書けなくても、案内が出るだけなので黙って諦める
   }
 }
+
+/**
+ * 見た記録を消す（もう一度出す。2026-08-25 便KO）。
+ *
+ * 「今後表示しない」を押したあとに**戻せる場所**が要る（設定から出し直せる）。
+ * 押した瞬間に二度と出せない形にしないための道で、消せなくても黙って諦める
+ * （出し直せないだけで、失われるものはない）。
+ */
+export function forgetNoticeSeen(key: string): void {
+  try {
+    window.localStorage.removeItem(key)
+  } catch {
+    // 書けない端末では出し直せないだけなので、黙って諦める
+  }
+}

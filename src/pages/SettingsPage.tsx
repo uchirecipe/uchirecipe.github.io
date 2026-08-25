@@ -100,6 +100,12 @@ import {
 import { detachedPhotoBytes } from '../logic/detachedLogs'
 import { db } from '../db/db'
 import { isLaunchedFromHomeScreen } from '../logic/standalone'
+// 取り込みのあとの説明を出し直す（2026-08-25 便KO・②。押した瞬間に二度と出せない形にしない）
+import {
+  forgetImportFieldNoticeSeen,
+  isImportFieldNoticeSeen,
+  markImportFieldNoticeSeen,
+} from '../logic/importFieldGaps'
 import { isImeConfirmKey } from '../logic/imeKey'
 import {
   isValidProCode,
@@ -458,6 +464,12 @@ export default function SettingsPage() {
   }
   // 設定画面を離れるときも、鳴らしっぱなしにしない
   useEffect(() => () => stopPreviewRef.current?.(), [])
+  /**
+   * 取り込みのあとの説明を出すか（2026-08-25 便KO・②）。
+   * 記録は localStorage なので Dexie の設定のように勝手には変わらない＝画面側で持つ。
+   * 一度出すと自動で切れる（初回のみ）ので、入れ直すとまた次の取り込みで出る。
+   */
+  const [importGapNoticeOn, setImportGapNoticeOn] = useState(() => !isImportFieldNoticeSeen())
   const [recipeSetUrl, setRecipeSetUrl] = useState('')
   const [recipeSetLoading, setRecipeSetLoading] = useState(false)
   // 「レシピセットを読み込む」欄の「URLから読み込む」「ファイルから読み込む」の結果メッセージ
@@ -1820,6 +1832,41 @@ export default function SettingsPage() {
                 />
               </button>
             </label>
+          </section>
+
+          {/* 取り込みのあとの説明（2026-08-25 便KO・②）。オーナー原文「毎回表示されると邪魔なので、
+              初回のみにして、今後表示しないを押したら消せるくらいがいい」。消したあとに戻す場所が
+              ここ＝押した瞬間に二度と出せない形にしない。レシピのデータには何も書き込まない */}
+          <section className={sectionCls}>
+            <h2 className="font-bold">{ja.settings.importGapNoticeTitle}</h2>
+            <p className="mt-1 text-sm text-ink-muted">{ja.settings.importGapNoticeDescription}</p>
+            <label className="mt-[var(--space-sm)] flex items-center justify-between gap-3">
+              <span className="min-w-0 text-sm font-bold text-ink-muted">
+                {ja.settings.importGapNoticeShow}
+              </span>
+              <button
+                type="button"
+                role="switch"
+                data-testid="import-gap-notice-switch"
+                aria-checked={importGapNoticeOn}
+                aria-label={ja.settings.importGapNoticeShow}
+                onClick={() => {
+                  if (importGapNoticeOn) markImportFieldNoticeSeen()
+                  else forgetImportFieldNoticeSeen()
+                  setImportGapNoticeOn((on) => !on)
+                }}
+                className={`relative h-8 w-14 shrink-0 rounded-full transition-colors ${
+                  importGapNoticeOn ? 'bg-accent' : 'bg-edge'
+                }`}
+              >
+                <span
+                  className={`absolute top-1 h-6 w-6 rounded-full bg-surface shadow-sm transition-all ${
+                    importGapNoticeOn ? 'left-7' : 'left-1'
+                  }`}
+                />
+              </button>
+            </label>
+            <p className="mt-1 text-xs text-ink-muted">{ja.settings.importGapNoticeOnce}</p>
           </section>
 
           {/* レシピセットの読み込み */}

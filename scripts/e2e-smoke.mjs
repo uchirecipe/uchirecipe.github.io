@@ -53128,6 +53128,259 @@ try {
     }
   }
 
+  // ============================================================================
+  // KOGAP-01〜04・KOMULTI-01（2026-08-25 便KO）: 取り込みで入らない項目と、複数料理の知らせ
+  //
+  //   影響範囲テストの取り込み実データ90品では、献立の絞り込みが読む項目
+  //   （ジャンル・季節・時間帯・種別・手間レベル）が1つも入っていなかった。
+  //
+  //   KOGAP-01 取り込みが終わった直後に、入らなかった項目だけが1タップで選べる形で出る
+  //   KOGAP-02 押さなくても保存できる／押した値はそのまま保存される
+  //   KOGAP-03 説明は初回のみ・「今後表示しない」で消せる（2回目の取り込みでは出ない）
+  //   KOGAP-04 設定から戻すと、また出る
+  //   KOMULTI-01 1品に複数料理が入った取り込みだけを知らせる
+  // ============================================================================
+  currentCheck = 'KOGAP-01'
+  {
+    const koBrowser = await chromium.launch()
+    const koCtx = await koBrowser.newContext({ viewport: { width: 390, height: 844 } })
+    const koPage = await koCtx.newPage()
+    koPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@KO] ${err.message}`)
+    })
+    /** 貼り付けから取り込む（登録画面を開き直してから貼る＝前の入力を持ち越さない） */
+    const koPaste = async (text) => {
+      await koPage.goto(`${BASE}/#/recipes/new`)
+      await koPage.reload({ waitUntil: 'networkidle' })
+      await koPage.waitForTimeout(900)
+      await koPage.getByText(ja.paste.open).click()
+      await koPage.waitForTimeout(300)
+      await koPage.locator(`textarea[placeholder="${ja.paste.placeholder}"]`).fill(text)
+      await koPage.getByRole('button', { name: ja.paste.apply }).click()
+      await koPage.waitForTimeout(700)
+    }
+    // ジャンル・季節・時間帯・手間レベルがどこにも書かれていない、ふつうの1品
+    const KO_PLAIN =
+      'KO取り込みの品\n2人分\n\n材料\n・鶏むね肉　200g\n・しょうゆ　大さじ1\n\n作り方\n1. 鶏むね肉を切る\n2. 5分焼く'
+    try {
+      // --- KOGAP-01: 入らなかった項目だけが並ぶ ---
+      await koPaste(KO_PLAIN)
+      const koGaps = koPage.locator('[data-testid="import-field-gaps"]')
+      check('KOGAP-01 取り込みの結果に、入らなかった項目の並びが出る', (await koGaps.count()) === 1)
+      const koRow = async (id) => (await koPage.locator(`[data-testid="${id}"]`).count()) === 1
+      check(
+        'KOGAP-01 ジャンル・季節・時間帯・手間レベルの4つが出ている（どれも取り込みでは入らない）',
+        [
+          await koRow('import-gap-genre'),
+          await koRow('import-gap-season'),
+          await koRow('import-gap-suitable-for'),
+          await koRow('import-gap-effort'),
+        ].every(Boolean),
+      )
+      // 種別は料理名から読み取れることがある。読み取れた品では並びに出さない（入ったものを出さない）
+      const koDishTypePressed = await koPage.evaluate(
+        () => document.querySelectorAll('[data-testid="import-gap-dish-type"] [aria-pressed="true"]').length,
+      )
+      const koDishTypeShown = await koRow('import-gap-dish-type')
+      check(
+        'KOGAP-01 種別は、料理名から読み取れなかったときだけ出る（読み取れた品では出さない）',
+        !koDishTypeShown || koDishTypePressed === 0,
+        `並びが出ている=${koDishTypeShown} 選ばれている数=${koDishTypePressed}`,
+      )
+      check(
+        'KOGAP-01 選ぶ部品は「くわしく」タブと同じもの（同じ並び・同じ押し方）',
+        (await koPage.locator('[data-testid="import-gap-season"] button[aria-pressed]').count()) === 4,
+      )
+      // 掴めなかったときに30秒待って実行を中断させない（CLAUDE.md の禁じ手・2026-08-22 UI-390-01）。
+      // 見つからなければその場で赤にして、後ろの節は走らせる
+      // 手間レベルは「選ばなければ普通」なので、押すまでどれも塗らない
+      // （選んでいないのに選んだ顔になると、入っていない項目だという話と食い違う）
+      check(
+        'KOGAP-01 手間レベルは、押すまでどれも選ばれていない（既定の「普通」を塗らない）',
+        (await koPage.locator('[data-testid="import-gap-effort"] button[aria-pressed="true"]').count()) === 0,
+      )
+      const koGapText =
+        (await koGaps.count()) === 0 ? '' : stripZwspText(await koGaps.innerText()).replace(/\s+/g, '')
+      check(
+        'KOGAP-01 何の並びかが見出しで分かる',
+        koGapText.includes(ja.form.importGapTitle.replace(/\s+/g, '')),
+        koGapText.slice(0, 160),
+      )
+      // 390px: 横にはみ出さない（項目を足しても、押せる幅のまま収まる）
+      const koOverflow = await koPage.evaluate(() => {
+        const box = document.querySelector('[data-testid="import-field-gaps"]')
+        if (!box) return null
+        const r = box.getBoundingClientRect()
+        return {
+          right: Math.round(r.right),
+          width: Math.round(r.width),
+          height: Math.round(r.height),
+          bodyScroll: document.documentElement.scrollWidth,
+          minBtn: Math.min(
+            ...[...box.querySelectorAll('button')].map((b) => Math.round(b.getBoundingClientRect().height)),
+          ),
+        }
+      })
+      check(
+        'KOGAP-01 390pxで横にはみ出さず、ボタンの高さは44px以上',
+        !!koOverflow && koOverflow.right <= 390 && koOverflow.bodyScroll <= 390 && koOverflow.minBtn >= 44,
+        JSON.stringify(koOverflow),
+      )
+
+      // --- KOGAP-03: 説明は初回のみ・「今後表示しない」で消せる ---
+      currentCheck = 'KOGAP-03'
+      check(
+        'KOGAP-03 初回の取り込みでは、入らない項目があることの説明が出る',
+        (await koPage.locator('[data-testid="import-gap-notice"]').count()) === 1,
+      )
+      const koHide = koPage.locator('[data-testid="import-gap-notice-hide"]').first()
+      check('KOGAP-03 「今後表示しない」がある', (await koHide.count()) === 1)
+      if (await koHide.count()) {
+        await koHide.click()
+        await koPage.waitForTimeout(300)
+      }
+      check(
+        'KOGAP-03 押すとその場で説明が消える（並びは残る＝設定はそのまま続けられる）',
+        (await koPage.locator('[data-testid="import-gap-notice"]').count()) === 0 &&
+          (await koPage.locator('[data-testid="import-field-gaps"]').count()) === 1,
+      )
+
+      // --- KOGAP-02: 1タップで選べて、押さなくても保存できる ---
+      currentCheck = 'KOGAP-02'
+      const koGenreBtn = koPage.locator('[data-testid="import-gap-genre"] button').first()
+      const koEffortBtn = koPage.locator('[data-testid="import-gap-effort"] button').first()
+      if (await koGenreBtn.count()) {
+        await koGenreBtn.click()
+        await koPage.waitForTimeout(200)
+      }
+      if (await koEffortBtn.count()) {
+        await koEffortBtn.click()
+        await koPage.waitForTimeout(200)
+      }
+      check(
+        'KOGAP-02 押すと、その並びは消えずに選んだ状態になる（選び直せる）',
+        (await koPage.locator('[data-testid="import-gap-genre"] button[aria-pressed="true"]').count()) === 1 &&
+          (await koPage.locator('[data-testid="import-gap-effort"] button[aria-pressed="true"]').count()) === 1,
+      )
+      // 選んだジャンルは「くわしく」タブのタグにも入っている（絞り込みが読むのと同じ形）
+      await koPage.getByRole('tab', { name: ja.form.formTabDetail }).click()
+      await koPage.waitForTimeout(400)
+      const koDetailText = stripZwspText(await koPage.textContent('body')).replace(/\s+/g, '')
+      check(
+        'KOGAP-02 選んだジャンルは、絞り込みが読むタグとして入っている',
+        koDetailText.includes(ja.mealPlan.genreLabel.replace(/\s+/g, '')) || koDetailText.includes('和食'),
+        koDetailText.slice(0, 200),
+      )
+      await koPage.getByRole('button', { name: ja.form.save }).click()
+      await koPage.waitForTimeout(1500)
+      const koSaved = await koPage.evaluate(async () => {
+        const openDb = () =>
+          new Promise((resolve, reject) => {
+            const r = indexedDB.open('uchi-recipe')
+            r.onsuccess = () => resolve(r.result)
+            r.onerror = () => reject(r.error)
+          })
+        const db = await openDb()
+        const all = await new Promise((res, rej) => {
+          const q = db.transaction('recipes').objectStore('recipes').getAll()
+          q.onsuccess = () => res(q.result)
+          q.onerror = () => rej(q.error)
+        })
+        db.close()
+        const one = all.filter((r) => r.title === 'KO取り込みの品').pop()
+        return one ? { tags: one.tags, effortLevel: one.effortLevel } : null
+      })
+      check(
+        'KOGAP-02 押した値がそのまま保存される',
+        !!koSaved && koSaved.tags.includes('和食') && koSaved.effortLevel === 'easy',
+        JSON.stringify(koSaved),
+      )
+      // 押さなくても保存できる（強制しない）
+      await koPaste('KO何も押さない品\n2人分\n\n材料\n・豆腐　1丁\n\n作り方\n1. 豆腐を切る\n2. 盛る')
+      await koPage.getByRole('button', { name: ja.form.save }).click()
+      await koPage.waitForTimeout(1500)
+      const koSavedPlain = await koPage.evaluate(async () => {
+        const openDb = () =>
+          new Promise((resolve, reject) => {
+            const r = indexedDB.open('uchi-recipe')
+            r.onsuccess = () => resolve(r.result)
+            r.onerror = () => reject(r.error)
+          })
+        const db = await openDb()
+        const all = await new Promise((res, rej) => {
+          const q = db.transaction('recipes').objectStore('recipes').getAll()
+          q.onsuccess = () => res(q.result)
+          q.onerror = () => rej(q.error)
+        })
+        db.close()
+        return all.some((r) => r.title === 'KO何も押さない品')
+      })
+      check('KOGAP-02 1つも押さずに保存できる（強制しない）', koSavedPlain === true)
+
+      // --- KOGAP-03（続き）: 2回目の取り込みでは説明が出ない ---
+      currentCheck = 'KOGAP-03'
+      await koPaste(KO_PLAIN)
+      check(
+        'KOGAP-03 2回目の取り込みでは説明が出ない（並びは出る）',
+        (await koPage.locator('[data-testid="import-gap-notice"]').count()) === 0 &&
+          (await koPage.locator('[data-testid="import-field-gaps"]').count()) === 1,
+      )
+
+      // --- KOGAP-04: 設定から戻せる ---
+      currentCheck = 'KOGAP-04'
+      await koPage.goto(`${BASE}/#/settings?section=recipe`)
+      await koPage.reload({ waitUntil: 'networkidle' })
+      await koPage.waitForTimeout(1200)
+      const koSwitch = koPage.locator('[data-testid="import-gap-notice-switch"]')
+      check('KOGAP-04 設定に戻す場所がある', (await koSwitch.count()) === 1)
+      const koSwitchFound = (await koSwitch.count()) === 1
+      check(
+        'KOGAP-04 いまは切れている（一度出したので自動で切れた）',
+        koSwitchFound && (await koSwitch.getAttribute('aria-checked')) === 'false',
+      )
+      if (koSwitchFound) {
+        await koSwitch.click()
+        await koPage.waitForTimeout(300)
+      }
+      check(
+        'KOGAP-04 入れ直せる',
+        koSwitchFound && (await koSwitch.getAttribute('aria-checked')) === 'true',
+      )
+      await koPaste(KO_PLAIN)
+      check(
+        'KOGAP-04 入れ直すと、次の取り込みでまた説明が出る',
+        (await koPage.locator('[data-testid="import-gap-notice"]').count()) === 1,
+      )
+
+      // --- KOMULTI-01: 1品に複数料理が入った取り込みだけを知らせる ---
+      currentCheck = 'KOMULTI-01'
+      await koPaste(
+        'KOねぎ使い切り3選\n2人分\n\n材料\n・ねぎ　3本\n・豚バラ肉　200g\n・にんじん　1本\n\n作り方\n1. ＜豚肉とねぎの炒めもの＞ ねぎを4cm幅に切る\n2. 豚肉を焼く\n3. 【にんじんのきんぴら】にんじんを千切りにする\n4. 炒める',
+      )
+      const koMulti = koPage.locator('[data-testid="import-multi-dish"]')
+      check('KOMULTI-01 複数料理が入っていそうな取り込みでは知らせる', (await koMulti.count()) === 1)
+      const koMultiText = (await koMulti.count()) ? stripZwspText(await koMulti.innerText()).replace(/\s+/g, '') : ''
+      check(
+        'KOMULTI-01 知らせは ja.ts の文言どおり（画面の日本語を書き写さない）',
+        koMultiText === ja.form.importMultiDish.replace('{n}', '2').replace(/\s+/g, ''),
+        `画面=${koMultiText} 期待=${ja.form.importMultiDish.replace('{n}', '2')}`,
+      )
+      check(
+        'KOMULTI-01 分ける操作は出さない（知らせるだけ）',
+        (await koPage.locator('[data-testid="import-multi-dish"] button').count()) === 0,
+      )
+      await koPaste(KO_PLAIN)
+      check(
+        'KOMULTI-01 ふつうの1品では知らせない',
+        (await koPage.locator('[data-testid="import-multi-dish"]').count()) === 0,
+      )
+    } finally {
+      await koBrowser.close()
+    }
+  }
+
+
 
 } catch (err) {
   ng(`実行中断(${currentCheck})`, err.message)
