@@ -526,8 +526,8 @@ if (FAKE_TODAY) {
   // 止めずに**ずらす**（差を足すだけ）のは、Playwright の待ち時間の計算が Date.now() の
   // 進みに依存しうるため＝固定すると待ちが返らなくなる恐れがある。ブラウザ側も同じ理由と、
   // 調理タイマーが減らなくなるのを避けるため、固定ではなく進める形にしてある。
+  const RealDate = Date
   {
-    const RealDate = Date
     const offset = fixedAt.getTime() - RealDate.now()
     class ShiftedDate extends RealDate {
       constructor(...args) {
@@ -540,6 +540,44 @@ if (FAKE_TODAY) {
     }
     globalThis.Date = ShiftedDate
   }
+  /**
+   * **2026-08-25 に見つかった不具合の修正**（これが無いと、この道具は半分しか効かない）。
+   *
+   * `globalThis.Date` をずらしたまま Playwright の `clock.install()` を呼ぶと、
+   * **Playwright 自身が内部で使う `Date` もずれている**ため、ずらした分がちょうど打ち消され、
+   * ブラウザ側の時計は**実際の今日のまま**になる。実測（2026-08-25 18:5x）:
+   *   node の今日 = 2026-08-24（ずれている） / ブラウザの今日 = 2026-08-25（ずれていない）
+   * つまり `E2E_FAKE_TODAY` は 2026-08-24 の新設以来、**e2e側の日付しか動かしていなかった**。
+   * 「月曜と日曜の両方を当てた」検証は、**node は月曜・画面は実際の曜日**という
+   * ちぐはぐな状態を測っていたことになる（偽の緑も偽の赤も出うる）。
+   * 気づけたのは WEEKUI-01 だけ＝**e2e側の今日と画面の塗り分けを突き合わせる唯一の節**だったため。
+   *
+   * 直し方: Playwright を呼ぶあいだだけ `globalThis.Date` を本物へ戻す。
+   */
+  const withRealDate = async (fn) => {
+    const shifted = globalThis.Date
+    globalThis.Date = RealDate
+    try {
+      return await fn()
+    } finally {
+      globalThis.Date = shifted
+    }
+  }
+  /** 時計が本当に効いたかをその場で確かめる。効いていなければ**黙って進めず落とす** */
+  const assertClockApplied = async (page) => {
+    const shown = await page.evaluate(() => {
+      const n = new Date()
+      const p = (v) => String(v).padStart(2, '0')
+      return `${n.getFullYear()}-${p(n.getMonth() + 1)}-${p(n.getDate())}`
+    })
+    if (shown !== FAKE_TODAY) {
+      console.error(
+        `e2e: ブラウザの時計を ${FAKE_TODAY} に合わせられませんでした（画面側の今日=${shown}）。` +
+          'この状態で走らせると、e2e側の今日と画面の今日が食い違ったまま測ることになります',
+      )
+      process.exit(1)
+    }
+  }
   for (const browserType of [chromium, webkit]) {
     const launch = browserType.launch.bind(browserType)
     browserType.launch = async (...args) => {
@@ -547,15 +585,30 @@ if (FAKE_TODAY) {
       const newContext = browser.newContext.bind(browser)
       browser.newContext = async (...contextArgs) => {
         const context = await newContext(...contextArgs)
-        await context.clock.install({ time: fixedAt })
-        await context.clock.resume()
+        await withRealDate(async () => {
+          await context.clock.install({ time: fixedAt })
+          await context.clock.resume()
+        })
+        const newPageOfContext = context.newPage.bind(context)
+        let checked = false
+        context.newPage = async (...pageArgs) => {
+          const page = await newPageOfContext(...pageArgs)
+          if (!checked) {
+            checked = true
+            await assertClockApplied(page)
+          }
+          return page
+        }
         return context
       }
       const newPage = browser.newPage.bind(browser)
       browser.newPage = async (...pageArgs) => {
         const page = await newPage(...pageArgs)
-        await page.clock.install({ time: fixedAt })
-        await page.clock.resume()
+        await withRealDate(async () => {
+          await page.clock.install({ time: fixedAt })
+          await page.clock.resume()
+        })
+        await assertClockApplied(page)
         return page
       }
       return browser
