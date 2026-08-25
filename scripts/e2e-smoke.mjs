@@ -40896,9 +40896,16 @@ try {
       await fuPage.getByRole('button', { name: ja.paste.apply }).click()
       await fuPage.waitForTimeout(600)
       const fuPasteBody2 = await fuPage.textContent('body')
+      // 2026-08-25 便KW・①（オーナー原文「改行や内容を絞って短く読みやすくしてください」）:
+      // 40字の1文（「調理時間は貼り付けた文章に書かれていなかったので、調理時間の欄は
+      // 空のままです」）を、人数分と同じ1行にまとめた（`ja.paste.notImported`）。
+      // ここは**その文言を書き写していた**（禁じ手②）ので、ja.ts から組み立てる形に直す。
+      // 見張る中身は変えない＝「調理時間が入らなかったことを、黙らずに言っている」
       check(
-        'FU-03 調理時間が書かれていないときは、欄が空のままである理由を書く',
-        fuPasteBody2.includes('調理時間は貼り付けた文章に書かれていなかったので、調理時間の欄は空のままです'),
+        'FU-03 調理時間が書かれていないときは、入らなかったことを言う',
+        stripZwspText(fuPasteBody2).includes(
+          stripZwspText(ja.paste.notImported.replace('{items}', ja.paste.itemCookMinutes)),
+        ),
         fuPasteBody2.slice(fuPasteBody2.indexOf('読み取りました'), fuPasteBody2.indexOf('読み取りました') + 240),
       )
     } finally {
