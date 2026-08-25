@@ -79,7 +79,9 @@ for (const [name, count] of nameCounts) {
 // 181→186件（厚揚げ・小松菜・豆苗・大豆水煮・キムチ）
 // 186→201件（2026-08-25 便KP: 減塩しょうゆ・減塩みそ・水菜・おろししょうが・白だし・ミニトマト・
 //   サバみそ煮缶・米油・赤みそ・ぶり・三温糖・粒マスタード・練りからし・コーン缶・粉チーズ）
-const PRICE_DEFAULTS_COUNT = 201
+// 201→204件（2026-08-25 便KW・オーナー申し送り3「味噌は種類で価格も塩分量も異なります」:
+//   だし入りみそ・麦みそ・豆みそ。1件ずつ容量をそろえて実売を調べ直した根拠は priceDefaults.ts）
+const PRICE_DEFAULTS_COUNT = 204
 check(
   PRICE_DEFAULTS.length === PRICE_DEFAULTS_COUNT,
   `PRICE_DEFAULTSの件数が想定と違う: 実際=${PRICE_DEFAULTS.length}件 / 想定=${PRICE_DEFAULTS_COUNT}件。` +
