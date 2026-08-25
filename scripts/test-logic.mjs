@@ -31164,6 +31164,147 @@ import { safetyNotesFor, stepSafetyNotes, wholeRecipeSafetyNotes } from '../src/
   }
 }
 
+// ---------- 便KM: 並行調理ナビの上段と並べ替え（2026-08-25 オーナー書き溜め）----------
+// オーナー原文:
+//   「・全体の目安約◯分→全体の調理時間約◯分
+//     　下の説明もながい。短く簡潔に。必要ない分は省いて。
+//     ・順番の入れ替えをしても元に戻せない。
+//     　上へ下へボタンの縦幅低くして。これのせいでページ全体が無駄に長い。
+//     ・完成押下後の窓の説明も長い。読みたい人だけ読めるように、折りたたんでしまうか、
+//     　さらに別の窓で表示のにしたい。」
+{
+  const kmDir = path.dirname(fileURLToPath(import.meta.url))
+  const kmNaviSrc = readFileSync(path.join(kmDir, '../src/pages/CookNaviPage.tsx'), 'utf-8')
+  const kmFinishSrc = readFileSync(path.join(kmDir, '../src/components/CookFinishModal.tsx'), 'utf-8')
+
+  // ---- KM-1: 見出しは「全体の調理時間」（何の目安なのかを語で言う）----
+  eq('KM-1 全体の分数の見出しが「全体の調理時間」', ja.cookNavi.totalEstimate, '全体の調理時間 約{n}分')
+  eq('KM-1 旧い「全体の目安」の言い方が残っていない', ja.cookNavi.totalEstimate.includes('全体の目安'), false)
+  // 画面の呼び名は1つに保つ（CLAUDE.md「画面の呼び名は、見出しに実際に出ている名前を正とする」）。
+  // 見出しだけ変えて、その数字を指す他の文が古い呼び名のままだと、同じものが2つの名前で出る
+  eq(
+    'KM-1 その数字を指す他の文も同じ呼び名になっている',
+    Object.entries(ja.cookNavi)
+      .filter(([, v]) => typeof v === 'string' && v.includes('全体の目安'))
+      .map(([k]) => k),
+    [],
+  )
+
+  // ---- KM-2: その数字の下に**必ず**出る説明を短くする（同じことを2回言わない・自明を書かない）----
+  // 「約◯分」と書いてある数字に「実際の火加減で前後します」を足すのは同じことの2回目。
+  // 数え方の説明も、すぐ上に品ごとの「1品だけなら約◯分」が並んでいるので前半は自明。
+  const KM_ALWAYS_LIMIT = 110
+  const kmAlways = [ja.cookNavi.totalCountNote, ja.cookNavi.orderNote, ja.cookNavi.restoreKeepNote]
+  const kmAlwaysLen = kmAlways.reduce((sum, t) => sum + (t ?? '').length, 0)
+  eq(
+    `KM-2 全体の分数の下に必ず出る説明の合計が${KM_ALWAYS_LIMIT}字以内（実際=${kmAlwaysLen}字）`,
+    kmAlwaysLen <= KM_ALWAYS_LIMIT,
+    true,
+  )
+  eq('KM-2 「実際の火加減で前後します。」は消した（「約◯分」と同じことを言っている）', ja.cookNavi.totalNote, undefined)
+  eq('KM-2 画面からも消えている', kmNaviSrc.includes('totalNote'), false)
+  eq(
+    'KM-2 数え方の説明は「レシピの一覧と一致しない」ことだけを言う',
+    (ja.cookNavi.totalCountNote ?? '').includes('手順ごとの時間を数えて合計した目安'),
+    false,
+  )
+  eq(
+    'KM-2 数え方が違うという肝心の中身は残っている',
+    (ja.cookNavi.totalCountNote ?? '').includes('数え方が違う'),
+    true,
+  )
+  eq(
+    'KM-2 1品ずつのときの説明から、上の枠と重なる一文を消した',
+    (ja.cookNavi.sequentialOrderNote ?? '').includes('1品を作り終えてから次の品に移ります'),
+    false,
+  )
+  eq(
+    'KM-2 加熱で仕上げる品を最後にしている、という中身は残っている',
+    (ja.cookNavi.sequentialOrderNote ?? '').includes('加熱で仕上げる品'),
+    true,
+  )
+  // 「日付が変わると残しません」は「今日のうちは残ります」の裏返しなので落としたが、
+  // **何が・いつまで残るか**は落とさない（落とすと、閉じてよいのかが読めなくなる）
+  eq(
+    'KM-2 段取りの覚え書きの説明は、何がいつまで残るかを残している',
+    [
+      (ja.cookNavi.restoreKeepNote ?? '').includes('段取り'),
+      (ja.cookNavi.restoreKeepNote ?? '').includes('開き直しても'),
+      (ja.cookNavi.restoreKeepNote ?? '').includes('今日のうちは残ります'),
+    ],
+    [true, true, true],
+  )
+
+  // ---- KM-3: 並べ替えを、押したその場で1回で戻せる（他の操作と同じトーストの「元に戻す」）----
+  // オーナー原文「順番の入れ替えをしても元に戻せない。」
+  // 便GJ/GLの「1つ前の並びに戻す」は**一覧のいちばん上の欄**にしかなく、下のほうの手順を
+  // 動かすと画面の外にある＝押しに行けない。トーストは画面の下に出るので、どこを動かしても届く
+  eq(
+    'KM-3 並べ替えたことをその場で知らせる文がある',
+    typeof ja.cookNavi.reorderMovedToast === 'string' &&
+      ja.cookNavi.reorderMovedToast.includes('{n}') &&
+      ja.cookNavi.reorderMovedToast.includes('{dir}'),
+    true,
+  )
+  eq('KM-3 知らせは1行に収まる長さ（40字以内）', (ja.cookNavi.reorderMovedToast ?? '').length <= 40, true)
+  eq('KM-3 上へ・下へを押したらその知らせを出している', kmNaviSrc.includes('reorderMovedToast'), true)
+  eq(
+    'KM-3 その知らせの「元に戻す」は、他の操作と同じ ja.common.undo を使う',
+    /actionLabel=\{toastUndo \? ja\.common\.undo : undefined\}/.test(kmNaviSrc),
+    true,
+  )
+  eq(
+    'KM-3 「元に戻す」の中身は、記録の取り消しと並べ替えの取り消しの両方が乗る',
+    /const toastUndo = undoCooked[\s\S]{0,200}undoPull/.test(kmNaviSrc),
+    true,
+  )
+  eq(
+    'KM-3 「元に戻す」を押すと、直前の1回ぶんだけ戻る（全部は捨てない）',
+    kmNaviSrc.includes('const undoLastPull = () => setPulls((prev) => prev.slice(0, -1))'),
+    true,
+  )
+
+  // ---- KM-4: 上へ・下へのボタンは、見た目を低くしても押せる大きさ（44px）を保つ ----
+  // オーナー原文「上へ下へボタンの縦幅低くして。これのせいでページ全体が無駄に長い。」
+  const kmUpBtn = kmNaviSrc.slice(
+    kmNaviSrc.indexOf('data-testid="navi-step-up"'),
+    kmNaviSrc.indexOf('data-testid="navi-step-down"'),
+  )
+  const kmDownBtn = kmNaviSrc.slice(
+    kmNaviSrc.indexOf('data-testid="navi-step-down"'),
+    kmNaviSrc.indexOf('data-testid="navi-active-minutes"'),
+  )
+  eq('KM-4 前提: 上へ・下へのボタンを読めている', [kmUpBtn.length > 0, kmDownBtn.length > 0], [true, true])
+  eq(
+    'KM-4 当たり判定は .tap-target で44pxを保つ',
+    [kmUpBtn.includes('tap-target'), kmDownBtn.includes('tap-target')],
+    [true, true],
+  )
+  eq(
+    'KM-4 見た目の上下の余白は py-3（46px）より低い',
+    [/\bpy-3\b/.test(kmUpBtn), /\bpy-3\b/.test(kmDownBtn)],
+    [false, false],
+  )
+
+  // ---- KM-5: 「完成！」の窓の説明は、読みたい人だけ開く（折りたたみ）----
+  // オーナー原文「完成押下後の窓の説明も長い。読みたい人だけ読めるように、折りたたんでしまうか、
+  // さらに別の窓で表示のにしたい。」
+  eq(
+    'KM-5 折りたたみを開く・閉じる文言がある',
+    [
+      typeof ja.cookNavi.sessionFinishDetailOpen === 'string' && ja.cookNavi.sessionFinishDetailOpen.length > 0,
+      typeof ja.cookNavi.sessionFinishDetailClose === 'string' && ja.cookNavi.sessionFinishDetailClose.length > 0,
+    ],
+    [true, true],
+  )
+  eq('KM-5 窓はアプリ共通の折りたたみ（Collapse）を使う', kmFinishSrc.includes("from './Collapse'"), true)
+  eq(
+    'KM-5 何品に記録が付くかは畳まずに出す（畳むのは、消えるもの・残るものの説明だけ）',
+    kmFinishSrc.includes('detail') && kmFinishSrc.includes('body'),
+    true,
+  )
+}
+
 // ---------- 結果 ----------
 console.log(`合格: ${passed}件 / 失敗: ${failures.length}件`)
 for (const f of failures) console.log(`  NG ${f}`)

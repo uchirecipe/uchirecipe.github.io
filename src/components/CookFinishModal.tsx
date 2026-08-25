@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
-import { Check, ChevronLeft, Square, SquareCheck, X } from 'lucide-react'
+import { Check, ChevronDown, ChevronLeft, ChevronUp, Square, SquareCheck, X } from 'lucide-react'
 import { ja } from '../i18n/ja'
+import Collapse from './Collapse'
 import { useScrollLock } from './useScrollLock'
 
 /**
@@ -26,18 +27,32 @@ import { useScrollLock } from './useScrollLock'
  * 鳴ります。終了時に『止めますか』が欲しい」）。本文の側からはタイマーの一文が抜けており
  *（呼び出し側が {timers} を空で組む）、この窓の中の欄が消す／消さないの両方の結果を書く。
  * 「まとめて作った！」の確認は今までどおり「そのまま残ります」と書いて動きも変えていない。
+ *
+ * 2026-08-25 便KM: 説明を**畳んだ**（オーナー原文「完成押下後の窓の説明も長い。読みたい人だけ
+ * 読めるように、折りたたんでしまうか、さらに別の窓で表示のにしたい。」）。
+ * 2つの案のうち**折りたたみ**を選んだ理由:
+ *   ・アプリの折りたたみは共通部品（components/Collapse）で作法が決まっている。設定の
+ *     「Pro版でできること」も 2026-08-09 便EO でブラウザ標準の <details> からこちらへそろえた。
+ *   ・この窓は全画面の調理中モードの上に重なっている。もう1枚重ねると窓が3枚になり、
+ *     閉じる順番（別の窓→この窓→全画面）を台所で判断させることになる。
+ *   ・畳んでも同じ窓の中なので、読んだあとそのまま「記録をつける」を押せる（行き来が要らない）。
+ * 畳まないのは「どの品に記録が付くか」（body）＝押す前に要る情報。畳むのは消えるもの・
+ * 残るもの・あとから編集できること（detail）で、**1文字も減らしていない**（読む人は開けば読める）。
  */
 export default function CookFinishModal({
   open,
   body,
+  detail,
   runningTimers,
   onRecord,
   onBack,
   onClose,
 }: {
   open: boolean
-  /** 記録の中身の説明（呼び出し側が「まとめて作った！」と同じ組み立てで作る） */
+  /** どの品に記録が付くか（畳まずに出す。呼び出し側が「まとめて作った！」と同じ組み立てで作る） */
   body: string
+  /** 何が消えて何が残るか・あとから編集できること（読みたい人だけが開く。2026-08-25 便KM） */
+  detail: string
   /**
    * まだ動いているタイマー（2026-08-14 便GL・利用者テスト
    * 「『動いているタイマーはそのまま残ります』とは書いてあるけど、片づけ中に鳴ります。
@@ -56,8 +71,13 @@ export default function CookFinishModal({
    * 窓を開くたびに選び直す（前回の選択を持ち越すと、押し間違いで残り時間を失う）
    */
   const [stopTimers, setStopTimers] = useState(false)
+  /** 詳しい説明を開いているか。**窓を開くたびに畳んだ状態から始める**（2026-08-25 便KM） */
+  const [detailOpen, setDetailOpen] = useState(false)
   useEffect(() => {
-    if (open) setStopTimers(false)
+    if (open) {
+      setStopTimers(false)
+      setDetailOpen(false)
+    }
   }, [open])
   /**
    * Escape は「調理を続ける」と同じ扱い（何も起きない側に倒す）。
@@ -91,13 +111,42 @@ export default function CookFinishModal({
         className="max-h-[85vh] w-full max-w-sm min-w-0 overflow-x-hidden overflow-y-auto overscroll-contain rounded-md border border-edge bg-surface p-[var(--space-md)] shadow-md"
       >
         <p className="text-lg font-bold">{ja.cookNavi.sessionFinishTitle}</p>
-        {/* 本文は改行をそのまま出す（「まとめて作った！」の確認と同じ文面） */}
+        {/* 畳まずに出すのは「どの品に記録が付くか」だけ（2026-08-25 便KM）。
+            改行はそのまま出す（「まとめて作った！」の確認と同じ文面） */}
         <p
           data-testid="cook-finish-modal-body"
           className="ja-phrase mt-[var(--space-sm)] whitespace-pre-line text-sm text-ink-muted"
         >
           {body.trim()}
         </p>
+        {/* 消えるもの・残るもの・あとから編集できることは、読みたい人だけが開く（同）。
+            開閉の作法はアプリ共通の折りたたみ（Collapse）にそろえる。
+            reveal={false}: この窓は自分でスクロールする箱なので、開いた先へページごと動かさない */}
+        <button
+          type="button"
+          data-testid="cook-finish-detail-toggle"
+          onClick={() => setDetailOpen((prev) => !prev)}
+          aria-expanded={detailOpen}
+          aria-controls="cook-finish-detail"
+          className="tap-target mt-[var(--space-sm)] flex items-center gap-1 text-sm font-bold text-accent-ink"
+        >
+          {detailOpen ? (
+            <ChevronUp size={16} className="shrink-0" aria-hidden />
+          ) : (
+            <ChevronDown size={16} className="shrink-0" aria-hidden />
+          )}
+          <span className="ja-phrase">
+            {detailOpen ? ja.cookNavi.sessionFinishDetailClose : ja.cookNavi.sessionFinishDetailOpen}
+          </span>
+        </button>
+        <Collapse open={detailOpen} id="cook-finish-detail" reveal={false}>
+          <p
+            data-testid="cook-finish-modal-detail"
+            className="ja-phrase mt-[var(--space-sm)] whitespace-pre-line text-sm text-ink-muted"
+          >
+            {detail.trim()}
+          </p>
+        </Collapse>
         {/* 動いているタイマーをどうするか（2026-08-14 便GL）。1本も無ければ出さない。
             消す側・消さない側の両方の結果を書く（規約F）。押す場所は指で押せる高さにする */}
         {runningTimers.length > 0 && (
