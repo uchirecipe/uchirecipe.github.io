@@ -96,7 +96,7 @@ const SHOT_NAMES = [
   'plan-month', 'plan-month-photo', 'shopping', 'pantry',
   'detail-photo', 'nutrition-open', 'share', 'logs',
   'cookmode-voice', 'cookmode', 'timer', 'settings-kitchen', 'cooknavi',
-  'cooknavi-finish', 'cooknavi-reorder', 'cooknavi-reorder-undo',
+  'cooknavi-reorder', 'cooknavi-reorder-undo',
   'cooknavi-session', 'cooknavi-session-others',
   'backup-export', 'backup-import', 'nutrition-row', 'plan-week-nutrition-row',
 ]
@@ -1308,7 +1308,7 @@ try {
     await wait(page, 1600)
   } else {
     // 段取りが無ければ、このあとの並行調理ナビのカットはどれも撮れない
-    for (const name of ['cooknavi', 'cooknavi-finish', 'cooknavi-reorder', 'cooknavi-reorder-undo'])
+    for (const name of ['cooknavi', 'cooknavi-reorder', 'cooknavi-reorder-undo'])
       missShot(name, '並行調理ナビに「段取りを作る」のボタンが無い')
   }
   // どの待ちの帯を撮るか(2026-08-09 便EU)。
@@ -1352,12 +1352,8 @@ try {
     missShot('cooknavi', '「待ち時間」の帯が段取りの中に1つも無い')
   }
 
-  // ======== できあがりの目安(2026-08-15 便GN) ========
-  // 使い方ページ§9の「できあがりの目安」の図。品ごとの分数と、その開きの一言が入る枠を
-  // 丸ごと切る。**手で並べ替える前**に撮る(並べ替えたあとは分数が灰色になるため、
-  // 自動で組んだ並びのときの見え方をここで写す)
-  const finishPanel = page.locator('[data-testid="navi-finish-times"]')
-  await crop(page, 'cooknavi-finish', finishPanel, { top: 72, padTop: 4, padBottom: 6 })
+  // 「できあがりの目安」の図(cooknavi-finish)は撮らない。
+  // 2026-08-25 便KT・オーナー指示で画面ごと消したため(使い方ページ§9の節も消した)
 
   // ======== 段取りの並べ替え(2026-08-15 便GN) ========
   // 使い方ページ§9の「段取りの順番を自分で変える」の2枚。

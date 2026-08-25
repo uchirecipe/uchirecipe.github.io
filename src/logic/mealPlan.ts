@@ -1389,6 +1389,34 @@ export function planWeekFill(
   }
 }
 
+/**
+ * 「すでに入っている品数」（2026-08-25 便KT・オーナー原文
+ * 「昼と夕が埋まっている状態で朝昼夕表示の空いた枠だけまとめて献立を入力すると、
+ *   「すでに決まっている１４食をそのままに１４食を〜」と間違った数字が表示された。
+ *   すでに決まっているのは昼と夕28食（1品なしで）になるはずですよね？」）。
+ *
+ * それまでは `preservedSlotKeys.size`＝**食事の数**（昼7＋夕7＝14）をそのまま出しており、
+ * 同じ文の後半に並ぶ「新しく入れた品数」（朝7食×主菜副菜＝14品）と単位が違った。
+ * 数字はどちらも正しいのに、**同じ文に単位の違う数が並ぶと引き算できるものに見える**。
+ * そこで、残るほうも**品**で数える＝オーナーが数えた28がそのまま出る。
+ *
+ * 数え方: 手つかずで残す食事（preservedSlotKeys）に入っている献立のうち、
+ * これから消す行（entryIdsToRemove）を除いたもの。汁物・その他も献立なので数える。
+ */
+export function preservedItemCount(
+  plan: Pick<FillWeekPlan, 'preservedSlotKeys' | 'entryIdsToRemove'>,
+  entries: readonly Pick<MealPlanEntry, 'id' | 'date' | 'slot'>[],
+): number {
+  const removing = new Set(plan.entryIdsToRemove)
+  let count = 0
+  for (const e of entries) {
+    if (!plan.preservedSlotKeys.has(`${e.date}|${e.slot}`)) continue
+    if (e.id != null && removing.has(e.id)) continue
+    count++
+  }
+  return count
+}
+
 /** ロック未指定の呼び出し用の空集合（毎回 new Set しないための共有インスタンス） */
 const EMPTY_LOCK_KEYS: ReadonlySet<string> = new Set<string>()
 

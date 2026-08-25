@@ -23,7 +23,8 @@ export default function StepBadge({ number, size = 32, color }: Props) {
   const wide = label != null && label.length > 2
   return (
     <span
-      className={`flex shrink-0 items-center justify-center rounded-full font-bold ${
+      // 「3-1」はハイフンで折り返せてしまう。番号は必ず1行で読ませる（2026-08-25 便KT）
+      className={`flex shrink-0 items-center justify-center whitespace-nowrap rounded-full font-bold ${
         color ? '' : 'bg-accent text-on-accent'
       }`}
       style={{

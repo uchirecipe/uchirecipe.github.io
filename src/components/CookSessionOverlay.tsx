@@ -41,6 +41,7 @@ import {
   hasFillableWorkDuringWait,
   recipeStepLabel,
   showsWaitTimerButton,
+  waitSignaledByAppliance,
   waitTimerSeconds,
   type TimelineItem,
   type TimelineRecipe,
@@ -71,6 +72,7 @@ import {
 import { useAppBusyWhileMounted } from '../logic/appBusy'
 import { useScrollLock } from './useScrollLock'
 import { timerNoticeOnAdvance, type CookTimerNotice } from '../logic/cookTimerNotice'
+import type { KitchenEquipment } from '../logic/cookAppliance'
 import { ja } from '../i18n/ja'
 
 /**
@@ -253,6 +255,11 @@ type Props = {
    */
   sequential: boolean
   /**
+   * 台所の器具（2026-08-25 便KT）。電子レンジ・トースターの待ちにアプリのタイマーを出さない
+   * 判定に使う。持っていない器具の工程はコンロに読み替わる＝そこではタイマーを残す
+   */
+  kitchen: KitchenEquipment
+  /**
    * 別の画面のタイマーから開かれた手順（2026-08-15 便GQ）。**見るだけ**で出し、
    * カーソルには触らない（常駐タイマーバー → `?focusStep=` → CookNaviPage が渡す）。
    * 全画面の中のタイマーから開いたときはこの画面が自分で覚えるので、ここは使わない。
@@ -291,6 +298,7 @@ export default function CookSessionOverlay({
   onStartTimer,
   onOpenCustomTimer,
   sequential,
+  kitchen,
   peekStep,
   onPeekStepClose,
 }: Props) {
@@ -401,7 +409,7 @@ export default function CookSessionOverlay({
    */
   const goNext = () => {
     const next = advanceCursor(items, cursor)
-    const notice = next ? timerNoticeOnAdvance(items, cursor, next, timers) : null
+    const notice = next ? timerNoticeOnAdvance(items, cursor, next, timers, kitchen) : null
     move(next)
     if (notice) showTimerNotice(notice)
   }
@@ -579,8 +587,14 @@ export default function CookSessionOverlay({
   /** この手順に割り当てたレシピ本体のメモ（2026-08-11 便FM） */
   const currentRecipeNotes = recipeNotes.get(recipeNoteStepKey(item)) ?? []
   // 段取りの一覧と同じ判定（2026-08-11 便FN・logic/cookNavi.ts showsWaitTimerButton）。
-  // 「約◯分の待ち時間」と名乗ったブロックには必ずタイマーのボタンを出す
-  const showWaitTimerButton = showsWaitTimerButton(item)
+  // 「約◯分の待ち時間」と名乗ったブロックには必ずタイマーのボタンを出す。
+  // ただし電子レンジ・トースターの待ちは器具そのものが鳴って知らせるので出さない
+  // （2026-08-25 便KT。段取りの一覧と同じ判定＝1つの段取りを2通りに見せない）
+  const applianceTimer = waitSignaledByAppliance(item, kitchen)
+  const showWaitTimerButton = showsWaitTimerButton(item) && applianceTimer == null
+  /** 器具の名前（設定「台所の器具」と同じ呼び方にそろえる） */
+  const applianceTimerName =
+    applianceTimer === 'toaster' ? ja.settings.kitchenToaster : ja.settings.kitchenMicrowave
   /**
    * この手順ではかっているタイマー（2026-08-12 便FS-5・利用者テスト「タイマーが動いていても
    * 手順の中のボタンが『タイマーを始める』のまま。もう一度押しても何も起きない」）。
@@ -1009,7 +1023,7 @@ export default function CookSessionOverlay({
                       .replace('{part}', String(item.splitPart))
                   : ja.cookNavi.stepNumberLabel.replace('{n}', currentStepLabel)}
               </span>
-              <span aria-hidden>
+              <span aria-hidden className="shrink-0">
                 <StepBadge number={currentStepLabel} size={30} color={color} />
               </span>
             </>
@@ -1133,6 +1147,15 @@ export default function CookSessionOverlay({
                     {ja.cookNavi.startTimer}
                   </button>
                 ))}
+              {/* ボタンを黙って消さない（2026-08-25 便KT。何ではかるのかをその場に書く） */}
+              {applianceTimer != null && (
+                <span
+                  data-testid="cook-session-wait-appliance-timer"
+                  className="ja-phrase text-xs text-ink-muted"
+                >
+                  {ja.cookNavi.waitApplianceTimerNote.replace('{appliance}', applianceTimerName)}
+                </span>
+              )}
             </div>
             {/* 段取りの一覧にだけ出ていた「この間に、次の手作業を進められます」を
                 調理中の画面にも出す（2026-08-11 便FL）。待ちを仕掛けたあと「次へ」で

@@ -14730,12 +14730,44 @@ try {
       await fmPage.getByRole('button', { name: ja.mealPlan.nextMonth }).click()
       await fmPage.waitForTimeout(600)
       await fmPage.getByRole('button', { name: ja.mealPlan.fillMonth }).click()
-      // 月まるごとの提案は枠数が多いので、書き込みが終わるまで長めに待つ
-      await fmPage.waitForTimeout(6000)
+      /*
+       * 月まるごとの提案は枠数が多いので、**結果の知らせが出るまで**待つ
+       *（出た時点で書き込みは終わっている）。決め打ちの秒数で待つと、トーストは6秒で
+       * 自動的に消える（components/Toast.tsx）ので、待ち終わったころには読めなくなっていた
+       *（2026-08-25 便KT で気づいた。以前はここを「本文に無い＝赤」ではなく素通りしていた）。
+       * 掴む文字は ja.ts から作る＝画面の日本語を書き写さない。evaluate の中に ja は無いので
+       * 引数で渡す（CLAUDE.md の JM-4）
+       */
+      // 差し込み口より後ろの、必ずそのまま出る部分だけを掴む（数字を挟むので前半は使えない）
+      const fmTail = (text) => text.slice(text.lastIndexOf('}') + 1)
+      const fmToastNeedles = [
+        fmTail(ja.mealPlan.fillMonthDone),
+        fmTail(ja.mealPlan.fillMonthKeptManual),
+      ]
+      let fmResultBody = ''
+      const fmReadBody = () =>
+        fmPage.evaluate(() => (document.body.innerText ?? '').replaceAll('\u200b', ''))
+      try {
+        await fmPage.waitForFunction(
+          (needles) =>
+            needles.some((n) => (document.body.innerText ?? '').replaceAll('\u200b', '').includes(n)),
+          fmToastNeedles,
+          { timeout: 25000 },
+        )
+        fmResultBody = await fmReadBody()
+      } catch {
+        fmResultBody = await fmReadBody()
+      }
+      await fmPage.waitForTimeout(1200)
+      // 文言は書き写さず ja.ts から組み立てる（2026-08-25 便KT で「◯日分（◯食分）」から
+      // 「◯食分」を落とし、残る側の数え方を「◯品」にそろえた。書き写した側だけが取り残される
+      // のを防ぐ）。{d}{k} には数字が入る
+      const fmJaRe = (text) =>
+        new RegExp(text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\\\{[a-z]\\\}/g, '\\d+'))
       check(
-        'MEALPLAN-A5(規約F) 実行前に「何日分・何食分を埋めるか」と「何が消えないか」を確認する',
-        /まだ決まっていない\d+日分（\d+食分）/.test(fmConfirmMsg) &&
-          fmConfirmMsg.includes('献立は消えません'),
+        'MEALPLAN-A5(規約F) 実行前に「何日分を埋めるか」と「何が消えないか」を確認する',
+        fmJaRe(ja.mealPlan.fillMonthConfirmTitle).test(fmConfirmMsg) &&
+          fmJaRe(ja.mealPlan.fillMonthConfirm).test(fmConfirmMsg),
         `confirm=${fmConfirmMsg}`,
       )
       const fmData = await fmPage.evaluate(
@@ -14791,12 +14823,13 @@ try {
         'MEALPLAN-A5 自動で入れた枠にはautoが付く(次の提案で再抽選できる)',
         fmMonthPlans.filter((e) => e.date !== fmManualDate).every((e) => e.auto === true),
       )
+      // 結果のトーストも ja.ts から組み立てて拾う（2026-08-25 便KT で「◯食分はそのままにして」
+      // →「◯品はそのままにして」に変わった）。上で**出るまで待って**控えた本文を見る
       check(
         'MEALPLAN-A5 結果は実際に入れた品数で伝える(正直な完了報告)',
-        /\d+品の献立を立てました|\d+食分はそのままにして、\d+品を新しく立てました/.test(
-          (await fmPage.textContent('body')) ?? '',
-        ),
-        `body=${((await fmPage.textContent('body')) ?? '').slice(0, 120)}`,
+        fmJaRe(ja.mealPlan.fillMonthDone).test(fmResultBody) ||
+          fmJaRe(ja.mealPlan.fillMonthKeptManual).test(fmResultBody),
+        `body=${fmResultBody.slice(0, 200)}`,
       )
       // 2026-07-30 便CH/C1: 2回目に押しても、自動で入れた献立を総入れ替えしない(非破壊)。
       // 従来は確認文が「今ある献立と作った記録は消えません」と言いながら自動分を全部消して
@@ -37981,8 +38014,14 @@ try {
         await p.getByRole('button', { name: ja.cookNavi.build }).click()
         await p.waitForTimeout(900)
 
-        // FN-02: 待ちの枠の数だけ「タイマーを始める」がある（出たり出なかったりしない）
+        // FN-02: 待ちの枠の数だけ「タイマーを始める」がある（出たり出なかったりしない）。
+        // 2026-08-25 便KT: 電子レンジ・トースターの待ちだけは器具が知らせるのでボタンを出さない
+        // ＝そのぶんを差し引いて数える（差し引く枠には代わりの一文が必ず入っていることも見る）
         const waitBlocks = await p.locator('[data-testid="navi-wait-block"]').count()
+        const applianceWaits = await p
+          .locator('[data-testid="navi-wait-block"]')
+          .filter({ has: p.locator('[data-testid="navi-wait-appliance-timer"]') })
+          .count()
         const timerButtons = await p
           .locator('[data-testid="navi-wait-block"]')
           .getByRole('button', { name: ja.cookNavi.startTimer })
@@ -37993,9 +38032,9 @@ try {
           `waitBlocks=${waitBlocks}`,
         )
         check(
-          'FN-02 待ちの枠の数と「タイマーを始める」の数が一致する',
-          waitBlocks === timerButtons,
-          `枠=${waitBlocks} / ボタン=${timerButtons}`,
+          'FN-02 待ちの枠の数と「タイマーを始める」の数が一致する(器具が知らせる待ちを除く)',
+          waitBlocks - applianceWaits === timerButtons,
+          `枠=${waitBlocks} / 器具が知らせる=${applianceWaits} / ボタン=${timerButtons}`,
         )
         // 本文に分数が書かれた待ち(「2分温める」)にもボタンがある＝本文の小さな文字に頼らせない
         const inTextWait = p.locator('[data-testid="navi-wait-block"]').filter({ hasText: '約2分の待ち時間' })
@@ -38016,9 +38055,16 @@ try {
 
         // FN-04: 品ごとの内訳と、数え方の違いの一文
         const legendMinutes = await p.locator('[data-testid="navi-legend-minutes"]').allInnerTexts()
+        // 文言は書き写さず ja.ts から組み立てる（2026-08-25 便KT で「1品だけなら約◯分」→
+        // 「単品で約◯分」に変わったときに、書き写した側だけが取り残されるのを防ぐ）
+        const legendRe = new RegExp(
+          `^${ja.cookNavi.legendRecipeMinutes
+            .replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+            .replace('\\{n\\}', '\\d+')}$`,
+        )
         check(
-          'FN-04 組み合わせる品それぞれに「1品だけなら約◯分」が出る',
-          legendMinutes.length === 3 && legendMinutes.every((t) => /^1品だけなら約\d+分$/.test(t.trim())),
+          `FN-04 組み合わせる品それぞれに「${ja.cookNavi.legendRecipeMinutes}」が出る`,
+          legendMinutes.length === 3 && legendMinutes.every((t) => legendRe.test(t.trim())),
           JSON.stringify(legendMinutes),
         )
         const compareText = noZw((await p.locator('[data-testid="navi-total-compare"]').innerText().catch(() => '')) || '')
@@ -38028,41 +38074,37 @@ try {
           compareText === '' || compareText.includes(`1品ずつ作ると約${soloSum}分`),
           `内訳合計=${soloSum} / ${compareText}`,
         )
-        const countNote = noZw(await p.locator('[data-testid="navi-total-count-note"]').innerText())
-        // 何と書くかは ja.ts 側の見張り（test-logic の KM-2）が持つ。ここは
-        // 「ja.ts の文言がそのまま画面に出ているか」だけを見る（書き写さない）
+        // 2026-08-25 便KT・オーナー原文「「レシピの一覧に出ている〜一致しません」削除。
+        // どこのことかわからない上に違っているのは前提のうちなので不要」。
+        // 便FN が置いていた断り書きは消した。**戻っていないこと**をここで見張る
+        //（黙って検査を消すと、次の便が足し直しても誰も気づかない）
         check(
-          'FN-04 レシピの「調理時間」と数え方が違うことが画面に書いてある',
-          countNote === noZw(ja.cookNavi.totalCountNote),
-          `画面=${countNote} / ja.ts=${noZw(ja.cookNavi.totalCountNote)}`,
+          'KT-3 数え方の断り書きは画面に出ていない（2026-08-25 オーナー指示で削除）',
+          (await p.locator('[data-testid="navi-total-count-note"]').count()) === 0 &&
+            !noZw(await p.textContent('body')).includes('数え方が違う'),
+        )
+        check(
+          'KT-3 「段取りと進んだところは〜」も画面に出ていない',
+          (await p.locator('[data-testid="navi-restore-keep-note"]').count()) === 0,
         )
 
-        // --- GF-C: 各品が何分後にできあがるかと、その開きが画面に出る ---
-        //   利用者テスト「アプリは合計だけ出して、各品が何分後にできるかは表示しません。
-        //   開きは最大16分。みそ汁ができてから主菜が焼き上がるまで12分放置になります。
-        //   この開きが出ること自体を画面に出してほしい（今は自分で足し算しないと分からない）」
+        // --- KT-5: 「できあがりの目安」の枠は画面から消えている ---
+        //   2026-08-25 便KT・オーナー原文「「出来上がりの目安」削除。全体の調理時間が分かれば
+        //   十分。細かく出したところで、個人の手のスピードや状況によってすぐに変わるので、
+        //   ここまで細かく表示してもあまり意味がない。」
+        //   便GF/GK がここで測っていた「品ごとの約◯分後」「開きの一文」は節ごと消した。
+        //   **全体の調理時間**は今までどおり画面に出ていること（消しすぎていないこと）まで見る
         {
           const prevCheck = currentCheck
-          currentCheck = 'GF-C'
-          const finishRows = await p.evaluate(() => {
-            const box = document.querySelector('[data-testid="navi-finish-times"]')
-            if (!box) return null
-            return [...box.querySelectorAll('li')].map((li) => ({
-              title: (li.querySelector('span')?.textContent ?? '').trim(),
-              minutes: Number(/約(\d+)分後/.exec((li.textContent ?? '').replaceAll('​', ''))?.[1] ?? -1),
-            }))
-          })
+          currentCheck = 'KT-5'
           check(
-            'GF-C 組み合わせた品それぞれに「約◯分後」が出る',
-            finishRows != null &&
-              finishRows.length === 3 &&
-              finishRows.every((r) => r.minutes >= 0 && r.title !== ''),
-            JSON.stringify(finishRows),
+            'KT-5 品ごとの「できあがりの目安」の枠が画面に無い',
+            (await p.locator('[data-testid="navi-finish-times"]').count()) === 0 &&
+              !noZw(await p.textContent('body')).includes('できあがりの目安'),
           )
-          // 段取りの合計は「いちばん遅い品ができあがる時刻」。画面の上で読み合わせられること
-          const naviBody = noZw(await p.textContent('body'))
           // 見出しの言い方（2026-08-25 便KM で「全体の目安」→「全体の調理時間」）に
           // 引きずられないよう、拾う形も ja.ts から組み立てる
+          const naviBody = noZw(await p.textContent('body'))
           const totalRe = new RegExp(
             ja.cookNavi.totalEstimate
               .replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
@@ -38071,38 +38113,10 @@ try {
           )
           const totalOnScreen = Number(totalRe.exec(naviBody)?.[1] ?? -1)
           check(
-            'GF-C いちばん遅い品の「約◯分後」が、全体の目安と一致する（自分で足し算しなくてよい）',
-            finishRows != null && Math.max(...finishRows.map((r) => r.minutes)) === totalOnScreen,
-            `品ごと=${JSON.stringify(finishRows)} / 全体=${totalOnScreen}`,
+            'KT-5 消したのは品ごとの目安だけ＝「全体の調理時間 約◯分」は今までどおり出ている',
+            totalOnScreen > 0,
+            `全体=${totalOnScreen}`,
           )
-          // 開きの一文は「どの2品が何分あくか」。書いてある数字が、上の一覧の引き算と合うこと
-          const spreadText = noZw(
-            (await p
-              .locator('[data-testid="navi-finish-spread"]')
-              .innerText()
-              .catch(() => '')) || '',
-          )
-          // 開きが0分のとき（温かい品の完成がそろっているとき）は一文を出さないので、
-          // 出ているときだけ中身を見る＝「出る/出ない」を決め打ちしない
-          if (spreadText !== '') {
-            const named = (finishRows ?? []).filter((r) => spreadText.includes(r.title))
-            const spreadMinutes = Number(/約(\d+)分あきます/.exec(spreadText)?.[1] ?? -1)
-            check(
-              'GF-C 開きの一文が、名前を挙げた2品の差と一致する（画面の中で計算が合う）',
-              named.length === 2 && spreadMinutes === Math.abs(named[0].minutes - named[1].minutes),
-              `${spreadText} / ${JSON.stringify(named)}`,
-            )
-            // GK-03: 開きは**全部の品**で数える（2026-08-14 便GK・実操作テスト3回目
-            //   「4分は言うのに17分は何も言わない。判定基準がわからない」）。
-            //   一覧のいちばん早い品といちばん遅い品が、そのまま一文に出ていること
-            const rows = finishRows ?? []
-            const widest = Math.max(...rows.map((r) => r.minutes)) - Math.min(...rows.map((r) => r.minutes))
-            check(
-              'GK-03 開きの一文は、一覧のいちばん早い品といちばん遅い品の差になっている（冷たい品を黙って外さない）',
-              rows.length > 0 && spreadMinutes === widest,
-              `${spreadText} / ${JSON.stringify(rows)}`,
-            )
-          }
           currentCheck = prevCheck
         }
 
@@ -40050,20 +40064,13 @@ try {
       await ftPage.getByRole('button', { name: ja.cookNavi.build }).click()
       await ftPage.waitForTimeout(800)
 
-      // 何がどこまで残るのかを、閉じる前に読める場所に書いてある（規約F）
-      const ftKeepNote = ftNoZw(
-        await ftPage.locator('[data-testid="navi-restore-keep-note"]').innerText(),
-      ).trim()
-      // 2026-08-25 便KM: 「日付が変わると残しません」は「今日のうちは残ります」の裏返しで
-      // 同じことの2回目だったので落とした（オーナー原文「必要ない分は省いて。」）。
-      // 残るもの（段取りと進んだところ）と、いつまで残るか（今日のうち）は今までどおり書いてある。
+      // 2026-08-25 便KT・オーナー原文「「段取りと進んだところは、〜」削除」。
+      // 常に出していた説明は消した。**作りは変えていない**ので、開き直しても段取りと
+      // 途中の位置が残ることは、この節の以降の検査（FT-02 以降）がそのまま見張る。
       // 日付をまたいで捨てたときは restoreExpiredByDate がその場で理由を言う（FT-05 が見張る）
       check(
-        'FT-01 段取りの説明に「何がいつまで残るか」が書いてある',
-        ftKeepNote === ftNoZw(ja.cookNavi.restoreKeepNote).trim() &&
-          ftKeepNote.includes('開き直しても') &&
-          ftKeepNote.includes('今日のうちは残ります'),
-        ftKeepNote,
+        'KT-3 「段取りと進んだところは〜」の説明が画面から消えている',
+        (await ftPage.locator('[data-testid="navi-restore-keep-note"]').count()) === 0,
       )
 
       // 開き直したあとと比べるための、いまの段取りの枚数（2026-08-14 便GK。
@@ -40295,7 +40302,7 @@ try {
   // ============================================================================
   // FU-01〜06: 「自分で登録したレシピだけ」で試した実操作テストで出た6件（2026-08-12 便FU）
   //
-  //   FU-01 画面に出ている各手順の分の合計＝ヘッダーの「1品だけなら約◯分」（機械で突き合わせる）
+  //   FU-01 画面に出ている各手順の分の合計＝ヘッダーの品ごとの目安（機械で突き合わせる）
   //   FU-02 合わせ調味料が、段取りにも調理中モードにも組ごと出る
   //   FU-03 貼り付け取り込みでも調理時間が入り、入らないときは理由を書く
   //   FU-04 段取りの丸数字とレシピ内の手順番号がくっついていない（「⑫5」を作らない）
@@ -40388,7 +40395,9 @@ try {
       await fuPage.getByRole('button', { name: ja.cookNavi.build }).click()
       await fuPage.waitForTimeout(900)
 
-      // --- FU-01: 画面に出ている各手順の分を足すと、ヘッダーの「1品だけなら約◯分」と一致する ---
+      // --- FU-01: 画面に出ている各手順の分を足すと、ヘッダーの品ごとの目安と一致する ---
+      //   （見出しの言い方は 2026-08-25 便KT で「1品だけなら約◯分」→「単品で約◯分」に変わった。
+      //     拾い方は「約◯分」のままなので、言い方が変わっても同じ判定になる）
       const fuMinutes = await fuPage.evaluate(() => {
         /** 手順カードに実際に出ている分数（待ちブロックの「約◯分の待ち時間」／手作業の「目安◯分」） */
         const shown = (card) => {
@@ -40409,7 +40418,7 @@ try {
         }
         const legend = [...document.querySelectorAll('[data-testid="navi-legend-minutes"]')].map((el) => ({
           title: (el.parentElement?.textContent ?? '').replace(el.textContent ?? '', '').trim(),
-          // 「1品だけなら約34分」。先頭の「1品」を拾わないよう「約◯分」で取る
+          // 「単品で約34分」。言い方に寄りかからないよう「約◯分」で取る
           minutes: Number((el.textContent ?? '').match(/約\s*(\d+)\s*分/)?.[1] ?? 0),
         }))
         const compare = document.querySelector('[data-testid="navi-total-compare"]')?.textContent ?? ''
@@ -40423,7 +40432,7 @@ try {
         })
         .filter((r) => r.shown !== r.legend)
       check(
-        'FU-01 画面に出ている各手順の分の合計＝ヘッダーの「1品だけなら約◯分」（3品とも）',
+        `FU-01 画面に出ている各手順の分の合計＝ヘッダーの「${ja.cookNavi.legendRecipeMinutes}」（3品とも）`,
         fuMinutes.legend.length === 3 && fuMismatch.length === 0,
         JSON.stringify({ 不一致: fuMismatch, 画面: fuMinutes.perRecipe, 見出し: fuMinutes.legend }),
       )
@@ -41104,10 +41113,15 @@ try {
       fxDialogMessage = ''
       await fxPage.locator('[data-testid="navi-discard-timeline"]').click()
       await fxPage.waitForTimeout(900)
+      // 2026-08-25 便KT・オーナー原文（差し戻しD）「文章が長くわかりづらいので。消える側は
+      // 「段取りを消す」したら当然消えるとわかる範囲では？むしろ確認で説明が入った方が煩わしいかと」。
+      // 規約Fの例外＝ボタンの名前が消えるものを言い切っているので、並べ立てはやめた。
+      // 残るのは、名前から読み取れない一点（タイマーは止まらない）だけ
       check(
-        'FX-08 確認文に、消えるものと残るものの両方が書いてある（規約F）',
-        fxDialogMessage.includes('作った段取り・選んでいた3品の組み合わせ・調理中だった手順') &&
-          fxDialogMessage.includes(ja.cookNavi.discardTimelineKept),
+        'FX-08 確認文は「段取りを消します」と「動いているタイマーは残ります」の2行だけ',
+        fxDialogMessage.includes(ja.cookNavi.discardTimelineConfirmTitle) &&
+          fxDialogMessage.includes(ja.cookNavi.discardTimelineTimerNote) &&
+          !fxDialogMessage.includes('組み合わせ'),
         fxDialogMessage,
       )
       check(
@@ -42085,7 +42099,8 @@ try {
   //   GL-01 並べ替えたあと、目安の分数と**同じ枠の中**に印が出て、分数は灰色になる
   //         （「数字が載っているカードには何の印もない。上へスクロールしたら私は17分後だと信じます」）
   //   GL-02 「自動の並びに戻す」の確認は画面の中の窓（ブラウザの素の確認を出さない）
-  //   GL-03 「1つ前の並びに戻す」は連打で戻れる／押す場所が動かない／あと何回戻せるかが出る
+  //   GL-03 「1つ前の並びに戻す」は連打で戻れる／押す場所が動かない
+  //         （「あと◯回」は 2026-08-25 便KT・オーナー指示で消した。KT-2 が戻っていないかを見る）
   // ============================================================================
   currentCheck = 'GL-01'
   {
@@ -42163,8 +42178,7 @@ try {
       check('GL 前提: 3品の段取りが組める', glAuto.length >= 6, String(glAuto.length))
       check(
         'GL-01 自動の並びのままなら、目安の分数に印は付かない',
-        (await glPage.locator('[data-testid="navi-total-estimate-stale"]').count()) === 0 &&
-          (await glPage.locator('[data-testid="navi-finish-estimate-stale"]').count()) === 0,
+        (await glPage.locator('[data-testid="navi-total-estimate-stale"]').count()) === 0,
       )
       /** 分数の色（灰色になったか）を実DOMで測る */
       const glMinutesColor = async (sel) =>
@@ -42173,7 +42187,6 @@ try {
           return el ? getComputedStyle(el).color : ''
         }, sel)
       const glTotalColorBefore = await glMinutesColor('[data-testid="navi-total-estimate"]')
-      const glFinishColorBefore = await glMinutesColor('[data-testid="navi-finish-minutes"]')
       // 手で1回動かす
       await glPage.locator('[data-testid="navi-step-down"]').nth(0).click()
       await glPage.waitForTimeout(600)
@@ -42183,24 +42196,20 @@ try {
           '自動で組んだ並びで計算した数字です。並びを変えたあとの時間ではありません。',
         noZw(await glPage.locator('[data-testid="navi-total-estimate-stale"]').innerText()),
       )
-      check(
-        'GL-01 「できあがりの目安」の枠の中にも同じ印が出る（品ごとの分数と同じ場所）',
-        noZw(await glPage.locator('[data-testid="navi-finish-estimate-stale"]').innerText()) ===
-          '自動で組んだ並びで計算した数字です。並びを変えたあとの時間ではありません。',
-        noZw(await glPage.locator('[data-testid="navi-finish-estimate-stale"]').innerText()),
-      )
+      // 2026-08-25 便KT: 「できあがりの目安」の枠はオーナー指示で消したので、その枠の中の
+      // 印と色を見ていた3件は落とした。**残す側**（全体の調理時間と同じ枠の中に印が出る・
+      // 分数そのものも灰色になる）は便GLの要点そのものなので、そのまま見張る
       const glTotalColorAfter = await glMinutesColor('[data-testid="navi-total-estimate"]')
-      const glFinishColorAfter = await glMinutesColor('[data-testid="navi-finish-minutes"]')
       check(
         'GL-01 分数そのものの色も変わる（灰色にして、いまの並びの答えでないと見て分かる）',
-        glTotalColorAfter !== glTotalColorBefore && glFinishColorAfter !== glFinishColorBefore,
-        `全体 ${glTotalColorBefore}→${glTotalColorAfter} / 品ごと ${glFinishColorBefore}→${glFinishColorAfter}`,
+        glTotalColorAfter !== glTotalColorBefore,
+        `全体 ${glTotalColorBefore}→${glTotalColorAfter}`,
       )
       check(
         'GL-01 印は、数字と同じ枠の中にある（手順リストの手前ではなく）',
         await glPage.evaluate(() => {
-          const card = document.querySelector('[data-testid="navi-finish-times"]')
-          const mark = document.querySelector('[data-testid="navi-finish-estimate-stale"]')
+          const card = document.querySelector('[data-testid="navi-total-card"]')
+          const mark = document.querySelector('[data-testid="navi-total-estimate-stale"]')
           return Boolean(card && mark && card.contains(mark))
         }),
       )
@@ -42212,9 +42221,13 @@ try {
         await glPage.waitForTimeout(350)
       }
       const glMoved = await glOrder()
+      // 2026-08-25 便KT・オーナー原文「並行調理の手順変更「１つ前の並びに戻す」→（あと◯回）削除」。
+      // 残り回数は消した。**押せる回数の上限は元から無い**ので、下の連打の検査がそのまま
+      // 「何度でも戻せる」を見張る。ここでは残り回数が戻っていないことだけを見る
       check(
-        'GL-03 あと何回戻せるかが、戻すボタンに出ている',
-        noZw(await glPage.locator('[data-testid="navi-reorder-undo"]').innerText()).includes('あと5回'),
+        'KT-2 戻すボタンに残り回数を書かない（ボタン名は ja.ts のとおり）',
+        noZw(await glPage.locator('[data-testid="navi-reorder-undo"]').innerText()) ===
+          noZw(ja.cookNavi.reorderUndoOne),
         noZw(await glPage.locator('[data-testid="navi-reorder-undo"]').innerText()),
       )
       // 押す場所を動かさないまま、同じ座標を5回押せるか（連打の再現）
@@ -51680,8 +51693,10 @@ try {
   // 熱いうちに食べたい品はこの組に1つだけなのに、和え物より12分早く仕上がる
   // ＝蒸ししゃぶは12分そのままになる。
   //
-  // e2eが見張るのは**画面が利用者に見せている数字**＝「できあがりの目安」の並び。
-  // 熱い品が1つだけの組では、その品の目安が、いちばん遅い品と4分以上離れないこと。
+  // 2026-08-25 便KT: 「できあがりの目安」の枠はオーナー指示で画面から消したので、
+  // 見る先を**画面に残っている「完成」の印の並び**に移した（測る中身は変えていない）。
+  // 熱い品が1つだけの組では、その品の「完成」が**いちばん最後**に来ること
+  // ＝ほかの品が先に出来上がって、熱い品だけが待たされる並びになっていないこと。
   // 何番目のカードに出るか・工程がいくつに割れたかは見ない
   // （段取りが伸びても縮んでも同じ判定になる形）。熱い品が2つある組は対象にしない
   // ＝どちらかが先に仕上がるのは物理的に避けられないため。 ---
@@ -51772,31 +51787,22 @@ try {
       await kqPage.getByRole('button', { name: ja.cookNavi.build }).click()
       await kqPage.waitForTimeout(900)
 
-      // 画面の「できあがりの目安」をそのまま読む（品名と、その品が何分後にできるか）
-      const kqFinishes = await kqPage.$$eval('[data-testid="navi-finish-times"] li', (lis) =>
-        lis.map((li) => {
-          const row = (li.textContent ?? '').replaceAll('​', '')
-          const shown = (
-            li.querySelector('[data-testid="navi-finish-minutes"]')?.textContent ?? ''
-          ).replaceAll('​', '')
-          const digits = shown.match(/[0-9]+/)
-          return { row, minutes: digits ? Number(digits[0]) : null }
-        }),
+      // 段取りの中の「完成」の印を、上から順に読む（どの品がどの順で仕上がるか）
+      const kqDone = await kqPage.$$eval('#root li', (lis) =>
+        lis
+          .filter((li) => li.querySelector('[data-testid="navi-recipe-done"]'))
+          .map((li) => (li.textContent ?? '').replaceAll('​', '')),
       )
-      const kqHotRow = kqFinishes.find((f) => f.row.includes(kqHotTitle))
-      const kqLatest = kqFinishes.reduce((max, f) => (f.minutes != null ? Math.max(max, f.minutes) : max), 0)
+      const kqHotAt = kqDone.findIndex((row) => row.includes(kqHotTitle))
       check(
-        'KQFIN-01 前提: できあがりの目安が2品ぶん出て、熱い品はこの組に1つだけ',
-        kqFinishes.length === 2 &&
-          kqFinishes.every((f) => f.minutes != null) &&
-          kqHotRow != null &&
-          kqHotCount.length === 1,
-        `行=${kqFinishes.map((f) => `${f.row}`).join(' / ')} 熱い品=${kqHotCount.length}品`,
+        'KQFIN-01 前提: 2品とも「完成」まで段取りに入っていて、熱い品はこの組に1つだけ',
+        kqDone.length === 2 && kqHotAt >= 0 && kqHotCount.length === 1,
+        `完成の並び=${kqDone.map((r) => r.slice(0, 24)).join(' / ')} 熱い品=${kqHotCount.length}品`,
       )
       check(
         'KQFIN-01 熱いうちに食べたい品が、ほかの品より先に仕上がってそのままにならない',
-        kqHotRow != null && kqHotRow.minutes != null && kqLatest - kqHotRow.minutes < 4,
-        `熱い品=約${kqHotRow?.minutes}分後 / いちばん遅い品=約${kqLatest}分後`,
+        kqHotAt === kqDone.length - 1,
+        `熱い品の完成=${kqHotAt + 1}番目 / 完成は全${kqDone.length}件`,
       )
     } finally {
       await kqBrowser.close()
@@ -53516,6 +53522,205 @@ try {
   }
 
 
+
+  // --- KTNUM-01 / KTTIMER-02: 2026-08-25 便KT（オーナー書き溜め・並行調理ナビ）---
+  //
+  // ①「並行調理のレシピごとの番号「1−1」などが、レシピ名が長いと改行されてしまう。」
+  //   → 番号のバッジは折り返さず、料理名の札だけが縮む。390px と 320px の両方で測る。
+  //     折り返しは**文字の行数**で測る（Range の getClientRects が1つ＝1行）。
+  //     バッジの高さは固定なので、高さでは見分けられない。
+  // ②「レンジでは、レンジのタイマーを使います。レンジに関するタイマーは削除できない？」
+  //   → 電子レンジの待ちには「タイマーを始める」を出さず、何ではかるのかを1行で書く。
+  //     コンロの待ちには今までどおり出す（器具が何も知らせないため）。 ---
+  currentCheck = 'KTNUM-01'
+  {
+    const ktBrowser = await chromium.launch()
+    const ktSeed = async (page) => {
+      await page.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await page.waitForTimeout(2400) // 初回シード完了待ち
+      await page.evaluate(async () => {
+        const openDb = () =>
+          new Promise((resolve, reject) => {
+            const r = indexedDB.open('uchi-recipe')
+            r.onsuccess = () => resolve(r.result)
+            r.onerror = () => reject(r.error)
+          })
+        const db = await openDb()
+        const P = (req) =>
+          new Promise((res, rej) => {
+            req.onsuccess = () => res(req.result)
+            req.onerror = () => rej(req.error)
+          })
+        const store = (name) => db.transaction(name, 'readwrite').objectStore(name)
+        const mk = (title, dishType, steps) => ({
+          title,
+          servings: 2,
+          effortLevel: 'normal',
+          tags: [],
+          dishType,
+          ingredients: [],
+          steps,
+          isFavorite: false,
+          cookedLogs: [],
+          searchWords: [],
+          isStarter: false,
+          updatedAt: Date.now(),
+        })
+        // 料理名を長くする（オーナーの報告は「レシピ名が長いと」）。
+        // 1つめの品は、1手順が段取りの上で2つに割れる形（＝番号が「3-1」「3-2」になる）
+        const idA = await P(
+          store('recipes').add(
+            mk('E2E鶏むね肉とたっぷり根菜のやわらか甘辛煮こみ定食', 'main', [
+              { text: '鶏むね肉と根菜を食べやすい大きさに切る。' },
+              { text: 'フライパンに油を熱し、鶏むね肉の色が変わるまで炒める。' },
+              { text: '水としょうゆ・みりん・砂糖を入れ、落としぶたをして中火で15分煮る。', minutes: 15 },
+            ]),
+          ),
+        )
+        // 2つめは電子レンジの待ち（器具が知らせる待ち）
+        const idB = await P(
+          store('recipes').add(
+            mk('E2Eブロッコリーのレンジ蒸し', 'side', [
+              { text: 'ブロッコリーは小房に分ける。' },
+              { text: '耐熱皿に並べてふんわりとラップをかけ、電子レンジ(600W)で3分加熱する。', minutes: 3 },
+              { text: '水気をきってごま油と塩で和える。' },
+            ]),
+          ),
+        )
+        const today = await P(store('todayList').getAll())
+        for (const row of today) await P(store('todayList').delete(row.id))
+        let addedAt = Date.now()
+        await P(store('todayList').add({ recipeId: idA, addedAt: addedAt++ }))
+        await P(store('todayList').add({ recipeId: idB, addedAt: addedAt++ }))
+        const cur = (await P(store('settings').get(1))) || { id: 1 }
+        await P(
+          store('settings').put({ ...cur, id: 1, proCode: 'UR-E2E-TEST-ONLY', proActivatedAt: Date.now() }),
+        )
+        db.close()
+      })
+      // 生のIndexedDBへ書いたので、必ず読み込み直す（Dexieのライブ購読はDexie経由しか見ていない）
+      await page.goto(`${BASE}/#/cook-navi`)
+      await page.reload({ waitUntil: 'networkidle' })
+      await page.waitForTimeout(1600)
+      await page.getByRole('button', { name: ja.cookNavi.build }).click()
+      await page.waitForTimeout(1000)
+    }
+    /** 品ごとの番号のバッジを、行数と幅で測る（文字が折り返していないか） */
+    const ktBadges = (page) =>
+      page.$$eval('[data-testid="navi-recipe-step-number"]', (wraps) =>
+        wraps.map((wrap) => {
+          const badge = wrap.firstElementChild ?? wrap
+          const node = [...badge.childNodes].find((n) => n.nodeType === 3)
+          const range = document.createRange()
+          if (node) range.selectNodeContents(node)
+          const box = badge.getBoundingClientRect()
+          return {
+            label: (badge.textContent ?? '').trim(),
+            lines: node ? range.getClientRects().length : 0,
+            width: Math.round(box.width),
+            scrollWidth: badge.scrollWidth,
+            right: Math.round(box.right),
+          }
+        }),
+      )
+    try {
+      for (const width of [390, 320]) {
+        const ktContext = await ktBrowser.newContext({ viewport: { width, height: 844 } })
+        const ktPage = await ktContext.newPage()
+        ktPage.on('pageerror', (err) => {
+          if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin'))
+            return
+          errors.push(`[pageerror@KTNUM-01] ${err.message}`)
+        })
+        try {
+          await ktSeed(ktPage)
+          const badges = await ktBadges(ktPage)
+          check(
+            `KTNUM-01 前提: ${width}px で品ごとの番号が出ていて、割れた手順の「◯-◯」もある`,
+            badges.length >= 3 && badges.some((b) => b.label.includes('-')),
+            `${width}px 番号=${badges.map((b) => b.label).join(',')}`,
+          )
+          const ktWrapped = badges.filter((b) => b.lines > 1)
+          check(
+            `KTNUM-01 ${width}px で番号が折り返していない（レシピ名が長くても1行）`,
+            ktWrapped.length === 0,
+            `折り返した番号=${JSON.stringify(ktWrapped)}`,
+          )
+          const ktSqueezed = badges.filter((b) => b.scrollWidth > b.width + 1)
+          check(
+            `KTNUM-01 ${width}px で番号が押しつぶされていない（中身がはみ出していない）`,
+            ktSqueezed.length === 0,
+            `つぶれた番号=${JSON.stringify(ktSqueezed)}`,
+          )
+          check(
+            `KTNUM-01 ${width}px で番号が画面の外へ押し出されていない`,
+            badges.every((b) => b.right <= width),
+            JSON.stringify(badges.map((b) => b.right)),
+          )
+          // 縮むのは料理名の札のほう＝長い名前は省略されて画面に収まる
+          const ktPillOverflow = await ktPage.evaluate(
+            () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+          )
+          check(
+            `KTNUM-01 ${width}px で横スクロールが出ていない（縮むのは料理名の札のほう）`,
+            ktPillOverflow <= 0,
+            `はみ出し=${ktPillOverflow}px`,
+          )
+
+          // --- KTTIMER-02: 器具そのものが知らせる待ちには、アプリのタイマーを出さない ---
+          if (width === 390) {
+            currentCheck = 'KTTIMER-02'
+            const ktWaits = await ktPage.$$eval(
+              '[data-testid="navi-wait-block"]',
+              (blocks, startLabel) =>
+                blocks.map((b) => ({
+                  text: (b.closest('li')?.querySelector('[data-testid="navi-step-text"]')?.textContent ?? '')
+                    .replaceAll('\u200b', ''),
+                  hasButton: [...b.querySelectorAll('button')].some((btn) =>
+                    (btn.textContent ?? '').replaceAll('\u200b', '').includes(startLabel),
+                  ),
+                  applianceNote: (
+                    b.querySelector('[data-testid="navi-wait-appliance-timer"]')?.textContent ?? ''
+                  ).replaceAll('\u200b', ''),
+                })),
+              ja.cookNavi.startTimer,
+            )
+            const ktMicro = ktWaits.filter((w) => stepAppliance(w.text) === 'microwave')
+            const ktStove = ktWaits.filter((w) => stepAppliance(w.text) === 'stove')
+            check(
+              'KTTIMER-02 前提: レンジの待ちとコンロの待ちが両方この段取りにある',
+              ktMicro.length >= 1 && ktStove.length >= 1,
+              `レンジ=${ktMicro.length} コンロ=${ktStove.length}`,
+            )
+            check(
+              'KTTIMER-02 レンジの待ちに「タイマーを始める」を出さない',
+              ktMicro.every((w) => !w.hasButton),
+              JSON.stringify(ktMicro),
+            )
+            check(
+              'KTTIMER-02 代わりに、何ではかるのかを書く（黙って消さない）',
+              ktMicro.every(
+                (w) =>
+                  w.applianceNote ===
+                  ja.cookNavi.waitApplianceTimerNote.replace('{appliance}', ja.settings.kitchenMicrowave),
+              ),
+              JSON.stringify(ktMicro.map((w) => w.applianceNote)),
+            )
+            check(
+              'KTTIMER-02 コンロの待ちには今までどおり出す（器具が何も知らせないため）',
+              ktStove.every((w) => w.hasButton && w.applianceNote === ''),
+              JSON.stringify(ktStove),
+            )
+            currentCheck = 'KTNUM-01'
+          }
+        } finally {
+          await ktContext.close()
+        }
+      }
+    } finally {
+      await ktBrowser.close()
+    }
+  }
 
 } catch (err) {
   ng(`実行中断(${currentCheck})`, err.message)

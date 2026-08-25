@@ -47,10 +47,10 @@ import {
   hasFillableWorkDuringWait,
   recipeStepLabel,
   showsWaitTimerButton,
+  waitSignaledByAppliance,
   waitTimerSeconds,
   type TimelineItem,
 } from '../logic/cookNavi'
-import { finishSpread, isFinishSpreadWide, recipeFinishTimes } from '../logic/cookFinish'
 import { NAVI_RECIPE_COLORS } from '../logic/naviColors'
 import {
   clearCookNaviSession,
@@ -110,7 +110,11 @@ import Toast from '../components/Toast'
 import { effectiveMealServings } from '../logic/servings'
 import type { Recipe } from '../db/types'
 import { settingsLinkWithBack } from '../logic/backLink'
-import { kitchenFromSettings, type ApplianceKey } from '../logic/cookAppliance'
+import {
+  kitchenFromSettings,
+  type ApplianceKey,
+  type KitchenEquipment,
+} from '../logic/cookAppliance'
 import { ja } from '../i18n/ja'
 
 /** レシピの色分け（最大3品）。常駐タイマーと同じ定義を使う（logic/naviColors.ts） */
@@ -138,7 +142,13 @@ function RecipeStepNumber({ item, colorIndex }: { item: TimelineItem; colorIndex
               .replace('{part}', String(item.splitPart))
           : ja.cookNavi.stepNumberLabel.replace('{n}', label)}
       </span>
-      <span aria-hidden data-testid="navi-recipe-step-number">
+      {/* 2026-08-25 便KT・オーナー原文「並行調理のレシピごとの番号「1−1」などが、
+          レシピ名が長いと改行されてしまう。」
+          この span は横並びの一員（flex item）で、既定では縮む側に入る。中の StepBadge は
+          `shrink-0` を持っているが、**外側のこの span が縮む**ので、中の「1-1」が
+          ハイフンのところで折り返していた。番号は縮ませず、料理名の札（RecipePill＝truncate）
+          だけが縮む形にする */}
+      <span aria-hidden data-testid="navi-recipe-step-number" className="shrink-0">
         <StepBadge
           number={label}
           size={24}
@@ -153,7 +163,7 @@ function RecipeStepNumber({ item, colorIndex }: { item: TimelineItem; colorIndex
 function RecipePill({ title, colorIndex }: { title: string; colorIndex: number }) {
   return (
     <span
-      className="inline-block max-w-full truncate rounded-full px-2 py-0.5 text-xs font-bold"
+      className="inline-block min-w-0 max-w-full truncate rounded-full px-2 py-0.5 text-xs font-bold"
       style={{ backgroundColor: RECIPE_COLORS[colorIndex % RECIPE_COLORS.length], color: 'var(--chip-ink)' }}
     >
       {title}
@@ -206,6 +216,7 @@ function reorderIssueText(issue: ReorderIssue): string {
 /** タイムラインの1手順カード */
 function TimelineCard({
   item,
+  kitchen,
   ingredients,
   ingredientNames,
   recipeNotes,
@@ -222,6 +233,8 @@ function TimelineCard({
   onMoveDown,
 }: {
   item: TimelineItem
+  /** 台所の器具（2026-08-25 便KT。レンジの無い家では、その待ちにアプリのタイマーを残す） */
+  kitchen: KitchenEquipment
   /** この手順の文に出てくる材料と分量（2026-08-08 便EB。無ければ空配列＝何も出さない） */
   ingredients: NaviIngredientAmount[]
   /** この手順に割り当てたレシピ本体のメモ（2026-08-11 便FM。無ければ空配列＝何も出さない） */
@@ -250,10 +263,17 @@ function TimelineCard({
   // 待ちブロックが分数を名乗っていればタイマーのボタンを必ず出す（2026-08-11 便FN。
   // 判定は logic/cookNavi.ts showsWaitTimerButton）。今回の調理では終わらない待ち
   // （「冷蔵庫で半日〜一晩漬ける」）だけは分数を持たないので出さない（同 便FL）
-  const showWaitTimerButton = showsWaitTimerButton(item)
+  // 電子レンジ・トースターの待ちは器具そのものが鳴って知らせるので、アプリのタイマーは出さない
+  // （2026-08-25 便KT・オーナー原文「レンジでは、レンジのタイマーを使います。……絶対使わないのに
+  //  出てると、アプリが安っぽく感じる。」）。段取りの計算（分数・器具の占有）は変えていない
+  const applianceTimer = waitSignaledByAppliance(item, kitchen)
+  const showWaitTimerButton = showsWaitTimerButton(item) && applianceTimer == null
   // 幅で書かれた待ち（「12〜15分焼く」）は短いほうで鳴らす（2026-08-14 便GK・logic/cookNavi.ts）
   const timerSeconds = waitTimerSeconds(item)
   const timerIsShorter = showWaitTimerButton && timerSeconds < item.waitMinutes * 60
+  /** 器具の名前（設定「台所の器具」と同じ呼び方にそろえる） */
+  const applianceTimerName =
+    applianceTimer === 'toaster' ? ja.settings.kitchenToaster : ja.settings.kitchenMicrowave
   return (
     <li
       id={naviStepDomId(item.recipeId, naviStepKey(item))}
@@ -408,6 +428,16 @@ function TimelineCard({
                   {ja.cookNavi.startTimer}
                 </button>
               ))}
+            {/* ボタンを黙って消すと「他の待ちには出るのに、ここだけ無い」になるので、
+                何ではかるのかをその場に書く（2026-08-25 便KT） */}
+            {applianceTimer != null && (
+              <span
+                data-testid="navi-wait-appliance-timer"
+                className="ja-phrase text-xs text-ink-muted"
+              >
+                {ja.cookNavi.waitApplianceTimerNote.replace('{appliance}', applianceTimerName)}
+              </span>
+            )}
           </div>
           {/* 幅で書かれた待ちは、鳴る長さがブロックの分数と違うので先に書く（2026-08-14 便GK） */}
           {timerIsShorter && (
@@ -1167,24 +1197,6 @@ export default function CookNaviPage() {
   }, [timeline, kitchen.burners])
 
   /**
-   * 品ごとのできあがりの目安（2026-08-14 便GF・利用者テスト「各品が何分後にできるかは
-   * 表示しません。（中略）この開きが出ること自体を画面に出してほしい」）。
-   * 数え方は docs/72 の N1（完成の揃い）と同じ＝logic/cookFinish.ts に集めてある。
-   */
-  const finishTimes = useMemo(
-    () =>
-      timeline
-        ? recipeFinishTimes(timeline.items, timeline.recipes, (id) => recipeById.get(id))
-        : [],
-    [timeline, recipeById],
-  )
-  const finishGap = useMemo(() => finishSpread(finishTimes), [finishTimes])
-  const finishGapWide = isFinishSpreadWide(finishGap.minutes, timeline?.totalMinutes ?? 0)
-  /** 開きの説明に出す品名（段取りが持っている名前を使う＝一覧の並びと同じ呼び方にする） */
-  const finishTitleOf = (recipeId: number) =>
-    timeline?.recipes.find((r) => r.id === recipeId)?.title ?? ''
-
-  /**
    * 画面に出す段取り（2026-08-10 便FI）。組み直した段取りに、色で引き寄せた並べ替えを
    * 当て直したもの。**引き寄せが1つも無ければ組み直したそのまま**（＝今までと同じ）。
    *
@@ -1691,15 +1703,13 @@ export default function CookNaviPage() {
    * 作った記録・レシピ・今日の献立・動いているタイマーには触らない。
    */
   const discardTimeline = async () => {
+    // 2026-08-25 便KT・オーナー原文（差し戻しD）「文章が長くわかりづらいので。消える側は
+    // 「段取りを消す」したら当然消えるとわかる範囲では？むしろ確認で説明が入った方が煩わしいかと」。
+    // 規約Fの例外＝ボタンの名前そのものが消えるものを言い切っているので、並べ立てをやめ、
+    // 名前から読み取れない一点（タイマーは止まらない）だけを残す
     const ok = await confirm({
       title: ja.cookNavi.discardTimelineConfirmTitle,
-      bullets: [
-        {
-          label: ja.cookNavi.discardTimelineGoneLabel,
-          text: ja.cookNavi.discardTimelineGone.replace('{n}', String(selectedRecipes.length)),
-        },
-        { label: ja.cookNavi.discardTimelineKeptLabel, text: ja.cookNavi.discardTimelineKept },
-      ],
+      body: ja.cookNavi.discardTimelineTimerNote,
       confirmLabel: ja.cookNavi.discardTimelineConfirmOk,
     })
     if (!ok) return
@@ -2074,107 +2084,25 @@ export default function CookNaviPage() {
                           {ja.cookNavi.totalAwayNote.replace('{n}', String(timeline.awayMinutes))}
                         </p>
                       )}
-                      {/* レシピの一覧に出ている「調理時間」と数え方が違うことを画面に書く
-                          （2026-08-11 便FN・利用者テスト「多く出たり少なく出たりするので、
-                          どちらを信じてよいか分からない」）。数え方の違いは黙っていると
-                          「どちらかが間違っている」に見える */}
-                      <p
-                        data-testid="navi-total-count-note"
-                        className="ja-phrase mt-1 text-xs text-ink-muted"
-                      >
-                        {ja.cookNavi.totalCountNote}
-                      </p>
+                      {/* 2026-08-25 便KT・オーナー原文で2行消した:
+                          ①「「レシピの一覧に出ている〜一致しません」削除。どこのことかわからない上に
+                            違っているのは前提のうちなので不要」（totalCountNote）
+                          ②「「段取りと進んだところは、〜」削除」（restoreKeepNote）
+                          残るのは番号の意味だけ。開き直しても残る作りは変えていない */}
                       <p className="mt-1 text-xs text-ink-muted">
                         {isSequential ? ja.cookNavi.sequentialOrderNote : ja.cookNavi.orderNote}
                       </p>
-                      {/* どこまでが残るのかを、閉じる前に読める場所に置く（2026-08-12 便FT・
-                          利用者テスト「料理中に画面が落ちる/切り替わるのは普通にあるので不安です」）。
-                          残る条件と捨てる条件を同じ1行に並べる（規約F） */}
-                      <p
-                        data-testid="navi-restore-keep-note"
-                        className="ja-phrase mt-1 text-xs text-ink-muted"
-                      >
-                        {renderJaUnits(ja.cookNavi.restoreKeepNote)}
-                      </p>
                     </div>
 
-                    {/* 品ごとのできあがりの目安と、その開き（2026-08-14 便GF・利用者テスト
-                        「アプリは合計だけ出して、各品が何分後にできるかは表示しません。
-                        （中略）この開きが出ること自体を画面に出してほしい」）。
-                        数え方は docs/72 の N1（完成の揃い）と同じ＝logic/cookFinish.ts */}
-                    {finishTimes.length > 0 && (
-                      <div
-                        data-testid="navi-finish-times"
-                        className="mt-[var(--space-sm)] rounded-md border border-edge bg-surface p-[var(--space-md)]"
-                      >
-                        <p className="text-sm font-bold text-ink-muted">
-                          {ja.cookNavi.finishTitle}
-                        </p>
-                        <ul className="mt-[var(--space-sm)] space-y-1">
-                          {finishTimes.map((finish) => {
-                            const recipe = timeline.recipes.find((r) => r.id === finish.recipeId)
-                            if (!recipe) return null
-                            return (
-                              <li
-                                key={finish.recipeId}
-                                className="flex items-center justify-between gap-2"
-                              >
-                                <RecipePill title={recipe.title} colorIndex={recipe.colorIndex} />
-                                {/* 手で並べ替えたあとは灰色にする（2026-08-14 便GL） */}
-                                <span
-                                  data-testid="navi-finish-minutes"
-                                  className={`shrink-0 font-bold ${
-                                    estimateStale ? 'text-ink-muted' : ''
-                                  }`}
-                                >
-                                  {ja.cookNavi.finishItem.replace('{n}', String(finish.minutes))}
-                                </span>
-                              </li>
-                            )
-                          })}
-                        </ul>
-                        {/* 開きは全部の品で数える（2026-08-14 便GK。冷たい品を黙って外すと
-                            「4分は言うのに17分は何も言わない」になる）。先にできる品が
-                            冷たい品なら放置ではなくそう組んでいるので、警告ではなく理由を書く。
-                            温かい品どうしで開きが大きいときは色を変えて、続けて何が起きるかを1行足す */}
-                        {finishGap.minutes > 0 && finishGap.first && finishGap.last && (
-                          <p
-                            data-testid="navi-finish-spread"
-                            className={`ja-phrase mt-[var(--space-sm)] text-sm ${
-                              finishGapWide && !finishGap.first.cold && !estimateStale
-                                ? 'font-bold text-accent-ink'
-                                : 'text-ink-muted'
-                            }`}
-                          >
-                            {renderJaUnits(
-                              ja.cookNavi.finishSpread
-                                .replace('{first}', finishTitleOf(finishGap.first.recipeId))
-                                .replace('{last}', finishTitleOf(finishGap.last.recipeId))
-                                .replace('{n}', String(finishGap.minutes)) +
-                                (finishGap.first.cold
-                                  ? ja.cookNavi.finishSpreadCold.replace(
-                                      '{first}',
-                                      finishTitleOf(finishGap.first.recipeId),
-                                    )
-                                  : finishGapWide
-                                    ? ja.cookNavi.finishSpreadWide.replace(
-                                        '{first}',
-                                        finishTitleOf(finishGap.first.recipeId),
-                                      )
-                                    : ''),
-                            )}
-                          </p>
-                        )}
-                        {estimateStale && (
-                          <p
-                            data-testid="navi-finish-estimate-stale"
-                            className="ja-phrase mt-[var(--space-sm)] text-xs font-bold text-warning"
-                          >
-                            {ja.cookNavi.estimateStaleNote}
-                          </p>
-                        )}
-                      </div>
-                    )}
+                    {/*
+                      「できあがりの目安」（品ごとの完成時刻と、その開き）は**節ごと消した**。
+                      2026-08-25 便KT・オーナー原文:
+                        「「出来上がりの目安」削除。全体の調理時間が分かれば十分。細かく出した
+                          ところで、個人の手のスピードや状況によってすぐに変わるので、ここまで
+                          細かく表示してもあまり意味がない。」
+                      品ごとの完成時刻を数える純ロジック（logic/cookFinish.ts）は残してある
+                      ＝docs/72 N1（完成の揃い）の物差しで、段取りの質は今までどおり検査できる。
+                    */}
 
                     {/* 並行の余地が無かったときの説明（2026-08-08 便ED・docs/68 打ち手#4）。
                         縮んでいないのに縮んだように見せないため、理由と次の一手を書く。
@@ -2274,7 +2202,7 @@ export default function CookNaviPage() {
                           >
                             <Undo2 size={16} className="shrink-0" aria-hidden />
                             <span className="ja-phrase">
-                              {ja.cookNavi.reorderUndoOne.replace('{n}', String(pulls.length))}
+                              {ja.cookNavi.reorderUndoOne}
                             </span>
                           </button>
                           <button
@@ -2317,6 +2245,7 @@ export default function CookNaviPage() {
                         <TimelineCard
                           key={`${item.recipeId}-${item.stepIndex}`}
                           item={item}
+                          kitchen={kitchen}
                           issues={issuesByStep.get(reorderStepKey(item)) ?? []}
                           canMoveUp={index > 0}
                           canMoveDown={index < planItems.length - 1}
@@ -2425,6 +2354,7 @@ export default function CookNaviPage() {
              窓は全画面（z-50）より上（z-70）に重なるので、調理中のまま時間を決められる */
           onOpenCustomTimer={openCustomTimer}
           sequential={isSequential}
+          kitchen={kitchen}
           peekStep={timerPeekStep}
           onPeekStepClose={() => setTimerPeekStep(null)}
         />
