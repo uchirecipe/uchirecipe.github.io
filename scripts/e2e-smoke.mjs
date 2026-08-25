@@ -1318,12 +1318,12 @@ try {
     nutBlurCount > 0,
     `blur要素=${nutBlurCount}`,
   )
-  // COST-03(2026-07-28 便BY): 要約行に基準人数を常時添える
-  // 直前に「人数を増やす」を押しているので基準人数は表示中の人数に追従する
+  // 2026-08-25 便KN・オーナー指示: 基準人数の併記をやめた（人数分は同じ画面の
+  // 人数ステッパーと「登録: ◯人分」に出ている）。ここは「1食あたり」と言えていることだけ見る
   check(
-    'NUT-01(便BY COST-03) 栄養・原価の「1食あたり」に基準人数が併記される',
-    /\d+人分で作るときの1食あたり/.test(nutExpandedText),
-    `本文に「◯人分で作るときの1食あたり」が無い`,
+    'NUT-01(便KN) 栄養の要約が「1食あたり」と言っている',
+    stripZwspText(nutExpandedText).includes(ja.nutrition.summaryLabel),
+    `本文に「${ja.nutrition.summaryLabel}」が無い`,
   )
   await page.getByRole('button', { name: ja.nutrition.toggleCollapse }).click()
   await page.waitForTimeout(200)
@@ -9353,8 +9353,8 @@ try {
   )
   // 2026-07-28 便BY/COST-03: 何人分を1食に分けた額なのかを常時添える
   check(
-    'PRICE-01(便BY COST-03) 概算食費に基準人数が併記される(「2人分で作るときの1食あたり」)',
-    priceDetailBefore.includes('2人分で作るときの1食あたり 約25円'),
+    'PRICE-01(便KN) 概算食費が「1食あたり 約25円」と出る',
+    priceDetailBefore.includes(ja.detail.pricePerServing.replace('{n}', '25')),
   )
 
   // 設定から「食材と価格」を開き、初期値30件の投入と目安の注意書きを確認する。
@@ -33260,7 +33260,7 @@ try {
         // 2026-08-24 司令部: 便KEで「単位が噛み合わないときの満額フォールバック」をやめたので
         // 178→128円。按分が効いていること（按分前の212円ではない）を測る役目はそのまま
         'EY-01 冷やし茶碗蒸しの1食あたりが生しいたけの按分後の金額になる(按分前212円→128円)',
-        eyChawanmushi.includes('2人分で作るときの1食あたり 約128円'),
+        eyChawanmushi.includes(ja.detail.pricePerServing.replace('{n}', '128')),
         eyChawanmushi.includes('約212円') ? '按分前の212円のまま' : '',
       )
       // 原価ビューで材料行そのものの金額も見る(1食あたり=全量33円÷2人分)
@@ -33282,7 +33282,7 @@ try {
       check(
         // 2026-08-24 司令部: 便KEで 152→144円
         'EY-01 オクラと長芋の梅肉あえの1食あたり(按分前165円→144円)',
-        eyOkra.includes('2人分で作るときの1食あたり 約144円'),
+        eyOkra.includes(ja.detail.pricePerServing.replace('{n}', '144')),
         eyOkra.includes('約165円') ? '修正前の165円のまま' : '',
       )
       // いちご6個(1パック280gのうち90g)
@@ -33291,7 +33291,7 @@ try {
         // 2026-08-24 司令部: 便KEで 327→127円（いちご「6個」が販売単位のマスタに噛み合わず、
         // 1パックまるごとの金額が乗っていた分が抜けた）
         'EY-01 フルーツヨーグルトバークの1食あたり(按分前395円→127円)',
-        eyBark.includes('4人分で作るときの1食あたり 約127円'),
+        eyBark.includes(ja.detail.pricePerServing.replace('{n}', '127')),
         eyBark.includes('約395円') ? '修正前の395円のまま' : '',
       )
       // 「食材と価格」の単位表記も新しい内容量になっていること
@@ -33828,7 +33828,7 @@ try {
       const faNabe = (await faPage.textContent('body')) ?? ''
       check(
         'FA-1 寄せ鍋の1食あたりが生しいたけの単価での按分になる(名寄せ前226円→217円)',
-        faNabe.includes('4人分で作るときの1食あたり 約217円'),
+        faNabe.includes(ja.detail.pricePerServing.replace('{n}', '217')),
         faNabe.includes('約226円') ? '名寄せ前の226円のまま' : '',
       )
       await faPage.getByRole('button', { name: ja.detail.priceViewShow }).click()

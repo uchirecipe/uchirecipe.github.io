@@ -23566,7 +23566,7 @@ Aみりん 大さじ1
         '落としぶた',
         // ③画面がその場で組み立てて出す文字（見出し＋補足／売り場名＋件数）。
         //   組み上がった形は ja.ts のどこにも無い
-        '栄養価の概算（◯人分で作るときの◯食あたり）',
+        '栄養価の概算（◯食あたり）',
         '肉・魚介 ◯件',
         '調味料 ◯件',
         // ④並行調理ナビの色の名前は src/logic/naviColors.ts（NAVI_COLOR_WORDS）が持っている。
@@ -31161,6 +31161,168 @@ import { safetyNotesFor, stepSafetyNotes, wholeRecipeSafetyNotes } from '../src/
       '17045', '17045', '17045', '17045',
       '17044', '17046',
     ])
+  }
+}
+
+// ==========================================================================================
+// 便KN（2026-08-25・オーナーの書き溜め3件）
+// ==========================================================================================
+//
+// ①レシピ詳細「◯人分で作るときの1食あたり」→「1食あたり」
+// ②「価格がわからない〜これより高くなります」の「これより高くなります」を省く
+// ③長い説明のうち、実質箇条書きになっているものを箇条書きにする
+{
+  const knRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
+  const knRead = (rel) => readFileSync(path.join(knRoot, rel), 'utf-8')
+
+  // ---------- KN-1: 「1食あたり」に人数分を繰り返さない ----------
+  // オーナー原文:「◯人分で作るときの１食あたり→１食あたり」。
+  // 2026-07-28 便BY/COST-03 が「1食あたり」だけだとレシピ全量の値と読まれる、として
+  // 人数分を常時添えたが、**人数分は同じ画面の別の場所に出ている**（下の KN-1 の3つ）ので、
+  // 同じ数字を1画面で3回言うことになっていた。消してよいのは、消しても人数分が画面に残るから。
+  {
+    eq('KN-1 食費の1食あたりに人数分を繰り返さない', ja.detail.pricePerServing.includes('人分で作るとき'), false)
+    eq('KN-1 栄養の1食あたりにも人数分を繰り返さない', ja.nutrition.summaryLabel.includes('人分で作るとき'), false)
+    eq('KN-1 食費は「1食あたり」と言う', ja.detail.pricePerServing.includes('1食あたり'), true)
+    eq('KN-1 栄養も「1食あたり」と言う', ja.nutrition.summaryLabel.includes('1食あたり'), true)
+    // 消してよい根拠＝同じ画面（レシピ詳細）に人数分が残っていること。
+    // ①材料の見出し行にある人数ステッパーの数字（表示中の人数。1食あたりの分母そのもの）
+    // ②そのすぐ下の「登録: ◯人分」（元のレシピが何人分で書かれているか）
+    // どちらかが画面から消えたらこの見張りが赤になる＝「1食あたり」だけでは分からない状態に戻る
+    const knDetail = knRead('src/pages/RecipeDetailPage.tsx')
+    eq('KN-1 レシピ詳細に人数ステッパーの人数が出ている', knDetail.includes('ja.detail.servingsUnit'), true)
+    eq('KN-1 レシピ詳細に登録人数の併記が出ている', knDetail.includes('ja.detail.servingsRegisteredNote'), true)
+    eq('KN-1 登録人数の併記は人数分を名乗っている', ja.detail.servingsRegisteredNote.includes('人分'), true)
+    eq('KN-1 人数ステッパーの単位は「人分」', ja.detail.servingsUnit, '人分')
+  }
+
+  // ---------- KN-2: 「実際はこれより高くなります」とは言い切れない ----------
+  // オーナー原文:「塩などは価格はない場合には仮置きして値段が入っていた。
+  //               必ずしも高くはならないので、「これより高くなります」は省く。」
+  //
+  // 「価格が分からない材料」は合計に1円も入らないので、その分だけなら確かに安く出る。
+  // だが同じ合計の中には、**書かれた分量を使わずに入れた仮置きの金額**も混ざっている
+  // （2026-08-23 便KE が「1回に使う量」で登録した食材＝塩・こしょう・ごま・揚げ油ほか）。
+  // 仮置きは多くも少なくも外れるので、合計が実際より高いか安いかは決まらない。
+  // ＝「実際はこれより高くなります」は言い切れない、というオーナーの見立てが正しい。
+  {
+    eq('KN-2 「これより高くなります」と言い切らない', ja.detail.costPricelessNote.includes('高くなります'), false)
+    // 月間の献立の同じ注記（mealPlan.weekCostPriceless）と同じ言い方にそろえる。
+    // 同じことを画面ごとに違う言い方で出さないため（ja.ts のコメントにも「揃える」とある）
+    eq('KN-2 月間の献立の注記と同じ言い方', ja.detail.costPricelessNote, ja.mealPlan.weekCostPriceless)
+    eq('KN-2 除いた材料の件数は今までどおり言う', ja.detail.costPricelessNote.includes('{n}件'), true)
+
+    // --- ここから、オーナーの見立てを実装と実データで確かめる ---
+    const knIndex = buildPriceIndex(PRICE_DEFAULTS.map((d) => ({ ...d, isDefault: true })))
+    // 塩の「少々」は「価格が分からない材料」に数えられず、仮置きの1円が入る（便KE で残した扱い）
+    eq('KN-2 塩「少々」には仮置きの金額が入る', estimateIngredientYen({ name: '塩', amount: '少々', unit: '' }, knIndex)?.yen, 1)
+    eq('KN-2 塩「少々」は書かれた分量を2倍にしても金額が変わらない',
+      estimateIngredientYen({ name: '塩', amount: '少々', unit: '' }, knIndex)?.rawYen ===
+        estimateIngredientYen({ name: '塩', amount: '少々少々', unit: '' }, knIndex)?.rawYen, true)
+    // 「書かれた分量を2倍にしても金額が動かない」＝その行の金額は分量から出ていない＝仮置き。
+    // 同梱109品を実際に数える（2026-08-25 実測: 783行中93行・74品）。
+    // 件数そのものはレシピが増えれば動くので、下限だけを見張る（0件になったら前提が崩れる）
+    let knRows = 0
+    let knAssumedRows = 0
+    let knAssumedRecipes = 0
+    for (const def of starterDefs) {
+      let inRecipe = 0
+      for (const ing of def.ingredients ?? []) {
+        knRows++
+        if (ing.price != null && ing.price > 0) continue
+        const one = estimateIngredientYen(ing, knIndex)
+        if (one == null || one.rawYen <= 0) continue
+        const twice = estimateIngredientYen(
+          { ...ing, amount: scaleAmount(ing.amount ?? '', 1, 2, ing.unit ?? '') },
+          knIndex,
+        )
+        if (twice != null && Math.abs(twice.rawYen - one.rawYen) > 1e-9) continue
+        inRecipe++
+      }
+      knAssumedRows += inRecipe
+      if (inRecipe > 0) knAssumedRecipes++
+    }
+    eq('KN-2 材料の行を数えられている（0行なら見張りが壊れている）', knRows > 500, true)
+    eq('KN-2 仮置きの金額が入った材料の行が実在する（2026-08-25 実測93行）', knAssumedRows >= 50, true)
+    eq('KN-2 仮置きの金額が入った品が実在する（2026-08-25 実測74品）', knAssumedRecipes >= 40, true)
+  }
+
+  // ---------- KN-3: 実質箇条書きの見つけ方を残す ----------
+  // オーナー原文:「アプリ全体として、長い説明は、箇条書きにできるところは箇条書きにして。
+  //               今は実質箇条書きなのに文頭に何もないのでわかりづらい。」
+  //
+  // 見つけ方（機械的に決める。人の感想で増減させない）:
+  //   ・ja.ts の文言のうち 40字以上
+  //   ・「。」で切ると3つ以上の文が並ぶ（＝並列が続いている＝実質箇条書き）
+  //   ・文頭に印（・①②…）が無く、改行でも行分けされていない（＝続けて読ませている）
+  // これに当たるものを scripts/data/ja-bullet-known.json と突き合わせる。
+  //   ・一覧に無いものが現れたら赤（＝新しい長い説明を、続けて読ませる形で足せない）
+  //   ・一覧にあるのにもう当たらないときも赤（＝直したら一覧から消す）
+  // 一覧には**1件ずつ「なぜ箇条書きにしないか」の理由**を書く。理由なしに足さないこと。
+  {
+    const KN_MIN_LEN = 40
+    const KN_MIN_SENTENCES = 3
+    const knStrings = []
+    const knWalk = (obj, prefix) => {
+      for (const [key, value] of Object.entries(obj)) {
+        const full = prefix ? `${prefix}.${key}` : key
+        if (typeof value === 'string') knStrings.push({ key: full, value })
+        else if (value && typeof value === 'object') knWalk(value, full)
+      }
+    }
+    knWalk(ja, '')
+    eq('KN-3 ja.ts の文言を読めている（0件なら見張りが壊れている）', knStrings.length > 1000, true)
+    const knHits = []
+    for (const { key, value } of knStrings) {
+      if (value.length < KN_MIN_LEN) continue
+      if (/^[\s]*[・①②③④⑤⑥⑦⑧⑨]/.test(value)) continue
+      if (value.includes('\n')) continue
+      if (value.split('。').filter((part) => part.trim() !== '').length < KN_MIN_SENTENCES) continue
+      knHits.push(key)
+    }
+    const knKnown = JSON.parse(knRead('scripts/data/ja-bullet-known.json'))
+    // 「_」で始まる項目は読み手向けの説明。一覧そのものではない
+    const knAllowed = Object.keys(knKnown).filter((k) => !k.startsWith('_'))
+    eq(
+      'KN-3 続けて読ませる長い説明が、一覧に無いところに増えていない',
+      knHits.filter((k) => !knAllowed.includes(k)),
+      [],
+    )
+    eq(
+      'KN-3 一覧に、もう当てはまらないものが残っていない（直したら消す）',
+      knAllowed.filter((k) => !knHits.includes(k)),
+      [],
+    )
+    eq(
+      'KN-3 一覧のすべてに、箇条書きにしない理由が書いてある',
+      knAllowed.filter((k) => typeof knKnown[k] !== 'string' || knKnown[k].length < 10),
+      [],
+    )
+    // 直したものは、箇条書きの行として持っている（1件でも配列でなくなったら赤）
+    eq('KN-3 月タブのロック案内は行で持つ', Array.isArray(ja.mealPlan.monthLockedDescriptionLines), true)
+    eq('KN-3 買い物メモの下書きの説明も行で持つ', Array.isArray(ja.shopping.candidateDescriptionLines), true)
+    const knLines = [
+      ...(Array.isArray(ja.mealPlan.monthLockedDescriptionLines) ? ja.mealPlan.monthLockedDescriptionLines : []),
+      ...(Array.isArray(ja.shopping.candidateDescriptionLines) ? ja.shopping.candidateDescriptionLines : []),
+    ]
+    eq(
+      'KN-3 行に分けたものは、1行ずつが40字以上3文の形に戻っていない',
+      knLines.filter(
+        (line) => line.split('。').filter((part) => part.trim() !== '').length >= KN_MIN_SENTENCES,
+      ),
+      [],
+    )
+    // 文頭の印は画面側が付ける（読み上げには渡さない＝aria-hidden）。
+    // 印を文言そのものに書き込むと、行を並べ替えたときに印だけ残る
+    const knMealPlanPage = knRead('src/pages/MealPlanPage.tsx')
+    const knShoppingPage = knRead('src/pages/ShoppingPage.tsx')
+    eq('KN-3 月タブのロック案内に文頭の印が付いている', knMealPlanPage.includes('monthLockedDescriptionLines'), true)
+    eq('KN-3 買い物メモの下書きの説明に文頭の印が付いている', knShoppingPage.includes('candidateDescriptionLines'), true)
+    eq(
+      'KN-3 文言そのものに印を書き込んでいない',
+      knLines.filter((line) => /^[・①②③④⑤⑥⑦⑧⑨]/.test(line)),
+      [],
+    )
   }
 }
 

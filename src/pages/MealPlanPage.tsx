@@ -7963,7 +7963,19 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                   {ja.mealPlan.monthLockedBadge}
                 </span>
                 <p className="mt-1 font-bold">{ja.mealPlan.monthLockedTitle}</p>
-                <p className="text-sm text-ink-muted">{ja.mealPlan.monthLockedDescription}</p>
+                {/* 2026-08-25 便KN・オーナー指示（長い説明は箇条書きに）: 185字の1段落を5行に分け、
+                    文頭に「・」を付ける。この枠は中央そろえだが、箇条書きは行頭がそろっていないと
+                    印の意味が無いので、この一覧だけ左そろえにする（枠の幅いっぱいは使わず
+                    inline-block で中身の幅にとどめる＝枠の中では今までどおり中央に乗る）。
+                    印は飾りなので読み上げには渡さない（aria-hidden） */}
+                <ul className="mx-auto mt-0.5 inline-block space-y-0.5 text-left text-sm text-ink-muted">
+                  {ja.mealPlan.monthLockedDescriptionLines.map((line) => (
+                    <li key={line} className="flex gap-1.5">
+                      <span aria-hidden>・</span>
+                      <span className="min-w-0">{line}</span>
+                    </li>
+                  ))}
+                </ul>
                 {/* 恒常のお試し(2026-08-02 便CP-2・docs/62 決定③)。押すと、この画面のサンプルではなく
                     本人の記録・献立が入った本物の月タブが1回だけフル表示になる（閉じたらここへ戻る）。
                     2026-08-02 オーナー指摘: 「作った記録」が少ないうちは入口を出さず、

@@ -758,7 +758,17 @@ export default function ShoppingPage() {
               {showCandidateDescription ? <ChevronUp size={14} aria-hidden /> : <ChevronDown size={14} aria-hidden />}
             </button>
             <Collapse open={showCandidateDescription}>
-              <p className="mt-1 text-sm text-ink-muted">{ja.shopping.candidateDescription}</p>
+              {/* 2026-08-25 便KN・オーナー指示（長い説明は箇条書きに）: 113字の1段落を3行に分け、
+                  文頭に「・」を付ける（この画面の「買い物終了」の窓と同じ形）。
+                  印は飾りなので読み上げには渡さない（aria-hidden） */}
+              <ul className="mt-1 space-y-1 text-sm text-ink-muted">
+                {ja.shopping.candidateDescriptionLines.map((line) => (
+                  <li key={line} className="flex gap-1.5">
+                    <span aria-hidden>・</span>
+                    <span className="min-w-0">{line}</span>
+                  </li>
+                ))}
+              </ul>
             </Collapse>
             {/* どの範囲の献立から作ったか(2026-08-08 便EA)。献立の週タブで日付・食事を選べる
                 ようにしたので、下書きを見たときに範囲が分かるようにする。

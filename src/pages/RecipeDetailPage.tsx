@@ -819,12 +819,12 @@ export default function RecipeDetailPage() {
         </div>
 
         {/* 1食あたりの概算食費(2026-07-14 オーナー実機フィードバック: 合計だけでなく
-            1食分の目安も見たい。表示中のservingsに追従) */}
+            1食分の目安も見たい。表示中のservingsに追従)。
+            2026-08-25 便KN: 人数分の併記をやめた（材料の見出し行の人数ステッパーと
+            「登録: ◯人分」に出ているので、この行で3回目を言わない） */}
         {totalPrice > 0 && (
           <p className="mt-0.5 text-sm text-ink-muted">
-            {ja.detail.pricePerServing
-              .replace('{s}', String(servings))
-              .replace('{n}', perServingPrice.toLocaleString())}
+            {ja.detail.pricePerServing.replace('{n}', perServingPrice.toLocaleString())}
           </p>
         )}
 

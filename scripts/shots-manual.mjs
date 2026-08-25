@@ -796,11 +796,17 @@ try {
   await cropRange(page, 'plan-week-suggest', weekDisplayGroup, weekTemplateGroup, { top: 64 })
 
   // 2026-08-08 便DW: 「今日から7日間」は折りたたみグループ「表示のしかた」の中にあり、
-  // 既定では畳まれている(2026-08-03 便DJ)。先に見出しを押して開かないとボタンを掴めない。
+  // 既定では畳まれている(2026-08-03 便DJ)。先に見出しを押して開かないと掴めない。
   // 実行ボタンの名前は「まとめて献立を立てる」→「まとめて献立を入力」(2026-08-07 便DT-5)
+  // 2026-08-25 便KN: 「週区切り／今日から7日間」は2026-08-22 便JF・⑤で**プルダウン**に
+  // なっており、ボタンとしては掴めなくなっていた（撮影がここで止まり、以降のカットが
+  // 1枚も撮れない状態だった）。e2e の selectWeekLayout と同じく select から選ぶ
   await page.getByRole('button', { name: '表示のしかたを開く' }).click()
   await wait(page, 500)
-  await page.getByRole('button', { name: '今日から7日間', exact: true }).click()
+  await page
+    .locator('[data-testid="week-layout"]')
+    .first()
+    .selectOption({ label: ja.mealPlan.weekLayoutRolling })
   await wait(page, 600)
   await page.getByRole('button', { name: '表示のしかたを閉じる' }).click()
   await wait(page, 400)

@@ -137,7 +137,9 @@ export default function NutritionTeaser({
           <span className="min-w-0 flex-1 text-sm font-bold">
             <Sparkles size={14} className="mr-1 inline-block shrink-0 text-accent-ink" aria-hidden />
             {ja.nutrition.title}
-            {ja.nutrition.summaryLabel.replace('{s}', String(displayServings))}
+            {/* 2026-08-25 便KN: 「◯人分で作るときの1食あたり」→「1食あたり」。
+                人数分はレシピ詳細の人数ステッパーと「登録: ◯人分」に出ている */}
+            {ja.nutrition.summaryLabel}
             {summaryText}
             {canShowSummary && (saltGap || materialGap) && (
               <span
