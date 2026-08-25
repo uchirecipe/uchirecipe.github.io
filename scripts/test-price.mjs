@@ -77,7 +77,9 @@ for (const [name, count] of nameCounts) {
 //   マッシュルーム・粉砂糖・青ねぎ・塩鮭）。「粗びき黒こしょう」→「黒こしょう」は改名なので増えない
 // 2026-08-23 便KE: 影響範囲テストA(節約したい人の30品)で「価格なし」だった主力食材5件を追加して
 // 181→186件（厚揚げ・小松菜・豆苗・大豆水煮・キムチ）
-const PRICE_DEFAULTS_COUNT = 186
+// 186→201件（2026-08-25 便KP: 減塩しょうゆ・減塩みそ・水菜・おろししょうが・白だし・ミニトマト・
+//   サバみそ煮缶・米油・赤みそ・ぶり・三温糖・粒マスタード・練りからし・コーン缶・粉チーズ）
+const PRICE_DEFAULTS_COUNT = 201
 check(
   PRICE_DEFAULTS.length === PRICE_DEFAULTS_COUNT,
   `PRICE_DEFAULTSの件数が想定と違う: 実際=${PRICE_DEFAULTS.length}件 / 想定=${PRICE_DEFAULTS_COUNT}件。` +

@@ -1,4 +1,4 @@
-import { stripIngredientDecoration, toIngredientKey } from './kana'
+import { stripIngredientNoise, toIngredientKey } from './kana'
 import { NUTRITION_DATA, type NutritionFood, type NutritionPer100g } from './nutritionData'
 import type { Ingredient, Recipe } from '../db/types'
 import {
@@ -427,16 +427,22 @@ function matchNutritionFoodExact(name: string): NutritionFood | null {
 /**
  * 材料名から成分表の食品を探す。
  *
- * 素の名前で当たらなかったときだけ、商品名の飾り語（オーガニック・微粒子・国産…）を落として
- * もう一度探す（2026-08-20 便IL・③）。**当たらなかったときの最後の手当てにしてある**ので、
- * これまで当たっていた材料の結果は1件も変わらない。
- * 落としてよい語・落としてはいけない語の線引きは logic/kana.ts の
- * INGREDIENT_DECORATION_WORDS を参照（「無塩バター」の「無塩」は落とさない）。
+ * 素の名前で当たらなかったときだけ、**合わせ調味料の印（★・〇・◎・a. など）と商品名の飾り語
+ * （オーガニック・微粒子・国産…）を落として**もう一度探す。
+ * **当たらなかったときの最後の手当てにしてある**ので、これまで当たっていた材料の結果は1件も変わらない。
+ * 落としてよい語・落としてはいけない語の線引きは logic/kana.ts の stripIngredientNoise を参照
+ * （「無塩バター」の「無塩」は落とさない／記号だけの行を空の名前にしない）。
+ *
+ * 2026-08-20 便IL・③で飾り語だけを落とすようにし、2026-08-25 便KPで記号も落とすようにした
+ * （原価側は 2026-08-23 便KE で既に記号を落としており、**同じ材料が原価では計算できて栄養では
+ * 対象外**という食い違いが残っていた）。影響範囲テストA・Bの実データで
+ * 『◎酒 大3』『★酒 大1』『〇酒 大さじ1』『a. 酒 大さじ1』の7行が、酒そのものは成分表にあるのに
+ * 頭の印だけで落ちていた。
  */
 export function matchNutritionFood(name: string): NutritionFood | null {
   const hit = matchNutritionFoodExact(name)
   if (hit) return hit
-  const stripped = stripIngredientDecoration(name)
+  const stripped = stripIngredientNoise(name)
   return stripped !== name.trim() ? matchNutritionFoodExact(stripped) : null
 }
 
