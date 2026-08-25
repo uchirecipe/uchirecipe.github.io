@@ -5,7 +5,7 @@
   },
   "day-suggest": {
     "w": 780,
-    "h": 1120
+    "h": 1148
   },
   "nav-tabs": {
     "w": 780,
@@ -37,11 +37,11 @@
   },
   "paste": {
     "w": 780,
-    "h": 780
+    "h": 788
   },
   "import-gaps": {
     "w": 780,
-    "h": 1176
+    "h": 1352
   },
   "url-import": {
     "w": 780,
@@ -49,7 +49,7 @@
   },
   "plan-day-buttons": {
     "w": 780,
-    "h": 928
+    "h": 900
   },
   "select-for-today": {
     "w": 780,
@@ -73,7 +73,7 @@
   },
   "cost-week": {
     "w": 780,
-    "h": 532
+    "h": 598
   },
   "plan-month": {
     "w": 780,
@@ -133,7 +133,7 @@
   },
   "cooknavi-reorder-undo": {
     "w": 780,
-    "h": 448
+    "h": 408
   },
   "cooknavi-session": {
     "w": 780,

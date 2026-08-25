@@ -706,6 +706,15 @@ try {
     'なすとピーマンのみそ炒め\n\n材料（2人分）\n・なす 2本\n・ピーマン 3個\n・豚こま切れ肉 150g\n・みそ 大さじ1\n\n作り方\n1. なすとピーマンを乱切りにする\n2. 豚こまを炒め、なす・ピーマンを加えて炒める\n3. みそを加えて全体にからめる',
   )
   await page.getByRole('button', { name: '自動で振り分ける' }).click()
+  await wait(page, 900)
+  // 2026-08-25 便KS・⑦: 料理名・ひとこと説明・メモも置き換えの対象になったので、
+  // **料理名を入れただけでも規約Fの確認の窓が出る**ようになった（それまでは材料・手順が
+  // 入力済みのときだけ出ていた）。この台本は先に料理名を入れているので必ず窓が開く。
+  // 通さないと貼り付けが当たらず、**そこから先のカットが1枚も撮れないまま落ちる**
+  // （2026-08-25 に実発。窓が残ったまま次の画面のボタンを押しに行って10秒待ちの時間切れ）
+  if (!(await pressConfirmWindow(page, ja.paste.confirmReplaceOk))) {
+    missShot('paste', '貼り付けの「置き換えます」の窓を通せず、読み取った結果が入らない')
+  }
   await wait(page, 1200)
   // 2026-08-25 便KR: 貼り付け欄の**下に**「取り込みで自動入力されない項目」の並びが付いた（便KO）。
   // それまでは textarea の親を丸ごと切っていたので、親が画面の高さ(844px)を超え、
@@ -938,15 +947,27 @@ try {
     }
   }
   // 表示している週の概算食費
-  const costRow = page.getByRole('button', { name: /表示している週の概算食費/ }).first()
-  if (await costRow.count()) {
-    await costRow.click()
-    await wait(page, 900)
-    await crop(page, 'cost-week', costRow, { top: 200, padTop: 12, extraBottom: 190 })
-    await costRow.click()
+  // 2026-08-25 便KU: 週の概算食費と栄養は「栄養と食費」の節の中へ移り、**既定は畳んである**
+  // （オーナー原文「買い物メモ、栄養と食費、それぞれでまとめて表示する」）。先に節を開かないと
+  // 行そのものが画面に無い。e2e の openWeekGroup と同じ押し方にそろえる
+  const nutritionCostOpener = page.getByRole('button', {
+    name: `${ja.mealPlan.weekGroupNutritionCostTitle}を開く`,
+  })
+  if (await nutritionCostOpener.count()) {
+    await nutritionCostOpener.first().click()
     await wait(page, 500)
+  }
+  // 2026-08-25 便KU: 自前の折りたたみは廃止され（開くのに2回押させない）、
+  // 節を開けば金額がそのまま並ぶ。掴むのはボタンではなく**見出しの文字**になった
+  const costTitle = page.getByText(ja.mealPlan.weekCostTitle, { exact: true }).first()
+  if (await costTitle.count()) {
+    await crop(page, 'cost-week', costTitle.locator('xpath=..'), {
+      top: 200,
+      padTop: 12,
+      padBottom: 12,
+    })
   } else {
-    missShot('cost-week', '「表示している週の概算食費」の行が週の画面に無い')
+    missShot('cost-week', `「${ja.mealPlan.weekCostTitle}」の見出しが週の画面に無い`)
   }
 
   // 「日」タブ: 献立が決まっている日の「今日の献立」(2026-08-18 便HL)。
