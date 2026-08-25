@@ -63,6 +63,7 @@ import {
   suggestForSlot,
   suggestPairForSlot,
   planWeekFill,
+  preservedItemCount,
   isPastDate,
   shiftDate,
   dowIndex,
@@ -204,6 +205,7 @@ import {
   stepHeatShift,
   heatOffAtEnd,
   waitKeepsAppliance,
+  waitSignaledByAppliance,
   waitTimerSeconds,
   BOIL_WATER_MINUTES,
 } from '../src/logic/cookNavi.ts'
@@ -19940,24 +19942,29 @@ Aみりん 大さじ1
   eq('GF-C 利用者の実測（44分中16分の開き）は大きいと読む', isFinishSpreadWide(16, 44), true)
 }
 {
-  // 画面に出す文言（規約H）。数字と品名がそろって初めて読めるので、差し込み口を固定する
+  // 2026-08-25 便KT・オーナー原文:
+  //   「「出来上がりの目安」削除。全体の調理時間が分かれば十分。細かく出したところで、
+  //     個人の手のスピードや状況によってすぐに変わるので、ここまで細かく表示しても
+  //     あまり意味がない。」
+  // 便GF/GK が画面に出していた文言（finishTitle ほか）は**節ごと**消した。
+  // ここは「文言が正しく差し込めるか」から「消した節が戻っていないか」の見張りに書き換える
+  //（黙ってテストを消すと、次の便が同じ節を足し直しても誰も気づかない）。
+  // 上の GF-C の純ロジック（logic/cookFinish.ts）はそのまま残す
+  //  ＝docs/72 N1（完成の揃い）は段取りの質を測る物差しとして使い続ける
+  const ktFinishKeys = ['finishTitle', 'finishItem', 'finishSpread', 'finishSpreadWide', 'finishSpreadCold']
   eq(
-    'GF-C 見出しに「調理を始めてから」が入っている（何分後かの起点が読める）',
-    ja.cookNavi.finishTitle.includes('調理を始めてから'),
-    true,
+    'KT-5 「できあがりの目安」の文言が ja.ts に残っていない（2026-08-25 オーナー指示で削除）',
+    ktFinishKeys.filter((k) => k in ja.cookNavi),
+    [],
   )
-  eq('GF-C 品ごとの行は分数を差し込む', ja.cookNavi.finishItem.includes('{n}'), true)
-  eq(
-    'GF-C 開きの一文は、2品の名前と分数を差し込む',
-    ja.cookNavi.finishSpread.includes('{first}') &&
-      ja.cookNavi.finishSpread.includes('{last}') &&
-      ja.cookNavi.finishSpread.includes('{n}'),
-    true,
+  const ktNaviPageSrc = readFileSync(
+    path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'src/pages/CookNaviPage.tsx'),
+    'utf-8',
   )
   eq(
-    'GF-C 開きが大きいときの一文も、先にできる品の名前を差し込む',
-    ja.cookNavi.finishSpreadWide.includes('{first}'),
-    true,
+    'KT-5 画面（並行調理ナビ）からも品ごとの目安の枠が消えている',
+    /navi-finish-times|navi-finish-minutes/.test(ktNaviPageSrc),
+    false,
   )
 }
 
@@ -20207,11 +20214,10 @@ Aみりん 大さじ1
     4,
   )
   eq('GK-6 1品だけなら開きは言わない', finishSpread([{ recipeId: 1, minutes: 20, cold: false }]).minutes, 0)
-  eq(
-    'GK-6 冷たい品が先にできる理由を書く一文がある',
-    typeof ja.cookNavi.finishSpreadCold === 'string' && ja.cookNavi.finishSpreadCold.includes('{first}'),
-    true,
-  )
+  // 開きの**分数**を画面に出す文言（finishSpread・finishSpreadCold ほか）は 2026-08-25 便KT で
+  // 節ごと消した（オーナー原文「……ここまで細かく表示してもあまり意味がない。」）。
+  // 「先にできた品が待つことになる」という**警告だけ**は分数抜きで残してある（KT-10）。
+  // 開きを数える純ロジックは上のとおり残してある＝段取りの質はこの物差しで測り続ける
 }
 
 // ---------- 便GL: 手順を進めたときのタイマーの一言 / 読み上げ名 ----------
@@ -20358,9 +20364,23 @@ Aみりん 大さじ1
         /ではありません|ではない/.test(ja.cookNavi.estimateStaleNote),
       true,
     )
+    // 2026-08-25 便KT・オーナー原文「並行調理の手順変更「１つ前の並びに戻す」→（あと◯回）削除」。
+    // 便GL が添えていた残り回数は消した。**押せる回数の上限は元から無い**（1件ずつ何度でも戻せる）。
+    // 「あと0回」で押せなくなる作りではなく、戻せるものが無くなると**欄そのものが画面から消える**
+    // ので、押せなくなることを別の形で伝える必要もない（KT-2 が画面側の条件を見張る）
     eq(
-      'GL-3 戻すボタンは、あと何回戻せるかを差し込む',
-      ja.cookNavi.reorderUndoOne.includes('{n}'),
+      'KT-2 戻すボタンに残り回数を書かない（差し込み口ごと無い）',
+      /\{n\}/.test(ja.cookNavi.reorderUndoOne),
+      false,
+    )
+    eq(
+      'KT-2 戻せるものが無いときは、欄ごと画面に出さない（「あと0回」が出ない作り）',
+      /\{pulls\.length > 0 && \(/.test(
+        readFileSync(
+          path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'src/pages/CookNaviPage.tsx'),
+          'utf-8',
+        ),
+      ),
       true,
     )
     eq(
@@ -31421,8 +31441,10 @@ import { safetyNotesFor, stepSafetyNotes, wholeRecipeSafetyNotes } from '../src/
   // ---- KM-2: その数字の下に**必ず**出る説明を短くする（同じことを2回言わない・自明を書かない）----
   // 「約◯分」と書いてある数字に「実際の火加減で前後します」を足すのは同じことの2回目。
   // 数え方の説明も、すぐ上に品ごとの「1品だけなら約◯分」が並んでいるので前半は自明。
-  const KM_ALWAYS_LIMIT = 110
-  const kmAlways = [ja.cookNavi.totalCountNote, ja.cookNavi.orderNote, ja.cookNavi.restoreKeepNote]
+  // 2026-08-25 便KT: この枠から2行が消えた（下の KT-3）ので、上限も実態に合わせて下げる。
+  // 上限そのものの役目は変わらない＝「必ず出る説明が、また育っていないか」を見る
+  const KM_ALWAYS_LIMIT = 60
+  const kmAlways = [ja.cookNavi.orderNote]
   const kmAlwaysLen = kmAlways.reduce((sum, t) => sum + (t ?? '').length, 0)
   eq(
     `KM-2 全体の分数の下に必ず出る説明の合計が${KM_ALWAYS_LIMIT}字以内（実際=${kmAlwaysLen}字）`,
@@ -31431,16 +31453,18 @@ import { safetyNotesFor, stepSafetyNotes, wholeRecipeSafetyNotes } from '../src/
   )
   eq('KM-2 「実際の火加減で前後します。」は消した（「約◯分」と同じことを言っている）', ja.cookNavi.totalNote, undefined)
   eq('KM-2 画面からも消えている', kmNaviSrc.includes('totalNote'), false)
-  eq(
-    'KM-2 数え方の説明は「レシピの一覧と一致しない」ことだけを言う',
-    (ja.cookNavi.totalCountNote ?? '').includes('手順ごとの時間を数えて合計した目安'),
-    false,
-  )
-  eq(
-    'KM-2 数え方が違うという肝心の中身は残っている',
-    (ja.cookNavi.totalCountNote ?? '').includes('数え方が違う'),
-    true,
-  )
+  /*
+   * ---- KT-3: 全体の分数の下に必ず出ていた2行を消した（2026-08-25 便KT・オーナー原文）----
+   *   「「レシピの一覧に出ている〜一致しません」削除。どこのことかわからない上に
+   *     違っているのは前提のうちなので不要」          → totalCountNote
+   *   「「段取りと進んだところは、〜」削除」            → restoreKeepNote
+   * 便KM は totalCountNote の前半だけを削って後半（数え方が違う）を残していたが、
+   * オーナーはその後半こそ要らないと言っている。**消えたことを見張る**形に書き換える
+   *（黙って検査を消すと、次の便が同じ2行を足し直しても誰も気づかない）。
+   * 開き直しても段取りが残る作り（cookNaviSession）は変えていない＝書いておくのをやめただけ
+   */
+  eq('KT-3 数え方の断り書き（レシピの一覧と一致しない）が ja.ts に残っていない', 'totalCountNote' in ja.cookNavi, false)
+  eq('KT-3 画面からも消えている', kmNaviSrc.includes('ja.cookNavi.totalCountNote'), false)
   eq(
     'KM-2 1品ずつのときの説明から、上の枠と重なる一文を消した',
     (ja.cookNavi.sequentialOrderNote ?? '').includes('1品を作り終えてから次の品に移ります'),
@@ -31451,16 +31475,16 @@ import { safetyNotesFor, stepSafetyNotes, wholeRecipeSafetyNotes } from '../src/
     (ja.cookNavi.sequentialOrderNote ?? '').includes('加熱で仕上げる品'),
     true,
   )
-  // 「日付が変わると残しません」は「今日のうちは残ります」の裏返しなので落としたが、
-  // **何が・いつまで残るか**は落とさない（落とすと、閉じてよいのかが読めなくなる）
+  eq('KT-3 「段取りと進んだところは〜」が ja.ts に残っていない', 'restoreKeepNote' in ja.cookNavi, false)
+  eq('KT-3 画面からも消えている', kmNaviSrc.includes('ja.cookNavi.restoreKeepNote'), false)
+  // 日付をまたいで捨てたときは、その場で理由を言う側が残っていること（黙って消さない・規約F）
   eq(
-    'KM-2 段取りの覚え書きの説明は、何がいつまで残るかを残している',
+    'KT-3 日付が変わって捨てたときの知らせは残っている（消したのは常に出る説明だけ）',
     [
-      (ja.cookNavi.restoreKeepNote ?? '').includes('段取り'),
-      (ja.cookNavi.restoreKeepNote ?? '').includes('開き直しても'),
-      (ja.cookNavi.restoreKeepNote ?? '').includes('今日のうちは残ります'),
+      (ja.cookNavi.restoreExpiredByDate ?? '').includes('残していません'),
+      (ja.cookNavi.restoreExpiredByDateCooking ?? '').includes('残していません'),
     ],
-    [true, true, true],
+    [true, true],
   )
 
   // ---- KM-3: 並べ替えを、押したその場で1回で戻せる（他の操作と同じトーストの「元に戻す」）----
@@ -32194,6 +32218,7 @@ import { safetyNotesFor, stepSafetyNotes, wholeRecipeSafetyNotes } from '../src/
 
 
 // ==========================================================================================
+// ==========================================================================================
 // 便KS（2026-08-25 オーナー書き溜め・レシピの登録画面／詳細画面／原価）
 //
 // オーナー原文（該当箇所）:
@@ -32680,6 +32705,349 @@ import { safetyNotesFor, stepSafetyNotes, wholeRecipeSafetyNotes } from '../src/
   }
 }
 
+
+// ==========================================================================================
+// 便KT: 2026-08-25 オーナー書き溜め（並行調理ナビの節）の再発防止
+// ==========================================================================================
+{
+  const ktDir = path.dirname(fileURLToPath(import.meta.url))
+  const ktRead = (rel) => readFileSync(path.join(ktDir, '..', rel), 'utf-8')
+
+  // ---- KT-1: レシピごとの番号「1-1」を、レシピ名が長くても折り返さない ----
+  // オーナー原文「並行調理のレシピごとの番号「1−1」などが、レシピ名が長いと改行されてしまう。」
+  // 真因は**バッジを包んでいる span が横並びの中で縮む側だった**こと（中の StepBadge は
+  // shrink-0 を持っていたが、外側が縮むので中の文字がハイフンで折り返していた）。
+  // 実際の見え方（390px/320px）は e2e が測る。ここでは「縮まない側」に戻っていないかを見る
+  {
+    const naviSrc = ktRead('src/pages/CookNaviPage.tsx')
+    const overlaySrc = ktRead('src/components/CookSessionOverlay.tsx')
+    const badgeSrc = ktRead('src/components/StepBadge.tsx')
+    eq(
+      'KT-1 段取りの一覧: 品ごとの番号のバッジを包む span が縮まない（shrink-0）',
+      /data-testid="navi-recipe-step-number" className="shrink-0"/.test(naviSrc),
+      true,
+    )
+    eq(
+      'KT-1 調理中モード: 品ごとの番号のバッジを包む span も縮まない',
+      /<span aria-hidden className="shrink-0">\s*<StepBadge number=\{currentStepLabel\}/.test(overlaySrc),
+      true,
+    )
+    eq(
+      'KT-1 番号そのものが折り返せない（「3-1」がハイフンで割れない）',
+      badgeSrc.includes('whitespace-nowrap'),
+      true,
+    )
+    eq(
+      'KT-1 縮むのは料理名の札のほう（truncate で省略する）',
+      /RecipePill[\s\S]{0,400}min-w-0 max-w-full truncate/.test(naviSrc),
+      true,
+    )
+  }
+
+  // ---- KT-4: 器具そのものが知らせる待ちに、アプリのタイマーを出さない ----
+  // オーナー原文「レンジでは、レンジのタイマーを使います。レンジに関するタイマーは削除できない？
+  //             絶対使わないのに出てると、アプリが安っぽく感じる。」
+  // 段取りの計算（分数・器具の占有）は変えない＝**表示するボタンだけ**を決める判定
+  {
+    const wait = (text, over = {}) => ({ kind: 'wait', longRest: false, waitMinutes: 3, text, ...over })
+    eq(
+      'KT-4 電子レンジの待ちはアプリのタイマーを出さない',
+      waitSignaledByAppliance(wait('ふんわりとラップをかけ、電子レンジ(600W)で3分加熱する。')),
+      'microwave',
+    )
+    eq(
+      'KT-4 トースターの待ちも出さない（つまみが時間で回り、終わると鳴る）',
+      waitSignaledByAppliance(wait('トースターでチーズに焼き色がつくまで7分焼く。')),
+      'toaster',
+    )
+    eq(
+      'KT-4 コンロの待ちには出す（沸くまで・煮るは器具が何も知らせない）',
+      [
+        waitSignaledByAppliance(wait('落としぶたをして中火で15分煮る。', { waitMinutes: 15 })),
+        waitSignaledByAppliance(wait('火にかけたまま、沸くのを待つ', { addedByNavi: true, waitMinutes: 5 })),
+      ],
+      [null, null],
+    )
+    eq(
+      'KT-4 魚焼きグリルにも出す（タイマーの無い機種があり、外れたときの被害が大きい）',
+      waitSignaledByAppliance(wait('魚焼きグリルで12分焼く。', { waitMinutes: 12 })),
+      null,
+    )
+    eq(
+      'KT-4 炊飯のあとの蒸らしにも出す（炊飯器は器具として数えていない＝知らせる合図もない）',
+      waitSignaledByAppliance(wait('炊飯器で普通に炊き、炊き上がったら10分蒸らす。', { waitMinutes: 10 })),
+      null,
+    )
+    eq(
+      'KT-4 レンジを持っていない台所では出す（その工程はコンロに読み替わるため）',
+      waitSignaledByAppliance(wait('電子レンジ(600W)で3分加熱する。'), {
+        burners: 2, microwave: false, grill: true, toaster: true,
+      }),
+      null,
+    )
+    eq(
+      'KT-4 待ちでない手順・長い待ちには元から出ない（判定を二重にしない）',
+      [
+        waitSignaledByAppliance({ kind: 'active', longRest: false, waitMinutes: 0, text: '電子レンジで温める' }),
+        waitSignaledByAppliance({ kind: 'wait', longRest: true, waitMinutes: 0, text: '電子レンジで温める' }),
+      ],
+      [null, null],
+    )
+    // 画面（段取りの一覧・調理中モード）が同じ判定を使っていること＝1つの段取りを2通りに見せない
+    for (const [where, src] of [
+      ['段取りの一覧', ktRead('src/pages/CookNaviPage.tsx')],
+      ['調理中モード', ktRead('src/components/CookSessionOverlay.tsx')],
+    ]) {
+      eq(
+        `KT-4 ${where}のタイマーのボタンは、この判定で出し分けている`,
+        /showsWaitTimerButton\(item\) && applianceTimer == null/.test(src),
+        true,
+      )
+      eq(
+        `KT-4 ${where}は、ボタンの代わりに何ではかるのかを書く（黙って消さない）`,
+        src.includes('ja.cookNavi.waitApplianceTimerNote'),
+        true,
+      )
+    }
+    eq(
+      'KT-4 その一文は器具の名前を差し込む（「器具」とだけ書かない）',
+      ja.cookNavi.waitApplianceTimerNote.includes('{appliance}'),
+      true,
+    )
+    // 押す手立てが無い待ちを「タイマーを押していません」と急かさない
+    {
+      const { timerNoticeOnAdvance } = await import('../src/logic/cookTimerNotice.ts')
+      const mk = (stepIndex, text, kind = 'wait') => ({
+        recipeId: 1, stepIndex, kind, longRest: false, waitMinutes: kind === 'wait' ? 3 : 0,
+        text, stepNumber: stepIndex + 1, order: stepIndex + 1,
+      })
+      const cur = (stepIndex) => ({ recipeId: 1, stepIndex })
+      eq(
+        'KT-4 進んだときの一言も、器具が知らせる待ちでは出さない',
+        timerNoticeOnAdvance(
+          [mk(0, 'ふんわりとラップをかけ、電子レンジ(600W)で3分加熱する。'), mk(1, '器に盛る。', 'active')],
+          cur(0), cur(1), [],
+        ),
+        null,
+      )
+      eq(
+        'KT-4 コンロの待ちでは今までどおり言う（押せるボタンがあるので急かす意味がある）',
+        timerNoticeOnAdvance(
+          [mk(0, '落としぶたをして中火で3分煮る。'), mk(1, '器に盛る。', 'active')],
+          cur(0), cur(1), [],
+        ),
+        { kind: 'notStarted', recipeId: 1, stepIndex: 0 },
+      )
+    }
+  }
+
+  // ---- KT-7: 「調理中だった手順」をやめ、画面の名前（調理中モード）で言う ----
+  // オーナー原文「自動で組んだ並びに戻します「調理中だった手順」とは？」
+  {
+    const stale = Object.entries(ja.cookNavi)
+      .filter(([, v]) => typeof v === 'string' && v.includes('調理中だった手順'))
+      .map(([k]) => k)
+    eq('KT-7 「調理中だった手順」という言い方が残っていない', stale, [])
+    eq(
+      'KT-7 言い直した先は、画面に出ているモードの名前で言う',
+      [
+        ja.cookNavi.sessionLost.includes('調理中モードで開いていた手順'),
+        ja.cookNavi.reorderUndoAllConfirm.includes('調理中モードで開いている手順'),
+        ja.cookNavi.restoreExpiredByDateCooking.includes('調理中モードで開いていた手順'),
+      ],
+      [true, true, true],
+    )
+  }
+
+  // ---- KT-8: 「段取りを消す」の確認は2行だけ（規約Fの例外） ----
+  // オーナー原文（差し戻しD）「文章が長くわかりづらいので。消える側は「段取りを消す」したら
+  // 当然消えるとわかる範囲では？むしろ確認で説明が入った方が煩わしいかと」
+  {
+    const naviSrc = ktRead('src/pages/CookNaviPage.tsx')
+    eq(
+      'KT-8 消える側・残る側の並べ立ては ja.ts から消えている',
+      ['discardTimelineGone', 'discardTimelineGoneLabel', 'discardTimelineKept', 'discardTimelineKeptLabel']
+        .filter((k) => k in ja.cookNavi),
+      [],
+    )
+    eq('KT-8 残すのはタイマーの一言だけ', ja.cookNavi.discardTimelineTimerNote, '動いているタイマーは残ります')
+    eq(
+      'KT-8 確認の窓は見出しとその一言だけ（箇条書きを渡していない）',
+      /title: ja\.cookNavi\.discardTimelineConfirmTitle,\s*\n\s*body: ja\.cookNavi\.discardTimelineTimerNote,/.test(
+        naviSrc,
+      ),
+      true,
+    )
+  }
+
+  // ---- KT-6: まとめて献立を入力したときの数字を、すべて「品」でそろえる ----
+  /*
+   * オーナー原文:
+   *   「昼と夕が埋まっている状態で朝昼夕表示の空いた枠だけまとめて献立を入力すると、
+   *     「すでに決まっている１４食をそのままに１４食を〜」と間違った数字が表示された。
+   *     すでに決まっているのは昼と夕28食（1品なしで）になるはずですよね？」
+   *
+   * 数字はどちらも正しかった（前者＝残す食事の数14、後者＝新しく入れた品数14）。
+   * **単位の違う数が同じ文に並んでいた**のが原因なので、両方とも品で数える。
+   * ここでは**枠の数と品数がわざと食い違う状況**を作り、出る文の数字が両方とも品数になることを見る。
+   */
+  {
+    const week = ['2026-07-20', '2026-07-21', '2026-07-22', '2026-07-23', '2026-07-24', '2026-07-25', '2026-07-26']
+    // 昼と夕に主菜＋副菜を手で入れてある＝14食事・28品。朝は空
+    const entries = []
+    let id = 1
+    for (const date of week) {
+      for (const slot of ['lunch', 'dinner']) {
+        entries.push({ id: id++, date, slot, recipeId: id, role: 'main' })
+        entries.push({ id: id++, date, slot, recipeId: id, role: 'side' })
+      }
+    }
+    const plan = planWeekFill(entries, week, ['breakfast', 'lunch', 'dinner'], '2026-07-20', {
+      keepAuto: true,
+    })
+    eq('KT-6 前提: 手つかずで残る食事は14（昼7＋夕7）', plan.preservedSlotKeys.size, 14)
+    eq('KT-6 前提: 埋めるのは朝の7食事', plan.slotsToFill.length, 7)
+    eq(
+      'KT-6 「すでに入っている」は品で数える＝オーナーが数えた28がそのまま出る',
+      preservedItemCount(plan, entries),
+      28,
+    )
+    // 実際に入るのは主菜＋副菜で14品。文の中の2つの数字が「28品」「14品」になること
+    const added = 14
+    const toast = ja.mealPlan.fillWeekKeptManual
+      .replace('{n}', String(preservedItemCount(plan, entries)))
+      .replace('{a}', String(added))
+    eq('KT-6 週タブの結果は「28品」「14品」（14と14が並ばない）', toast, 'すでに入っている28品はそのままにして、14品を新しく入れました')
+    eq(
+      'KT-6 その文に「食分」が混ざっていない（単位の違う数を並べない）',
+      [ja.mealPlan.fillWeekKeptManual, ja.mealPlan.fillWeekNoRoom,
+       ja.mealPlan.fillMonthKeptManual, ja.mealPlan.fillMonthNoRoom,
+       ja.mealPlan.fillMonthConfirm, ja.mealPlan.fillMonthConfirmTitle,
+       ja.mealPlan.templateApplyConfirm, ja.mealPlan.templateApplyConfirmTitle,
+       ja.mealPlan.templateApplyNoRoom].filter((t) => t.includes('食分')),
+      [],
+    )
+    /*
+     * これから消して入れ直す行は「すでに入っている」に数えない。
+     * 夕食に「手で入れた主菜」＋「自動で入った副菜」がある週で、副菜だけを振り直す形を作る
+     *（週タブの再抽選＝keepAuto なし）。主菜7品は残り、副菜7品は消して入れ直すので、
+     * 「すでに入っている」は7品。ここを entries の数（14）で数えると、消える品まで
+     * 「そのままにします」と言うことになる
+     */
+    const mixed = []
+    let mid = 500
+    for (const date of week) {
+      mixed.push({ id: mid++, date, slot: 'dinner', recipeId: mid, role: 'main' })
+      mixed.push({ id: mid++, date, slot: 'dinner', recipeId: mid, role: 'side', auto: true })
+    }
+    const replan = planWeekFill(mixed, week, ['dinner'], '2026-07-20')
+    eq('KT-6 前提: 自動で入った副菜7品は消して入れ直す', replan.entryIdsToRemove.length, 7)
+    eq(
+      'KT-6 これから消して入れ直す行は「すでに入っている」に数えない',
+      preservedItemCount(replan, mixed),
+      7, // 手で入れた主菜7品だけ
+    )
+    // 月タブ・テンプレも同じ数え方（片方だけ直すと週と月で数え方が違う混乱になる）
+    eq(
+      'KT-6 月タブの結果も同じ言い方',
+      ja.mealPlan.fillMonthKeptManual.replace('{n}', '28').replace('{a}', '14'),
+      'すでに入っている28品はそのままにして、14品を新しく入れました',
+    )
+    eq(
+      'KT-6 画面が品で数える関数を使っている（枠の数をそのまま出していない）',
+      [
+        /const preserved = preservedItemCount\(plan, entries \?\? \[\]\)/.test(ktRead('src/pages/MealPlanPage.tsx')),
+        /const preserved = preservedItemCount\(plan, monthEntries \?\? \[\]\)/.test(ktRead('src/pages/MealPlanPage.tsx')),
+        ktRead('src/pages/MealPlanPage.tsx').includes('plan.keptItemCount'),
+      ],
+      [true, true, true],
+    )
+  }
+
+  /* ---- KT-10: 「先にできた品が待つことになる」警告は、分数抜きで残す（司令部裁定）----
+   *
+   * 便KQが直前に、熱い品が1つだけの組の放置を 15組→7組 に減らした。残る7組は
+   * **熱い品が2つあって物理的に避けられない**組で、そこでは実際に置いたままになる。
+   * オーナーの削除理由（「個人の手のスピードや状況によってすぐに変わる」）は
+   * **分数の予測**への指摘であって、この事実には当たらない。
+   *
+   * ここが見張るのは2つ:
+   *   ①分数を書いていない（差し込み口も、分の言い回しも持たない）＝数字を戻す便を止める
+   *   ②開きが大きい組では出て、そうでない組・冷たい品が先の組では出ない
+   */
+  {
+    const naviSrc = ktRead('src/pages/CookNaviPage.tsx')
+    eq(
+      'KT-10 警告に分数を書かない（差し込み口を持たない）',
+      /\{n\}|分/.test(ja.cookNavi.finishWaitNote),
+      false,
+    )
+    eq(
+      'KT-10 どの品がどの品を待つのかは名前で書く（「その間」だけにしない）',
+      ja.cookNavi.finishWaitNote.includes('{first}') && ja.cookNavi.finishWaitNote.includes('{last}'),
+      true,
+    )
+    eq(
+      'KT-10 消した「約◯分あきます」の言い方は戻っていない',
+      Object.values(ja.cookNavi).filter((v) => typeof v === 'string' && v.includes('あきます')),
+      [],
+    )
+    // 出す条件は docs/72 N1 と同じ物差し（logic/cookFinish.ts）から取っていること
+    eq(
+      'KT-10 出す条件はロジック側の線（isFinishSpreadWide）で決めている',
+      naviSrc.includes('isFinishSpreadWide(gap.minutes, timeline.totalMinutes)'),
+      true,
+    )
+    eq(
+      'KT-10 先にできる品が冷たいまま出す品なら出さない（そう組んでいるので咎めない）',
+      /gap\.first\.cold\) return null/.test(naviSrc),
+      true,
+    )
+    // 線そのものの通り方（全体30分・開き20分＝大きい／開き5分＝大きくない）
+    const { isFinishSpreadWide: ktWide, finishSpread: ktSpread } = await import('../src/logic/cookFinish.ts')
+    const ktHotPair = [
+      { recipeId: 1, minutes: 10, cold: false },
+      { recipeId: 2, minutes: 30, cold: false },
+    ]
+    eq(
+      'KT-10 熱い品が2つで開きが大きい組は「出す」側になる（便KQで残る7組の形）',
+      ktWide(ktSpread(ktHotPair).minutes, 30) && !ktSpread(ktHotPair).first.cold,
+      true,
+    )
+    eq(
+      'KT-10 開きが小さい組は出さない（全部の組に出すと読まれなくなる）',
+      ktWide(
+        ktSpread([
+          { recipeId: 1, minutes: 27, cold: false },
+          { recipeId: 2, minutes: 30, cold: false },
+        ]).minutes,
+        30,
+      ),
+      false,
+    )
+    eq(
+      'KT-10 先にできるのが冷たい品なら、開きが大きくても出さない',
+      ktSpread([
+        { recipeId: 1, minutes: 10, cold: true },
+        { recipeId: 2, minutes: 30, cold: false },
+      ]).first.cold,
+      true,
+    )
+  }
+
+  // ---- KT-9: 使い方ページが、アプリに無い文言を説明していない ----
+  {
+    const manual = ktRead('public/about/manual.html')
+    eq(
+      'KT-9 消した文言が使い方ページに残っていない',
+      ['できあがりの目安', '1品だけなら約', '一致しません', 'あと◯回', 'すでに決まっている◯食分'].filter((t) =>
+        manual.includes(t),
+      ),
+      [],
+    )
+    eq('KT-9 新しい言い方に差し替わっている', manual.includes('単品で約◯分'), true)
+  }
+}
 
 // ---------- 結果 ----------
 console.log(`合格: ${passed}件 / 失敗: ${failures.length}件`)

@@ -52,8 +52,14 @@ export interface TemplateFillPlan {
   ops: { date: string; slot: MealSlot; role: MealRole; recipeId: number }[]
   /** これから献立が入る食事の数（＝空いていた食事の数） */
   fillSlotCount: number
-  /** すでに献立が入っていて触らない食事の数（規約Fの確認文で「残るもの」として出す） */
+  /** すでに献立が入っていて触らない食事の数（入る場所の勘定に使う） */
   keptSlotCount: number
+  /**
+   * すでに献立が入っていて触らない**品数**（2026-08-25 便KT）。
+   * 確認文・お知らせに出す「すでに入っている◯品」はこちらを使う
+   * ＝同じ文に並ぶ「◯品を入れます」と単位をそろえるため（i18n/ja.ts の数え方の決まり）。
+   */
+  keptItemCount: number
   /** テンプレに中身がある曜日にあたった日数（確認文の「何日分か」に使う） */
   targetDayCount: number
   /**
@@ -99,6 +105,12 @@ export function planTemplateFill(options: {
   const { items, dates, entries, today, allowedDows, visibleSlots } = options
   const lockedKeys = options.lockedKeys ?? new Set<string>()
   const filledSlotKeys = new Set(entries.map((e) => `${e.date}|${e.slot}`))
+  /** 食事ごとの品数（「すでに入っている◯品」を品で数えるため。2026-08-25 便KT） */
+  const itemsBySlotKey = new Map<string, number>()
+  for (const e of entries) {
+    const key = `${e.date}|${e.slot}`
+    itemsBySlotKey.set(key, (itemsBySlotKey.get(key) ?? 0) + 1)
+  }
   const itemsByDowSlot = new Map<string, MealTemplateItem[]>()
   for (const item of items) {
     const key = `${item.dow}|${item.slot}`
@@ -110,6 +122,7 @@ export function planTemplateFill(options: {
   const ops: TemplateFillPlan['ops'] = []
   let fillSlotCount = 0
   let keptSlotCount = 0
+  let keptItemCount = 0
   let targetDayCount = 0
   let lockedSlotCount = 0
   const hiddenSlotSet = new Set<MealSlot>()
@@ -136,6 +149,7 @@ export function planTemplateFill(options: {
       }
       if (filledSlotKeys.has(`${date}|${slot}`)) {
         keptSlotCount++
+        keptItemCount += itemsBySlotKey.get(`${date}|${slot}`) ?? 0
         continue
       }
       fillSlotCount++
@@ -149,6 +163,7 @@ export function planTemplateFill(options: {
     ops,
     fillSlotCount,
     keptSlotCount,
+    keptItemCount,
     targetDayCount,
     hiddenSlots: MEAL_SLOTS.filter((s) => hiddenSlotSet.has(s)),
     lockedSlotCount,

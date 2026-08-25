@@ -95,6 +95,7 @@ import {
   suggestForSlot,
   suggestPairForSlot,
   planWeekFill,
+  preservedItemCount,
   todayListPickedIds,
   showsCookedPlanRowToday,
   normalizeDateRange,
@@ -4657,7 +4658,11 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
     // 1品も追加していない(行のサイコロで全部埋めた後など)ときにも「立てました」と嘘を言っていた。
     // 実際に追加した品数(added)で分岐し、0品なら0品と伝える
     const messages: string[] = []
-    const preserved = plan.preservedSlotKeys.size
+    // 「すでに入っている◯品」は**品**で数える（2026-08-25 便KT・オーナー原文
+    // 「すでに決まっているのは昼と夕28食（1品なしで）になるはずですよね？」）。
+    // 枠の数（preservedSlotKeys.size）を出すと、同じ文の「◯品を新しく入れました」と
+    // 単位が違う数が並ぶ＝どちらも14になった実機で「間違った数字」に見えた
+    const preserved = preservedItemCount(plan, entries ?? [])
     if (added > 0) {
       if (replaceAll) {
         // 総入れ替えは消す操作なので、終わったことと入った品数を必ず言う(便DT-8)
@@ -4783,7 +4788,9 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
         return !(mainRecipe && isOneDish(mainRecipe))
       }),
     }
-    const preserved = plan.preservedSlotKeys.size
+    // 週タブと同じ数え方にそろえる（品で数える。2026-08-25 便KT）。
+    // 片方だけ直すと、週と月で数え方が違うという新しい混乱になる
+    const preserved = preservedItemCount(plan, monthEntries ?? [])
     const targetSlots = [...plan.slotsToFill, ...plan.partialFills]
     // メモの日を外したことは、入れる前にも入れた後にも必ず言う（黙って飛ばさない）
     const noteSkipped =
@@ -4807,9 +4814,9 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
     }
     const targetDayCount = new Set(targetSlots.map((s) => s.date)).size
     const ok = await confirm({
-      title: ja.mealPlan.fillMonthConfirmTitle
-        .replace('{d}', String(targetDayCount))
-        .replace('{s}', String(targetSlots.length)),
+      // 入る先の数は「日分」だけを言う（2026-08-25 便KT）。空いた食事は**まだ0品**なので
+      // 品では数えられず、そこに「◯食分」と書くと結果の「◯品」と単位が食い違う
+      title: ja.mealPlan.fillMonthConfirmTitle.replace('{d}', String(targetDayCount)),
       body: (preserved > 0
         ? ja.mealPlan.fillMonthConfirm
         : ja.mealPlan.fillMonthConfirmNoKept
@@ -4933,7 +4940,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
       setMessage(
         withNotice(
           plan.keptSlotCount > 0
-            ? ja.mealPlan.templateApplyNoRoom.replace('{n}', String(plan.keptSlotCount))
+            ? ja.mealPlan.templateApplyNoRoom.replace('{n}', String(plan.keptItemCount))
             : plan.hiddenSlots.length > 0
               ? ja.mealPlan.templateApplyHiddenSlots.replaceAll(
                   '{slots}',
@@ -4949,12 +4956,12 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
     const ok = await confirm({
       title: ja.mealPlan.templateApplyConfirmTitle
         .replace('{name}', template.name)
-        .replace('{n}', String(plan.ops.length))
-        .replace('{d}', String(plan.fillSlotCount)),
+        .replace('{n}', String(plan.ops.length)),
+      // 残るほうも品で数える（2026-08-25 便KT。同じ窓の「{n}品を入れます」と単位をそろえる）
       body: (plan.keptSlotCount > 0
         ? ja.mealPlan.templateApplyConfirm
         : ja.mealPlan.templateApplyConfirmNoKept
-      ).replace('{k}', String(plan.keptSlotCount)),
+      ).replace('{k}', String(plan.keptItemCount)),
       notes: lockNotice ? [lockNotice] : [],
       confirmLabel: ja.mealPlan.templateApplyConfirmOk,
     })

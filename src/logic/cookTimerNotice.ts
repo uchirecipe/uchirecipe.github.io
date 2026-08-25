@@ -22,7 +22,14 @@
  * 判定はエンジン側の言い方（`hasParallelCue` / `addedByNavi`）をそのまま借りる
  * ＝段取りの組み方（logic/cookNavi.ts）には手を入れず、同じ物差しで黙る。
  */
-import { hasParallelCue, recipeStepLabel, showsWaitTimerButton, type TimelineItem } from './cookNavi'
+import {
+  hasParallelCue,
+  recipeStepLabel,
+  showsWaitTimerButton,
+  waitSignaledByAppliance,
+  type TimelineItem,
+} from './cookNavi'
+import { DEFAULT_KITCHEN, type KitchenEquipment } from './cookAppliance'
 import { findCursorIndex, type CookCursor } from './cookSession'
 
 /** 一言の中身。画面はこの指し先から、そのときの手順・タイマーを引き直して描く */
@@ -75,6 +82,7 @@ export function timerNoticeOnAdvance(
   from: CookCursor,
   to: CookCursor,
   timers: readonly NoticeTimer[],
+  kitchen: KitchenEquipment = DEFAULT_KITCHEN,
 ): CookTimerNotice | null {
   const fromIndex = findCursorIndex(items, from)
   const toIndex = findCursorIndex(items, to)
@@ -84,8 +92,14 @@ export function timerNoticeOnAdvance(
 
   // ① 離れた手順が「約◯分の待ち時間」なのに、そのタイマーを始めていない。
   //    分数を名乗らない長い待ち（半日〜一晩）はタイマーのボタン自体が無いので対象外
-  //    （showsWaitTimerButton が画面と同じ判定を持っている）
-  if (showsWaitTimerButton(left) && !timers.some((t) => !t.done && isForStep(t, left))) {
+  //    （showsWaitTimerButton が画面と同じ判定を持っている）。
+  //    電子レンジ・トースターの待ちも画面にボタンが無い（2026-08-25 便KT）ので言わない
+  //    ＝押す手立てが無いものを「押していません」と急かさない
+  if (
+    showsWaitTimerButton(left) &&
+    waitSignaledByAppliance(left, kitchen) == null &&
+    !timers.some((t) => !t.done && isForStep(t, left))
+  ) {
     return { kind: 'notStarted', recipeId: left.recipeId, stepIndex: left.stepIndex }
   }
 
