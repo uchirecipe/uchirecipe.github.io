@@ -1,11 +1,11 @@
 {
   "recipe-cards": {
     "w": 780,
-    "h": 1088
+    "h": 1104
   },
   "day-suggest": {
     "w": 780,
-    "h": 1148
+    "h": 1120
   },
   "nav-tabs": {
     "w": 780,
@@ -37,7 +37,11 @@
   },
   "paste": {
     "w": 780,
-    "h": 964
+    "h": 780
+  },
+  "import-gaps": {
+    "w": 780,
+    "h": 1176
   },
   "url-import": {
     "w": 780,
@@ -45,7 +49,7 @@
   },
   "plan-day-buttons": {
     "w": 780,
-    "h": 900
+    "h": 928
   },
   "select-for-today": {
     "w": 780,
@@ -53,7 +57,7 @@
   },
   "plan-week-suggest": {
     "w": 780,
-    "h": 428
+    "h": 356
   },
   "plan-week-nutrition-open": {
     "w": 780,
@@ -65,7 +69,7 @@
   },
   "plan-week-day-edit": {
     "w": 780,
-    "h": 1156
+    "h": 1204
   },
   "cost-week": {
     "w": 780,
@@ -73,7 +77,7 @@
   },
   "plan-month": {
     "w": 780,
-    "h": 1120
+    "h": 1172
   },
   "plan-month-photo": {
     "w": 780,
@@ -121,7 +125,7 @@
   },
   "cooknavi": {
     "w": 780,
-    "h": 926
+    "h": 894
   },
   "cooknavi-finish": {
     "w": 780,
@@ -129,7 +133,7 @@
   },
   "cooknavi-reorder": {
     "w": 780,
-    "h": 736
+    "h": 704
   },
   "cooknavi-reorder-undo": {
     "w": 780,

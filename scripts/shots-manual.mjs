@@ -82,12 +82,15 @@ const manifest = {}
 // 2026-08-20 便IK: 'plan-week-suggest'（週の「献立を提案」）と 'recipes-filter'
 // （レシピ一覧の絞り込み）を足した。どちらもこの数日で並びが変わったのに図が1枚も無く、
 // 使い方ページが「上から順に」「見出しの横にあり」と**見た目を言葉で書いていた**場所
+// 2026-08-25 便KR: 'import-gaps' を足した。取り込みが終わった直後に出る
+// 「取り込みで入らない項目」の並び（便KO）。使い方ページがこの並びに一言も触れていなかった
 // 2026-08-22 便JB: 'plan-week-day-edit' を足した。週タブの曜日カードが
 // 「通常表示（絵と料理名だけ）」と「編集モード」の2つの姿になった（便IV）ので、
 // 1枚では説明できなくなった。plan-week-day は通常表示の絵として残す
 const SHOT_NAMES = [
   'recipe-cards', 'day-suggest', 'nav-tabs', 'search', 'recipes-filter',
-  'register-tabs', 'ingredient-rows', 'bulk-input', 'register-detail', 'paste', 'url-import',
+  'register-tabs', 'ingredient-rows', 'bulk-input', 'register-detail', 'paste', 'import-gaps',
+  'url-import',
   'plan-day-buttons', 'select-for-today', 'plan-week-suggest',
   'plan-week-nutrition-open', 'plan-week-day', 'plan-week-day-edit', 'cost-week',
   'plan-month', 'plan-month-photo', 'shopping', 'pantry',
@@ -704,7 +707,28 @@ try {
   )
   await page.getByRole('button', { name: '自動で振り分ける' }).click()
   await wait(page, 1200)
-  await crop(page, 'paste', pasteArea.locator('xpath=..'), { top: 60, padTop: 12, padBottom: 12 })
+  // 2026-08-25 便KR: 貼り付け欄の**下に**「取り込みで入らない項目」の並びが付いた（便KO）。
+  // それまでは textarea の親を丸ごと切っていたので、親が画面の高さ(844px)を超え、
+  // **文字が途中で切れた絵**になっていた（crop は VIEW.height で黙って切り詰める）。
+  // 貼り付けの説明に要るのは「読み取った件数が出るところ」までなので、
+  // 上＝説明文、下＝合わせ調味料の案内、で範囲を決める。入らない項目は別のカットにする
+  await cropRange(
+    page,
+    'paste',
+    page.getByText(ja.paste.description, { exact: true }).first(),
+    page.getByText(ja.form.importSeasoningGuide, { exact: true }).first(),
+    { top: 60, padTop: 12, padBottom: 12 },
+  )
+
+  // ---- 取り込みのあとの「入らない項目」（2026-08-25 便KO） ----
+  // 取り込みが終わった直後にだけ出る並び。ジャンル・季節・時間帯・手間レベルは
+  // 取り込みでは入らないので、その場で1タップで選べる。説明はこの端末での初回のみ
+  const gapPanel = page.locator('[data-testid="import-field-gaps"]')
+  if (await gapPanel.count()) {
+    await crop(page, 'import-gaps', gapPanel, { top: 64, padTop: 10, padBottom: 12 })
+  } else {
+    missShot('import-gaps', '取り込みのあとに「取り込みで入らない項目」の並びが出ない')
+  }
 
   // ---- URLから取り込む ----
   await openNewRecipeForm(page, BASE)
@@ -942,19 +966,42 @@ try {
   await wait(page, 1500)
   await page.getByRole('button', { name: '月', exact: true }).click()
   await wait(page, 900)
-  const fillMonth = page.getByRole('button', { name: '献立をまとめて提案' })
+  const fillMonth = page.getByRole('button', { name: ja.mealPlan.fillMonth })
   if (await fillMonth.count()) {
     await fillMonth.click()
     await wait(page, 900)
     // 規約Fの確認の窓（「この月のまだ決まっていない◯日分に、主菜と副菜を自動で入れます」）を通す。
-    // 2026-08-22 便JB: 通せなかったら黙って進まない(カレンダーが空のまま撮れてしまう)
-    if (!(await pressConfirmWindow(page, '入れる')))
-      missShot('plan-month', '「献立をまとめて提案」の確認の窓を通せず、カレンダーが埋まらない')
+    // 2026-08-25 便KR: **窓が出ないことは失敗ではない**。まだ決まっていない食事が1つも無いと、
+    // アプリは窓を出さずにトーストで返す（MealPlanPage の `targetSlots.length === 0`）。
+    // 投入したデモデータで月がすでに埋まっているときは毎回こうなる。
+    // 旧コードはこれを失敗と決めつけていたため、**絵は正しく撮れているのに毎回赤**になっていた。
+    // 見るべきは窓の有無ではなく、**カレンダーが実際に埋まっているか**（＝この絵で見せたいもの）。
+    await pressConfirmWindow(page, ja.mealPlan.fillMonthConfirmOk)
     await wait(page, 2500)
   } else {
     missShot('plan-month', '月の画面に「献立をまとめて提案」のボタンが無い')
   }
   await wait(page, 6500) // 結果トーストが自動で消えるのを待つ
+  // 2026-08-25 便KR: 「今日から先の日に献立が入っているか」を数えて確かめる。
+  // この絵で見せたいのは**埋まったカレンダー**なので、空に近いまま撮れたら赤にする。
+  // 過ぎた日は「作った記録の写真」で埋まるので数えない（写真は先の日には付かない）。
+  // マスの中身は写真のときも文字のときもあるので、**どちらでも1日と数える**（禁じ手④）
+  const filledAhead = await page.evaluate(() => {
+    const pad = (n) => String(n).padStart(2, '0')
+    const now = new Date()
+    const today = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`
+    return [...document.querySelectorAll('[data-testid="month-day-cell"]')].filter((el) => {
+      const date = el.getAttribute('data-date') ?? ''
+      if (date < today) return false
+      if (el.querySelector('img')) return true
+      const dayNum = String(Number(date.slice(-2)))
+      const text = (el.textContent ?? '').replace(/\s/g, '').replace(dayNum, '')
+      return text.length > 0
+    }).length
+  })
+  if (filledAhead < 3) {
+    missShot('plan-month', `今日から先の日に献立が${filledAhead}日ぶんしか入っておらず、カレンダーが空に近い`)
+  }
   // 2026-08-08 便DW(オーナー指摘「献立月ページサンプルが実際の画面と違う」): カレンダーの
   // マスだけを切り出していたため、月タブのどこを見ているのか実機と結び付かなかった。
   // 2026-08-07 便DUでカレンダーが月タブの先頭に上がったので、「カレンダーに出す情報」から
