@@ -4,7 +4,7 @@ import type { SafetyNote } from '../logic/safetyNotes'
 import { ja } from '../i18n/ja'
 
 /**
- * 安全のめやすの枠（2026-08-22 便JH）。
+ * レシピに添える注意の枠（2026-08-22 便JH。見出しは ja.safety.title＝「注意」）。
  *
  * レシピ詳細と調理中モードで**同じ部品**を使う。片方だけ言い回し・見た目が変わることを
  * 構造的に起こさないため（同じ考えで作られている NaviRecipeNotes と同じ作法）。

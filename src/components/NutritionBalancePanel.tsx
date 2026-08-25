@@ -24,22 +24,22 @@ import { ProNutrientTeaser } from './NutritionTeaser'
 import { ja } from '../i18n/ja'
 
 /**
- * 献立タブに置く「栄養バランスのめやす」パネル（2026-07-30 便CL・docs/60 第1段「見える化」）。
+ * 献立タブに置く「栄養バランスの目安」パネル（2026-07-30 便CL・docs/60 第1段「見える化」）。
  * 週タブの各日カードと週まとめの両方で同じ部品を使う（同じ数字の出し方を2か所に書かないため）。
  *
  * 【表示の作法】
  * - 既定は1行だけ（無料「約◯kcal・野菜約◯g」／Pro「約◯kcal・塩分約◯g・野菜約◯g」）。
- *   めやすとの並置は展開時のみ。
+ *   目安との並置は展開時のみ。
  *   2026-07-11 にレシピ詳細の栄養パネルを「面積を取りすぎる」で折りたたんだ経緯があり、
  *   7日分のカードに常時展開のパネルを並べると同じ問題が7倍で起きる。
  * - **無料＝エネルギー・野菜量の2値／Pro＝8項目＋野菜量**（2026-08-01 オーナー確定・線引きB'。
  *   食塩相当量は無料側から外してPro側へ移した。野菜量は無料のまま＝docs/60 §7 未決#3＝(a)
  *   オーナー承認済み。第2段のエンジンが使う基準そのものなので、無料ユーザーにも見えないと
  *   選定理由が説明できない）。
- * - **1日のめやす（食塩相当量・野菜量）は説明文1行で書く**（2026-08-02 便CW-7・オーナー指示。
- *   従来の「1日のめやすとくらべる」＝値ごとの並置UIは廃止した）。食塩相当量のめやすは
- *   Pro解錠時のみ出す（値そのものがPro側なので、めやすだけ先に出すと無料側に塩分の話が残る）。
- *   エネルギー・たんぱく質・脂質・炭水化物にはめやすの線を引かない（docs/60 §1-2）。
+ * - **1日の目安（食塩相当量・野菜量）は説明文1行で書く**（2026-08-02 便CW-7・オーナー指示。
+ *   従来の「1日の目安とくらべる」＝値ごとの並置UIは廃止した）。食塩相当量の目安は
+ *   Pro解錠時のみ出す（値そのものがPro側なので、目安だけ先に出すと無料側に塩分の話が残る）。
+ *   エネルギー・たんぱく質・脂質・炭水化物には目安の線を引かない（docs/60 §1-2）。
  * - 不足・過多は断定しない。色でも善悪を表さない。
  * - **食事（朝食/昼食/夕食）ごとの小計はPro解錠時のみ**（2026-08-02 便CW-6・オーナー要望）。
  */
@@ -120,7 +120,7 @@ export default function NutritionBalancePanel({
   const summaryValues = canShowNumbers
     ? summaryValuesOf(balance, unlocked)
     : [ja.nutrition.unavailableSummary]
-  // 1日のめやす（食塩相当量・野菜量）の説明文1行（2026-08-02 便CW-7）。
+  // 1日の目安（食塩相当量・野菜量）の説明文1行（2026-08-02 便CW-7）。
   // 数値は DAILY_GUIDES から埋める＝基準値をUIに直書きしない（docs/60 §1-1）
   const guideNote = unlocked
     ? ja.nutritionBalance.guideNote
@@ -217,7 +217,7 @@ export default function NutritionBalancePanel({
             </label>
             <p className="mt-1 text-xs text-ink-muted">{ja.nutritionBalance.includeRiceHint}</p>
           </div>
-          {/* 1日のめやすは説明文1行だけにする（2026-08-02 便CW-7・オーナー指示）。
+          {/* 1日の目安は説明文1行だけにする（2026-08-02 便CW-7・オーナー指示）。
               自分の数値との並置・良し悪しの判定はしない */}
           {canShowNumbers && <p className="text-xs text-ink-muted">{guideNote}</p>}
           <div className="space-y-0.5 text-xs text-ink-muted">
@@ -304,9 +304,9 @@ export default function NutritionBalancePanel({
                 <p>{ja.nutrition.excludedDirectionNoteTotal}</p>
                 <p className="font-bold">{ja.nutritionBalance.vegetableCountNote}</p>
                 <p>{ja.nutrition.estimateNote}</p>
-                {/* 成分値の出典と「めやす」の出典は必ず別行にする（docs/60 §1-1。2つの出典を混ぜない）。
-                    めやすの出典は、画面に出しているめやすの分だけ挙げる
-                    （無料は野菜量のめやすしか出していないので、塩分側の出典は挙げない） */}
+                {/* 成分値の出典と「目安」の出典は必ず別行にする（docs/60 §1-1。2つの出典を混ぜない）。
+                    目安の出典は、画面に出している目安の分だけ挙げる
+                    （無料は野菜量の目安しか出していないので、塩分側の出典は挙げない） */}
                 <p>
                   {ja.nutrition.sourcePrefix}
                   {nutritionSourceName()}

@@ -59,7 +59,7 @@
 //         (差し替え)ができること。削除→保存→サムネ消滅、再編集で追加→保存→サムネ再出現・
 //         圧縮後Blobが新規作成時と同じ形式でIndexedDBに保存されることを確認) /
 //         NUT-01(栄養価の概算: 未解錠でもエネルギーの概算が閉じた1行から見え、展開すると
-//         野菜量(g)・「めやす」表記・出典・Pro案内リンクが出る。塩分は2026-08-01 線引きB'で
+//         野菜量(g)・「目安」表記・出典・Pro案内リンクが出る。塩分は2026-08-01 線引きB'で
 //         Pro側へ移したので無料側には出ない) /
 //         NUT-02(栄養価の概算: Pro解錠済みで8項目の実パネルが出る(2026-07-13 第2弾で
 //         食物繊維・鉄・カルシウム+ビタミン注記を追加)・人数を変えても1人分の値は不変。
@@ -298,13 +298,13 @@
 //         NUTRI-DAY-01 / NUTRI-WEEK-01 / NUTRI-PRO-01(栄養バランス献立 第1段「見える化」・
 //         2026-07-30 便CL・docs/60 第1段 / 2026-08-01 線引きB': 週タブの各日カードに
 //         「この日の献立の栄養（1人分の概算）」の1行(無料=kcal・野菜g / Pro=kcal・塩分・野菜g)、
-//         週まとめに「表示している週の献立の栄養（1人分の概算）」が出ること。既定は1行で、めやすの説明は展開時のみ。
+//         週まとめに「表示している週の献立の栄養（1人分の概算）」が出ること。既定は1行で、目安の説明は展開時のみ。
 //         展開時は塩分(男女併記の7.5/6.5g)と野菜(350g)だけを**数値の並置**で出し(塩分側はPro解錠時のみ)、
-//         エネルギーにはめやすの線を引かないこと・不足/過多の断定語や
+//         エネルギーには目安の線を引かないこと・不足/過多の断定語や
 //         「監修」「推奨」「減塩」を使わないこと・「登録したレシピだけの合計」等の但し書きと
-//         成分値/めやすの出典が別行で出ること。無料では8項目(塩分含む)の実数値が出ず鍵付き導線
+//         成分値/目安の出典が別行で出ること。無料では8項目(塩分含む)の実数値が出ず鍵付き導線
 //         (PRO-01の様式)になり、Pro解錠後は8項目の実数値が出て鍵が消えること。野菜量は
-//         docs/60 §7 未決#3(a)で無料。週のめやすは1日ぶん×数えた日数に伸ばすこと) /
+//         docs/60 §7 未決#3(a)で無料。週の目安は1日ぶん×数えた日数に伸ばすこと) /
 //         (THEMESORT-01は「基本レシピ順」並び替えの廃止・2026-07-24 便BNに伴い削除) /
 //         ZENKAKU-01(全角入力の自動正規化・2026-07-21 オーナー実機報告:「アサリ 300ｇ」の
 //         全角ｇだと栄養計算に反映されない・数量も全角で入力できてしまう。材料の分量欄に全角数字
@@ -459,6 +459,17 @@ import { MEAL_GENRES } from '../src/logic/mealPlan.ts'
 import { stepAppliance } from '../src/logic/cookAppliance.ts'
 // 便KQ（熱い品が先に仕上がって冷める）で、その品を熱いうちに食べたい品として扱うかを見分ける
 import { recipeServeTemp } from '../src/logic/cookNavi.ts'
+// 栄養の公的基準値の文言は、ja.ts の型紙に DAILY_GUIDES の数値を埋めて作る
+// （画面の日本語も基準値も書き写さない。2026-08-25 便KV）
+import { DAILY_GUIDES } from '../src/logic/nutritionBalance.ts'
+const NB_GUIDE_VEG = ja.nutritionBalance.guideNoteFree.replace(
+  '{veg}',
+  DAILY_GUIDES.vegetableG.perDayG.toLocaleString(),
+)
+const NB_GUIDE_FULL = ja.nutritionBalance.guideNote
+  .replace('{male}', DAILY_GUIDES.saltG.male.toLocaleString())
+  .replace('{female}', DAILY_GUIDES.saltG.female.toLocaleString())
+  .replace('{veg}', DAILY_GUIDES.vegetableG.perDayG.toLocaleString())
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const appRoot = path.join(__dirname, '..')
@@ -9908,13 +9919,13 @@ try {
   // (2026-07-30 便CL・docs/60 第1段 / 2026-08-01 線引きB'で無料側の内訳を変更)。
   // ・週タブの各日カードに「この日の献立の栄養（1人分の概算）」が1行(**無料は kcal・野菜g の2値**)で出ること
   // ・週まとめに「表示している週の献立の栄養（1人分の概算）」が同じ構成で出ること
-  // ・展開すると1日のめやすが**説明文1行**で出ること(2026-08-02 便CW-7で並置UIから置換。
-  //   **無料は野菜350gだけ**で、塩分のめやすはPro側。不足・過多の断定をしない=
+  // ・展開すると1日の目安が**説明文1行**で出ること(2026-08-02 便CW-7で並置UIから置換。
+  //   **無料は野菜350gだけ**で、塩分の目安はPro側。不足・過多の断定をしない=
   //   「足りません」「摂りすぎ」の語がどこにも出ないこと)
-  // ・成分値の出典と「めやすの出典」が別行で出ること
+  // ・成分値の出典と「目安の出典」が別行で出ること
   // ・**未解錠(無料)では8項目が出ないこと**(たんぱく質・塩分等の実数値が出ず、鍵付き導線になること)
   // 「まとめて献立を入力」の対象を7日ぶん確実にするため「今日から7日間」表示に切り替えてから行う
-  // (週区切り表示だと実行日の曜日次第で対象日数が変わり、めやすの日数が日替わりになる) ---
+  // (週区切り表示だと実行日の曜日次第で対象日数が変わり、目安の日数が日替わりになる) ---
   currentCheck = 'NUTRI-DAY-01'
   {
     const nbBrowser = await chromium.launch()
@@ -9966,10 +9977,10 @@ try {
         (await dayToggles.count()) === 7,
         `count=${await dayToggles.count()}`,
       )
-      // 既定は1行だけ(めやすの説明は展開時のみ。2026-07-11の「面積を取りすぎる」の再発防止)
+      // 既定は1行だけ(目安の説明は展開時のみ。2026-07-11の「面積を取りすぎる」の再発防止)
       check(
-        'NUTRI-DAY-01 既定は1行=めやすの説明は畳まれている',
-        !nbFilledText.includes('1日分のめやすは'),
+        'NUTRI-DAY-01 既定は1行=目安の説明は畳まれている',
+        !nbFilledText.includes(NB_GUIDE_VEG),
       )
       // 1行の中身(無料): kcal・野菜gの2値。塩分は2026-08-01 線引きB'でPro側へ移した
       check(
@@ -9990,7 +10001,7 @@ try {
         nbFilledText.includes(ja.nutritionBalance.weekTitle),
       )
 
-      // 日カードを展開してめやすの説明文・注記・出典・鍵付き導線を確認する
+      // 日カードを展開して目安の説明文・注記・出典・鍵付き導線を確認する
       await dayToggles.first().click()
       await nbPage.waitForTimeout(400)
       // 2026-08-09 便EN(オーナー指示「注意説明が長い」): 但し書きと出典は中で畳んだので、
@@ -10008,25 +10019,25 @@ try {
       await nbPage.waitForTimeout(300)
       const nbDayOpenText = await nbPage.textContent('body')
       check(
-        'NUTRI-DAY-01(便CW-7) 展開すると1日のめやすが説明文1行で出る(無料は野菜だけ)',
-        nbDayOpenText.includes('1日分のめやすは、野菜350gです。'),
+        'NUTRI-DAY-01(便CW-7) 展開すると1日の目安が説明文1行で出る(無料は野菜だけ)',
+        nbDayOpenText.includes(NB_GUIDE_VEG),
       )
       check(
-        "NUTRI-DAY-01(B') 無料では塩分のめやすを出さない(値ごとPro側へ移した)",
+        "NUTRI-DAY-01(B') 無料では塩分の目安を出さない(値ごとPro側へ移した)",
         !nbDayOpenText.includes('塩分7.5g（男性）'),
-        '無料に塩分のめやすが残っている',
+        '無料に塩分の目安が残っている',
       )
       check(
-        'NUTRI-DAY-01(便CW-7) 自分の数値とめやすを並べる旧UIは出さない',
-        !nbDayOpenText.includes('めやすとくらべる') && !/　／　めやす /.test(nbDayOpenText),
+        'NUTRI-DAY-01(便CW-7) 自分の数値と目安を並べる旧UIは出さない',
+        !nbDayOpenText.includes('目安とくらべる') && !/　／　目安 /.test(nbDayOpenText),
       )
       check(
-        "NUTRI-DAY-01(B') 無料は塩分のめやすを出さないので、その出典も挙げない",
+        "NUTRI-DAY-01(B') 無料は塩分の目安を出さないので、その出典も挙げない",
         !nbDayOpenText.includes('日本人の食事摂取基準（2025年版）'),
       )
       check(
-        'NUTRI-DAY-01(docs/60 §7 未決#2) エネルギーにはめやすの線を引かない',
-        !/エネルギー.{0,12}めやす [\d,]+ ?kcal/.test(nbDayOpenText),
+        'NUTRI-DAY-01(docs/60 §7 未決#2) エネルギーには目安の線を引かない',
+        !/エネルギー.{0,12}目安 [\d,]+ ?kcal/.test(nbDayOpenText),
       )
       check(
         'NUTRI-DAY-01(docs/60 §1-3-2) 不足・過多を断定する語を出さない',
@@ -10059,12 +10070,12 @@ try {
         nbDayOpenText.includes('いも・豆・きのこ・海藻・果物は入っていません'),
       )
       check(
-        'NUTRI-DAY-01(docs/60 §1-1) 成分値の出典と「めやすの出典」を別行で出す',
+        'NUTRI-DAY-01(docs/60 §1-1) 成分値の出典と「目安の出典」を別行で出す',
         nbDayOpenText.includes('出典: 日本食品標準成分表（八訂）増補2023年（文部科学省）') &&
-          nbDayOpenText.includes('めやすの出典: 健康日本21（第三次）（厚生労働省）'),
+          nbDayOpenText.includes(`${ja.nutritionBalance.guideSourcePrefix}健康日本21（第三次）（厚生労働省）`),
       )
       check(
-        'NUTRI-DAY-01 めやすの適用範囲(治療中・妊娠中は主治医の指示)を1行置く',
+        'NUTRI-DAY-01 目安の適用範囲(治療中・妊娠中は主治医の指示)を1行置く',
         nbDayOpenText.includes('治療中の方・妊娠中の方は、主治医や管理栄養士の指示に従ってください'),
       )
       check(
@@ -10085,17 +10096,17 @@ try {
         nbDayOpenText.includes('Pro版で使えます') && nbDayOpenText.includes('栄養価8項目の概算'),
       )
 
-      // 週まとめを展開: めやすは日数で掛けず、1日分の基準を説明文1行で書く(便CW-7)
+      // 週まとめを展開: 目安は日数で掛けず、1日分の基準を説明文1行で書く(便CW-7)
       await nbPage.getByRole('button', { name: ja.nutritionBalance.weekToggleExpand }).click()
       await nbPage.waitForTimeout(400)
       const nbWeekOpenText = await nbPage.textContent('body')
       check(
-        'NUTRI-WEEK-01(便CW-7) 週まとめも1日分のめやすを説明文1行で書く',
-        nbWeekOpenText.includes('1日分のめやすは、野菜350gです。'),
+        'NUTRI-WEEK-01(便CW-7) 週まとめも1日分の目安を説明文1行で書く',
+        nbWeekOpenText.includes(NB_GUIDE_VEG),
       )
       check(
-        'NUTRI-WEEK-01(便CW-7) めやすを日数倍した数字は出さない',
-        !/めやす 2,450g/.test(nbWeekOpenText) &&
+        'NUTRI-WEEK-01(便CW-7) 目安を日数倍した数字は出さない',
+        !/目安 2,450g/.test(nbWeekOpenText) &&
           !nbWeekOpenText.includes('日ぶんに伸ばした数です'),
       )
       check(
@@ -10170,7 +10181,7 @@ try {
   // Pro解錠(コード入力UI経由)後は、日カード・週まとめの展開で栄養8項目の実数値＋野菜量が出て、
   // 鍵付き導線が消えること。線引きは2026-08-01のB'(オーナー確定)＝
   // 無料はエネルギー＋野菜量、Proは8項目(食塩相当量を含む)＋野菜量。
-  // 塩分の値・塩分のめやす並置がPro側にだけ出ることも、ここで見張る ---
+  // 塩分の値・塩分の目安並置がPro側にだけ出ることも、ここで見張る ---
   currentCheck = 'NUTRI-PRO-01'
   {
     const npBrowser = await chromium.launch()
@@ -10218,7 +10229,7 @@ try {
         .first()
         .click()
       await npPage.waitForTimeout(400)
-      // 2026-08-09 便EN: 但し書きと出典は折りたたみの中（めやすの出典もここ）
+      // 2026-08-09 便EN: 但し書きと出典は折りたたみの中（目安の出典もここ）
       await npPage.getByRole('button', { name: '注記と出典' }).first().click()
       await npPage.waitForTimeout(300)
       const npOpenText = await npPage.textContent('body')
@@ -10244,13 +10255,13 @@ try {
         !npOpenText.includes('Pro版で使えます'),
       )
       check(
-        'NUTRI-PRO-01(便CW-7) Pro解錠済みは塩分と野菜のめやすを説明文1行で出す',
-        npOpenText.includes('1日分のめやすは、塩分7.5g（男性）・6.5g（女性）、野菜350gです。'),
+        'NUTRI-PRO-01(便CW-7) Pro解錠済みは塩分と野菜の目安を説明文1行で出す',
+        npOpenText.includes(NB_GUIDE_FULL),
       )
       check(
-        "NUTRI-PRO-01(B') 塩分のめやすを出すので、その出典もPro側では挙げる",
+        "NUTRI-PRO-01(B') 塩分の目安を出すので、その出典もPro側では挙げる",
         npOpenText.includes(
-          'めやすの出典: 日本人の食事摂取基準（2025年版）（厚生労働省）／健康日本21（第三次）（厚生労働省）',
+          `${ja.nutritionBalance.guideSourcePrefix}日本人の食事摂取基準（2025年版）（厚生労働省）${ja.nutritionBalance.guideSourceSeparator}健康日本21（第三次）（厚生労働省）`,
         ),
       )
       // 便CW-6: 食事ごとの内訳(Pro)。朝食・夕食の2食に献立があるので小計が2行出る
@@ -13757,7 +13768,7 @@ try {
         meBodyOpen.includes('内訳 作った記録'),
       )
       check(
-        'MEALPLAN-A3B3(B-3) 常設サマリーも「概算・めやす」の但し書きを外さない',
+        'MEALPLAN-A3B3(B-3) 常設サマリーも「概算・目安」の但し書きを外さない',
         // 2026-07-30 便CH/C2: 注記の文言を実装どおり(目安価格で自動計算している)に直した
         meBodyOpen.includes('概算') &&
           meBodyOpen.includes('食材の目安価格で自動計算しています'),
@@ -18903,7 +18914,7 @@ try {
       check('SHARE-01 既定: 原価OFF', !(await optionCheckbox('原価').isChecked()))
       check(
         // 2026-08-01 線引きB': 無料の栄養は「1食あたりのカロリー」だけ(塩分はPro解錠時のみ入る)。
-        // チェック行ラベルから「（めやす）」は削除済み・シェア本文側は法務配慮で残す
+        // チェック行ラベルから「（目安）」は削除済み・シェア本文側は法務配慮で残す
         "SHARE-01(B') 既定: 栄養OFF・無料のラベルは「1食あたりのカロリー」(塩分を含まない)",
         !(await optionCheckbox('1食あたりのカロリー').isChecked()) &&
           !dialogText.includes(ja.share.optNutrition),
@@ -48960,7 +48971,7 @@ try {
     }
   }
 
-  // --- JHSAFE-01(2026-08-22 便JH): 取り込んだレシピにも安全のめやすが出る ---
+  // --- JHSAFE-01(2026-08-22 便JH): 取り込んだレシピにもアプリが添える注意が出る ---
   //
   // オーナー原文:
   //   「レンジ温泉卵
@@ -49021,7 +49032,7 @@ try {
       // ① 手順に注記が出る
       const jhStepNote = jhPage.locator('[data-testid="safety-step-0"]')
       check('JHSAFE-01 前提: 取り込み相当のレシピを開けた', (await jhPage.textContent('body')).includes('E2Eレンジで温泉卵'))
-      check('JHSAFE-01 レンジ加熱＋卵の手順に安全のめやすが出る', (await jhStepNote.count()) === 1)
+      check('JHSAFE-01 レンジ加熱＋卵の手順に注意が出る', (await jhStepNote.count()) === 1)
       const jhStepText = ((await jhStepNote.count()) === 1 ? await jhStepNote.textContent() : '').replaceAll('​', '')
       check(
         'JHSAFE-01 注記に、穴を開けることが書いてある',
@@ -49030,7 +49041,7 @@ try {
       )
       check(
         'JHSAFE-01 注記に見出しが付いていて、利用者が書いた文と区別できる',
-        jhStepText.includes('安全のめやす'),
+        jhStepText.includes(ja.safety.title),
         `注記=${jhStepText}`,
       )
       // ② 手順の本文は1文字も変わっていない
@@ -49046,7 +49057,7 @@ try {
       const jhRecipeText = ((await jhRecipeNote.count()) === 1 ? await jhRecipeNote.textContent() : '').replaceAll('​', '')
       check(
         'JHSAFE-01 レシピ全体の枠に、誰が添えた文なのかが書いてある',
-        jhRecipeText.includes('アプリが添えた'),
+        jhRecipeText.includes(ja.safety.source),
         `枠=${jhRecipeText}`,
       )
 

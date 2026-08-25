@@ -1808,7 +1808,7 @@ export default function SettingsPage() {
             </button>
           </section>
 
-          {/* 安全のめやす（2026-08-22 便JH）。既定は表示。ここで切ると、どの画面にも出さない。
+          {/* レシピに添える注意（2026-08-22 便JH）。既定は表示。ここで切ると、どの画面にも出さない。
               レシピのデータには何も書き込まないので、切っても入れてもレシピの中身は変わらない */}
           <section className={sectionCls}>
             <h2 className="font-bold">{ja.settings.safetyTitle}</h2>

@@ -19,26 +19,26 @@ import {
  * 栄養バランス献立 第1段「見える化」の純ロジック（2026-07-30 便CL・docs/60 第1段）。
  *
  * この層の責任は3つだけで、献立エンジン（logic/mealPlan.ts）には一切依存しない:
- *  1. 「めやす」の公的基準値を1か所に持つ（DAILY_GUIDES）
+ *  1. 「目安」の公的基準値を1か所に持つ（DAILY_GUIDES）
  *  2. 野菜量（g）を数える（vegetableGrams。八訂の食品群「06 野菜類」だけを合計する）
- *  3. 日・期間の合計と、「めやすとの並置を出してよいか」の判定（docs/60 §5）
+ *  3. 日・期間の合計と、「目安との並置を出してよいか」の判定（docs/60 §5）
  *
  * 【文言・表示の規律（docs/60 §1-3。UI側で必ず守ること）】
- *  - 見出しには必ず「めやす」を含める。
- *  - **不足・過多を断定しない**。「◯g／めやす7.5g」のように数値を並置するだけにとどめ、
+ *  - 見出しには必ず「目安」を含める。
+ *  - **不足・過多を断定しない**。「◯g／目安7.5g」のように数値を並置するだけにとどめ、
  *    「足りません」「摂りすぎです」とは書かない。色で善悪も表さない。
  *  - 「監修」「推奨」「減塩」「健康的」は使わない（景表法・医療助言の文脈になる。docs/08 §3）。
  *  - 計算に入っていないもの（ごはん・飲みもの・おやつ・外食）を必ず添える。
- *  - エネルギー・たんぱく質・脂質・炭水化物には**めやすを出さない**（docs/60 §1-2。
+ *  - エネルギー・たんぱく質・脂質・炭水化物には**目安を出さない**（docs/60 §1-2。
  *    推定エネルギー必要量は年齢・性別・身体活動レベルで大きく変わり、1本の線を引くと誤誘導になる）。
  *
- * あくまで概算・めやす。医療・効能の文脈では使わない（nutrition.ts 冒頭の設計方針と同じ）。
+ * あくまで概算・目安。医療・効能の文脈では使わない（nutrition.ts 冒頭の設計方針と同じ）。
  */
 
-// ---------- めやすの定数（出典つき・数値はここにだけ書く） ----------
+// ---------- 目安の定数（出典つき・数値はここにだけ書く） ----------
 
 /**
- * めやす1件の型。UIに数値を直書きさせないため、値と出典を必ず対で持つ
+ * 目安1件の型。UIに数値を直書きさせないため、値と出典を必ず対で持つ
  * （docs/60 §1-1 運用ルール: 基準値は1か所にだけ書き、source / sourceUrl を必ず持たせる）。
  */
 export interface DailyGuide {
@@ -49,7 +49,7 @@ export interface DailyGuide {
 }
 
 /**
- * 食塩相当量の1日のめやす（docs/60 §1-1）。
+ * 食塩相当量の1日の目安（docs/60 §1-1）。
  *
  * 出典: 厚生労働省「日本人の食事摂取基準（2025年版）」の目標量。
  *   18歳以上 男性 7.5g/日未満・女性 6.5g/日未満。
@@ -62,7 +62,7 @@ export interface DailyGuide {
  *   上の確認先は厚労省自身の解説サイト（健康日本21アクション支援システム＝旧e-ヘルスネット）で、
  *   一次資料そのものではない。本体PDFのページ番号追記は宿題として残っている。
  *
- * ※ 男女どちらを出すかの選択（docs/60 第3段「めやすの基準」）は第1段では作らないため、
+ * ※ 男女どちらを出すかの選択（docs/60 第3段「目安の基準」）は第1段では作らないため、
  *   UIは**両方を併記**する（docs/60 §7 未決#5＝(b) 併記。片方に丸めると
  *   「自分の値ではない数字」を出すことになる）。
  */
@@ -74,7 +74,7 @@ export const SALT_DAILY_GUIDE = {
 } as const satisfies DailyGuide & { male: number; female: number }
 
 /**
- * 野菜の1日のめやす（docs/60 §1-1）。350g以上。
+ * 野菜の1日の目安（docs/60 §1-1）。350g以上。
  *
  * 出典: 厚生労働省「健康日本21（第三次）」の目標値（栄養・食生活）。
  *   確認先: https://www.mhlw.go.jp/content/10900000/001122156.pdf
@@ -91,9 +91,9 @@ export const VEGETABLE_DAILY_GUIDE = {
 } as const satisfies DailyGuide & { perDayG: number }
 
 /**
- * 第1段でめやすを出す指標は「食塩相当量」と「野菜量」の2つだけ
+ * 第1段で目安を出す指標は「食塩相当量」と「野菜量」の2つだけ
  * （docs/60 §7 未決#2＝(a)。オーナー承認済み）。
- * エネルギー・食物繊維・鉄・カルシウム等にめやすを増やすのは第1段の範囲外。
+ * エネルギー・食物繊維・鉄・カルシウム等に目安を増やすのは第1段の範囲外。
  */
 export const DAILY_GUIDES = {
   saltG: SALT_DAILY_GUIDE,
@@ -117,7 +117,7 @@ const VEGETABLE_GROUP_CODE = '06'
  *
  * items[].grams はレシピ全量（servings人分）のグラム数なので、人数で割って1人分にする。
  * 名寄せできなかった材料・分量が数値にできなかった材料は items に入らない＝数えない。
- * つまりこの値は**常に少なめ（下限側）に出る**ので、UIでは「めやすより実際は多い可能性がある」
+ * つまりこの値は**常に少なめ（下限側）に出る**ので、UIでは「目安より実際は多い可能性がある」
  * 方向の但し書きを必ず添えること（docs/60 §5-3）。
  */
 export function vegetableGramsOf(nutrition: Pick<RecipeNutrition, 'items' | 'servings'>): number {
@@ -274,20 +274,20 @@ export function riceServingsByDate(keys: Iterable<string>): Map<string, number> 
   return counts
 }
 
-// ---------- めやすとの並置を出してよいかの判定（docs/60 §5） ----------
+// ---------- 目安との並置を出してよいかの判定（docs/60 §5） ----------
 
 /**
- * 期間の合計でめやすとの並置をやめる、計算できなかった品の割合の上限
+ * 期間の合計で目安との並置をやめる、計算できなかった品の割合の上限
  * （docs/60 §7 未決#8＝(a) オーナー承認済み: 1日単位は「1品でもあれば出さない」・
  *  期間は2割で切る。厳しすぎると期間の比較がほぼ出なくなるため）。
  */
 export const RANGE_EXCLUDED_RATIO_LIMIT = 0.2
 
 /**
- * 【1日分】めやすとの並置を出してよいか（docs/60 §5 新設規則1〜3）。
+ * 【1日分】目安との並置を出してよいか（docs/60 §5 新設規則1〜3）。
  *
  * その日に「計算できない品」が1品でもあれば false にして、数値だけを出す。
- * 合計が下振れしていると分かっているものを「めやす内」と見せるのは誤誘導になるため。
+ * 合計が下振れしていると分かっているものを「目安内」と見せるのは誤誘導になるため。
  * 対象は既存の2区分:
  *  - excludedDishCount … 1品も計算できないレシピ
  *  - partialDishCount  … 量が書いてあるのに計算できなかった材料がある品（hasMaterialGap）
@@ -298,7 +298,7 @@ export function canCompareDay(sum: PersonalNutritionSum): boolean {
 }
 
 /**
- * 【期間（週・月）】めやすとの並置を出してよいか（docs/60 §5-4）。
+ * 【期間（週・月）】目安との並置を出してよいか（docs/60 §5-4）。
  * 1日単位より影響が薄まるため件数を明示したうえで比較を出すが、
  * 1品も計算できなかった品が期間の品数の2割を超えたら出さない。
  */
@@ -308,7 +308,7 @@ export function canCompareRange(sum: PersonalNutritionSum): boolean {
   return sum.excludedDishCount / totalDishes <= RANGE_EXCLUDED_RATIO_LIMIT
 }
 
-/** めやすを日数分に伸ばす（週まとめ用。1日のめやす × 数えた日数） */
+/** 目安を日数分に伸ばす（週まとめ用。1日の目安 × 数えた日数） */
 export function guideForDays(perDayGuide: number, days: number): number {
   return perDayGuide * days
 }
@@ -345,7 +345,7 @@ export interface DayBalance {
   basis: BalanceBasis
   /** その日の1人分の合計 */
   balance: BalanceSum
-  /** めやすとの並置を出してよいか（canCompareDay） */
+  /** 目安との並置を出してよいか（canCompareDay） */
   comparable: boolean
   /**
    * 合計に入れた品のうち、どの食事（朝/昼/夕）のものか分からない品数（2026-08-09 便EK）。
@@ -524,9 +524,9 @@ export function slotBalances(dishes: { slot: MealSlot; recipe: BalanceRecipeLike
 export interface WeekBalance {
   /** 期間の1人分の合計 */
   balance: BalanceSum
-  /** 実際に数えた日数（献立も記録も無い日は数えない＝めやすの掛け算の日数になる） */
+  /** 実際に数えた日数（献立も記録も無い日は数えない＝目安の掛け算の日数になる） */
   countedDays: number
-  /** めやすとの並置を出してよいか（canCompareRange） */
+  /** 目安との並置を出してよいか（canCompareRange） */
   comparable: boolean
   /** 期間の合計に足したごはんの杯数（日ごとの杯数の合計。2026-08-10 便FD） */
   riceServings: number
@@ -579,8 +579,8 @@ export function purposeAxisValue(
 /**
  * 引き直し（chooseBalancedPair）に渡す「目的からの遠さ」。**小さいほど目的に沿う**。
  *
- * 【なぜ「めやすからの距離」にしないか】
- * docs/60 §1-2 のとおり、たんぱく質には**1日のめやすを出さない**（推定必要量は年齢・性別・
+ * 【なぜ「目安からの距離」にしないか】
+ * docs/60 §1-2 のとおり、たんぱく質には**1日の目安を出さない**（推定必要量は年齢・性別・
  * 身体活動レベルで大きく変わり、1本の線を引くと誤誘導になる）。目的モードのために
  * 表に出さない目標値をこっそり決めるのは、その規律を裏口から破ることになる。
  * そこで「線に近いか」ではなく「引いた候補どうしを比べてどちらが軸に沿うか」だけで決める。
@@ -670,8 +670,8 @@ export function reviewPurposeDays(
 /**
  * dayBalanceMap の結果を期間の合計にまとめる（週タブの週まとめ用）。
  *
- * めやすは「1日のめやす × countedDays」で並置する（guideForDays）。
- * 7日固定で掛けないのは、3日しか登録していない週を7日ぶんのめやすと並べると
+ * 目安は「1日の目安 × countedDays」で並置する（guideForDays）。
+ * 7日固定で掛けないのは、3日しか登録していない週を7日ぶんの目安と並べると
  * 「ぜんぜん足りない」と読める数字になり、数値の並置という規律から外れるため。
  */
 export function summarizeWeekBalance(days: Iterable<DayBalance>): WeekBalance {
