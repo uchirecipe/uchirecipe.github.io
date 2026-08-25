@@ -31,7 +31,12 @@ import type {
 } from '../db/types'
 import { createRecipe, deleteRecipe, getRecipe, listRecipes, updateRecipe } from '../db/recipes'
 import { useSettings, updateSettings } from '../db/settings'
-import { countFreeLimitRecipes, freeLimitNoticeFor, isAtFreeLimit } from '../logic/freeLimit'
+import {
+  canUseRecipeImportTools,
+  countFreeLimitRecipes,
+  freeLimitNoticeFor,
+  isAtFreeLimit,
+} from '../logic/freeLimit'
 import { resizePhoto } from '../logic/image'
 import { isImeConfirmKey } from '../logic/imeKey'
 import { parseRecipeText, normalizeImportedIngredient, autoSplitAmountUnit, looksPoorlyParsed } from '../logic/parseRecipeText'
@@ -365,6 +370,46 @@ function ImportSeasoningGuide({ groupCount }: { groupCount: number }) {
   )
 }
 
+/**
+ * 取り込み（URL・貼り付け）の結果を出す（2026-08-25 便KS・⑧）。
+ *
+ * オーナー原文「登録後の赤文字も箇条書きにして改行入れて読みやすくして。注意書きなのに
+ * 読みにくい。」実測（390px幅・貼り付け）では「材料4件・手順3件を読み取りました。内容を確認して
+ * 修正してください。調理時間は貼り付けた文章に書かれていなかったので、調理時間の欄は空のままです。」
+ * が**4行にわたって続けて**出ており、どこまでが1つの知らせなのか読み取れなかった。
+ *
+ * 決めごと:
+ *  ・1つの知らせ＝1行。2つ以上あるときだけ「・」を付けた並びにする（1行のときに印は付けない）
+ *  ・印は画面が付ける＝文言そのものには書き込まない・読み上げには渡さない（aria-hidden。
+ *    月タブのロック案内・買い物メモの下書きの説明と同じ作法。scripts/test-logic.mjs KN-3）
+ *  ・失敗と片側だけの取り込みは今までどおり警告色＋role="alert"、成功は role="status" で読み上げる
+ */
+function ImportResultMessage({ lines, tone }: { lines: string[]; tone: 'info' | 'warn' }) {
+  const boxCls =
+    tone === 'warn'
+      ? 'mt-[var(--space-sm)] rounded-sm border border-warning px-3 py-2 text-sm font-bold text-warning'
+      : 'mt-[var(--space-sm)] text-sm font-bold text-accent-ink'
+  const role = tone === 'warn' ? 'alert' : 'status'
+  const ariaLive = tone === 'warn' ? undefined : 'polite'
+  if (lines.length === 1) {
+    return (
+      <p role={role} aria-live={ariaLive} className={`ja-phrase ${boxCls}`}>
+        {lines[0]}
+      </p>
+    )
+  }
+  return (
+    <ul role={role} aria-live={ariaLive} className={`${boxCls} space-y-1`}>
+      {lines.map((line) => (
+        <li key={line} className="ja-phrase flex gap-1.5">
+          <span aria-hidden>・</span>
+          <span className="min-w-0">{line}</span>
+        </li>
+      ))}
+    </ul>
+  )
+}
+
 /** 配列の要素を上下に入れ替える */
 function move<T>(list: T[], from: number, to: number): T[] {
   if (to < 0 || to >= list.length) return list
@@ -588,7 +633,17 @@ function RecipeFormInner() {
   // URLから取り込む(エンドポイント未設定ならUI自体を表示しない。urlImport.tsのisUrlImportEnabled参照)
   const [urlImportOpen, setUrlImportOpen] = useState(false)
   const [urlImportValue, setUrlImportValue] = useState('')
-  const [urlImportMessage, setUrlImportMessage] = useState('')
+  /**
+   * 取り込みの結果に出す文（2026-08-25 便KS・⑧で1本の長文から**行の配列**にした）。
+   *
+   * オーナー原文「登録後の赤文字も箇条書きにして改行入れて読みやすくして。注意書きなのに
+   * 読みにくい。」実測（390px幅・URL取り込み）では
+   * 「材料4件・手順3件を読み取りました。内容を確認して修正してください。調理時間は貼り付けた
+   * 文章に書かれていなかったので、調理時間の欄は空のままです。」が**4行にわたって続けて**出ており、
+   * どこまでが1つの知らせなのか読み取れなかった。1つの知らせ＝1行にして「・」を付ける。
+   * 文言そのものに印は書き込まない（画面が付ける・読み上げには渡さない＝規約H/KN-3と同じ作法）
+   */
+  const [urlImportMessage, setUrlImportMessage] = useState<string[]>([])
   // 結果メッセージの見た目(2026-07-28 便BW/C-02)。失敗・片側だけの取り込みは警告色+role="alert"で出し、
   // 成功と同じ顔にしない(件数だけを見て中身未確認のまま保存されるのを防ぐ)
   const [urlImportMessageTone, setUrlImportMessageTone] = useState<'info' | 'warn'>('info')
@@ -649,7 +704,7 @@ function RecipeFormInner() {
   // テキスト貼り付けで自動入力
   const [pasteOpen, setPasteOpen] = useState(false)
   const [pasteText, setPasteText] = useState('')
-  const [pasteMessage, setPasteMessage] = useState('')
+  const [pasteMessage, setPasteMessage] = useState<string[]>([])
   const [pasteMessageTone, setPasteMessageTone] = useState<'info' | 'warn'>('info')
   /**
    * 取り込みで自動的に作った合わせ調味料の組の数（2026-08-14 便GF）。
@@ -672,15 +727,19 @@ function RecipeFormInner() {
     !!row.name.trim() &&
     amountlessImportedNames.includes(row.name.trim())
 
-  const showPasteMessage = (message: string, tone: 'info' | 'warn') => {
-    setPasteMessage(message)
+  /** 結果の文を出す。1本の文字列でも、行の配列でも渡せる（空の行は落とす） */
+  const toMessageLines = (message: string | string[]): string[] =>
+    (Array.isArray(message) ? message : [message]).filter((line) => line.trim() !== '')
+
+  const showPasteMessage = (message: string | string[], tone: 'info' | 'warn') => {
+    setPasteMessage(toMessageLines(message))
     setPasteMessageTone(tone)
   }
   // 取り込み結果・エラーの表示欄はパネルの内側にしか無いため、読み込み中にパネルを閉じられると
   // 結果もエラーも一度も出ないまま終わっていた(2026-07-28 便BX/C03・QA S2)。
   // メッセージを出すときは必ずパネルを開き直し、どの経路でも結果が目に入るようにする
-  const showUrlImportMessage = (message: string, tone: 'info' | 'warn') => {
-    setUrlImportMessage(message)
+  const showUrlImportMessage = (message: string | string[], tone: 'info' | 'warn') => {
+    setUrlImportMessage(toMessageLines(message))
     setUrlImportMessageTone(tone)
     setUrlImportOpen(true)
   }
@@ -706,6 +765,11 @@ function RecipeFormInner() {
      * テンプレート1本(末尾に残るものを含む形)で従来どおり完結する
      */
     photoPlan?: PhotoReplacePlan,
+    /**
+     * 取り込んだ側が料理名を読み取れたか（2026-08-25 便KS・⑦）。
+     * 読み取れたときだけ料理名が置き換わる＝確認文の「消えるもの」にも読み取れたときだけ出す
+     */
+    parsedTitle = false,
   ): Promise<boolean> => {
     const filledIngredients = ingredients.filter(
       (row) => row.name.trim() || row.amount.trim() || row.unit.trim() || row.memo.trim(),
@@ -714,14 +778,23 @@ function RecipeFormInner() {
       (row) => row.text.trim() || row.minutes.trim() || row.memo.trim(),
     ).length
     const targets = replaceConfirmTargets({
+      filledTitle: title.trim() !== '',
+      filledIntro: intro.trim() !== '',
+      filledMemo: memo.trim() !== '',
       filledIngredients,
       filledSteps,
+      parsedTitle,
       parsedIngredients: parsedIngredientCount,
       parsedSteps: parsedStepCount,
       photoPlan: photoPlan ?? 'none',
     })
     if (!needsReplaceConfirm(targets)) return true
+    // 「消えるもの」の並びは、レシピの上から出てくる順（料理名→ひとこと説明→メモ→材料→手順）。
+    // 2026-08-25 便KS・⑦で料理名・ひとこと説明・メモが「残るもの」から「消えるもの」へ移った
     const items: string[] = []
+    if (targets.title) items.push(ja.paste.replaceItemTitle)
+    if (targets.intro) items.push(ja.paste.replaceItemIntro)
+    if (targets.memo) items.push(ja.paste.replaceItemMemo)
     if (targets.ingredients) {
       items.push(ja.paste.replaceItemIngredients.replace('{n}', String(filledIngredients)))
     }
@@ -754,11 +827,16 @@ function RecipeFormInner() {
         },
         {
           label: ja.paste.confirmReplaceKeptLabel,
-          text: !isUrl
-            ? ja.paste.confirmReplaceKept
-            : photoPlan === 'kept'
+          // 「残るもの」＝取り込みが触らない項目（2026-08-25 便KS・⑦で料理名・ひとこと説明・
+          // メモが置き換えの対象になったので、残るものの中身を実際に触らないものへ書き直した）。
+          // 写真は、貼り付けなら必ず残り、URL取り込みは「写真も取り込む」がOFFのときだけ残る
+          text: isUrl
+            ? photoPlan === 'kept'
               ? ja.urlImport.confirmReplaceKeptWithPhoto
-              : ja.urlImport.confirmReplaceKept,
+              : ja.urlImport.confirmReplaceKept
+            : photo !== undefined
+              ? ja.paste.confirmReplaceKeptWithPhoto
+              : ja.paste.confirmReplaceKept,
         },
       ],
       // 写真を守る手立ては、消えるものの並びに混ぜず補足の行で伝える
@@ -1095,7 +1173,9 @@ function RecipeFormInner() {
       // 元から写真があった場合は「置き換わった」と書く(便CK/②-1。「写真も取り込みました」は
       // 足しただけのように読めるため)
       const note = hadPhoto ? ja.urlImport.photoReplaced : ja.urlImport.photoImported
-      setUrlImportMessage((prev) => (prev ? `${prev} ${note}` : prev))
+      // あとから届く写真の知らせは、結果の並びの最後に1行足す（2026-08-25 便KS・⑧で
+      // 1本の文への継ぎ足しから、行を1つ足す形にした）。結果が出ていないときは何も出さない
+      setUrlImportMessage((prev) => (prev.length > 0 ? [...prev, note] : prev))
     } catch {
       // resizePhotoの失敗(壊れた画像等)もベストエフォート。取り込みは止めないが、
       // 「写真も取り込む」がONだった以上は結果を黙らせない(便BX/C01)
@@ -1126,7 +1206,7 @@ function RecipeFormInner() {
     setUrlImportLoading(true)
     // 前の取り込みの写真待ちは、この取り込みで置き換わるので一旦降ろす(便KG)
     setUrlImportPhotoLoading(false)
-    setUrlImportMessage('')
+    setUrlImportMessage([])
     setUrlImportToast('')
     try {
       const result = await importRecipeFromUrl(target)
@@ -1146,8 +1226,15 @@ function RecipeFormInner() {
       const hadPhoto = photo !== undefined
       const photoPlan = photoReplacePlan(hadPhoto, urlImportFetchPhoto && !!result.imageUrl)
       // 入力済みの材料・手順・写真を置き換える前に確認する(規約F・C-04。貼り付け経路と同じ扱い)
+      const importedTitle = result.title ? stripImportedMarkup(result.title).trim() : ''
       if (
-        !(await confirmReplaceExisting('url', importedRows.length, importedSteps.length, photoPlan))
+        !(await confirmReplaceExisting(
+          'url',
+          importedRows.length,
+          importedSteps.length,
+          photoPlan,
+          importedTitle !== '',
+        ))
       ) {
         // 中止したことを必ず返事する(2026-07-28 便BX/C16・QA S3)。
         // 従来は冒頭で消したメッセージ欄が空のまま戻り、押した結果が一切分からなかった
@@ -1173,25 +1260,34 @@ function RecipeFormInner() {
       if (sourceUrl.trim() && sourceUrl.trim() !== nextSourceUrl) {
         alsoApplied.push(ja.urlImport.alsoAppliedSourceUrl)
       }
+      // 2026-08-25 便KS・⑧: 1つの知らせ＝1行にしたので、句点でつなぐための出し分けは要らない
       const alsoAppliedNote =
         alsoApplied.length > 0
-          ? `。${ja.urlImport.alsoApplied.replace(
+          ? ja.urlImport.alsoApplied.replace(
               '{items}',
               alsoApplied.join(ja.urlImport.alsoAppliedSeparator),
-            )}`
+            )
           : ''
       /** 手順の「分」を本文から入れた件数の一言（0件のときは何も言わない） */
       const stepMinutesNote = (filled: number) =>
-        filled > 0
-          ? `${alsoAppliedNote ? '' : '。'}${ja.form.stepMinutesFilled.replace('{n}', String(filled))}`
-          : ''
+        filled > 0 ? ja.form.stepMinutesFilled.replace('{n}', String(filled)) : ''
       /** 注記を手順のメモへ寄せた件数の一言（0件のときは何も言わない・便IL/②） */
-      const stepNotesNote = (moved: number, minutesNote: string) =>
-        moved > 0
-          ? `${alsoAppliedNote || minutesNote ? '' : '。'}${ja.form.stepNotesMoved.replace('{n}', String(moved))}`
-          : ''
-      // 料理名にもHTMLの印が混ざりうるので落としてから入れる(便IL/①)
-      if (result.title && !title.trim()) setTitle(stripImportedMarkup(result.title))
+      const stepNotesNote = (moved: number) =>
+        moved > 0 ? ja.form.stepNotesMoved.replace('{n}', String(moved)) : ''
+      /**
+       * 2026-08-25 便KS・⑦（オーナー原文「URL取り込みで期待するのは、URLからの情報のみです。
+       * 余計な情報が残ることはむしろマイナス」）。
+       *
+       * 旧: 料理名・ひとこと説明・メモは「空のときだけ入れる」＝入力済みなら手を付けなかった。
+       *     取り込んだ料理の材料・手順に、前の料理の名前と説明が付いたレシピができていた。
+       * 新: 読み取れた料理名で**上書きする**。ひとこと説明とメモは取り込みでは入らない欄なので、
+       *     前の料理のぶんが残らないよう空にする（消えるものは確認の窓で先に伝えている）。
+       * 料理名だけは、読み取れなかったときに消さない（保存に必須の欄で、代わりに入る情報が
+       * 無いまま手で入れた名前を失わせない。判定は logic/replaceConfirm.ts に書いてある）
+       */
+      if (importedTitle) setTitle(importedTitle)
+      setIntro('')
+      setMemo('')
       // 取り込んだ人数分も範囲(1〜20)に収める(便CK/①-1)。Worker側のextractServingsに上限が無く、
       // 「24 cookies」等の表記から20超が入りうるが、手入力では作れない値なので保存させない
       if (nextServings !== undefined) setServings(nextServings)
@@ -1221,7 +1317,8 @@ function RecipeFormInner() {
       // 新規登録では料理名からの自動提案に任せる(applyPasteと同じ理由・便BW)。
       // 編集中のレシピで種別が未設定のときだけ、ここで初期値を入れる。
       if (isEdit && dishType === undefined) {
-        const guessedTitle = title.trim() || result.title || ''
+        // 2026-08-25 便KS・⑦: 料理名は読み取れたもので置き換わるので、推定にもそちらを先に使う
+        const guessedTitle = importedTitle || title.trim()
         const guessedIngredients =
           importedRows.length > 0
             ? importedRows.map((row) => ({ name: row.name }))
@@ -1233,7 +1330,7 @@ function RecipeFormInner() {
       // 片側だけ読み込めたときは警告トーンで正直に伝える(便BW/C-02。貼り付け経路と同じ扱い)。
       // どの結果文にも、材料・手順以外で置き換わった項目(便BX/C02)を書き添える
       const minutesNote = stepMinutesNote(filledMinutes)
-      const notesNote = stepNotesNote(movedNotes, minutesNote)
+      const notesNote = stepNotesNote(movedNotes)
       // 人数分が読み取れなかったことは、結果の文でも言う(2026-08-23 便KF)。
       // 人数分の欄の下に出る印(ja.form.servingsNotReadNote)と対になる
       const servingsNote = importedServings.unread ? ja.urlImport.servingsNotRead : ''
@@ -1250,26 +1347,30 @@ function RecipeFormInner() {
         !result.cookMinutes && cookMinutes.trim() === '' ? ja.urlImport.cookMinutesNotWritten : ''
       if (importedRows.length === 0) {
         showUrlImportMessage(
-          ja.urlImport.resultNoIngredients.replace('{s}', String(importedSteps.length)) +
-            alsoAppliedNote +
-            minutesNote +
-            notesNote +
-            servingsNote +
+          [
+            ja.urlImport.resultNoIngredients.replace('{s}', String(importedSteps.length)),
+            alsoAppliedNote,
+            minutesNote,
+            notesNote,
+            servingsNote,
             cookMinutesNote,
+          ],
           'warn',
         )
       } else if (importedSteps.length === 0) {
         showUrlImportMessage(
-          ja.urlImport.resultNoSteps.replace('{i}', String(importedRows.length)) +
-            alsoAppliedNote +
-            servingsNote +
+          [
+            ja.urlImport.resultNoSteps.replace('{i}', String(importedRows.length)),
+            alsoAppliedNote,
+            servingsNote,
             cookMinutesNote,
+          ],
           'warn',
         )
       } else {
         // 取り込みで入らなかった項目と、複数料理の知らせ（2026-08-25 便KO・①④）
         noteImportFollowUp({
-          title: title.trim() || (result.title ? stripImportedMarkup(result.title) : ''),
+          title: importedTitle || title.trim(),
           ingredients: importedRows.map((row) => ({ name: row.name })),
           steps: importedSteps.map((step) => ({ text: typeof step === 'string' ? step : step.text })),
         })
@@ -1277,20 +1378,22 @@ function RecipeFormInner() {
         // (便BX/C09ライト版)。分量を読み取れなかった件数だけ内訳として添える
         const amountless = countAmountlessRows(importedRows)
         showUrlImportMessage(
-          ja.urlImport.resultSummary
-            .replace('{i}', String(importedRows.length))
-            .replace(
-              '{a}',
-              amountless > 0
-                ? ja.urlImport.resultAmountless.replace('{n}', String(amountless))
-                : '',
-            )
-            .replace('{s}', String(importedSteps.length)) +
-            alsoAppliedNote +
-            minutesNote +
-            notesNote +
-            servingsNote +
+          [
+            ja.urlImport.resultSummary
+              .replace('{i}', String(importedRows.length))
+              .replace(
+                '{a}',
+                amountless > 0
+                  ? ja.urlImport.resultAmountless.replace('{n}', String(amountless))
+                  : '',
+              )
+              .replace('{s}', String(importedSteps.length)),
+            alsoAppliedNote,
+            minutesNote,
+            notesNote,
+            servingsNote,
             cookMinutesNote,
+          ],
           'info',
         )
       }
@@ -1328,11 +1431,25 @@ function RecipeFormInner() {
       showPasteMessage(ja.paste.resultNone, 'warn')
       return
     }
-    // 入力済みの材料・手順を置き換える前に確認する(規約F・C-04)
-    if (!(await confirmReplaceExisting('paste', parsed.ingredients.length, parsed.steps.length))) {
+    // 入力済みの内容を置き換える前に確認する(規約F・C-04)
+    const pastedTitle = parsed.title?.trim() ?? ''
+    if (
+      !(await confirmReplaceExisting(
+        'paste',
+        parsed.ingredients.length,
+        parsed.steps.length,
+        undefined,
+        pastedTitle !== '',
+      ))
+    ) {
       return
     }
-    if (parsed.title && !title.trim()) setTitle(parsed.title)
+    // 2026-08-25 便KS・⑦: 読み取れた料理名で上書きし、ひとこと説明は空にする
+    // （取り込みでは入らない欄なので、前の料理の説明が残らないようにする）。
+    // 読み取れなかった料理名は消さない＝手で入れた名前を、代わりの情報が無いまま失わせない。
+    // メモは下（「コツ」「ポイント」見出し以降の流し込み）でまとめて置き換える
+    if (pastedTitle) setTitle(pastedTitle)
+    setIntro('')
     // 材料・手順以外にも黙って置き換わる項目(人数分・調理時間)を、URL取り込みと同じように
     // 結果メッセージへ書き添える(2026-08-12 便FU-3)。実際に値が変わったものだけを並べる
     const pasteAlsoApplied: string[] = []
@@ -1400,15 +1517,18 @@ function RecipeFormInner() {
     if (pastedStepRows.length > 0) {
       setSteps(pastedStepRows)
     }
-    // 「コツ」「ポイント」「メモ」見出し以降の文章は、メモ欄が空ならそこへ流し込む
-    if (parsed.memo && !memo.trim()) setMemo(parsed.memo)
+    // 「コツ」「ポイント」「メモ」見出し以降の文章をメモ欄に入れる。
+    // 2026-08-25 便KS・⑦: 旧「メモ欄が空のときだけ入れる」をやめ、読み取れた内容で置き換える。
+    // 読み取れなければ空にする（前の料理のメモが、取り込んだ料理に付いたまま残らないように）
+    setMemo(parsed.memo ?? '')
     // 取り込んだ内容から役割(dishType)を自動推定して初期値にする(2026-07-23 便BH-1・docs/56 §3-4)。
     // 新規登録では料理名からの自動提案(showDishTypeSuggestion)が同じ推定を担うので、ここでは値を
     // 書き込まない: 書き込むと「料理名から自動で選びました」の説明だけが出ないままになるため
     // (2026-07-28 便BW・QA S3。手入力経路と貼り付け経路で見え方を揃える)。
     // 編集中のレシピで種別が未設定のときだけ、従来どおりここで初期値を入れる。
     if (isEdit && dishType === undefined) {
-      const guessedTitle = title.trim() || parsed.title || ''
+      // 2026-08-25 便KS・⑦: 読み取れた料理名で置き換わるので、推定にもそちらを先に使う
+      const guessedTitle = pastedTitle || title.trim()
       const guessedIngredients =
         parsed.ingredients.length > 0
           ? parsed.ingredients.map((row) => ({ name: row.name }))
@@ -1433,29 +1553,26 @@ function RecipeFormInner() {
       showPasteMessage(ja.paste.resultNoSteps.replace('{i}', String(parsed.ingredients.length)), 'warn')
       return
     }
-    // 添える一文はどれも句点で終わる（i18n側で終端まで書いてある）。
-    // 件数の一文だけ句点を持たないので、添える文がある場合に1つだけ足す
-    // （2026-08-12 便FU-3。文ごとに句点を足していて「入れました。。調理時間も…」になっていた）
     // 取り込みで入らなかった項目と、複数料理の知らせ（2026-08-25 便KO・①④）
     noteImportFollowUp({
-      title: title.trim() || parsed.title || '',
+      title: pastedTitle || title.trim(),
       ingredients: parsed.ingredients.map((row) => ({ name: row.name })),
       steps: pastedStepRows.map((row) => ({ text: row.text })),
     })
     const pasteServingsNote = pasteServings.unread ? ja.paste.servingsNotRead : ''
-    const pasteNotes = [
-      pasteAlsoAppliedNote,
-      stepMinutesNote,
-      stepNotesNote,
-      pasteCookMinutesNote,
-      pasteServingsNote,
-    ]
-      .filter((note) => note !== '')
-      .join('')
+    // 2026-08-25 便KS・⑧: 1本の長文にまとめる（句点でつなぐ）のをやめ、1つの知らせ＝1行にする。
+    // 空の行は showPasteMessage が落とすので、ここでは並べるだけでよい
     showPasteMessage(
-      ja.paste.resultSummary
-        .replace('{i}', String(parsed.ingredients.length))
-        .replace('{s}', String(pastedSteps.length)) + (pasteNotes ? `。${pasteNotes}` : ''),
+      [
+        ja.paste.resultSummary
+          .replace('{i}', String(parsed.ingredients.length))
+          .replace('{s}', String(pastedSteps.length)),
+        pasteAlsoAppliedNote,
+        stepMinutesNote,
+        stepNotesNote,
+        pasteCookMinutesNote,
+        pasteServingsNote,
+      ],
       'info',
     )
   }
@@ -1850,6 +1967,17 @@ function RecipeFormInner() {
       ? 'starter'
       : 'own'
 
+  /**
+   * 取り込みの手段（URL取り込み・テキスト貼り付け）を出すか（2026-08-25 便KS・⑥）。
+   * 基本レシピを**編集しているとき**だけ出さない。判定は logic/freeLimit.ts に置いてある
+   * （なぜ止めるのかがそこに書いてある＝上限の件数に数えない109品を丸ごと入れ替えられると、
+   * 無料の30件とは別の登録枠になるため）。新規登録では今までどおり両方使える
+   */
+  const importToolsAvailable = canUseRecipeImportTools({
+    isEdit,
+    isStarter: loadedRecipe?.isStarter,
+  })
+
   const [resetMessage, setResetMessage] = useState('')
 
   /** 差し替え先の値をまとめてフォームへ反映し、この状態を新しい基準点にする
@@ -2017,9 +2145,21 @@ function RecipeFormInner() {
             className="mt-[var(--space-sm)] rounded-md border border-edge bg-app p-[var(--space-md)]"
           >
             <p className="text-sm font-bold text-ink">{ja.form.importGapTitle}</p>
+            {/* 保存がまだであることは、説明を消したあとも常に出す（2026-08-25 便KS・⑧。
+                オーナー原文「決定押した時点でレシピ登録終わった気分になるので注が必要」）。
+                選ぶボタンが並ぶと、その場で登録まで済んだように見えるため */}
+            <p data-testid="import-gap-save-note" className="ja-phrase mt-1 text-sm text-ink-muted">
+              {ja.form.importGapSaveNote}
+            </p>
             {importGapNoticeOpen && (
               <div data-testid="import-gap-notice">
                 <p className="ja-phrase mt-1 text-sm text-ink-muted">{ja.form.importGapNoticeBody}</p>
+                {/* 「今後表示しない」の隣に、あとから設定し直せる場所を書く（2026-08-25 便KS・⑧。
+                    オーナー原文「取り込みで入らない項目は、「くわしく」から設定できることを
+                    「今後表示しない」の近くに書いて。」）*/}
+                <p className="ja-phrase mt-1 text-sm text-ink-muted">
+                  {ja.form.importGapNoticeDetailField}
+                </p>
                 <button
                   type="button"
                   data-testid="import-gap-notice-hide"
@@ -2155,6 +2295,19 @@ function RecipeFormInner() {
         </div>
       )}
 
+      {/* 取り込みの手段（URL取り込み・テキスト貼り付け）。基本レシピを編集しているときは
+          出さず、代わりに理由の1行を置く（2026-08-25 便KS・⑥。黙って2つのボタンが消えると
+          「不具合で出ていない」と読めるので、必ず何か出す）。**新規登録では今までどおり両方使える** */}
+      {!importToolsAvailable ? (
+        <div
+          data-testid="starter-import-blocked"
+          className="mt-[var(--space-md)] rounded-md border border-edge bg-app p-[var(--space-md)]"
+        >
+          <p className="ja-phrase text-sm font-bold text-ink">{ja.form.starterImportBlocked}</p>
+          <p className="ja-phrase mt-1 text-sm text-ink-muted">{ja.form.starterImportBlockedHint}</p>
+        </div>
+      ) : (
+        <>
       {/* URLから取り込む(エンドポイント未設定=Workerデプロイ前はUI自体を表示しない) */}
       {isUrlImportEnabled() && (
         <>
@@ -2193,26 +2346,16 @@ function RecipeFormInner() {
               {/* 取り込み結果は成功時もスクリーンリーダーへ伝える(2026-07-28 便BX/C17・QA S3)。
                   失敗・片側だけの警告は従来どおり role="alert" で割り込ませ、成功は
                   role="status" + aria-live="polite" で邪魔をせず読み上げる */}
-              {urlImportMessage && (
-                <p
-                  role={urlImportMessageTone === 'warn' ? 'alert' : 'status'}
-                  aria-live={urlImportMessageTone === 'warn' ? undefined : 'polite'}
-                  className={
-                    urlImportMessageTone === 'warn'
-                      ? 'mt-[var(--space-sm)] rounded-sm border border-warning px-3 py-2 text-sm font-bold text-warning'
-                      : 'mt-[var(--space-sm)] text-sm font-bold text-accent-ink'
-                  }
-                >
-                  {urlImportMessage}
-                </p>
+              {urlImportMessage.length > 0 && (
+                <ImportResultMessage lines={urlImportMessage} tone={urlImportMessageTone} />
               )}
               {/* 取り込めたときだけ出す価格の案内(2026-08-02 オーナー指示・便DF)。
                   取り込んだレシピには調味料まで材料に並ぶが、「食材と価格」に価格が無い食材は
                   概算食費に入らない。結果メッセージ(info=成功時のみ)の下に1行＋登録先への近道を置く */}
-              {urlImportMessage && urlImportMessageTone === 'info' && (
+              {urlImportMessage.length > 0 && urlImportMessageTone === 'info' && (
                 <ImportSeasoningGuide groupCount={importedSeasoningGroups} />
               )}
-              {urlImportMessage && urlImportMessageTone === 'info' && importFollowUp}
+              {urlImportMessage.length > 0 && urlImportMessageTone === 'info' && importFollowUp}
               <div className="mt-[var(--space-sm)] flex gap-2">
                 <button
                   type="button"
@@ -2260,23 +2403,14 @@ function RecipeFormInner() {
             rows={6}
             className="mt-[var(--space-sm)] block w-full rounded-sm border border-edge bg-app px-3 py-2 text-base text-ink placeholder:text-ink-muted/60"
           />
-          {pasteMessage && (
-            <p
-              role={pasteMessageTone === 'warn' ? 'alert' : undefined}
-              className={
-                pasteMessageTone === 'warn'
-                  ? 'mt-[var(--space-sm)] rounded-sm border border-warning px-3 py-2 text-sm font-bold text-warning'
-                  : 'mt-[var(--space-sm)] text-sm font-bold text-accent-ink'
-              }
-            >
-              {pasteMessage}
-            </p>
+          {pasteMessage.length > 0 && (
+            <ImportResultMessage lines={pasteMessage} tone={pasteMessageTone} />
           )}
           {/* 貼り付け経路にも同じ案内を出す(2026-08-02 オーナー指示・便DF。URL取り込みと同じ扱い) */}
-          {pasteMessage && pasteMessageTone === 'info' && (
+          {pasteMessage.length > 0 && pasteMessageTone === 'info' && (
             <ImportSeasoningGuide groupCount={importedSeasoningGroups} />
           )}
-          {pasteMessage && pasteMessageTone === 'info' && importFollowUp}
+          {pasteMessage.length > 0 && pasteMessageTone === 'info' && importFollowUp}
           <div className="mt-[var(--space-sm)] flex gap-2">
             <button
               type="button"
@@ -2295,6 +2429,8 @@ function RecipeFormInner() {
           </div>
         </div>
       </Collapse>
+        </>
+      )}
 
       {/* かんたん / くわしく タブ(2026-07-16 Fable裁定docs/26・案A承認)。DOMは両タブとも常時
           マウントし、非表示は`hidden`属性の切替だけで行う(state消失リスクゼロ)。表示のグルーピング
@@ -3055,6 +3191,23 @@ function RecipeFormInner() {
       />
 
       <h2 className={sectionHeadingCls}>{ja.form.detailSectionPlanning}</h2>
+
+      {/* 料理のジャンル（2026-08-25 便KS・①。オーナー原文「レシピ登録には和洋中を設定する
+          場所がないけど、タグに手入力するの？献立で絞り込み設定の専用ボタンがあるなら、
+          レシピ登録でも専用に設定する場所があった方がわかりやすい」）。
+          取り込み直後の欄（import-gap-genre）と同じ選択肢・同じ操作で、state も同じ
+          （中身はタグの「和食」「洋食」「中華」＝logic/importFieldGaps.ts の tagsWithGenre）。
+          そのため下のタグ欄でジャンルのタグを外すと、この並びの選択も同時に外れる（二重に持たない）。
+          置き場所は「献立提案・検索に必要な設定」の先頭＝献立の絞り込みで使う項目のまとまりに入れる */}
+      <OptionPicker
+        label={ja.form.genreLabel}
+        description={ja.form.genreDescription}
+        options={genreOptions}
+        cols={3}
+        isPicked={(genre) => recipeGenreTag(tags) === genre}
+        onPick={pickGenre}
+        testId="detail-genre"
+      />
 
       {/* 季節（任意・もう一度押すと解除） */}
       <OptionPicker

@@ -797,9 +797,13 @@ export default function RecipeDetailPage() {
           )}
           {totalPrice > 0 && (
             <span>
-              {ja.detail.priceAbout}
-              {scaledPrice.toLocaleString()}
-              {ja.detail.priceYen}
+              {/* 「1食」に分けて食べる品ではないレシピ（Recipe.wholeBatch・2026-08-25 便KS・④）は、
+                  ここに「でき上がり全体で 約◯円」と書き、下の「1食あたり」の行を出さない。
+                  金額そのものは今までと同じ（表示中の人数ぶんの合計）で、言い方だけを変える＝
+                  同じ金額を2度言わないため、1食あたりの行と入れ替える形にした */}
+              {recipe.wholeBatch
+                ? ja.detail.priceWholeBatch.replace('{n}', scaledPrice.toLocaleString())
+                : `${ja.detail.priceAbout}${scaledPrice.toLocaleString()}${ja.detail.priceYen}`}
               {/* 価格が分からない材料があるときの印(2026-08-22 便JG)。NG食材は枠付きの札で
                   この行に並ぶので、こちらは金額の文字に添えるだけにして場所を取り合わない。
                   印の意味は下の1行で書くので、読み上げでは重複させない */}
@@ -820,9 +824,12 @@ export default function RecipeDetailPage() {
 
         {/* 1食あたりの概算食費(2026-07-14 オーナー実機フィードバック: 合計だけでなく
             1食分の目安も見たい。表示中のservingsに追従)。
-            2026-08-25 便KN: 人数分の併記をやめた（材料の見出し行の人数ステッパーと
-            「登録: ◯人分」に出ているので、この行で3回目を言わない） */}
-        {totalPrice > 0 && (
+            2026-08-25 便KN: 人数分の併記をやめた（材料の見出し行の人数ステッパーに出ているので、
+            この行で言い直さない）。
+            2026-08-25 便KS・④: だしのとり方のように「1食」に分けて食べる品ではないレシピ
+            （Recipe.wholeBatch）では、この行を出さない。上の金額が「でき上がり全体で 約◯円」に
+            なっているので、割った値を並べると意味を成さない数字が増えるだけになる */}
+        {totalPrice > 0 && !recipe.wholeBatch && (
           <p className="mt-0.5 text-sm text-ink-muted">
             {ja.detail.pricePerServing.replace('{n}', perServingPrice.toLocaleString())}
           </p>
@@ -964,11 +971,13 @@ export default function RecipeDetailPage() {
             ) : (
               <span aria-hidden />
             )}
-            {recipe.servings > 0 && (
-              <span className="text-right text-xs text-ink-muted">
-                {ja.detail.servingsRegisteredNote.replace('{n}', String(recipe.servings))}
-              </span>
-            )}
+            {/* 2026-08-25 便KS・③: ここにあった「登録: ◯人分」（2026-08-03 便DK）を消した。
+                オーナー原文「レシピ詳細の材料下段「登録：◯人分」がここに書いてあると、材料の
+                原価などがその人数分であるかのように見える。削除。知りたかったら編集で確認できるし。」
+                材料の分量も原価も**表示中の人数**（すぐ上の人数ステッパー）で動くので、動かない
+                人数がもう1つ並ぶと、どちらの人数の金額なのかが読めなくなっていた。
+                **行そのものは残す**＝この行は「原価を編集」が出たり消えたりする場所で、
+                高さを先に取っておかないと材料の1行目が48px下へずれる（2026-08-23 便JOの手当て） */}
           </div>
           {recipe.ingredients.some((ing) => ing.seasoningGroup) && (
             <p className="mt-1 text-sm text-ink-muted">{ja.detail.seasoningGroupHint}</p>

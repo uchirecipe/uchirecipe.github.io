@@ -199,13 +199,13 @@ type Props = {
    */
   place?: CardPlace
   /**
-   * 栄養価並び替え中（Pro機能。2026-07-16 便T）に表示する、並び替えに使っている栄養価の値
-   * （例:「カロリー: 320kcal」「たんぱく質: 18.5g」。ラベル+値の形式で呼び出し側(RecipesPage)が
-   * 整形済みの文字列を渡す。2026-07-16オーナー指示でラベル付き表示に変更）。
+   * 並び替えに使っている値（呼び出し側(RecipesPage)が整形済みの文字列を渡す）。
+   * ・栄養価並び替え中（2026-07-16 便T）:「カロリー: 320kcal」「たんぱく質: 18.5g」
+   * ・1食あたりの原価順（2026-08-25 便KS・②）:「1食あたり 約120円」
    * 「大」ではカード左上、「標準」では行の右下に出す。「小」では出さない（幅に載らない）。
-   * 算出不能なレシピはRecipesPage側で undefinedのまま渡す（バッジ自体を出さない）
+   * 算出できないレシピはRecipesPage側で undefinedのまま渡す（バッジ自体を出さない）
    */
-  nutrientBadgeText?: string
+  sortBadgeText?: string
 
   // ------------------------------------------------------------------------
   // 2026-08-19 便HW（オーナー原文「場所や機能ごとにレシピカードの形や内容が変わっている
@@ -318,7 +318,7 @@ export default function RecipeCard({
   showQuickTime,
   density = 'large',
   place,
-  nutrientBadgeText,
+  sortBadgeText,
   onSelect,
   selectAriaLabel,
   disabled,
@@ -654,9 +654,9 @@ export default function RecipeCard({
             出たので、指を素通りさせないとバッジの上だけレシピ詳細へ行けない死角になる
             (390px幅の実機で、リスト表示のバッジを押しても何も起きないことを実測)。
             「大」の同じ役目の重ね表示は最初からこの扱いなので、そちらに揃える */}
-        {nutrientBadgeText && (
+        {sortBadgeText && (
           <span className="pointer-events-none absolute bottom-1.5 right-1.5 max-w-[50%] truncate rounded-full bg-accent px-2 py-0.5 text-[10px] font-bold text-on-accent shadow-sm">
-            {nutrientBadgeText}
+            {sortBadgeText}
           </span>
         )}
       </div>
@@ -740,11 +740,11 @@ export default function RecipeCard({
       {/* 栄養価並び替え中の値(2026-07-16 便T-7)とNG食材警告は同じ左上角に出るため縦積みにする。
           便T-7-2でラベル付き表示("たんぱく質: 24g")に変更し長くなったため、max-width+truncateで
           カード幅を超えないようにする */}
-      {(nutrientBadgeText || hasNg) && (
+      {(sortBadgeText || hasNg) && (
         <div className="pointer-events-none absolute left-1.5 top-1.5 flex max-w-[70%] flex-col items-start gap-1">
-          {nutrientBadgeText && (
+          {sortBadgeText && (
             <span className="max-w-full truncate rounded-full bg-accent px-2 py-0.5 text-[10px] font-bold text-on-accent shadow-sm">
-              {nutrientBadgeText}
+              {sortBadgeText}
             </span>
           )}
           {hasNg &&

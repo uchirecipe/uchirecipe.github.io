@@ -2,6 +2,11 @@ import type { Recipe } from '../db/types'
 import { titleKanaKey } from './kana'
 import { makePantryMatcher } from './pantry'
 import {
+  estimateRecipeCost,
+  recipeCostConfidence,
+  type PriceIndexEntry,
+} from './priceEstimate'
+import {
   computeRecipeNutrition,
   nutritionLabelFor,
   nutritionUnitFor,
@@ -65,6 +70,8 @@ export type RecipeSortOption =
   | 'cooked'
   /** 最近作った順（2026-08-03 オーナー指示）。「作った！」の記録の最新日付で並べる */
   | 'recentCooked'
+  /** 1食あたりの原価順（2026-08-25 便KS・②。オーナー原文「原価で並び替えもほしい」）。無料で使える */
+  | 'cost'
   | NutrientSortOption
 
 /**
@@ -115,6 +122,9 @@ export const defaultSortDirection: Record<RecipeSortOption, SortDirection> = {
   cooked: 'desc',
   // 「最近作った順」は新しい方から（2026-08-03）
   recentCooked: 'desc',
+  // 「1食あたりの原価順」は安い方から（2026-08-25 便KS・②。エネルギーと同じ考え方で、
+  // 探す動機が「安く作れる品を見つける」側にあるため。昇順/降順トグルで反転できる）
+  cost: 'asc',
   kcal: 'asc',
   protein: 'desc',
   fat: 'asc',
@@ -202,6 +212,59 @@ export function buildNutrientSortValues(recipes: Recipe[]): Map<number, Nutrient
   return map
 }
 
+/**
+ * 1食あたりの原価で並べるための値（2026-08-25 便KS・②。オーナー原文「原価で並び替えもほしい」）。
+ *
+ * 【「安い順」に嘘を並べないための決めごと】
+ * 価格が分からない材料の分は合計に1円も入らないので、その品の金額は**必ず実際より安く出る**。
+ * そのまま値だけで並べると、値段を入れ忘れただけの品が「いちばん安い品」として先頭に来る。
+ * そこで、値のほかに「金額がそろっているか」を持ち、次の3つのまとまりの順に並べる
+ * （このまとまりの順は昇順/降順のどちらでも変わらない。反転するのはまとまりの中だけ）:
+ *   ①金額がそろっている品（価格が分からない材料が0件）
+ *   ②一部の材料の価格が分からない品（レシピ詳細で「※」が付く品と同じ判定）
+ *   ③金額が1円も分からない品（値が無いので、まとまりの中は更新順）
+ * ②を末尾へ回さず②のまとまりの中でも金額順に並べるのは、材料10件中1件だけ抜けている品まで
+ * 「並べない」にすると、自分で登録したレシピの多くが原価順から締め出されるため。
+ * どのまとまりに入るかは、レシピ詳細の「※」と同じ根拠なので、画面で理由を確かめられる。
+ */
+export interface RecipeCostSortValue {
+  /** 1食あたりの概算（円）。金額が1円も分からない品は null */
+  perServingYen: number | null
+  /** 価格が分からない材料が1件も無い（＝金額がそろっている） */
+  complete: boolean
+}
+
+/**
+ * 全レシピ分の「1食あたりの原価」をまとめて計算する。
+ * 栄養並び替え（buildNutrientSortValues）と同じで、呼び出し側は原価順を選んでいる間だけ
+ * useMemo で1回計算する。1食あたりの割り算はレシピ詳細の原価サマリーと同じ
+ * （登録人数で割る＝表示中の人数には追随しない値）。
+ */
+export function buildCostSortValues(
+  recipes: Recipe[],
+  priceIndex: PriceIndexEntry[],
+): Map<number, RecipeCostSortValue> {
+  const map = new Map<number, RecipeCostSortValue>()
+  for (const recipe of recipes) {
+    if (recipe.id === undefined) continue
+    const cost = estimateRecipeCost(recipe.ingredients, priceIndex)
+    const confidence = recipeCostConfidence(recipe.ingredients, priceIndex)
+    map.set(recipe.id, {
+      perServingYen: cost.hasAnyPriceInfo
+        ? Math.round(recipe.servings > 0 ? cost.total / recipe.servings : cost.total)
+        : null,
+      complete: !confidence.shouldWarn,
+    })
+  }
+  return map
+}
+
+/** 原価順の「まとまり」（小さいほど先。昇順/降順に関わらずこの順は変わらない） */
+function costTier(value: RecipeCostSortValue | undefined): number {
+  if (!value || value.perServingYen === null) return 2
+  return value.complete ? 0 : 1
+}
+
 const collator = new Intl.Collator('ja')
 
 /**
@@ -217,9 +280,10 @@ function pantryMatchCount(
 }
 
 /** 各並べ替えの「昇順」方向の比較値（updatedAt・かな順・作った回数・在庫一致数のいずれか。
- * 'recentCooked' は「記録なしを常に末尾へ」の扱いが要るので sortResults 側で個別に処理する） */
+ * 'recentCooked'（記録なしを常に末尾へ）と 'cost'（金額のそろい方でまとまりを分ける）は
+ * 別の扱いが要るので sortResults 側で個別に処理する） */
 function compareAscending(
-  option: Exclude<RecipeSortOption, NutrientSortOption | 'recentCooked'>,
+  option: Exclude<RecipeSortOption, NutrientSortOption | 'recentCooked' | 'cost'>,
   a: SearchResult,
   b: SearchResult,
   pantryMatchers: ((ingredientName: string) => boolean)[],
@@ -254,6 +318,8 @@ export function sortResults(
   pantryNames: string[],
   direction: SortDirection = defaultSortDirection[option],
   nutrientValues?: ReadonlyMap<number, NutrientSortValue>,
+  /** 原価順（'cost'）のときだけ渡す。buildCostSortValues の結果 */
+  costValues?: ReadonlyMap<number, RecipeCostSortValue>,
 ): SearchResult[] {
   const sign = direction === 'asc' ? 1 : -1
   const sorted = [...results]
@@ -281,6 +347,27 @@ export function sortResults(
       // 算出不能（null）は昇順/降順に関わらず常に末尾へ
       if ((av === null) !== (bv === null)) return av === null ? 1 : -1
       if (av !== null && bv !== null && av !== bv) return sign * (av - bv)
+      return b.recipe.updatedAt - a.recipe.updatedAt
+    })
+    return sorted
+  }
+
+  // 1食あたりの原価順(2026-08-25 便KS・②)。金額がそろっている品→一部の価格が分からない品→
+  // 金額が1円も分からない品、の順にまとめてから、まとまりの中を金額で並べる
+  // (まとまりの順は昇順/降順で変わらない＝「安い順」の先頭に、値段を入れ忘れただけの品を出さない)
+  if (option === 'cost') {
+    const valueOf = (result: SearchResult): RecipeCostSortValue | undefined =>
+      result.recipe.id === undefined ? undefined : costValues?.get(result.recipe.id)
+    sorted.sort((a, b) => {
+      const used = byUsedCount(a, b)
+      if (used !== 0) return used
+      const av = valueOf(a)
+      const bv = valueOf(b)
+      const tier = costTier(av) - costTier(bv)
+      if (tier !== 0) return tier
+      const ay = av?.perServingYen ?? null
+      const by = bv?.perServingYen ?? null
+      if (ay !== null && by !== null && ay !== by) return sign * (ay - by)
       return b.recipe.updatedAt - a.recipe.updatedAt
     })
     return sorted

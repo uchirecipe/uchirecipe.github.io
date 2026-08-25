@@ -19993,7 +19993,9 @@ try {
           'URLIMPORT-08 人数分・調理時間も置き換わった旨が結果メッセージに出る(C02)',
           (await uiPage.textContent('body')).includes('人数分・調理時間も読み込んだ内容に合わせました'),
         )
-        const okMsg = uiPage.locator('p[role="status"]', { hasText: '材料2件・手順2件を読み込みました' })
+        // 2026-08-25 便KS・⑧: 知らせが2つ以上あるときは「・」付きの並び（ul）で出すので、
+        // pに限らず role="status" の入れ物を見る（1つの知らせだけのときは今までどおりp）
+        const okMsg = uiPage.locator('[role="status"]', { hasText: '材料2件・手順2件を読み込みました' })
         check(
           'URLIMPORT-08 成功メッセージはrole="status"+aria-live="polite"で読み上げられる(C17)',
           (await okMsg.count()) === 1 && (await okMsg.first().getAttribute('aria-live')) === 'polite',
@@ -20149,9 +20151,18 @@ try {
           'URLIMPORT-14 写真を守る方法(チェックを外す)も同じ確認文で伝える',
           ckDialogs[0]?.includes('写真を残したいときは「写真も取り込む」のチェックを外してください'),
         )
+        // 2026-08-25 便KS・⑦: 料理名・ひとこと説明・メモは「残るもの」から「消えるもの」へ移った。
+        // 規約Fの「何が残るか」は、取り込みが触らない項目（タグ・季節・時間帯・種別）で書く
         check(
-          'URLIMPORT-14 「何が残るか」も従来どおり書かれている(規約F)',
-          ckDialogs[0]?.includes('残るもの: 料理名・ひとこと説明・メモ'),
+          'URLIMPORT-14 「何が残るか」も書かれている(規約F)',
+          ckDialogs[0]?.includes(`${ja.paste.confirmReplaceKeptLabel}: ${ja.urlImport.confirmReplaceKept}`),
+          JSON.stringify(ckDialogs),
+        )
+        check(
+          'URLIMPORT-14 入力済みの料理名は「消えるもの」に入る(便KS・⑦)',
+          ckDialogs[0]?.includes(ja.paste.replaceItemTitle) &&
+            !ckDialogs[0]?.includes(`${ja.paste.confirmReplaceKeptLabel}: ${ja.paste.replaceItemTitle}`),
+          JSON.stringify(ckDialogs),
         )
         check(
           'URLIMPORT-14 置き換わった写真は「取り込みました」ではなく「置き換わりました」と伝える',
@@ -20170,7 +20181,9 @@ try {
         check(
           'URLIMPORT-14 チェックOFFなら「写真はそのまま残る」と書く(消える予告は出さない)',
           ckDialogsOff.length === 1 &&
-            ckDialogsOff[0].includes('残るもの: 写真・料理名・ひとこと説明・メモ') &&
+            ckDialogsOff[0].includes(
+              `${ja.paste.confirmReplaceKeptLabel}: ${ja.urlImport.confirmReplaceKeptWithPhoto}`,
+            ) &&
             !ckDialogsOff[0].includes(ja.urlImport.confirmPhotoReplace),
           JSON.stringify(ckDialogsOff),
         )

@@ -2269,6 +2269,10 @@ type StarterContent = Pick<
   | 'sourceUrl'
   | 'keywords'
   | 'dishType'
+  // 「1食」に分けて食べる品ではない印（2026-08-25 便KS・④）。レシピ本文と同じく配る内容なので、
+  // 「基本レシピを入れ直す」で既存の端末にも届くようにする（入れないと、だしのとり方の金額が
+  // 古い端末だけ「1食あたり」のままになる）
+  | 'wholeBatch'
 >
 
 /**
@@ -2304,6 +2308,8 @@ export function buildUpdatedStarterRecipe(
       // dishType(種別)も配布内容の一部として更新対象(2026-07-13 dishType導入と同日の統合で追加。
       // これが無いと、dishTypeだけ違う既存レシピが「内容同一」扱いになり配布が届かない)
       dishType: source.dishType,
+      // 2026-08-25 便KS・④: 同じ理由で wholeBatch も見る
+      wholeBatch: source.wholeBatch,
     })
   if (content(existing) === content(incoming)) return null
 
@@ -2325,6 +2331,7 @@ export function buildUpdatedStarterRecipe(
     sourceUrl: incoming.sourceUrl,
     keywords: incoming.keywords,
     dishType: incoming.dishType,
+    wholeBatch: incoming.wholeBatch,
     searchWords: buildSearchWords(existing.title, incoming.ingredients, incoming.tags, incoming.keywords, incoming.steps, incoming.dishType),
     updatedAt: now,
   }

@@ -65,3 +65,27 @@ export function isAtFreeLimit(count: number, isPro: boolean): boolean {
   if (!FREE_LIMIT_ENABLED || isPro) return false
   return count >= FREE_LIMIT
 }
+
+/**
+ * 基本レシピを編集しているとき、取り込みの手段（URL取り込み・テキスト貼り付け）を出すか
+ * （2026-08-25 便KS・⑥）。
+ *
+ * オーナー原文（差し戻しA）:「A懸念は微調整ではなく、URL取り込みやコピペによる全体の改変です。
+ * 無料３０枠の他に、書き換えで100以上登録できてしまうところです。なので、せめて手段を狭めて
+ * URLとコピペができないようにし、手動編集は残します。」
+ *
+ * 同梱の基本レシピ（isStarter=true）は上限の件数に数えない（countFreeLimitRecipes）。
+ * その109品を丸ごと別の料理に置き換えられると、無料の30件とは別に109品ぶんの登録枠になる。
+ * **止めるのは「まるごと入れ替える手段」だけ**で、手で書き直す・写真・アイコン・
+ * 「デフォルトに戻す」は今までどおり全部使える（データを失う方向の制限は入れない）。
+ *
+ * 新規登録（isEdit=false）では基本レシピという概念が無いので、常に使える。
+ */
+export function canUseRecipeImportTools(params: {
+  /** 編集中か（新規登録なら false） */
+  isEdit: boolean
+  /** 編集しているレシピが同梱の基本レシピか（読み込み前は undefined） */
+  isStarter: boolean | undefined
+}): boolean {
+  return !(params.isEdit && params.isStarter === true)
+}

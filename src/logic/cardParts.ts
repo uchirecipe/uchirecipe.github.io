@@ -37,7 +37,7 @@
  *
  * NG食材の警告・「今日の献立」の印・栄養価の値は、この表では切らない。
  * どれも**呼び出し側が渡した材料があるときだけ**出る（ngIngredients / inTodayList /
- * nutrientBadgeText）ので、出す・出さないの判断はすでに呼び出し側が持っている。
+ * sortBadgeText）ので、出す・出さないの判断はすでに呼び出し側が持っている。
  * とくにNG食材の警告は安全に関わるので、場所ごとに削れる列には置かない。
  */
 export const CARD_PART_KEYS = ['time', 'effort', 'season', 'starter', 'ingredients'] as const

@@ -46,6 +46,7 @@ import {
   freeLimitNoticeFor,
   freeLimitRemaining,
   countFreeLimitRecipes,
+  canUseRecipeImportTools,
   FREE_LIMIT,
   FREE_LIMIT_NOTICE_COUNTS,
 } from '../src/logic/freeLimit.ts'
@@ -305,6 +306,7 @@ import {
   lastCookedDate,
   defaultSortDirection,
   buildNutrientSortValues,
+  buildCostSortValues,
   isNutrientSortOption,
   isFreeSortOption,
   NUTRIENT_SORT_OPTIONS,
@@ -14843,7 +14845,8 @@ eq('IT⑥: 3桁以上の数字は強調の印とみなさない', stripImportedM
   eq(
     '便CK/②-1 材料・手順・写真の3つとも消えるものとして数える',
     replaceConfirmTargets({ ...filled, photoPlan: 'replace' }),
-    { ingredients: true, steps: true, photo: true },
+    // 2026-08-25 便KS・⑦で料理名・ひとこと説明・メモが加わった（この呼び方では未入力＝false）
+    { title: false, intro: false, memo: false, ingredients: true, steps: true, photo: true },
   )
   eq(
     '便CK/②-1 写真がOFFで残るなら写真は「消えるもの」ではない',
@@ -14879,7 +14882,8 @@ eq('IT⑥: 3桁以上の数字は強調の印とみなさない', stripImportedM
       parsedSteps: 0,
       photoPlan: 'none',
     }),
-    { ingredients: false, steps: false, photo: false },
+    // 2026-08-25 便KS・⑦で料理名・ひとこと説明・メモが加わった（この呼び方では未入力＝false）
+    { title: false, intro: false, memo: false, ingredients: false, steps: false, photo: false },
   )
 }
 
@@ -22667,7 +22671,7 @@ Aみりん 大さじ1
     const cardSrc = hwFiles.find((f) => f.rel === 'src/components/RecipeCard.tsx')?.src ?? ''
     eq('HX-1 共通のカード部品を読めている', cardSrc.length > 0, true)
     // 値バッジを出している場所（「大」「標準」の2か所）を全部拾う。0件なら見張りが壊れている
-    const badgeSpots = [...cardSrc.matchAll(/\{nutrientBadgeText &&/g)].map((m) => m.index)
+    const badgeSpots = [...cardSrc.matchAll(/\{sortBadgeText &&/g)].map((m) => m.index)
     eq('HX-1 値バッジを出している場所を拾えている（0件なら見張りが壊れている）', badgeSpots.length >= 2, true)
     // 「標準」はバッジ自身が、「大」は外側の重ねの箱が pointer-events-none を持つので、
     // 直後のclassと直前のclassの**どちらか**にあれば通す（持たせ方を1つに縛らない）。
@@ -28152,22 +28156,49 @@ Aみりん 大さじ1
   }
 
   // --- JG-6: 「価格なし」があることを知らせる判定 ---
-  // オーナー原文「『価格なし』が複数（１つだったとしても金額によっては大きいが）ある場合には、
-  // 目安とはいえ実際と大きく異なることを記号でお知らせして欲しい」「ティラミスとか、１食４円なわけない。
-  // チーズがたくさん」。判定そのものを純ロジックとして持たせる
+  // オーナー原文（2026-08-22 便JG）「『価格なし』が複数（１つだったとしても金額によっては
+  // 大きいが）ある場合には、目安とはいえ実際と大きく異なることを記号でお知らせして欲しい」
+  // 「ティラミスとか、１食４円なわけない。チーズがたくさん」。判定そのものを純ロジックとして持たせる。
+  //
+  // 【2026-08-25 便KS・⑤ オーナー指示で条件を変えた】原文:
+  // 「価格なし材料が１つでもあるのに※表記がない（２つ以上だと※がつくのに）と、何を基準に
+  //  表記しているのかユーザーとしては不安になります。やはり１つでも価格なしになったら表記しましょう」
+  //   旧: 2件以上 または（1件でもそれが主材料）→ 知らせる
+  //   新: 1件でも知らせる
+  // 旧条件では「主材料かどうか」を機械が決めていたので、同じ「価格が分からない材料1件」でも
+  // 材料の書き方次第で印が出たり出なかったりし、画面からは基準が読めなかった。
   eq('JG-6 知らせるかどうかの判定が logic/priceEstimate.ts にある', typeof priceEstimateModule.recipeCostConfidence, 'function')
   {
     const conf = (ings) => priceEstimateModule.recipeCostConfidence(ings, jgIndex)
-    // 同梱109品は全材料に価格があるので1品も知らせない（実測: 109品中0品）
+    // 同梱109品は全材料に価格があるので1品も知らせない（実測: 109品中0品。条件を緩めても0品）
     let starterWarn = 0
     for (const def of starterDefs) if (conf(def.ingredients).shouldWarn) starterWarn++
     eq('JG-6 同梱109品では1品も知らせない（価格が全部そろっているため）', starterWarn, 0)
-    // 価格が分からない材料が1件でも、それが調味料・薬味なら知らせない
+    // 2026-08-25 便KS・⑤: 調味料1件でも知らせる（旧: 知らせない）
     eq(
-      'JG-6 分からないのが調味料1件だけなら知らせない',
+      'JG-6 分からないのが調味料1件だけでも知らせる（2026-08-25 オーナー指示で条件を変えた）',
       conf([
         { name: '玉ねぎ', amount: '1', unit: '個' },
         { name: '架空の調味料', amount: '少々', unit: '' },
+      ]).shouldWarn,
+      true,
+    )
+    // 件数は印の意味の1行（ja.detail.costPricelessNote「価格が分からない材料{n}件を除いた概算です」）に
+    // そのまま出る。印が出る条件と、そこに出る件数が食い違わないことを数で押さえる
+    eq(
+      'JG-6 知らせるときの件数は、価格が分からない材料の数と一致する',
+      conf([
+        { name: '玉ねぎ', amount: '1', unit: '個' },
+        { name: '架空の調味料', amount: '少々', unit: '' },
+      ]).pricelessCount,
+      1,
+    )
+    // 価格がすべてそろっていれば、今までどおり知らせない（印が常時出る形にはしない）
+    eq(
+      'JG-6 価格が全部そろっていれば知らせない',
+      conf([
+        { name: '玉ねぎ', amount: '1', unit: '個' },
+        { name: 'にんじん', amount: '1/2', unit: '本' },
       ]).shouldWarn,
       false,
     )
@@ -31196,25 +31227,39 @@ import { safetyNotesFor, stepSafetyNotes, wholeRecipeSafetyNotes } from '../src/
   const knRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
   const knRead = (rel) => readFileSync(path.join(knRoot, rel), 'utf-8')
 
-  // ---------- KN-1: 「1食あたり」に人数分を繰り返さない ----------
-  // オーナー原文:「◯人分で作るときの１食あたり→１食あたり」。
+  // ---------- KN-1: 「1食あたり」が何人分の1食なのか、画面から読み取れること ----------
+  // オーナー原文（2026-08-25 便KN）:「◯人分で作るときの１食あたり→１食あたり」。
   // 2026-07-28 便BY/COST-03 が「1食あたり」だけだとレシピ全量の値と読まれる、として
-  // 人数分を常時添えたが、**人数分は同じ画面の別の場所に出ている**（下の KN-1 の3つ）ので、
-  // 同じ数字を1画面で3回言うことになっていた。消してよいのは、消しても人数分が画面に残るから。
+  // 人数分を常時添えたが、**人数分は同じ画面の別の場所に出ている**ので、同じ数字を1画面で
+  // 3回言うことになっていた。消してよいのは、消しても人数分が画面に残るから。
+  //
+  // 【2026-08-25 便KS・③で見張るものを1つに絞った】
+  // オーナー原文:「レシピ詳細の材料下段「登録：◯人分」がここに書いてあると、材料の原価などが
+  // その人数分であるかのように見える。削除。知りたかったら編集で確認できるし。」
+  // 便KNの時点では人数分が2か所（①人数ステッパー ②「登録: ◯人分」）に出ていて、この見張りは
+  // **どちらかが消えたら赤**にしていた。②を消した今、残る手がかりは①だけなので、
+  // 守るべきものは「①が消えないこと」に絞る（②が戻ってこないことも同時に見る＝
+  // 消した理由が「同じ人数を何度も読ませない」ことなので、戻ると元の分かりにくさに戻る）。
+  //
+  // ①は**表示中の人数**（人数ステッパーの数字）で、1食あたりの分母そのもの。
+  // 材料の分量・原価もこの人数で動くので、画面の数字はすべて同じ人数を指す。
   {
     eq('KN-1 食費の1食あたりに人数分を繰り返さない', ja.detail.pricePerServing.includes('人分で作るとき'), false)
     eq('KN-1 栄養の1食あたりにも人数分を繰り返さない', ja.nutrition.summaryLabel.includes('人分で作るとき'), false)
     eq('KN-1 食費は「1食あたり」と言う', ja.detail.pricePerServing.includes('1食あたり'), true)
     eq('KN-1 栄養も「1食あたり」と言う', ja.nutrition.summaryLabel.includes('1食あたり'), true)
-    // 消してよい根拠＝同じ画面（レシピ詳細）に人数分が残っていること。
-    // ①材料の見出し行にある人数ステッパーの数字（表示中の人数。1食あたりの分母そのもの）
-    // ②そのすぐ下の「登録: ◯人分」（元のレシピが何人分で書かれているか）
-    // どちらかが画面から消えたらこの見張りが赤になる＝「1食あたり」だけでは分からない状態に戻る
+    // 消してよい根拠＝同じ画面（レシピ詳細）に、1食あたりの分母になる人数が残っていること。
+    // 材料の見出し行にある人数ステッパーの数字がそれで、**これが消えたら赤**になる
+    // ＝「1食あたり」だけでは何人分の1食か分からない状態に戻る
     const knDetail = knRead('src/pages/RecipeDetailPage.tsx')
     eq('KN-1 レシピ詳細に人数ステッパーの人数が出ている', knDetail.includes('ja.detail.servingsUnit'), true)
-    eq('KN-1 レシピ詳細に登録人数の併記が出ている', knDetail.includes('ja.detail.servingsRegisteredNote'), true)
-    eq('KN-1 登録人数の併記は人数分を名乗っている', ja.detail.servingsRegisteredNote.includes('人分'), true)
     eq('KN-1 人数ステッパーの単位は「人分」', ja.detail.servingsUnit, '人分')
+    // 便KS・③で消した「登録: ◯人分」が戻っていないこと（文言も画面も両方見る）
+    eq('KN-1 「登録: ◯人分」の文言は持たない', 'servingsRegisteredNote' in ja.detail, false)
+    eq('KN-1 レシピ詳細に登録人数の併記を出していない', knDetail.includes('servingsRegisteredNote'), false)
+    // 「原価を編集」が出たり消えたりする行の高さは先に取ってある（2026-08-23 便JOの手当て）。
+    // 併記を消したときに行ごと消すと、原価を見るたびに材料の1行目が48px下へずれる形に戻る
+    eq('KN-1 原価のボタンが出る行は高さを先に取ってある', knDetail.includes('flex min-h-11 items-center justify-between'), true)
   }
 
   // ---------- KN-2: 「実際はこれより高くなります」とは言い切れない ----------
@@ -32145,6 +32190,356 @@ import { safetyNotesFor, stepSafetyNotes, wholeRecipeSafetyNotes } from '../src/
   // --- KP-10: 版番号を上げてある（上げないと新しい行が既存の端末に届かない） ---
   eq('KP-10 価格マスタの版番号は13以上', PRICE_DEFAULTS_VERSION_FOR_JG >= 13, true)
   eq('KP-10 成分表の版番号は9以上', NUTRITION_DB_VERSION_FOR_KP >= 9, true)
+}
+
+
+// ==========================================================================================
+// 便KS（2026-08-25 オーナー書き溜め・レシピの登録画面／詳細画面／原価）
+//
+// オーナー原文（該当箇所）:
+//   「・レシピ登録には和洋中を設定する場所がないけど、タグに手入力するの？献立で絞り込み設定の
+//     専用ボタンがあるなら、レシピ登録でも専用に設定する場所があった方がわかりやすい
+//    ・原価で並び替えもほしい
+//    ・レシピ詳細の材料下段「登録：◯人分」がここに書いてあると、材料の原価などがその人数分で
+//      あるかのように見える。削除。知りたかったら編集で確認できるし。
+//    ・出汁の取り方「この分量で、〜」→作る量によって変わるので変更。だし◯ｍｌなら〜。
+//      １食あたり７０円とあるが、出汁だけで１食とは言わない。
+//    ・価格なし材料が１つでもあるのに※表記がない…やはり１つでも価格なしになったら表記しましょう」
+//   差し戻しA「せめて手段を狭めてURLとコピペができないようにし、手動編集は残します」
+//   差し戻しC「URL取り込みで期待するのは、URLからの情報のみです。余計な情報が残ることは
+//             むしろマイナス」
+// ==========================================================================================
+{
+  const ksRoot = path.dirname(fileURLToPath(import.meta.url))
+  const ksRead = (rel) => readFileSync(path.join(ksRoot, '..', rel), 'utf-8')
+  const ksForm = ksRead('src/pages/RecipeFormPage.tsx')
+  const ksDetail = ksRead('src/pages/RecipeDetailPage.tsx')
+  const ksList = ksRead('src/pages/RecipesPage.tsx')
+  const ksManual = ksRead('public/about/manual.html')
+
+  // ---------- KS-1: 「くわしく」にも料理のジャンルを置く ----------
+  // 取り込み直後の欄（便KO）にはジャンルのボタンがあるのに、登録画面の「くわしく」には無く、
+  // 和洋中はタグ欄に手で打つしかなかった。同じ項目なので同じ部品・同じstateで出す。
+  {
+    eq('KS-1 「くわしく」にジャンルの欄名がある', typeof ja.form.genreLabel, 'string')
+    eq('KS-1 欄名は取り込み側と同じ言い方', ja.form.genreLabel.startsWith(ja.form.importGapField.genre), true)
+    eq('KS-1 他の任意項目と同じく「（任意）」が付く', ja.form.genreLabel.includes('（任意）'), true)
+    // 画面: 取り込み直後の欄（import-gap-genre）と「くわしく」（detail-genre）の2か所に出す
+    eq('KS-1 取り込み直後の欄にジャンルが出ている', ksForm.includes('testId="import-gap-genre"'), true)
+    eq('KS-1 「くわしく」にもジャンルが出ている', ksForm.includes('testId="detail-genre"'), true)
+    // 両方とも同じ関数を使う（片方だけ別の持ち方にすると、選び直しで食い違う）
+    eq('KS-1 ジャンルの読み書きは1か所（tagsWithGenre / recipeGenreTag）', [
+      ksForm.split('pickGenre').length - 1 >= 2,
+      ksForm.split('recipeGenreTag(tags)').length - 1 >= 2,
+    ], [true, true])
+    // タグと二重にならない: 中身はタグそのものなので、選ぶ＝タグが1つ入る／
+    // タグ欄で消す＝ボタンの選択も外れる（同じ配列を見ているため）
+    eq('KS-1 選ぶとタグに1つだけ入る', tagsWithGenre(['定番'], '和食'), ['定番', '和食'])
+    eq('KS-1 別のジャンルを選ぶと入れ替わる（2つ付かない）', tagsWithGenre(['定番', '和食'], '洋食'), ['定番', '洋食'])
+    eq('KS-1 同じものをもう一度押すと外れる', tagsWithGenre(['定番', '和食'], '和食'), ['定番'])
+    // タグ欄で手入力・削除したときも、ボタンの選択はタグから引き直す＝二重に持たない
+    eq('KS-1 タグ欄で「和食」を消せばボタンの選択も外れる', recipeGenreTag(['定番']), undefined)
+    eq('KS-1 タグ欄に手で「中華」と打てばボタンも選ばれた状態になる', recipeGenreTag(['中華']), '中華')
+  }
+
+  // ---------- KS-2: 1食あたりの原価で並べ替える ----------
+  // オーナー「原価で並び替えもほしい」。**無料で使える**（原価の表示自体が無料の機能なので、
+  // 並べ替えだけを有料にする理由が無い）。
+  // 価格が分からない材料がある品は金額が必ず実際より安く出るので、「安い順」の先頭に置かない。
+  {
+    eq('KS-2 原価順は無料で選べる', isFreeSortOption('cost'), true)
+    eq('KS-2 原価順は栄養並び替えの区分に入っていない', isNutrientSortOption('cost'), false)
+    eq('KS-2 既定は安い順（昇順）', defaultSortDirection.cost, 'asc')
+    eq('KS-2 並べ替えの名前と、並び方の1行がある', [
+      typeof ja.search.sortCost,
+      typeof ja.search.sortCostHint,
+    ], ['string', 'string'])
+    eq('KS-2 名前に「1食あたり」を入れて、何を比べた順か言い切る', ja.search.sortCost.includes('1食あたり'), true)
+    eq('KS-2 レシピ一覧の並べ替えに原価順が並んでいる', ksList.includes("value: 'cost'"), true)
+    eq('KS-2 無料/Proで出し分ける栄養の並びには足していない', ksList.includes('nutrientSortOptions'), true)
+
+    const ksIndex = buildPriceIndex([
+      { id: 1, name: 'たまねぎ', pricePerUnit: 50, unit: '1個' },
+      { id: 2, name: '牛こま切れ肉', pricePerUnit: 300, unit: '100g' },
+    ])
+    const ksRecipe = (id, ingredients, servings = 2) => ({
+      id,
+      title: `KS${id}`,
+      servings,
+      effortLevel: 'normal',
+      tags: [],
+      ingredients,
+      steps: [],
+      isFavorite: false,
+      cookedLogs: [],
+      searchWords: [],
+      createdAt: 0,
+      updatedAt: id,
+    })
+    // ①金額がそろっている安い品 ②金額がそろっている高い品
+    // ③一部の材料の価格が分からない品（合計は安く出る＝そのままなら先頭に来てしまう）
+    // ④金額が1円も分からない品
+    const ksCheap = ksRecipe(1, [{ name: 'たまねぎ', amount: '1', unit: '個' }])
+    const ksPricey = ksRecipe(2, [{ name: '牛こま切れ肉', amount: '200', unit: 'g' }])
+    const ksPartial = ksRecipe(3, [
+      { name: 'たまねぎ', amount: '1', unit: '個' },
+      { name: '架空の高級食材', amount: '300', unit: 'g' },
+    ])
+    const ksUnknown = ksRecipe(4, [{ name: '架空の高級食材', amount: '300', unit: 'g' }])
+    const ksAll = [ksCheap, ksPricey, ksPartial, ksUnknown]
+    const ksValues = buildCostSortValues(ksAll, ksIndex)
+    eq('KS-2 1食あたりの金額は登録人数で割った値（たまねぎ1個50円÷2人分＝25円）', ksValues.get(1).perServingYen, 25)
+    eq('KS-2 価格が全部そろっていれば「そろっている」印が立つ', ksValues.get(1).complete, true)
+    eq('KS-2 価格が分からない材料が1件でもあれば印は立たない（レシピ詳細の※と同じ判定）', ksValues.get(3).complete, false)
+    eq('KS-2 金額が1円も分からない品は値を持たない', ksValues.get(4).perServingYen, null)
+
+    const ksResults = ksAll.map((recipe) => ({ recipe, usedCount: 0, wantedCount: 0 }))
+    const ksOrder = (direction) =>
+      sortResults(ksResults, 'cost', [], direction, undefined, ksValues).map((r) => r.recipe.id)
+    // 安い順: 金額がそろっている品(1→2) → 一部が分からない品(3) → 金額が分からない品(4)
+    eq('KS-2 安い順でも、価格が分からない材料がある品を先頭に出さない', ksOrder('asc'), [1, 2, 3, 4])
+    // 高い順: まとまりの順は変えず、まとまりの中だけを反転する
+    eq('KS-2 高い順ではまとまりの中だけ反転する（まとまりの順は変わらない）', ksOrder('desc'), [2, 1, 3, 4])
+    // 実際の金額そのものは、レシピ詳細の原価と同じ資産で計算している（値の食い違いを作らない）
+    eq(
+      'KS-2 並べ替えに使う金額はレシピ詳細の原価と同じ計算',
+      ksValues.get(2).perServingYen,
+      Math.round(estimateRecipeCost(ksPricey.ingredients, ksIndex).total / ksPricey.servings),
+    )
+  }
+
+  // ---------- KS-3: レシピ詳細の「登録: ◯人分」を消す（見張りは KN-1 に統合） ----------
+  // KN-1 が「1食あたりが何人分の1食か画面から読めること」を見張っている。
+  // ここでは、消したことで**行そのものが消えていない**ことだけを見る（消すと材料が48pxずれる）
+  eq('KS-3 「登録: ◯人分」の文言は無い', 'servingsRegisteredNote' in ja.detail, false)
+
+  // ---------- KS-4: 「1食」に分けて食べる品ではないレシピの金額 ----------
+  // オーナー「１食あたり７０円とあるが、出汁だけで１食とは言わない」。
+  // 料理名での特別扱いにはせず、レシピが持つ印（wholeBatch）で言い方を変える
+  {
+    const ksDashi = starterDefs.find((def) => def.title === 'だしのとり方')
+    eq('KS-4 だしのとり方に「1食に分けない」印が付いている', ksDashi?.wholeBatch, true)
+    eq(
+      'KS-4 印が付いているのはだしのとり方だけ（他の品の金額の言い方は変わらない）',
+      starterDefs.filter((def) => def.wholeBatch === true).map((def) => def.title),
+      ['だしのとり方'],
+    )
+    eq('KS-4 でき上がり全体の言い方がある', typeof ja.detail.priceWholeBatch, 'string')
+    eq('KS-4 でき上がり全体の言い方に金額が入る', ja.detail.priceWholeBatch.includes('{n}'), true)
+    eq('KS-4 レシピ詳細が印を見て言い方を変えている', ksDetail.includes('recipe.wholeBatch'), true)
+    eq('KS-4 印が付いた品では1食あたりの行を出さない', ksDetail.includes('!recipe.wholeBatch'), true)
+    // 料理名での分岐にしない（だし・下ごしらえ・作り置きのもとは今後も増えうる）。
+    // レシピ詳細には材料「だし汁」から飛ぶリンク（便DASHI）があるので、ファイル全体ではなく
+    // **金額の言い方を決めているところ**に料理名が出てこないことを見る
+    eq('KS-4 金額の言い方は印だけで決める（料理名で分けない）', (() => {
+      const at = ksDetail.indexOf('ja.detail.priceWholeBatch')
+      return at > 0 && !ksDetail.slice(at - 800, at + 800).includes('だしのとり方')
+    })(), true)
+    eq('KS-4 印はレシピが持つ任意項目（どの品にも付けられる）', ksRead('src/db/types.ts').includes('wholeBatch?: boolean'), true)
+    // 「基本レシピを入れ直す」で既存の端末にも届くこと（配る内容の一覧に入っていないと、
+    // 印が付くのは新しく入れた端末だけになる）
+    {
+      const ksOld = { ...ksDashi, wholeBatch: undefined, title: 'だしのとり方', isFavorite: true, cookedLogs: [], searchWords: [], createdAt: 1, updatedAt: 1, id: 99 }
+      const ksNew = buildUpdatedStarterRecipe(ksOld, ksDashi, 1000)
+      eq('KS-4 入れ直しで印が届く', ksNew?.wholeBatch, true)
+      eq('KS-4 入れ直しでも作った記録・お気に入りは残る', [ksNew?.isFavorite, ksNew?.id], [true, 99])
+    }
+    // 本文の「この分量で、500mlほどのだしができる」も、人数を変えると嘘になるので比で言い直した
+    eq('KS-4 でき上がる量を「この分量で」と言わない', ksDashi?.onePoint.includes('この分量で'), false)
+    eq('KS-4 でき上がる量は水に対する割合で言う', ksDashi?.onePoint.includes('使った水のおよそ8割'), true)
+  }
+
+  // ---------- KS-5: 価格が分からない材料が1件でも知らせる（判定は JG-6 で固定） ----------
+  // ここでは同梱109品の実測（1品も印が出ない）を、条件を変えたあとの数で持っておく
+  {
+    const ksPriceIndex = buildPriceIndex(
+      PRICE_DEFAULTS.map((d, i) => ({ id: i + 1, ...d, isDefault: true })),
+    )
+    const ksWarned = starterDefs.filter(
+      (def) => recipeCostConfidence(def.ingredients, ksPriceIndex).shouldWarn,
+    )
+    eq('KS-5 条件を「1件でも」にしても、同梱109品では1品も印が出ない', ksWarned.length, 0)
+    eq('KS-5 見ている品数は109品', starterDefs.length, 109)
+  }
+
+  // ---------- KS-6: 基本レシピの編集では、まるごと入れ替える手段を出さない ----------
+  // オーナー差し戻しA「せめて手段を狭めてURLとコピペができないようにし、手動編集は残します」
+  {
+    eq('KS-6 基本レシピの編集では取り込みを出さない', canUseRecipeImportTools({ isEdit: true, isStarter: true }), false)
+    eq('KS-6 自分で登録したレシピの編集では今までどおり使える', canUseRecipeImportTools({ isEdit: true, isStarter: false }), true)
+    eq('KS-6 新規登録では今までどおり使える', canUseRecipeImportTools({ isEdit: false, isStarter: undefined }), true)
+    // 読み込み中（isStarterがまだ分からない）は止めない＝自作レシピの編集を一瞬止めない
+    eq('KS-6 読み込み中は止めない', canUseRecipeImportTools({ isEdit: true, isStarter: undefined }), true)
+    // 画面: 出さないときは理由の1行を置く（黙って2つのボタンが消えない）
+    eq('KS-6 出さない理由の1行がある', typeof ja.form.starterImportBlocked, 'string')
+    eq('KS-6 使える手段も1行で書く', ja.form.starterImportBlockedHint.includes('手で書き直せます'), true)
+    eq('KS-6 内部の事情（無料枠）はUIに書かない', [
+      ja.form.starterImportBlocked.includes('無料'),
+      ja.form.starterImportBlockedHint.includes('無料'),
+      ja.form.starterImportBlocked.includes('上限'),
+    ], [false, false, false])
+    eq('KS-6 登録画面が判定を使っている', ksForm.includes('canUseRecipeImportTools'), true)
+    eq('KS-6 出さないときの1行を画面に置いている', ksForm.includes('starter-import-blocked'), true)
+    // 手動編集の道は1つも塞がない（「デフォルトに戻す」・写真・アイコンは今までどおり）
+    eq('KS-6 「デフォルトに戻す」は残っている', ksForm.includes('resetVariant'), true)
+    eq('KS-6 写真の入口は残っている', ksForm.includes('cameraInputRef'), true)
+    eq('KS-6 アイコンの入口は残っている', ksForm.includes('iconPickerOpen'), true)
+  }
+
+  // ---------- KS-7: 読み取れた内容ですべて置き換える ----------
+  // オーナー差し戻しC「URL取り込みで期待するのは、URLからの情報のみです。余計な情報が残ることは
+  // むしろマイナス」。従来は料理名・ひとこと説明・メモを「残るもの」として触っていなかった。
+  //
+  // 【料理名だけ、読み取れなかったときに消さない理由（実測）】
+  // ・URL取り込み: 料理名・材料・手順のどれかが空なら取り込み自体が成立しない
+  //   （workers/recipe-import/src/normalize.ts）＝成功した取り込みでは料理名が必ず入る
+  // ・貼り付け: 解析コーパス108件のうち料理名を読み取れたのは50件（46%）。読み取れなかった58件は
+  //   「材料」「作り方」で始まる断片＝ページの材料・作り方だけをコピーした形で、
+  //   アプリ自身が案内している貼り付け方（urlImport.errorBlocked）でもある。
+  //   ここで空にすると、代わりに入る情報が無いまま手で入れた料理名だけが失われ、
+  //   料理名は保存に必須なので保存もできなくなる
+  {
+    const ksBase = {
+      filledTitle: true,
+      filledIntro: true,
+      filledMemo: true,
+      filledIngredients: 3,
+      filledSteps: 2,
+      parsedTitle: true,
+      parsedIngredients: 4,
+      parsedSteps: 5,
+      photoPlan: 'none',
+    }
+    eq('KS-7 料理名・ひとこと説明・メモも置き換えの対象になる', replaceConfirmTargets(ksBase), {
+      title: true,
+      intro: true,
+      memo: true,
+      ingredients: true,
+      steps: true,
+      photo: false,
+    })
+    eq(
+      'KS-7 料理名を読み取れなかったときは、手で入れた料理名を消さない',
+      replaceConfirmTargets({ ...ksBase, parsedTitle: false }).title,
+      false,
+    )
+    eq(
+      'KS-7 ひとこと説明とメモは、読み取れなくても空にする（前の料理の説明を残さない）',
+      [
+        replaceConfirmTargets({ ...ksBase, parsedTitle: false }).intro,
+        replaceConfirmTargets({ ...ksBase, parsedTitle: false }).memo,
+      ],
+      [true, true],
+    )
+    eq(
+      'KS-7 空の登録画面に取り込むときは確認を出さない（今までどおり）',
+      needsReplaceConfirm(
+        replaceConfirmTargets({
+          filledTitle: false,
+          filledIntro: false,
+          filledMemo: false,
+          filledIngredients: 0,
+          filledSteps: 0,
+          parsedTitle: true,
+          parsedIngredients: 3,
+          parsedSteps: 3,
+          photoPlan: 'none',
+        }),
+      ),
+      false,
+    )
+    eq(
+      'KS-7 料理名だけ入力済みなら、それだけで確認を出す',
+      needsReplaceConfirm(
+        replaceConfirmTargets({
+          filledTitle: true,
+          filledIntro: false,
+          filledMemo: false,
+          filledIngredients: 0,
+          filledSteps: 0,
+          parsedTitle: true,
+          parsedIngredients: 3,
+          parsedSteps: 3,
+          photoPlan: 'none',
+        }),
+      ),
+      true,
+    )
+    // 確認の窓（規約F）: 消えるものに3項目が並び、残るものは「取り込みが触らないもの」になる
+    eq('KS-7 消えるものの言い方がある', [
+      ja.paste.replaceItemTitle,
+      ja.paste.replaceItemIntro,
+      ja.paste.replaceItemMemo,
+    ], ['料理名', 'ひとこと説明', 'メモ'])
+    eq('KS-7 「残るもの」から料理名・ひとこと説明・メモが消えている', [
+      ja.paste.confirmReplaceKept.includes('料理名'),
+      ja.urlImport.confirmReplaceKept.includes('料理名'),
+      ja.urlImport.confirmReplaceKeptWithPhoto.includes('メモ'),
+    ], [false, false, false])
+    // 規約F: 残るものが空にならない（取り込みが触らない項目を書く）
+    eq('KS-7 「残るもの」には取り込みが触らない項目が入っている', [
+      ja.paste.confirmReplaceKept.includes('タグ'),
+      ja.urlImport.confirmReplaceKept.includes('タグ'),
+    ], [true, true])
+    eq('KS-7 写真が残る経路では写真も書く', [
+      ja.paste.confirmReplaceKeptWithPhoto.includes('写真'),
+      ja.urlImport.confirmReplaceKeptWithPhoto.includes('写真'),
+    ], [true, true])
+    // 画面: 読み取れた料理名で上書きし、ひとこと説明は空にする
+    eq('KS-7 「空のときだけ入れる」書き方が残っていない', [
+      ksForm.includes("!title.trim()) setTitle"),
+      ksForm.includes("!memo.trim()) setMemo"),
+    ], [false, false])
+    eq('KS-7 ひとこと説明を空にしている', ksForm.split("setIntro('')").length - 1 >= 2, true)
+  }
+
+  // ---------- KS-8: 取り込みの結果と、入らない項目の欄 ----------
+  // オーナー「登録後の赤文字も箇条書きにして改行入れて読みやすくして。注意書きなのに読みにくい。」
+  // 「取り込みで入らない項目は、「くわしく」から設定できることを「今後表示しない」の近くに書いて。」
+  // 「「取り込みで入らない項目」→「取り込みで自動入力されない項目」」
+  {
+    eq('KS-8 欄の名前を「取り込みで自動入力されない項目」にした', ja.form.importGapTitle, '取り込みで自動入力されない項目')
+    // 使い方ページの同じ節も同じ名前で呼ぶ（同じものを2つの名前で呼ばない）
+    eq('KS-8 使い方ページも同じ名前で書いてある', ksManual.includes('取り込みで自動入力されない項目'), true)
+    eq('KS-8 使い方ページに古い名前が残っていない', ksManual.includes('取り込みで入らない項目'), false)
+    // 「くわしく」から設定できることを「今後表示しない」の近くに書く。「タブ」の語は使わない
+    eq('KS-8 あとから設定できる場所を書いてある', ja.form.importGapNoticeDetailField.includes('「くわしく」の入力欄'), true)
+    eq('KS-8 「タブ」の語は使わない（2026-08-10 オーナー指示）', ja.form.importGapNoticeDetailField.includes('タブ'), false)
+    eq('KS-8 「今後表示しない」と同じまとまりに置いている', (() => {
+      const at = ksForm.indexOf('ja.form.importGapNoticeDetailField')
+      const hide = ksForm.indexOf('ja.form.importGapNoticeHide')
+      return at > 0 && hide > at && hide - at < 900
+    })(), true)
+    // 「決定」は作らない（オーナー「決定押した時点でレシピ登録終わった気分になるので注が必要」）。
+    // 代わりに、欄の中に保存がまだであることを常に出す
+    eq('KS-8 保存がまだであることを言う1行がある', ja.form.importGapSaveNote.includes('保存する'), true)
+    eq('KS-8 その1行は欄の中に常に出る（説明を消しても残る）', (() => {
+      const note = ksForm.indexOf('import-gap-save-note')
+      const notice = ksForm.indexOf('importGapNoticeOpen && (')
+      return note > 0 && notice > note
+    })(), true)
+    // 結果の文は「1つの知らせ＝1行」。文言そのものに印（・）は書き込まない
+    eq('KS-8 結果は行の並びで持つ', ksForm.includes('function ImportResultMessage'), true)
+    eq('KS-8 印は画面が付け、読み上げには渡さない', (() => {
+      const at = ksForm.indexOf('function ImportResultMessage')
+      return ksForm.slice(at, at + 1600).includes('<span aria-hidden>・</span>')
+    })(), true)
+    const ksResultLines = [
+      ja.paste.resultSummary,
+      ja.paste.cookMinutesNotWritten,
+      ja.paste.servingsNotRead,
+      ja.urlImport.resultSummary,
+      ja.urlImport.cookMinutesNotWritten,
+      ja.urlImport.servingsNotRead,
+      ja.form.stepMinutesFilled,
+      ja.form.stepNotesMoved,
+    ]
+    eq(
+      'KS-8 結果の文言に「・」を書き込んでいない',
+      ksResultLines.filter((line) => line.includes('・') && !line.includes('手順')),
+      [],
+    )
+  }
 }
 
 

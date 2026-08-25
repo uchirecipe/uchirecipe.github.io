@@ -85,6 +85,7 @@ import {
   sortResults,
   defaultSortDirection,
   buildNutrientSortValues,
+  buildCostSortValues,
   isNutrientSortOption,
   isFreeSortOption,
   NUTRIENT_SORT_OPTIONS,
@@ -96,6 +97,9 @@ import {
   type SortDirection,
 } from '../logic/recipeSort'
 import { isNutritionUnlocked, roundNutrient } from '../logic/nutrition'
+// 1食あたりの原価順（2026-08-25 便KS・②）。金額の計算はレシピ詳細・月間の献立と同じ資産を使う
+import { usePriceEntries } from '../db/prices'
+import { buildPriceIndex } from '../logic/priceEstimate'
 import {
   countFreeLimitRecipes,
   freeLimitNoticeFor,
@@ -175,6 +179,9 @@ const baseSortOptions: { value: RecipeSortOption; label: string }[] = [
   { value: 'cooked', label: ja.search.sortCooked },
   // 最近作った順(2026-08-03 オーナー指示)。回数で数える「よく使う順」の隣に置く
   { value: 'recentCooked', label: ja.search.sortRecentCooked },
+  // 1食あたりの原価順(2026-08-25 便KS・②。オーナー原文「原価で並び替えもほしい」)。
+  // 栄養の並び替えと違って**無料**なので、Proの区分ではなくこちらの並びに入れる
+  { value: 'cost', label: ja.search.sortCost },
   // 「基本レシピ順」は2026-07-24 便BN・タスク4で廃止(配布テーマ全廃で無意味化)
 ]
 
@@ -717,6 +724,15 @@ export default function RecipesPage() {
     return buildNutrientSortValues(recipes)
   }, [recipes, nutrientSortActive])
 
+  // 1食あたりの原価順の値（2026-08-25 便KS・②）。栄養並び替えと同じで、原価順を選んでいる
+  // 間だけ全レシピ分をまとめて1回計算する（材料×食材価格マスタの照合はレシピ数に比例して重い）
+  const priceEntries = usePriceEntries()
+  const costSortActive = sort === 'cost'
+  const costSortValues = useMemo(() => {
+    if (!recipes || !costSortActive) return undefined
+    return buildCostSortValues(recipes, buildPriceIndex(priceEntries ?? []))
+  }, [recipes, costSortActive, priceEntries])
+
   // 「基本レシピを表示しない」設定を反映した、この一覧が扱う全レシピ。
   // 総件数・検索対象・よく使うタグの集計をすべてこの同じ集合から作る(食い違いを作らない)
   const visibleRecipes = useMemo(() => {
@@ -846,7 +862,7 @@ export default function RecipesPage() {
       pantryNames,
       ngIngredients: ngIngredients ?? [],
     })
-    return sortResults(found, sort, pantryNames, sortDirection, nutrientSortValues)
+    return sortResults(found, sort, pantryNames, sortDirection, nutrientSortValues, costSortValues)
   }, [
     visibleRecipes,
     query,
@@ -866,6 +882,7 @@ export default function RecipesPage() {
     sortDirection,
     pantryNames,
     nutrientSortValues,
+    costSortValues,
   ])
 
   /**
@@ -1392,10 +1409,18 @@ export default function RecipesPage() {
    * 2026-07-16オーナー指示: 「たんぱく質: 24g」のように並び替え項目のラベルを値の前に付ける
    * (ラベルはNUTRIENT_SORT_LABELS=並び替えパネルの項目名と同じものを流用する)
    */
-  const nutrientBadgeTextFor = (recipeId: number | undefined): string | undefined => {
+  const sortBadgeTextFor = (recipeId: number | undefined): string | undefined => {
+    if (recipeId === undefined) return undefined
+    // 1食あたりの原価順のとき（2026-08-25 便KS・②）。一覧では金額の内訳が見えないので、
+    // 並べ替えに使っている値そのものをカードに出す。言い方はレシピ詳細と同じ文言を使う
+    // （同じ金額を画面ごとに違う言い方で呼ばない）。金額が1円も分からない品には出さない
+    if (costSortActive) {
+      const yen = costSortValues?.get(recipeId)?.perServingYen
+      if (yen == null) return undefined
+      return ja.detail.pricePerServing.replace('{n}', yen.toLocaleString())
+    }
     if (!nutrientSortActive || !isNutrientSortOption(sort)) return undefined
     if (!nutritionUnlocked && !isFreeSortOption(sort)) return undefined
-    if (recipeId === undefined) return undefined
     const field = NUTRIENT_SORT_FIELD[sort]
     const raw = nutrientSortValues?.get(recipeId)?.[field]
     if (raw == null) return undefined
@@ -1606,6 +1631,14 @@ export default function RecipesPage() {
           />
           {/* 「よく使う順」が何を数えた順かを一言で示す(2026-07-29 便CI/C13) */}
           <p className="mt-1 text-xs text-ink-muted">{ja.search.sortCookedHint}</p>
+          {/* 原価順を選んでいるあいだだけ、並び方の決めごとを1行で出す(2026-08-25 便KS・②)。
+              価格が分からない材料がある品は金額が実際より安く出るので、金額がそろっている品の
+              あとにまとめている。常時出すと並び替えの並びが説明文で埋まるため、選んだときだけ */}
+          {sort === 'cost' && (
+            <p data-testid="sort-cost-hint" className="mt-1 text-xs text-ink-muted">
+              {ja.search.sortCostHint}
+            </p>
+          )}
 
           {/* 栄養価並び替え(便T-4で5項目をPro機能化 → 2026-08-01 線引きB'でカロリー順のみ無料開放)。
               無料版は「カロリー」だけを選べる欄＋残り4項目のグレーのティーザー行を出し、
@@ -2252,7 +2285,7 @@ export default function RecipesPage() {
                 subLabel={subLabelFor(usedCount, wantedCount)}
                 inTodayList={todayRecipeIds.has(recipe.id!)}
                 showQuickTime={quickOnly}
-                nutrientBadgeText={nutrientBadgeTextFor(recipe.id)}
+                sortBadgeText={sortBadgeTextFor(recipe.id)}
                 // 検査用の目印（2026-08-21 便IU・①）。今日の献立の行から基本レシピ・主要食材を
                 // 外したのが**その場所だけ**であることを、同じ品のカードを見比べて確かめる
                 testId="recipe-list-card"
