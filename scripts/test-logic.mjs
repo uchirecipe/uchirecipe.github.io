@@ -17366,6 +17366,8 @@ eq('IT⑥: 3桁以上の数字は強調の印とみなさない', stripImportedM
     'src/pages/SettingsPage.tsx',
     'src/pages/RecipeFormPage.tsx',
     'src/pages/MealPlanPage.tsx',
+    // 日付メモの入力欄（DayNoteEditor）は 2026-08-25 便KZ で切り出した先にある
+    'src/pages/mealPlan/DayParts.tsx',
     'src/pages/IngredientPricesPage.tsx',
   ]
   for (const rel of imeGuardTargets) {
@@ -22372,8 +22374,9 @@ Aみりん 大さじ1
       [
         ['レシピ詳細の「作った！」', 'src/pages/RecipeDetailPage.tsx', '{ja.detail.cooked}'],
         [
+          // 今日の献立の1品（TodayListRow）は 2026-08-25 便KZ で src/pages/mealPlan/DayParts.tsx へ移した
           '献立・日タブの1品ごとの「作った！」',
-          'src/pages/MealPlanPage.tsx',
+          'src/pages/mealPlan/DayParts.tsx',
           '{ja.mealPlan.todayMarkCooked}',
         ],
         [
@@ -25526,7 +25529,8 @@ Aみりん 大さじ1
     eq('IJ-2 共通のカード部品が短い言葉を出している', cardSrc.includes('ja.card.ngBadgeShort'), true)
     const others = ['src/pages', 'src/components']
       .flatMap((dir) =>
-        readdirSync(path.join(appRoot, dir))
+        // 2026-08-25 便KZ で src/pages/mealPlan/ ができたので、下の階層まで走査する
+        readdirSync(path.join(appRoot, dir), { recursive: true })
           .filter((f) => f.endsWith('.tsx') && f !== 'RecipeCard.tsx')
           .map((f) => `${dir}/${f}`),
       )
@@ -26574,10 +26578,20 @@ Aみりん 大さじ1
   const iqScriptDir = path.dirname(fileURLToPath(import.meta.url))
   const iqRoot = process.env.IQ_SRC_ROOT ?? path.join(iqScriptDir, '..')
   const iqRowPath = path.join(iqRoot, 'src/components/SwipeRevealRow.tsx')
-  const iqPagePath = path.join(iqRoot, 'src/pages/MealPlanPage.tsx')
+  // 献立の画面は2026-08-25 便KZ（docs/74 第3手）で、画面の本体と src/pages/mealPlan/ の部品に
+  // 分かれた（中身は1文字も動かしていない）。今日の献立の行（TodayListRow）は DayParts.tsx に
+  // あるので、ここは**画面一式**を1つの本文として読む＝分ける前と同じものを見ている
+  const iqPagePaths = [
+    'src/pages/MealPlanPage.tsx',
+    'src/pages/mealPlan/DayParts.tsx',
+    'src/pages/mealPlan/IntakeParts.tsx',
+    'src/pages/mealPlan/MonthParts.tsx',
+  ].map((rel) => path.join(iqRoot, rel))
   eq('IQ-0 払いの器のファイルが読める（無ければ以下は全部空振りになる）', existsSync(iqRowPath), true)
   const iqRow = existsSync(iqRowPath) ? readFileSync(iqRowPath, 'utf-8') : ''
-  const iqPage = existsSync(iqPagePath) ? readFileSync(iqPagePath, 'utf-8') : ''
+  const iqPage = iqPagePaths
+    .map((full) => (existsSync(full) ? readFileSync(full, 'utf-8') : ''))
+    .join('\n')
 
   // ---- IQ-1: ブラウザの「戻る」に譲る左端の幅 ----------------------------------------------
   // iOSの端からの戻るジェスチャーは左0〜30pxから始まり、献立の行は左端x=33pxから始まる。
@@ -26633,7 +26647,8 @@ Aみりん 大さじ1
     .filter((full) => /<SwipeRevealRow\b/.test(readFileSync(full, 'utf-8')))
     .map((full) => path.relative(iqRoot, full).split(path.sep).join('/'))
   eq('IQ-6 払いで外せるのは今日の献立の行だけ（買い物メモ・食材の在庫には付けない）', iqUsers, [
-    'src/pages/MealPlanPage.tsx',
+    // 今日の献立の行（TodayListRow）は 2026-08-25 便KZ で src/pages/mealPlan/DayParts.tsx へ移した
+    'src/pages/mealPlan/DayParts.tsx',
   ])
   // ---- IQ-7: 払う以外の道が残っている ------------------------------------------------------
   // 整理モードの×＝キーボードでも読み上げでも届く順路。払う操作しか無い形にしない
@@ -26937,7 +26952,10 @@ Aみりん 大さじ1
   // 画面の名前を並べない＝新しい画面が増えても、そのまま当たる
   {
     const iuPagesDir = path.join(iuRoot, 'src/pages')
-    const iuPageFiles = readdirSync(iuPagesDir).filter((f) => f.endsWith('.tsx')).sort()
+    // 2026-08-25 便KZ で src/pages/mealPlan/ ができたので、下の階層まで走査する
+    const iuPageFiles = readdirSync(iuPagesDir, { recursive: true })
+      .filter((f) => f.endsWith('.tsx'))
+      .sort()
     eq('IU-6 画面ファイルを走査できている（0件なら見張りが壊れている）', iuPageFiles.length > 0, true)
     const iuBackPages = []
     const iuUndecided = []
@@ -27677,7 +27695,17 @@ Aみりん 大さじ1
 {
   const jfRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
   const jfRead = (rel) => readFileSync(path.join(jfRoot, rel), 'utf-8')
-  const jfMealPlanSrc = jfRead('src/pages/MealPlanPage.tsx')
+  // 献立の画面は2026-08-25 便KZ（docs/74 第3手）で、画面の本体と src/pages/mealPlan/ の部品に
+  // 分かれた（中身は1文字も動かしていない）。記録のカード（CookedLogCard）は DayParts.tsx に
+  // あるので、ここは**画面一式**を1つの本文として読む＝分ける前と同じものを見ている
+  const jfMealPlanSrc = [
+    'src/pages/MealPlanPage.tsx',
+    'src/pages/mealPlan/DayParts.tsx',
+    'src/pages/mealPlan/IntakeParts.tsx',
+    'src/pages/mealPlan/MonthParts.tsx',
+  ]
+    .map(jfRead)
+    .join('\n')
   const mealPlanLogicJF2 = await import('../src/logic/mealPlan.ts')
 
   // --- JF-1: 過ぎた日の編集モードは「作った記録を足す」（①） ---
@@ -28087,6 +28115,10 @@ Aみりん 大さじ1
   const jeFiles = [
     'src/components/RecipeCard.tsx',
     'src/pages/MealPlanPage.tsx',
+    // 献立の画面から切り出した部品（2026-08-25 便KZ）。抜け道を作らないので一緒に見る
+    'src/pages/mealPlan/DayParts.tsx',
+    'src/pages/mealPlan/IntakeParts.tsx',
+    'src/pages/mealPlan/MonthParts.tsx',
     'src/pages/RecipesPage.tsx',
     'src/pages/MealTemplatesPage.tsx',
     'src/pages/MealPlanCopyWeekPage.tsx',
@@ -28920,7 +28952,8 @@ import { safetyNotesFor, stepSafetyNotes, wholeRecipeSafetyNotes } from '../src/
       const jjRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
       const jjFiles = []
       for (const dir of ['src/components', 'src/pages']) {
-        for (const name of readdirSync(path.join(jjRoot, dir))) {
+        // 2026-08-25 便KZ で src/pages/mealPlan/ ができたので、下の階層まで走査する
+        for (const name of readdirSync(path.join(jjRoot, dir), { recursive: true })) {
           if (name.endsWith('.tsx')) jjFiles.push(path.join(dir, name))
         }
       }
@@ -33283,7 +33316,17 @@ import { safetyNotesFor, stepSafetyNotes, wholeRecipeSafetyNotes } from '../src/
 // ==========================================================================================
 {
   const appRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
-  const kuPlanSrc = readFileSync(path.join(appRoot, 'src/pages/MealPlanPage.tsx'), 'utf-8')
+  // 献立の画面は2026-08-25 便KZ（docs/74 第3手）で、画面の本体と src/pages/mealPlan/ の部品に
+  // 分かれた（中身は1文字も動かしていない）。記録のカード（CookedLogCard）は DayParts.tsx に
+  // あるので、ここは**画面一式**を1つの本文として読む＝分ける前と同じものを見ている
+  const kuPlanSrc = [
+    'src/pages/MealPlanPage.tsx',
+    'src/pages/mealPlan/DayParts.tsx',
+    'src/pages/mealPlan/IntakeParts.tsx',
+    'src/pages/mealPlan/MonthParts.tsx',
+  ]
+    .map((rel) => readFileSync(path.join(appRoot, rel), 'utf-8'))
+    .join('\n')
   const kuShopSrc = readFileSync(path.join(appRoot, 'src/pages/ShoppingPage.tsx'), 'utf-8')
   const kuDetailSrc = readFileSync(path.join(appRoot, 'src/pages/RecipeDetailPage.tsx'), 'utf-8')
   const kuCss = readFileSync(path.join(appRoot, 'src/index.css'), 'utf-8')
