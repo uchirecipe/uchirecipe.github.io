@@ -647,20 +647,37 @@ function CookedLogCard({
         selectAriaLabel={asButton ? openDetailAria : undefined}
         linkState={linkState}
         onNavigate={onNavigate}
+        // 検査用の目印（2026-08-25 便KU）。この記録カードから「レシピ詳細へ移って戻る」道を
+        // 機械で見張る。献立の枠のカード（row-recipe）とは役割が違うので別の名前にする
+        testId="cooked-log-recipe"
         titleBadges={<CheckCircle2 size={16} className="text-accent-ink" aria-hidden />}
       />
-      {/* カードの押下にレシピ詳細という別の役割があるところ（週タブの過去日）では、
+      {/* カードの押下にレシピ詳細という別の役割があるところ（週タブの過去日・月タブの日の窓）では、
           記録の中身への入口を1行足す（2026-08-09 便EQ）。
           2026-08-22 便JF: 編集モードのときは、その隣に削除を並べる。
-          間隔は12px（gap-3）＝押し間違いが起きる近さを作らない（便IZと同じ作法） */}
+          間隔は12px（gap-3）＝押し間違いが起きる近さを作らない（便IZと同じ作法）。
+
+          2026-08-25 便KU（オーナー原文「窓の「作った記録を見る」を右に寄せて」
+          「作った記録のレシピと「作った記録を見る」の縦幅が同じくらいなので、レシピ数が多いと
+          それだけ無駄に縦長になる。「作った記録を見る」の場所が上下のレシピの真ん中あたりなので、
+          どっちについているのかわかりづらい」）で3つ直した:
+           ①**右端へ**寄せる（justify-end）。直す前は左から48px（ml-12）の位置に置いていた
+           ②**行の高さを実測44px→20px**にする。直す前は min-h-11 でカード（実測46px）と
+             ほぼ同じ高さがあり、記録が5件並ぶと入口の行だけで220px使っていた。
+             小さくしても押せるよう、当たり判定は器（.tap-target）で44pxのまま保つ
+             （2026-08-24 便KJ が記録の窓の「レシピを見る」で採った作法と同じ）
+           ③カードの**すぐ下**（mt-0.5＝2px）に付ける。記録どうしの間は12px空けてあるので、
+             「間が狭いほうが同じ記録」＝どのレシピの入口かが距離で読める
+             （便JQ が献立の1品で採った「1品の中 < 品と品の間」と同じ考え方） */}
       {!readOnly && (onDelete || (onOpenDetail && detailAs === 'below')) && (
-        <div className="ml-12 flex flex-wrap items-center gap-3">
+        <div className="mt-0.5 flex flex-wrap items-center justify-end gap-3">
           {onOpenDetail && detailAs === 'below' && (
             <button
               type="button"
+              data-testid="cooked-log-open-detail"
               onClick={onOpenDetail}
               aria-label={openDetailAria}
-              className="inline-flex min-h-11 items-center gap-0.5 text-xs font-bold text-accent-ink underline"
+              className="tap-target inline-flex items-center gap-0.5 text-xs font-bold text-accent-ink underline"
             >
               {ja.cookedDetail.openFromPlan}
               <ChevronRight size={14} aria-hidden />
@@ -676,6 +693,11 @@ function CookedLogCard({
                 .replace('{m}', String(Number(log.date.slice(5, 7))))
                 .replace('{d}', String(Number(log.date.slice(8, 10))))
                 .replace('{title}', recipe.title)}
+              /* 削除は**実寸で44px**のまま（2026-08-25 便KU で低くしたのは「作った記録を見る」だけ）。
+                 消える操作なので、当たり判定だけを広げる形（.tap-target）にはしない
+                 ＝押せる面が見た目より広いと、消すつもりのない場所で消えることが起きうる。
+                 この削除は編集モードでしか出ないので、オーナーが縦長を指摘した通常表示の高さには
+                 効かない（scripts/e2e-smoke.mjs の JFDEL-07 が実寸44pxを見張る） */
               className={`inline-flex min-h-11 items-center gap-1 text-xs font-bold text-warning underline ${
                 deleteDisabled ? 'opacity-40' : ''
               }`}
@@ -5550,8 +5572,9 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
     [activeEntries, recipeById, priceIndex],
   )
   // 概算食費の折りたたみ(2026-07-24 便BH-3・タスク4: 「まとめて献立」直後にいきなり金額が出る
-  // 違和感への対応。既定閉・配置も7日分カードの下=邪魔にならない位置へ移動)
-  const [weekCostOpen, setWeekCostOpen] = useState(false)
+  // 違和感への対応。既定閉・配置も7日分カードの下=邪魔にならない位置へ移動)。
+  // 2026-08-25 便KU: 「栄養と食費」の節の折りたたみ(weekGroupOpen.nutritionCost)に一本化した
+  // ＝入れ子の折りたたみを作らない（開くのに2回押させない）ので、専用の状態は持たない
 
   /**
    * 栄養バランスの見える化(2026-07-30 便CL・docs/60 第1段)。
@@ -5664,7 +5687,8 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
      null＝絞っていない＝従来どおり表示中の週ぜんぶ（＝開かない人の手数も分量も変わらない）。
      チップを押して全部選び直した状態は null に戻す＝「絞っていない」の意味を1つに保つ。
      献立のロックとは無関係（買い物は献立を読むだけ）。 */
-  const [shopRangeOpen, setShopRangeOpen] = useState(false)
+  /* 2026-08-25 便KU: 開閉は「買い物メモ」の節（weekGroupOpen.shopping）が持つようになった。
+     ここで別に持つと、同じ折りたたみの状態が2か所に分かれる */
   const [shopDates, setShopDates] = useState<string[] | null>(null)
   const [shopSlots, setShopSlots] = useState<MealSlot[] | null>(null)
   /** 範囲に選べる日付＝週タブで買い物の対象になっている日（過ぎた日は元から対象外） */
@@ -5806,34 +5830,32 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
    * 既定は閉じていて、開かなければ従来どおり表示中の週ぜんぶから作る。
    * チップの見た目は「表示する食事」のボタン（renderSlotFilter）と同じ作法にそろえる。
    */
+  /**
+   * いま買い物メモの対象になっている範囲の要約（2026-08-25 便KU）。
+   * 「買い物メモ」の節を畳んでいても、見出しの横に出したままにする
+   * ＝開かなくても、いま何を対象にしているかが読める。
+   */
+  const renderShopRangeSummary = () => (
+    <span className="min-w-0 truncate text-xs text-ink-muted" data-testid="shop-range-summary">
+      {shopRangeNarrowed
+        ? ja.mealPlan.shopRangeSummaryPicked
+            .replace('{dates}', formatShoppingRangeDates(shopRangeDates))
+            .replace('{slots}', shopRangeSlots.map((s) => ja.mealPlan.slot[s]).join('・'))
+        : ja.mealPlan.shopRangeSummaryAll}
+    </span>
+  )
+  /**
+   * 買い物メモの範囲えらびの中身（2026-08-08 便EA）。
+   * 2026-08-25 便KU: 自前の開閉ボタンをやめ、「買い物メモ」の節の折りたたみに乗せた。
+   * `<Collapse>` はこの中に置いたままにする＝「畳むと消える範囲」を
+   * scripts/test-logic.mjs の COLLAPSE-1 が規則で掃けるようにするため
+   * （呼び出し側で包むと、掃く側から中身が Collapse の外に見える）。
+   */
   const renderShopRange = () => (
-    <div className="mt-[var(--space-md)] rounded-md border border-edge">
-      <button
-        type="button"
-        data-testid="shop-range-toggle"
-        onClick={() => setShopRangeOpen((v) => !v)}
-        aria-expanded={shopRangeOpen}
-        className="flex w-full items-center justify-between gap-2 p-[var(--space-sm)] text-left"
-      >
-        <span className="text-sm font-bold">{ja.mealPlan.shopRangeToggle}</span>
-        <span className="flex min-w-0 items-center gap-1">
-          <span className="truncate text-xs text-ink-muted" data-testid="shop-range-summary">
-            {shopRangeNarrowed
-              ? ja.mealPlan.shopRangeSummaryPicked
-                  .replace('{dates}', formatShoppingRangeDates(shopRangeDates))
-                  .replace('{slots}', shopRangeSlots.map((s) => ja.mealPlan.slot[s]).join('・'))
-              : ja.mealPlan.shopRangeSummaryAll}
-          </span>
-          {shopRangeOpen ? (
-            <ChevronUp size={16} className="shrink-0 text-ink-muted" aria-hidden />
-          ) : (
-            <ChevronDown size={16} className="shrink-0 text-ink-muted" aria-hidden />
-          )}
-        </span>
-      </button>
-      <Collapse open={shopRangeOpen}>
-        <div className="px-[var(--space-sm)] pb-[var(--space-sm)]">
-          <p className="text-xs text-ink-muted">{ja.mealPlan.shopRangeNote}</p>
+    <Collapse open={weekGroupOpen.shopping}>
+        <div className="mt-[var(--space-sm)]">
+          <p className="text-xs font-bold text-ink-muted">{ja.mealPlan.shopRangeToggle}</p>
+          <p className="mt-1 text-xs text-ink-muted">{ja.mealPlan.shopRangeNote}</p>
           <p className="mt-[var(--space-sm)] text-xs font-bold text-ink-muted">
             {ja.mealPlan.shopRangeDateLabel}
           </p>
@@ -5908,8 +5930,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
             </button>
           )}
         </div>
-      </Collapse>
-    </div>
+    </Collapse>
   )
 
   const dowLabels = ja.mealPlan.dow
@@ -6003,13 +6024,24 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
              作った記録が付いた枠の淡い表示（muted）と「作った」バッジ、NG食材の印、
              鍵の掛かった食事で押せなくなること（disabled）も、そのままカード側の口で表す */
           <div className="min-w-0 w-full">
+            {/* 2026-08-25 便KU（オーナー原文「編集画面、ここだけレシピカードをタップで
+                レシピ詳細に行かない。他はレシピカードから必ずレシピ詳細に行くので
+                揃えるべきでは。「レシピを見る」→「レシピを変更」」）:
+                編集モードでも**カードの押下はレシピ詳細**にした。アプリの他のレシピカード
+                （通常表示の週・月、レシピ一覧、買い物メモの窓、作った記録）はすべて
+                押すとレシピ詳細なので、ここだけ別の行き先だった。
+                差し替えは下の段の「レシピを変更」が受け持つ（便DP-5の裁定＝
+                「間違えて記録した枠を選び直せなくなる方が害が大きい」は、差し替えの口を
+                同じ行に残すことで満たしている。無くしたのではなく名前の付いたボタンに移した）。
+                鍵が掛かっていてもレシピを読むことは止めない＝止めるのは変更と削除
+                （通常表示のカードも鍵に関わらずレシピ詳細へ行く。モードで振る舞いを変えない） */}
             <RecipeCard
               recipe={recipe!}
               density="small"
               place="planSlot"
               muted={isCooked}
-              disabled={locked}
-              onSelect={() => openPicker(date, slot, role, entryId, extraLocalId)}
+              linkState={logDetailLinkState}
+              onNavigate={rememberLogDetailReturn}
               ngIngredients={settings?.ngIngredients ?? []}
               thumbTestId="row-thumb"
               // 検査用の目印(2026-08-19 便HX)。鍵を掛けたときにこのカード=料理名の差し替えが
@@ -6063,25 +6095,25 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
             {ja.mealPlan.servingsChip.replace('{n}', String(rowServings))}
           </button>
         )}
-        {/* 枠に入っているレシピの詳細へ行く入口（2026-08-10 便EZ・オーナー実機
-            「献立カードで選択中のレシピからレシピ詳細に移る手段がない」）。
-            この枠の押下は「レシピを選び直す」に割り当ててあり(便DP-5の司令部裁定。間違えて
-            記録した枠を直せなくなる方が害が大きい)、週・月のカードにはレシピ詳細への入口が
-            1つも無かった＝材料や手順を見たいときに一覧から探し直すしかなかった。
-            2026-08-22 便IZ で、カードの真下に付いていた高さ16pxの1行から、この操作の段へ移した
-            （カードとの間隔が2pxしかなく、レシピ詳細と差し替えを押し間違える近さだった） */}
+        {/* この枠を別のレシピに差し替える入口（2026-08-25 便KU）。
+            直す前はここが「レシピを見る」で、差し替えは**カードの押下**に割り当たっていた。
+            オーナー指示でカードの押下をレシピ詳細にそろえたので、差し替えを名前の付いた
+            ボタンにしてこの段へ置く（操作の段の並びは変えていない）。
+            鍵の掛かった食事では押せなくする＝止め方は同じ段の×・食数とまったく同じ */}
         {recipe?.id != null && (
-          <Link
-            to={`/recipes/${recipe.id}`}
-            state={logDetailLinkState}
-            onClick={rememberLogDetailReturn}
-            data-testid="slot-open-recipe"
-            aria-label={ja.mealPlan.openRecipeAria.replace('{title}', recipe.title)}
-            className="inline-flex min-h-11 items-center gap-0.5 text-xs font-bold text-accent-ink underline"
+          <button
+            type="button"
+            data-testid="slot-change-recipe"
+            onClick={() => openPicker(date, slot, role, entryId, extraLocalId)}
+            disabled={locked}
+            aria-label={ja.mealPlan.changeRecipeAria.replace('{title}', recipe.title)}
+            className={`inline-flex min-h-11 items-center gap-0.5 text-xs font-bold text-accent-ink underline ${
+              locked ? 'opacity-40' : ''
+            }`}
           >
-            {ja.mealPlan.openRecipe}
+            {ja.mealPlan.changeRecipe}
             <ChevronRight size={14} aria-hidden />
-          </Link>
+          </button>
         )}
         {/* 作った！済みで薄くなっている枠から、その記録の中身を開く(2026-08-09 便EQ・オーナー実機
             「作った！して表示が薄くなっているレシピをタップ→記録を見たい」)。
@@ -6181,10 +6213,11 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
         // モードを切り替えても、どの食事の枠かの見分け方が変わらないようにする。
         // 2026-08-22 便JE（オーナー指示「外側の『夕食』などのカードも同様に」）:
         // 外側の曜日カードと同じ --radius-card にそろえる＝外より中のほうが丸い状態を作らない
+        // 2026-08-25 便KU: 囲みの線を --border-card にした（理由は renderSlotEditor 側に）
         className="rounded-card border border-l-4 p-[var(--space-sm)]"
         style={{
           background: slotLocked ? SLOT_TONE[slot].lockedBg : SLOT_TONE[slot].bg,
-          borderColor: slotLocked ? 'var(--accent)' : 'var(--border)',
+          borderColor: slotLocked ? 'var(--accent)' : 'var(--border-card)',
           borderLeftColor: SLOT_TONE[slot].bar,
         }}
       >
@@ -6291,13 +6324,24 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
         data-slot={slot}
         data-locked={slotLocked ? 'true' : undefined}
         // 2026-08-22 便JE: 角丸は通常表示の枠と同じ --radius-card（入れ子でそろえる）
+        /* 2026-08-25 便KU（オーナー原文「操作の段がレシピごとに囲まれているのはわかるが、
+           もともとの色が朝昼夕で似通っている上に距離が近いため、境目が認識しづらい。
+           ダークでも同様」）:
+            ・囲みの線を --border（面との差が実測1.15〜1.25:1）から **--border-card** に替えた。
+              便JEが「並ぶカードが何枚あるか線から読み取れない」を直すために作った線で、
+              図形の輪郭の下限とされる 3:1 を5テーマとも超える濃さを持つ。
+              朝昼夕の地色の差（実測 1.04:1・ダーク1.05:1）に見分けを頼るのをやめ、
+              **境目そのものを線で引く**
+            ・食事どうしの間を 8px → 16px（--space-md）にした。1品の中(12px)より広い
+              ＝距離でも切れ目が読める（便JQ が1品で作った関係を、食事の単位にも通す）
+           色は直接書かずトークンのまま＝5テーマとも自動で追従する */
         className="rounded-card border border-l-4 p-[var(--space-sm)]"
         style={{
           // ロック中は地色を薄め、囲みをアクセント色にする(便DX・オーナー指示
           // 「鍵アイコン+わずかな面の差」)。薄くする向きなので、地色に載る補足文字の
           // コントラストは元の実測値より上がる(index.css の --slot-bg-locked-* 参照)
           background: slotLocked ? SLOT_TONE[slot].lockedBg : SLOT_TONE[slot].bg,
-          borderColor: slotLocked ? 'var(--accent)' : 'var(--border)',
+          borderColor: slotLocked ? 'var(--accent)' : 'var(--border-card)',
           borderLeftColor: SLOT_TONE[slot].bar,
         }}
       >
@@ -6756,6 +6800,8 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
     title: string,
     alwaysVisible?: ReactNode,
     wrap = true,
+    /** 検査用の目印（開閉ボタンに付く）。節を増やしても掴み方が並び順に依らないようにするため */
+    testId?: string,
   ) => {
     const open = weekGroupOpen[key]
     return (
@@ -6764,6 +6810,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
       >
         <button
           type="button"
+          data-testid={testId}
           onClick={() => setWeekGroupOpen((prev) => ({ ...prev, [key]: !prev[key] }))}
           aria-expanded={open}
           aria-label={(open
@@ -8631,7 +8678,10 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                 通常表示で献立が1品も無い日は、押す場所の名前を1行で書く
                 （空き枠を出さないので、書かないと行き止まりになる） */}
             {dayEditKind === 'plan' && (
-              <div className="mt-[var(--space-sm)] space-y-[var(--space-sm)]">
+              /* 食事どうしの間は16px（2026-08-25 便KU）。1品の中12px・品と品の間16pxという
+                 便JQ の関係の上に、食事の切れ目をさらに広く取る＝どこで朝昼夕が変わるかが
+                 色だけでなく距離でも読める。月タブの日の窓も同じ値にそろえる */
+              <div className="mt-[var(--space-sm)] space-y-[var(--space-md)]">
                 {dayEditing ? (
                   visibleSlots.map((slot) => renderSlotEditor(date, slot))
                 ) : (
@@ -8706,7 +8756,9 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                     <CheckCircle2 size={14} className="text-accent-ink" aria-hidden />
                     {ja.mealPlan.pastCookedTitle}
                   </p>
-                  <ul className="mt-1 space-y-1">
+                  {/* 記録どうしの間は12px（2026-08-25 便KU）。月タブの日の窓とまったく同じ並べ方
+                      ＝同じ形のものを2通りに並べない */}
+                  <ul className="mt-1 space-y-3">
                     {shownLogsOf(date).map((entry, i) => (
                       <CookedLogCard
                         key={`${entry.recipe.id ?? `d${entry.detachedRecordId}`}-${i}`}
@@ -8796,10 +8848,33 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
           栄養価パネルは元から枠だけの見た目なので、残る2つをそれに揃えた */}
       <div className="mt-[var(--space-lg)] border-t border-edge pt-[var(--space-sm)]">
 
-      {/* 週まとめ: この週の献立ぶんの栄養と野菜量(2026-07-30 便CL・docs/60 第1段)。
-          各日カードと同じ部品・同じ数え方で、期間の合計だけを1人分で出す。
-          目安は「1日の目安 × 献立や記録がある日数」で並べる(週まとめ側だけ日数の注記を添える)。
-          概算食費カードの隣(すぐ上)に置く: どちらも「この週ぜんぶを振り返る数字」なので同じ場所に集める */}
+      {/* 2026-08-25 便KU（オーナー原文「買い物メモ、栄養と食費、それぞれでまとめて表示する
+          （ページ頭の設定のように）」）:
+          7日分のカードの下に**見出しの無い箱が5つ**（週の栄養／週の概算食費／献立表／
+          買い物メモの範囲／買い物メモを作る）縦に続いていて、どこからどこまでが一つの話なのかが
+          読み取れなかった。ページ頭の設定と同じ作法＝1枚の面（.setup-panel）にまとめ、
+          中を「栄養と食費」「買い物メモ」の2節に分けて仕切り線で切る。
+          畳んだ状態から始めるのも上の3節と同じ。ただし**「買い物メモを作る」ボタンは
+          折りたたみの外**に出したままにする（毎回押すものはしまわない＝
+          「まとめて献立を入力」を見出しの横に残しているのと同じ考え方）。
+          献立表（印刷・画像で保存）はこの2つのどちらでもないので、面の外に残す */}
+      <div className="setup-panel mt-[var(--space-md)]">
+
+      {/* 節1: 栄養と食費。
+          週まとめの栄養（2026-07-30 便CL・docs/60 第1段）と週の概算食費（便BH-3・タスク4）は
+          どちらも「この週ぜんぶを振り返る数字」なので、同じ節に入れる。
+          直す前は概算食費だけが自分の折りたたみを持っていたが、節そのものが折りたたみに
+          なったので**入れ子の折りたたみは作らない**（開くのに2回押させない） */}
+      <section className="p-[var(--space-sm)]">
+        {renderWeekGroupHeader(
+          'nutritionCost',
+          ja.mealPlan.weekGroupNutritionCostTitle,
+          undefined,
+          true,
+          'week-nutrition-cost-toggle',
+        )}
+        <Collapse open={weekGroupOpen.nutritionCost}>
+          <>
       {weekBalance.countedDays > 0 && (
         <div className="mt-[var(--space-md)]">
           <NutritionBalancePanel
@@ -8815,27 +8890,16 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
         </div>
       )}
 
-      {/* 週の概算食費（2026-07-24 便BH-3・タスク4: 「まとめて献立」直後にいきなり金額が出る違和感を
-          解消するため、7日分カードの下=邪魔にならない位置へ移動し、小さな折りたたみ(既定閉)にした。
-          価格情報が1件も無い/何も割り当てていない(weekCost===0)ときはセクションごと非表示のまま。
-          タスク8: 展開時に「◯食分」も併記する） */}
+      {/* 週の概算食費（2026-07-24 便BH-3・タスク4: 「まとめて献立」直後にいきなり金額が出る
+          違和感を解消するため、7日分カードの下=邪魔にならない位置に置き、既定では出さない）。
+          価格情報が1件も無い/何も割り当てていない(weekCost===0)ときは中身ごと非表示のまま。
+          2026-08-25 便KU: 「栄養と食費」の節の中へ入れたので、自前の折りたたみは持たない。
+          見出しは節の中の小見出しにし、金額はその横に置く（2026-08-20 便IG・⑬
+          「◯月の食費の横に表示して。縦長にしない。」と同じ作法） */}
       {hasPricedRecipe && weekCost > 0 && (
-        <section className="mt-[var(--space-md)] rounded-md border border-edge">
-          <button
-            type="button"
-            onClick={() => setWeekCostOpen((v) => !v)}
-            aria-expanded={weekCostOpen}
-            className="flex w-full items-center justify-between gap-2 p-[var(--space-md)] text-left"
-          >
-            <span className="font-bold">{ja.mealPlan.weekCostTitle}</span>
-            {weekCostOpen ? (
-              <ChevronUp size={18} className="shrink-0 text-accent-ink" aria-hidden />
-            ) : (
-              <ChevronDown size={18} className="shrink-0 text-accent-ink" aria-hidden />
-            )}
-          </button>
-          <Collapse open={weekCostOpen}>
-            <div className="px-[var(--space-md)] pb-[var(--space-md)]">
+        <section className="mt-[var(--space-md)]">
+            <div>
+              <p className="text-sm font-bold text-ink-muted">{ja.mealPlan.weekCostTitle}</p>
               <p className="text-2xl font-bold text-accent-ink">
                 約{weekCost.toLocaleString()}円
                 <span className="ml-2 text-sm font-bold text-ink-muted">
@@ -8903,35 +8967,51 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                 </div>
               )}
             </div>
-          </Collapse>
         </section>
       )}
+          </>
+        </Collapse>
+      </section>
 
-      {/* A-4 献立表(印刷・画像で保存)。この週の分を1枚にまとめる(2026-07-29 便CB-2・docs/59)。
-          週タブでは面を塗らない見た目にする(便DP-8。曜日カードと紛れないため) */}
-      {renderPlanSheetSection(weekPlanSheet, '')}
+      {/* 節2: 買い物メモ。
+          範囲えらび（2026-08-08 便EA）は折りたたみの中、「買い物メモを作る」は外。
+          畳んでいても今の範囲が読めるよう、要約は見出しの横に出したままにする
+          （2026-08-25 便KU） */}
+      <section className="p-[var(--space-sm)]">
+        {renderWeekGroupHeader(
+          'shopping',
+          ja.mealPlan.weekGroupShoppingTitle,
+          renderShopRangeSummary(),
+          true,
+          'shop-range-toggle',
+        )}
+        {renderShopRange()}
+        <button
+          type="button"
+          onClick={goShopping}
+          disabled={weekRecipeIds.length === 0}
+          className="mt-[var(--space-sm)] flex w-full items-center justify-center gap-2 rounded-md bg-accent py-4 text-lg font-bold text-on-accent shadow-md disabled:opacity-40"
+        >
+          <ShoppingCart size={20} aria-hidden />
+          {shopRangeNarrowed ? ja.mealPlan.goToShoppingPicked : ja.mealPlan.goToShopping}
+        </button>
+        {weekRecipeIds.length === 0 && (
+          <p className="mt-1 text-center text-sm text-ink-muted">
+            {shopRangeNarrowed
+              ? ja.mealPlan.goToShoppingPickedEmpty
+              : ja.mealPlan.goToShoppingEmpty}
+          </p>
+        )}
+      </section>
 
       </div>
 
-      {/* この週の買い物リストを作る。2026-08-08 便EA: 日付と食事を選んでから作れるようにした
-          （既定は表示中の週ぜんぶ＝従来どおり）。範囲を絞ったときはボタン名も言い換える */}
-      {renderShopRange()}
-      <button
-        type="button"
-        onClick={goShopping}
-        disabled={weekRecipeIds.length === 0}
-        className="mt-[var(--space-sm)] flex w-full items-center justify-center gap-2 rounded-md bg-accent py-4 text-lg font-bold text-on-accent shadow-md disabled:opacity-40"
-      >
-        <ShoppingCart size={20} aria-hidden />
-        {shopRangeNarrowed ? ja.mealPlan.goToShoppingPicked : ja.mealPlan.goToShopping}
-      </button>
-      {weekRecipeIds.length === 0 && (
-        <p className="mt-1 text-center text-sm text-ink-muted">
-          {shopRangeNarrowed
-            ? ja.mealPlan.goToShoppingPickedEmpty
-            : ja.mealPlan.goToShoppingEmpty}
-        </p>
-      )}
+      {/* A-4 献立表(印刷・画像で保存)。この週の分を1枚にまとめる(2026-07-29 便CB-2・docs/59)。
+          週タブでは面を塗らない見た目にする(便DP-8。曜日カードと紛れないため)。
+          2026-08-25 便KU: 「栄養と食費」でも「買い物メモ」でもないので、面の外に置く */}
+      {renderPlanSheetSection(weekPlanSheet, '')}
+
+      </div>
 
       {/* 2026-08-02 便DE-11(オーナー指示): ここから開いた「作った記録」の戻るは、
           呼び出し元の週タブへ返す(?back=week)。従来はブラウザの戻りで献立タブに戻るだけで、
@@ -9563,7 +9643,8 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
               // （renderSlotView＝写真と料理名だけ）と編集モード（renderSlotEditor＝
               // 1品ごとの操作すべて）を、見出しの「編集」で切り替える。
               // 使う部品・並べ方は週タブとまったく同じものをそのまま呼ぶ
-              <div className="mt-[var(--space-sm)] space-y-[var(--space-sm)]">
+              /* 食事どうしの間は週タブとまったく同じ16px（2026-08-25 便KU） */
+              <div className="mt-[var(--space-sm)] space-y-[var(--space-md)]">
                 {dayModalWindow.plan === 'editor' ? (
                   <>
                     {dayModalEntries.length === 0 && (
@@ -9604,14 +9685,23 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                   <CheckCircle2 size={14} className="text-accent-ink" aria-hidden />
                   {ja.mealPlan.pastCookedTitle}
                 </p>
-                <ul className="mt-1 space-y-1">
+                {/* 記録どうしの間は12px（2026-08-25 便KU）。1件の中（カードと入口の行）は2pxなので、
+                    どの入口がどのレシピのものかが距離で読める（便JQ と同じ「中 < 間」の関係） */}
+                <ul className="mt-1 space-y-3">
                   {dayModalLogs.map((entry, i) => (
                     <CookedLogCard
                       key={`${entry.recipe.id ?? `d${entry.detachedRecordId}`}-${i}`}
                       recipe={entry.recipe}
                       log={entry.log}
                       readOnly={isDemo}
-                      onNavigate={() => setDayModalDate(null)}
+                      // 2026-08-25 便KU（オーナー原文「窓の記録のレシピからレシピ詳細→戻る→
+                      // レシピ一覧に戻ってしまうので、直近の画面に戻して。」）: この記録カードだけ
+                      // 出所を渡しておらず、詳細の「戻る」が必ずレシピ一覧へ行っていた。
+                      // 同じ窓の中の献立の枠のカードと**同じ帰り道**に乗せる
+                      // ＝月と縦位置とこの日の窓ごと開き直す（rememberMonthReturn の openDate）。
+                      // 窓は閉じない（閉じると覚える対象の openDate が消える）
+                      linkState={logDetailLinkState}
+                      onNavigate={rememberLogDetailReturn}
                       // 2026-08-09 便EQ(オーナー実機「月献立の作った記録から献立名をタップで
                       // 整理された記録を見たい」): 料理名を押すと記録の中身の小窓が開く
                       onOpenDetail={() => setLogDetail(entry)}

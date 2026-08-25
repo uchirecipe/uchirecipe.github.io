@@ -6423,15 +6423,25 @@ try {
       await wuPage.getByRole('button', { name: ja.mealPlan.viewWeek, exact: true }).click()
       await openAllWeekDays(wuPage) // 便ID・⑦: 畳む既定になったので、カードの中を触る前に開く
       await wuPage.waitForTimeout(700)
+      // 2026-08-25 便KU: 1品カードは編集モードでも**レシピ詳細へのリンク**になり、差し替えは
+      // 同じ行の「レシピを変更」が持つようになった。掴む先を <button> から目印（row-recipe）へ移す
+      // ＝この節が見たいのは「記録済みと予定の見分け」で、押しどころの正体ではない
       const wuRows = await wuPage.evaluate((d) => {
         const sec = document.querySelector(`section[data-date="${d}"]`)
-        const btns = [...(sec?.querySelectorAll('button') ?? [])]
-        const cooked = btns.find((b) => b.textContent?.includes('肉じゃが'))
-        const planned = btns.find((b) => b.textContent?.includes('カレーライス'))
+        const rows = [...(sec?.querySelectorAll('[data-testid="plan-row"]') ?? [])]
+        const rowOf = (title) => rows.find((r) => (r.textContent ?? '').includes(title))
+        const cardOf = (row) => row?.querySelector('[data-testid="row-recipe"]') ?? null
+        const changeOf = (row) => row?.querySelector('[data-testid="slot-change-recipe"]') ?? null
+        const cookedRow = rowOf('肉じゃが')
+        const plannedRow = rowOf('カレーライス')
+        const cooked = cardOf(cookedRow)
+        const planned = cardOf(plannedRow)
+        const cookedChange = changeOf(cookedRow)
         return {
           cookedCls: cooked?.className ?? '',
           cookedText: cooked?.textContent ?? '',
-          cookedDisabled: cooked?.disabled ?? true,
+          // 差し替えの道が残っているか（記録済みでも押せること）
+          cookedChangeDisabled: cookedChange ? cookedChange.disabled : true,
           plannedCls: planned?.className ?? '',
           plannedText: planned?.textContent ?? '',
         }
@@ -6456,17 +6466,20 @@ try {
       )
       // 司令部裁定: 見た目だけ区別し、編集は可能なまま残す(間違えた記録を直せない方が害が大きい)
       check(
-        'WEEKUI-01(便DP-5) 記録済みの枠も押して選び直せる(編集不可にはしない)',
-        wuRows.cookedDisabled === false,
+        'WEEKUI-01(便DP-5→便KU) 記録済みの枠でも「レシピを変更」が押せる(編集不可にはしない)',
+        wuRows.cookedChangeDisabled === false,
+        JSON.stringify(wuRows.cookedChangeDisabled),
       )
       await wuPage.evaluate((d) => {
         const sec = document.querySelector(`section[data-date="${d}"]`)
-        const b = [...(sec?.querySelectorAll('button') ?? [])].find((x) => x.textContent?.includes('肉じゃが'))
-        b?.click()
+        const row = [...(sec?.querySelectorAll('[data-testid="plan-row"]') ?? [])].find((r) =>
+          (r.textContent ?? '').includes('肉じゃが'),
+        )
+        row?.querySelector('[data-testid="slot-change-recipe"]')?.click()
       }, wuToday)
       await wuPage.waitForTimeout(500)
       check(
-        'WEEKUI-01(便DP-5) 記録済みの枠を押すとレシピ選択の窓が開く',
+        'WEEKUI-01(便DP-5→便KU) 記録済みの枠でも「レシピを変更」でレシピ選択の窓が開く',
         !!(await wuPage.getByPlaceholder(ja.mealPlan.pickSearchPlaceholder).count()),
       )
       await wuPage.keyboard.press('Escape')
@@ -7180,12 +7193,13 @@ try {
           if (!block) return null
           const buttons = [...block.querySelectorAll('button')]
           const remove = buttons.find((b) => b.getAttribute('aria-label') === 'この割り当てを外す')
-          // 料理名(押すとレシピを選び直すカード)。2026-08-19 便HXまではクラス名(flex-1)で
-          // 拾っていたが、それは自前で組んでいた行の内部の書き方＝便HWで共通のレシピカードに
-          // 寄せた時点で当たらなくなり、ロック中も解除後も null(=測れていない)になっていた。
-          // 実機では鍵を掛けると押せなくなっていた(disabled)ので、掴み方だけを直す。
+          // 差し替えのボタン。2026-08-19 便HXまではクラス名(flex-1)で拾っていたが、
+          // それは自前で組んでいた行の内部の書き方＝便HWで共通のレシピカードに寄せた時点で
+          // 当たらなくなり、ロック中も解除後も null(=測れていない)になっていた。
+          // 2026-08-25 便KU: 差し替えは料理名のカードから「レシピを変更」のボタンへ移った
+          // （カードの押下はレシピ詳細＝鍵に関わらず読める）。掴む先だけを移す。
           // 見つからなければ null のまま＝下の判定(=== true / === false)はどちらも不合格になる
-          const name = block.querySelector('[data-testid="row-recipe"]')
+          const name = block.querySelector('[data-testid="slot-change-recipe"]')
           const servings = buttons.find((b) =>
             (b.getAttribute('aria-label') ?? '').includes('この行の食数を変える'),
           )
@@ -7204,7 +7218,7 @@ try {
         }, { date: lkDate, suggestAria: ja.mealPlan.suggestAria })
       const lkLockedCtl = await lkControls()
       check(
-        'WEEKLOCK(便EA) ロック中は ×(削除)・料理名(差し替え)・食数 が押せない',
+        'WEEKLOCK(便EA→便KU) ロック中は ×(削除)・レシピを変更・食数 が押せない',
         !!lkLockedCtl &&
           lkLockedCtl.removeDisabled === true &&
           lkLockedCtl.nameDisabled === true &&
@@ -7245,7 +7259,7 @@ try {
           JSON.stringify(await lkPlanOf(lkDate)) === JSON.stringify(lkPlanBeforeManual),
         `before=${JSON.stringify(lkPlanBeforeManual)}`,
       )
-      // 2026-08-19 便HX: 料理名(差し替え)は「押せない印が付いている」だけでなく、
+      // 2026-08-19 便HX: 差し替えは「押せない印が付いている」だけでなく、
       // **実際に押しても差し替えの画面が開かない**ことまで見る。
       // 便HWで掴み方が外れたとき、印だけを見る書き方では null(測れていない)で落ちるまで
       // 気付けなかった＝押した結果まで見ておくと、印の名前が変わっても意味が残る
@@ -7254,7 +7268,7 @@ try {
           const section = document.querySelector(`section[data-date="${date}"]`)
           const name = section
             ?.querySelector('[data-testid="slot-block"]')
-            ?.querySelector('[data-testid="row-recipe"]')
+            ?.querySelector('[data-testid="slot-change-recipe"]')
           if (!name) return false
           name.click()
           return true
@@ -7262,7 +7276,7 @@ try {
       const lkNameClickedWhileLocked = await lkClickName()
       await lkPage.waitForTimeout(700)
       check(
-        'WEEKLOCK(便EA) ロック中は料理名を押しても差し替えの画面が開かない',
+        'WEEKLOCK(便EA→便KU) ロック中は「レシピを変更」を押しても差し替えの画面が開かない',
         lkNameClickedWhileLocked === true &&
           (await lkPage.locator('[data-testid="recipe-picker"]').count()) === 0,
         `押せた=${lkNameClickedWhileLocked}`,
@@ -9652,13 +9666,13 @@ try {
       await mpPage.waitForTimeout(300)
       await mpPage.getByText('肉じゃが', { exact: true }).first().click()
       await mpPage.waitForTimeout(400)
+      // 2026-07-24 便BH-3・タスク4: 概算食費は小さな折りたたみ(既定閉)になった。
+      // 2026-08-25 便KU: その折りたたみは「栄養と食費」の節に一本化された（入れ子にしない）。
+      // 開いて初めて見出し・金額・リンクが出る
+      await openWeekGroup(mpPage, ja.mealPlan.weekGroupNutritionCostTitle)
+      await mpPage.waitForTimeout(500)
       const mpAssignedText = await mpPage.textContent('body')
-      // 2026-07-24 便BH-3・タスク4: 概算食費は小さな折りたたみ(既定閉)になった。見出し(トグル)は
-      // 割り当て後に出るが、金額・リンクは展開して初めて出る
       check('MEALPLAN-01(Fix3) 割り当てると概算食費セクションが出る', mpAssignedText.includes(ja.mealPlan.weekCostTitle))
-      // タスク4: 折りたたみを展開してから金額・食数・リンクを確認する
-      await mpPage.getByRole('button', { name: ja.mealPlan.weekCostTitle }).click()
-      await mpPage.waitForTimeout(300)
       const mpCostText = await mpPage.textContent('body')
       const costMatch = mpCostText.match(/約([\d,]+)円/)
       check(
@@ -9996,9 +10010,13 @@ try {
         'NUTRI-DAY-01(docs/60 §7 未決#3) 野菜量は無料でも1行に出る',
         /野菜約[\d,]+g/.test(nbFilledText),
       )
+      // 2026-08-25 便KU: 週まとめの栄養は「栄養と食費」の節の中（既定は畳んである）。
+      // **節を開いてから**読む＝上の nbFilledText（節を開く前の画面）では出ていない
+      await openWeekGroup(nbPage, ja.mealPlan.weekGroupNutritionCostTitle)
+      await nbPage.waitForTimeout(600)
       check(
         'NUTRI-WEEK-01 週まとめに「表示している週の献立の栄養（1人分の概算）」が出る',
-        nbFilledText.includes(ja.nutritionBalance.weekTitle),
+        ((await nbPage.textContent('body')) ?? '').includes(ja.nutritionBalance.weekTitle),
       )
 
       // 日カードを展開して目安の説明文・注記・出典・鍵付き導線を確認する
@@ -10097,6 +10115,9 @@ try {
       )
 
       // 週まとめを展開: 目安は日数で掛けず、1日分の基準を説明文1行で書く(便CW-7)
+      // 2026-08-25 便KU: 週まとめの栄養は「栄養と食費」の節の中（既定は畳んである）
+      await openWeekGroup(nbPage, ja.mealPlan.weekGroupNutritionCostTitle)
+      await nbPage.waitForTimeout(500)
       await nbPage.getByRole('button', { name: ja.nutritionBalance.weekToggleExpand }).click()
       await nbPage.waitForTimeout(400)
       const nbWeekOpenText = await nbPage.textContent('body')
@@ -10159,6 +10180,8 @@ try {
       await nbPage.getByRole('button', { name: ja.mealPlan.viewWeek, exact: true }).click()
       await openAllWeekDays(nbPage) // 便ID・⑦: 畳む既定になったので、カードの中を触る前に開く
       await nbPage.waitForTimeout(400)
+      await openWeekGroup(nbPage, ja.mealPlan.weekGroupNutritionCostTitle) // 便KU
+      await nbPage.waitForTimeout(500)
       await nbPage.getByRole('button', { name: ja.nutritionBalance.weekToggleExpand }).click()
       await nbPage.waitForTimeout(400)
       check(
@@ -10166,8 +10189,9 @@ try {
         await nbPage.locator('[data-testid="include-rice"]').first().isChecked(),
       )
       // 食費にも同じ選択が効き、何を足した金額なのかを必ず書く
-      await nbPage.getByRole('button', { name: ja.mealPlan.weekCostTitle }).click()
-      await nbPage.waitForTimeout(400)
+      // （2026-08-25 便KU: 概算食費は「栄養と食費」の節の中）
+      await openWeekGroup(nbPage, ja.mealPlan.weekGroupNutritionCostTitle)
+      await nbPage.waitForTimeout(500)
       check(
         'NUTRI-DAY-01(便CW-10) 週の概算食費に「ごはん◯杯分を含めた金額です」を添える',
         /ごはん\d+杯(?:分|ぶん)（約[\d,]+円）を含めた金額です/.test(await nbPage.textContent('body')),
@@ -13111,8 +13135,9 @@ try {
       )
       // 未設定のときの概算食費(合計金額)と注記を控える
       const hhOpenCost = async () => {
-        await hhPage.getByRole('button', { name: ja.mealPlan.weekCostTitle }).click()
-        await hhPage.waitForTimeout(400)
+        // 2026-08-25 便KU: 概算食費は「栄養と食費」の節の中（節を開けば金額まで出る）
+        await openWeekGroup(hhPage, ja.mealPlan.weekGroupNutritionCostTitle)
+        await hhPage.waitForTimeout(500)
         const text = (await hhPage.textContent('body')) ?? ''
         return {
           yen: Number((text.match(/約([\d,]+)円/)?.[1] ?? '0').replace(/,/g, '')),
@@ -28084,7 +28109,9 @@ try {
       if ((await pkRow.count()) === 1) {
         const pkOpen = pkRow.getByRole('button', { name: ja.mealPlan.emptyAssign })
         if ((await pkOpen.count()) === 1) await pkOpen.click()
-        else await pkRow.locator('[data-testid="row-recipe"]').first().click()
+        // 2026-08-25 便KU: 埋まっている枠の差し替えは「レシピを変更」から
+        // （カードの押下はレシピ詳細に移った）
+        else await pkRow.locator('[data-testid="slot-change-recipe"]').first().click()
         await pkPage.waitForTimeout(1400)
         const pkPicker = pkPage.locator('[data-testid="recipe-picker"]')
         check('PICKCOMPACT-05 前提: 「レシピを選ぶ」画面が開いた', (await pkPicker.count()) === 1)
@@ -29891,6 +29918,9 @@ try {
       await enPage.locator('[data-testid="day-lock"]').first().click()
       await enPage.waitForTimeout(700)
 
+      // 2026-08-25 便KU: 週まとめの栄養は「栄養と食費」の節の中（既定は畳んである）
+      await openWeekGroup(enPage, ja.mealPlan.weekGroupNutritionCostTitle)
+      await enPage.waitForTimeout(600)
       // 文言は ja.ts から読むが、evaluate の中はブラウザ側なので引数で渡す（便JM）
       const enPanel = await enPage.evaluate((weekToggleAria) => {
         const btns = [...document.querySelectorAll('button[aria-label]')]
@@ -31537,15 +31567,18 @@ try {
         .getByRole('button', { name: '肉じゃがの作った記録を見る' })
         .first()
       check('EQ-01(③) 作った！済みの枠の下に「作った記録を見る」が出る', (await eqPlanOpen.count()) === 1)
-      // 枠そのものは従来どおり「押すとレシピを選び直せる」まま(便DP-5の裁定を壊さない)
+      // 作った！済みの枠でも「レシピを変更」で選び直せるまま(便DP-5の裁定を壊さない)。
+      // 2026-08-25 便KU: 差し替えは枠そのものの押下から「レシピを変更」のボタンへ移った
+      // （枠の押下はレシピ詳細＝アプリの他のレシピカードと同じ行き先）
       const eqRowStillEditable = await eqPage.evaluate((d) => {
         const sec = document.querySelector(`section[data-date="${d}"]`)
-        const b = [...(sec?.querySelectorAll('button') ?? [])].find((x) =>
-          x.textContent?.includes('肉じゃが'),
+        const row = [...(sec?.querySelectorAll('[data-testid="plan-row"]') ?? [])].find((r) =>
+          (r.textContent ?? '').includes('肉じゃが'),
         )
-        return b ? !b.disabled : null
+        const change = row?.querySelector('[data-testid="slot-change-recipe"]')
+        return change ? !change.disabled : null
       }, eqToday)
-      check('EQ-01(③) 作った！済みの枠は押して選び直せるまま', eqRowStillEditable === true)
+      check('EQ-01(③→便KU) 作った！済みの枠でも「レシピを変更」で選び直せるまま', eqRowStillEditable === true)
       await eqPlanOpen.click()
       await eqPage.waitForTimeout(700)
       check(
@@ -33747,13 +33780,13 @@ try {
       const ezTodaySection = ezPage.locator(`section[data-date="${ezSeed.today}"]`)
       // 2026-08-22 便IV（オーナー原文「週献立は、通常表示はレシピカード（レシピ名と画像のみ）のみ
       // （タップでレシピ詳細画面につながる）。」）: 通常表示では**カードそのものが**レシピ詳細への
-      // 入口になった。「レシピを見る」の1行は編集モード（枠の押下＝選び直しに割り当たっている側）に
-      // 残してある＝どちらのモードでもレシピ詳細への道が1つある
+      // 入口になった。2026-08-25 便KU で編集モードのカードも同じ行き先になり、
+      // 1品ごとの操作（レシピを変更・引き直し・外す・食数）だけが編集モードに残っている
       const ezCards = ezTodaySection.locator('[data-testid="row-recipe"]')
       check(
-        'EZ-05(便IV) 通常表示では「レシピを見る」の1行を出さない（カードが入口）',
-        (await ezTodaySection.locator('[data-testid="slot-open-recipe"]').count()) === 0,
-        `件数=${await ezTodaySection.locator('[data-testid="slot-open-recipe"]').count()}`,
+        'EZ-05(便IV→便KU) 通常表示には1品ごとの操作を出さない（カードだけが入口）',
+        (await ezTodaySection.locator('[data-testid="slot-change-recipe"]').count()) === 0,
+        `件数=${await ezTodaySection.locator('[data-testid="slot-change-recipe"]').count()}`,
       )
       check(
         'EZ-05(便IV) 通常表示に、レシピが入っている枠のカードが並ぶ',
@@ -33789,37 +33822,51 @@ try {
         (await ezPage.locator(`section[data-date="${ezSeed.today}"]`).count()) === 1,
         ezPage.url(),
       )
-      // 編集モード側: 枠の押下は「レシピを選び直す」のまま（入れ替えの道を奪っていない）で、
-      // レシピ詳細へは「レシピを見る」の1行から行ける（便EZ・便DP-5の裁定をそのまま残す）
+      // 編集モード側（2026-08-25 便KU・オーナー原文「編集画面、ここだけレシピカードをタップで
+      // レシピ詳細に行かない。他はレシピカードから必ずレシピ詳細に行くので揃えるべきでは。
+      // 「レシピを見る」→「レシピを変更」」）:
+      // **カードの押下は通常表示と同じレシピ詳細**になり、差し替えは「レシピを変更」が持つ。
+      // 便DP-5の裁定（差し替えの道を奪わない）は、名前の付いたボタンとして残すことで満たす
+      // 「戻る」で週タブへ帰ってきた直後なので、そのまま曜日カードを開いて編集モードへ入る
       await openAllWeekDays(ezPage)
       check(
         'EZ-05(便IV) 前提: 今日のカードを編集モードにできた',
         (await openWeekDayEdit(ezPage, ezSeed.today)) === true,
       )
-      const ezOpenRecipe = ezTodaySection.locator('[data-testid="slot-open-recipe"]')
+      const ezChangeRecipe = ezTodaySection.locator('[data-testid="slot-change-recipe"]')
       check(
-        'EZ-05 編集モードでは、レシピが入っている枠に「レシピを見る」が出る',
-        (await ezOpenRecipe.count()) === 2,
-        `件数=${await ezOpenRecipe.count()}`,
+        'EZ-05(便KU) 編集モードでは、レシピが入っている枠に「レシピを変更」が出る',
+        (await ezChangeRecipe.count()) === 2,
+        `件数=${await ezChangeRecipe.count()}`,
       )
       check(
-        'EZ-05 空いている枠には出さない（押す先が無いため）',
-        (await ezOpenRecipe.count()) ===
+        'EZ-05(便KU) 空いている枠には出さない（差し替える中身が無いため）',
+        (await ezChangeRecipe.count()) ===
           (await ezTodaySection.locator('[data-testid="row-thumb"]').count()) -
             (await ezTodaySection
               .getByRole('button', { name: ja.mealPlan.emptyAssign })
               .count()),
-        `レシピを見る=${await ezOpenRecipe.count()} サムネ=${await ezTodaySection.locator('[data-testid="row-thumb"]').count()}`,
+        `レシピを変更=${await ezChangeRecipe.count()} サムネ=${await ezTodaySection.locator('[data-testid="row-thumb"]').count()}`,
       )
       check(
-        'EZ-05 編集モードでは枠そのものの押下が「レシピを選び直す」のまま（入れ替えの道を奪っていない）',
-        (await ezTodaySection.getByRole('button', { name: /EZ照り焼き/ }).count()) === 1,
-        `件数=${await ezTodaySection.getByRole('button', { name: /EZ照り焼き/ }).count()}`,
+        'EZ-05(便KU) 編集モードでもカードはレシピ詳細へのリンク（通常表示と同じ行き先）',
+        (await ezTodaySection.locator('a[data-testid="row-recipe"]').count()) === 2,
+        `リンク=${await ezTodaySection.locator('a[data-testid="row-recipe"]').count()}`,
       )
-      await ezOpenRecipe.first().click()
-      await ezPage.waitForTimeout(900)
+      // 「レシピを変更」を押すと、差し替えの画面（レシピを選ぶ）が開く＝入れ替えの道は残っている
+      await ezChangeRecipe.first().click()
+      await ezPage.waitForTimeout(1200)
       check(
-        'EZ-05 「レシピを見る」でもそのレシピの詳細へ移る',
+        'EZ-05(便KU) 「レシピを変更」で差し替えの画面が開く（入れ替えの道を奪っていない）',
+        (await ezPage.locator('[data-testid="recipe-picker"]').count()) === 1,
+        `ピッカー=${await ezPage.locator('[data-testid="recipe-picker"]').count()}`,
+      )
+      await ezPage.keyboard.press('Escape')
+      await ezPage.waitForTimeout(800)
+      await ezTodaySection.locator('a[data-testid="row-recipe"]').first().click()
+      await ezPage.waitForTimeout(1200)
+      check(
+        'EZ-05(便KU) 編集モードのカードを押すとレシピ詳細が開く',
         /#\/recipes\/\d+/.test(ezPage.url()),
         ezPage.url(),
       )
@@ -35274,14 +35321,15 @@ try {
       await fdPage.waitForTimeout(1500)
       await fdPage.locator(`[data-date="${fdSeed.today}"]`).first().click()
       await fdPage.waitForTimeout(1000)
-      // 2026-08-23 便JN: 「レシピを見る」は編集モードの中へ移った（週タブと同じ2モード）
-      const fdMonthEditOn = await openMonthDayEdit(fdPage)
-      check('FD-03 前提: 月タブの日の窓を編集モードにできた', fdMonthEditOn === true, `結果=${fdMonthEditOn}`)
+      // 2026-08-25 便KU: 日の窓のレシピカードは**通常表示のまま**レシピ詳細へのリンク
+      // （オーナー原文「他はレシピカードから必ずレシピ詳細に行くので揃えるべきでは」）。
+      // 編集モードに入らなくても同じ道が在ることを、この節でそのまま測る
       check(
-        'FD-03 前提: 月タブの日の窓が開き、中に「レシピを見る」がある',
-        (await fdPage.locator('[data-testid="slot-open-recipe"]').count()) >= 1,
+        'FD-03 前提: 月タブの日の窓が開き、中のレシピカードがレシピ詳細へのリンクになっている',
+        (await fdPage.locator('[role="dialog"] a[data-testid="row-recipe"]').count()) >= 1,
+        `リンク=${await fdPage.locator('[role="dialog"] a[data-testid="row-recipe"]').count()}`,
       )
-      await fdPage.locator('[data-testid="slot-open-recipe"]').first().click()
+      await fdPage.locator('[role="dialog"] a[data-testid="row-recipe"]').first().click()
       await fdPage.waitForTimeout(1500)
       check(
         'FD-03 前提: 月タブからもレシピ詳細へ移る',
@@ -46683,7 +46731,7 @@ try {
             servings: /\d+人分/.test(text) ? 1 : 0,
             roleLabel: aria.roles.filter((r) => text.includes(r)).length,
             slotLockButtons: section.querySelectorAll('[data-testid="slot-lock"]').length,
-            pickers: section.querySelectorAll('[data-testid="row-recipe"]').length,
+            pickers: section.querySelectorAll('[data-testid="slot-change-recipe"]').length,
           }
         },
         {
@@ -46708,7 +46756,7 @@ try {
         JSON.stringify(iwEditOps),
       )
       check(
-        'IVEDIT-03 編集モードでも1品カードは残っている（差し替えの入口）',
+        'IVEDIT-03 編集モードには差し替えの入口「レシピを変更」が出る（2026-08-25 便KU）',
         iwEditOps !== null && iwEditOps.pickers > 0,
         JSON.stringify(iwEditOps),
       )
@@ -50618,8 +50666,9 @@ try {
             (el.getAttribute('aria-label') ?? '').startsWith(name),
           ),
         )
-        // 料理名のカードそのもの（押すと差し替えの窓が開く）も、鍵で止まる操作の1つ
-        const ops = [...byAria, ...dialog.querySelectorAll('[data-testid="row-recipe"]')]
+        // 差し替えのボタン（2026-08-25 便KU で料理名のカードから移った）も、鍵で止まる操作の1つ。
+        // カードそのものはレシピ詳細への行き先になったので、鍵では止めない（読むのは止めない）
+        const ops = [...byAria, ...dialog.querySelectorAll('[data-testid="slot-change-recipe"]')]
         return {
           ops: ops.length,
           pressable: ops.filter((el) => !el.disabled).length,
@@ -50892,6 +50941,10 @@ try {
       await jpgPage.getByRole('button', { name: ja.mealPlan.viewWeek, exact: true }).first().click()
       await jpgPage.waitForTimeout(1600)
 
+      // 2026-08-25 便KU: 週まとめの栄養は「栄養と食費」の節の中へ入った。
+      // この節を測るのは**週まとめの折りたたみ**なので、外側の節は先に開いておく
+      await openWeekGroup(jpgPage, ja.mealPlan.weekGroupNutritionCostTitle)
+      await jpgPage.waitForTimeout(600)
       const jpgGap = jpgPage.locator('[data-testid="nutrition-gap-dish"]')
       // ① 畳んでいるあいだは名前を出さない
       check(
@@ -53545,6 +53598,434 @@ try {
     }
   }
 
+
+  // ==========================================================================================
+  // 便KU: 2026-08-25 オーナー実機（献立の「月」「週」と買い物メモ）
+  //  KUBACK-01 月タブの日の窓の「作った記録」のレシピ→詳細→戻る で、月・その日の窓ごと帰る
+  //  KUBACK-02 買い物メモの食材の窓のレシピ→詳細→戻る で、買い物メモ・同じ食材の窓ごと帰る
+  //  KUROW-03  「作った記録を見る」は右端にあり、レシピカードより明らかに低い
+  //  KULINE-04 朝昼夕の境目が線で読める（ライト・ダークの両方で、線と面の差が3:1以上）
+  //  KUGROUP-05 7日分の下は「栄養と食費」「買い物メモ」の2節にまとまり、
+  //             畳んでいても「買い物メモを作る」は押せる
+  // ==========================================================================================
+  currentCheck = 'KUBACK-01'
+  {
+    const kuBrowser = await chromium.launch()
+    try {
+      const kuCtx = await kuBrowser.newContext({ viewport: { width: 390, height: 844 } })
+      const kuPage = await kuCtx.newPage()
+      kuPage.on('dialog', (d) => void d.accept())
+      kuPage.on('pageerror', (err) => errors.push(`[pageerror@KU] ${err.message}`))
+      await kuPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await kuPage.waitForTimeout(2000)
+      const kuSeed = await kuPage.evaluate(async () => {
+        const openDb = () =>
+          new Promise((resolve, reject) => {
+            const r = indexedDB.open('uchi-recipe')
+            r.onsuccess = () => resolve(r.result)
+            r.onerror = () => reject(r.error)
+          })
+        const db = await openDb()
+        const P = (req) =>
+          new Promise((res, rej) => {
+            req.onsuccess = () => res(req.result)
+            req.onerror = () => rej(req.error)
+          })
+        const store = (name) => db.transaction(name, 'readwrite').objectStore(name)
+        const iso = (dt) =>
+          `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`
+        const now = new Date()
+        const today = iso(now)
+        // 過ぎた日は「今日の前日」だと今日が月初のときに前の月になる。
+        // 月タブは開いた月のカレンダーを出すので、**同じ月の中の過ぎた日**を選ぶ
+        // （今日が1日なら今日を使う＝どの日でも必ず今月のマスがある）
+        const past = now.getDate() > 1 ? iso(new Date(now.getFullYear(), now.getMonth(), 1)) : today
+        const mk = (title, logs = []) => ({
+          title,
+          servings: 2,
+          effortLevel: 'normal',
+          tags: [],
+          ingredients: [{ name: 'KUにんじん', amount: '1', unit: '本' }],
+          steps: [{ text: '切る。' }],
+          isFavorite: false,
+          cookedLogs: logs,
+          searchWords: [],
+          isStarter: false,
+          updatedAt: Date.now(),
+        })
+        const ids = []
+        for (let i = 1; i <= 3; i++) {
+          ids.push(await P(store('recipes').add(mk(`KU記録${i}`, [{ date: past, servings: 2 }]))))
+        }
+        // 買い物メモ（食材の窓の出所になるレシピ付き）
+        await P(
+          store('shoppingItems').add({
+            name: 'KUにんじん',
+            amount: '1本',
+            isChecked: false,
+            order: 0,
+            fromRecipeIds: [ids[0]],
+            fromRecipes: [{ recipeId: ids[0], amount: '1本' }],
+          }),
+        )
+        // 週の編集画面の境目を測るため、今日の朝昼夕に1品ずつ入れる
+        for (const slot of ['breakfast', 'lunch', 'dinner']) {
+          await P(store('mealPlans').add({ date: today, slot, role: 'main', recipeId: ids[0] }))
+        }
+        const cur = (await P(store('settings').get(1))) || { id: 1 }
+        await P(
+          store('settings').put({
+            ...cur,
+            id: 1,
+            // 月タブ（月間献立）はPro機能なので、解錠した状態で測る
+            proCode: 'UR-E2E-TEST-ONLY',
+            proActivatedAt: Date.now(),
+            visibleMealSlots: ['breakfast', 'lunch', 'dinner'],
+          }),
+        )
+        db.close()
+        return { today, past, ids }
+      })
+      // 生のIndexedDBへ書いたので必ず読み込み直す（CLAUDE.md 禁じ手⑥）
+      await kuPage.goto(`${BASE}/#/meal-plan`)
+      await kuPage.reload({ waitUntil: 'networkidle' })
+      await kuPage.waitForTimeout(2200)
+      await kuPage.getByRole('button', { name: ja.mealPlan.viewMonth, exact: true }).click()
+      await kuPage.waitForTimeout(1600)
+      await kuPage.locator(`[data-date="${kuSeed.past}"]`).first().click()
+      await kuPage.waitForTimeout(1400)
+      const kuDayDialog = kuPage.locator('[role="dialog"]')
+      check(
+        'KUBACK-01 前提: 月タブの日の窓が開き、作った記録のカードが並んでいる',
+        (await kuDayDialog.locator('[data-testid="cooked-log-card"]').count()) === 3,
+        `記録=${await kuDayDialog.locator('[data-testid="cooked-log-card"]').count()}件`,
+      )
+      const kuRecordLink = kuDayDialog
+        .locator('a[data-testid="cooked-log-recipe"]')
+        .first()
+      check(
+        'KUBACK-01 前提: 記録のカードがレシピ詳細へのリンクになっている',
+        (await kuRecordLink.count()) === 1,
+        `リンク=${await kuRecordLink.count()}`,
+      )
+      await kuRecordLink.click()
+      await kuPage.waitForTimeout(1500)
+      check(
+        'KUBACK-01 前提: 記録のカードからレシピ詳細へ移る',
+        /#\/recipes\/\d+/.test(kuPage.url()),
+        kuPage.url(),
+      )
+      await kuPage.getByRole('button', { name: ja.common.back }).first().click()
+      await kuPage.waitForTimeout(2500)
+      const kuBack = await kuPage.evaluate(() => {
+        const dialogs = [...document.querySelectorAll('[role="dialog"]')]
+        return {
+          url: location.hash,
+          dialogs: dialogs.length,
+          labels: dialogs.map((d) => d.getAttribute('aria-label') ?? '').join(' / '),
+          logs: document.querySelectorAll('[data-testid="cooked-log-card"]').length,
+        }
+      })
+      check(
+        'KUBACK-01 「戻る」でレシピ一覧へ飛ばされず、献立へ帰る',
+        kuBack.url.includes('/meal-plan'),
+        JSON.stringify(kuBack),
+      )
+      check(
+        'KUBACK-01 帰った先で、開いていた日の窓が開き直っている（記録も並んでいる）',
+        kuBack.dialogs >= 1 && kuBack.logs === 3,
+        JSON.stringify(kuBack),
+      )
+
+      // ---------- KUROW-03: 「作った記録を見る」の位置と高さ ----------
+      currentCheck = 'KUROW-03'
+      const kuRow = await kuPage.evaluate(() => {
+        const dialog = [...document.querySelectorAll('[role="dialog"]')].pop()
+        const li = dialog?.querySelector('[data-testid="cooked-log-card"]')
+        if (!li) return null
+        const card = li.querySelector('[data-testid="cooked-log-recipe"]')
+        const open = li.querySelector('[data-testid="cooked-log-open-detail"]')
+        if (!card || !open) return null
+        const lr = li.getBoundingClientRect()
+        const cr = card.getBoundingClientRect()
+        const or = open.getBoundingClientRect()
+        return {
+          li: Math.round(lr.height),
+          card: Math.round(cr.height),
+          open: Math.round(or.height),
+          rightGap: Math.round(lr.right - or.right),
+          // 当たり判定（.tap-target が広げる面）は44px四方を割らない
+          tapH: Math.round(
+            parseFloat(getComputedStyle(open, '::after').height) || or.height,
+          ),
+          tapW: Math.round(
+            parseFloat(getComputedStyle(open, '::after').width) || or.width,
+          ),
+        }
+      })
+      check('KUROW-03 前提: 記録のカードと「作った記録を見る」を掴めた', kuRow !== null, JSON.stringify(kuRow))
+      check(
+        'KUROW-03 「作った記録を見る」は行の右端に寄っている（右の空きが8px以内）',
+        kuRow !== null && kuRow.rightGap <= 8,
+        JSON.stringify(kuRow),
+      )
+      check(
+        'KUROW-03 その行はレシピカードより明らかに低い（カードの半分以下）',
+        kuRow !== null && kuRow.open * 2 <= kuRow.card,
+        JSON.stringify(kuRow),
+      )
+      check(
+        'KUROW-03 小さくしても指で押せる（当たり判定は44px四方以上）',
+        kuRow !== null && kuRow.tapH >= 44 && kuRow.tapW >= 44,
+        JSON.stringify(kuRow),
+      )
+
+      // ---------- KUBACK-02: 買い物メモの食材の窓へ帰る ----------
+      currentCheck = 'KUBACK-02'
+      await kuPage.goto(`${BASE}/#/shopping`)
+      await kuPage.reload({ waitUntil: 'networkidle' })
+      await kuPage.waitForTimeout(2000)
+      await kuPage.getByRole('button', { name: ja.shopping.tabMemo, exact: true }).click()
+      await kuPage.waitForTimeout(900)
+      const kuNameBtn = kuPage.getByRole('button', {
+        name: `KUにんじん ${ja.shopping.memoSourceOpen}`,
+      })
+      check('KUBACK-02 前提: 買い物メモの食材を掴めた', (await kuNameBtn.count()) === 1, `件数=${await kuNameBtn.count()}`)
+      await kuNameBtn.first().click()
+      await kuPage.waitForTimeout(900)
+      check(
+        'KUBACK-02 前提: 食材の窓が開き、出所のレシピが並ぶ',
+        (await kuPage.locator('a[data-testid="shopping-source-recipe"]').count()) >= 1,
+        `件数=${await kuPage.locator('a[data-testid="shopping-source-recipe"]').count()}`,
+      )
+      await kuPage.locator('a[data-testid="shopping-source-recipe"]').first().click()
+      await kuPage.waitForTimeout(1500)
+      check(
+        'KUBACK-02 前提: 窓のレシピからレシピ詳細へ移る',
+        /#\/recipes\/\d+/.test(kuPage.url()),
+        kuPage.url(),
+      )
+      await kuPage.getByRole('button', { name: ja.common.back }).first().click()
+      await kuPage.waitForTimeout(2500)
+      const kuShopBack = await kuPage.evaluate(() => {
+        const dialogs = [...document.querySelectorAll('[role="dialog"]')]
+        return {
+          url: location.hash,
+          dialogs: dialogs.length,
+          labels: dialogs.map((d) => d.getAttribute('aria-label') ?? '').join(' / '),
+        }
+      })
+      check(
+        'KUBACK-02 「戻る」でレシピ一覧へ飛ばされず、買い物メモへ帰る',
+        kuShopBack.url.includes('/shopping'),
+        JSON.stringify(kuShopBack),
+      )
+      check(
+        'KUBACK-02 帰った先で、開いていた食材の窓が開き直っている',
+        kuShopBack.dialogs >= 1 && kuShopBack.labels.includes('KUにんじん'),
+        JSON.stringify(kuShopBack),
+      )
+
+      // ---------- KULINE-04 / KUGROUP-05: 週タブ ----------
+      currentCheck = 'KUGROUP-05'
+      await kuPage.goto(`${BASE}/#/meal-plan`)
+      await kuPage.reload({ waitUntil: 'networkidle' })
+      await kuPage.waitForTimeout(2200)
+      await kuPage.getByRole('button', { name: ja.mealPlan.viewWeek, exact: true }).click()
+      await kuPage.waitForTimeout(1500)
+      await openAllWeekDays(kuPage)
+      await kuPage.waitForTimeout(600)
+      const kuGroupNames = [
+        ja.mealPlan.weekGroupNutritionCostTitle,
+        ja.mealPlan.weekGroupShoppingTitle,
+      ]
+      for (const name of kuGroupNames) {
+        check(
+          `KUGROUP-05 「${name}」の節が1つある（畳んだ状態で見出しだけ出る）`,
+          (await kuPage.getByRole('button', {
+            name: ja.mealPlan.weekGroupToggleOpenAria.replace('{group}', name),
+          }).count()) === 1,
+        )
+      }
+      check(
+        'KUGROUP-05 畳んでいても「買い物メモを作る」は押せる（毎回押すものはしまわない）',
+        await kuPage.getByRole('button', { name: ja.mealPlan.goToShopping }).isVisible(),
+      )
+      check(
+        'KUGROUP-05 畳んでいても、いま何を対象にしているかは読める（範囲の要約）',
+        (await kuPage.getByTestId('shop-range-summary').innerText()).includes(
+          ja.mealPlan.shopRangeSummaryAll,
+        ),
+      )
+      check(
+        'KUGROUP-05 畳んでいるあいだ、概算食費の見出しと金額は出さない',
+        !stripZwspText(await kuPage.textContent('body')).includes(ja.mealPlan.weekCostTitle),
+      )
+      await openWeekGroup(kuPage, ja.mealPlan.weekGroupNutritionCostTitle)
+      await kuPage.waitForTimeout(700)
+      check(
+        'KUGROUP-05 節を1回開くと、週まとめの栄養がその場に出る（入れ子の折りたたみを作らない）',
+        stripZwspText(await kuPage.textContent('body')).includes(ja.nutritionBalance.weekTitle),
+      )
+      await kuCtx.close()
+
+      // ---------- KULINE-04: 朝昼夕の境目（ライト・ダークの両方） ----------
+      currentCheck = 'KULINE-04'
+      for (const scheme of ['light', 'dark']) {
+        const lineCtx = await kuBrowser.newContext({
+          viewport: { width: 390, height: 844 },
+          colorScheme: scheme,
+        })
+        const linePage = await lineCtx.newPage()
+        linePage.on('pageerror', (err) => errors.push(`[pageerror@KULINE] ${err.message}`))
+        await linePage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+        await linePage.waitForTimeout(2000)
+        // 入れ物（context）ごとに端末の中身は空なので、この入れ物にも同じ献立を入れる
+        await linePage.evaluate(async () => {
+          const openDb = () =>
+            new Promise((resolve, reject) => {
+              const r = indexedDB.open('uchi-recipe')
+              r.onsuccess = () => resolve(r.result)
+              r.onerror = () => reject(r.error)
+            })
+          const db = await openDb()
+          const P = (req) =>
+            new Promise((res, rej) => {
+              req.onsuccess = () => res(req.result)
+              req.onerror = () => rej(req.error)
+            })
+          const store = (name) => db.transaction(name, 'readwrite').objectStore(name)
+          const iso = (dt) =>
+            `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`
+          const today = iso(new Date())
+          const id = await P(
+            store('recipes').add({
+              title: 'KU境目',
+              servings: 2,
+              effortLevel: 'normal',
+              tags: [],
+              ingredients: [],
+              steps: [{ text: '切る。' }],
+              isFavorite: false,
+              cookedLogs: [],
+              searchWords: [],
+              isStarter: false,
+              updatedAt: Date.now(),
+            }),
+          )
+          for (const slot of ['breakfast', 'lunch', 'dinner']) {
+            await P(store('mealPlans').add({ date: today, slot, role: 'main', recipeId: id }))
+          }
+          const cur = (await P(store('settings').get(1))) || { id: 1 }
+          await P(
+            store('settings').put({
+              ...cur,
+              id: 1,
+              visibleMealSlots: ['breakfast', 'lunch', 'dinner'],
+            }),
+          )
+          db.close()
+        })
+        await linePage.goto(`${BASE}/#/meal-plan`)
+        await linePage.reload({ waitUntil: 'networkidle' })
+        await linePage.waitForTimeout(2200)
+        await linePage.getByRole('button', { name: ja.mealPlan.viewWeek, exact: true }).click()
+        await linePage.waitForTimeout(1500)
+        await openAllWeekDays(linePage)
+        await linePage.waitForTimeout(600)
+        const lineToday = await linePage.evaluate(() => {
+          const d = new Date()
+          const pad = (n) => String(n).padStart(2, '0')
+          return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+        })
+        const lineEditOn = await openWeekDayEdit(linePage, lineToday)
+        check(`KULINE-04(${scheme}) 前提: 今日のカードを編集モードにできた`, lineEditOn === true)
+        const lineInfo = await linePage.evaluate((date) => {
+          // 色は oklab() で返ることがある（color-mix）。相対輝度は線形sRGBから出す
+          const clamp = (v) => Math.min(1, Math.max(0, v))
+          const oklabToLinear = (L, A, B) => {
+            const l_ = L + 0.3963377774 * A + 0.2158037573 * B
+            const m_ = L - 0.1055613458 * A - 0.0638541728 * B
+            const s_ = L - 0.0894841775 * A - 1.291485548 * B
+            const l = l_ * l_ * l_
+            const m = m_ * m_ * m_
+            const s = s_ * s_ * s_
+            return {
+              r: clamp(4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s),
+              g: clamp(-1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s),
+              b: clamp(-0.0041960863 * l - 0.7034186147 * m + 1.707614701 * s),
+            }
+          }
+          const lin = (v) => {
+            const c = v / 255
+            return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4)
+          }
+          const parse = (str) => {
+            if (!str) return null
+            let m = str.match(/oklab\(([^)]+)\)/)
+            if (m) {
+              const p = m[1]
+                .split(/[ ,/]+/)
+                .filter(Boolean)
+                .map((x) => (x.endsWith('%') ? Number(x.slice(0, -1)) / 100 : Number(x)))
+              return oklabToLinear(p[0], p[1], p[2])
+            }
+            m = str.match(/rgba?\(([^)]+)\)/)
+            if (!m) return null
+            const p = m[1].split(/[ ,/]+/).filter(Boolean).map(Number)
+            return { r: lin(p[0]), g: lin(p[1]), b: lin(p[2]) }
+          }
+          const lum = (c) => 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b
+          const ratio = (x, y) => {
+            if (!x || !y) return null
+            const a = lum(x)
+            const b = lum(y)
+            return Math.round(((Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05)) * 100) / 100
+          }
+          const section = document.querySelector(`section[data-date="${date}"]`)
+          if (!section) return null
+          const blocks = [...section.querySelectorAll('[data-testid="slot-block"]')]
+          if (blocks.length < 2) return null
+          const read = (el) => {
+            const cs = getComputedStyle(el)
+            const r = el.getBoundingClientRect()
+            return { bg: cs.backgroundColor, line: cs.borderTopColor, top: r.top, bottom: r.bottom }
+          }
+          const list = blocks.map(read)
+          const out = { blocks: blocks.length, gaps: [], lineVsAbove: [], lineVsBelow: [], bgPairs: [] }
+          for (let i = 1; i < list.length; i++) {
+            out.gaps.push(Math.round(list[i].top - list[i - 1].bottom))
+            out.lineVsAbove.push(ratio(parse(list[i].line), parse(list[i - 1].bg)))
+            out.lineVsBelow.push(ratio(parse(list[i].line), parse(list[i].bg)))
+            out.bgPairs.push(ratio(parse(list[i - 1].bg), parse(list[i].bg)))
+          }
+          return out
+        }, lineToday)
+        check(
+          `KULINE-04(${scheme}) 前提: 朝昼夕の枠が3つとも並んでいる`,
+          lineInfo !== null && lineInfo.blocks === 3,
+          JSON.stringify(lineInfo),
+        )
+        // 直す前は 地色どうし 1.04:1（ダーク1.05:1）・線と面 1.07〜1.25:1 で、
+        // 「どこで朝昼夕が変わるか」を色から読めなかった。**線で引く**側で測る
+        check(
+          `KULINE-04(${scheme}) 隣り合う枠の境目の線は、上下どちらの面に対しても3:1以上`,
+          lineInfo !== null &&
+            lineInfo.lineVsAbove.every((v) => v !== null && v >= 3) &&
+            lineInfo.lineVsBelow.every((v) => v !== null && v >= 3),
+          JSON.stringify(lineInfo),
+        )
+        check(
+          `KULINE-04(${scheme}) 枠どうしの間は16px以上（距離でも切れ目が読める）`,
+          lineInfo !== null && lineInfo.gaps.every((g) => g >= 16),
+          JSON.stringify(lineInfo),
+        )
+        await lineCtx.close()
+      }
+    } finally {
+      await kuBrowser.close()
+    }
+  }
 
 
   // --- KTNUM-01 / KTTIMER-02: 2026-08-25 便KT（オーナー書き溜め・並行調理ナビ）---
