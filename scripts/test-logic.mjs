@@ -31467,6 +31467,200 @@ import { safetyNotesFor, stepSafetyNotes, wholeRecipeSafetyNotes } from '../src/
   )
 }
 
+// ==========================================================================================
+// 便KQ: 熱いうちに食べたい品が先に仕上がって冷める
+// （2026-08-25・影響範囲テストC「時間が無い人」の実データ30品）
+//
+// 起きていたこと（実データ30品の全435組を組み直して数えた）:
+//   熱いうちに食べたい品が**その組に1つだけ**なのに、その品が全体の終わりより4分以上前に
+//   仕上がる組が15組あった。いちばん大きいのは12分前（豚肉とキャベツの蒸ししゃぶ ＋
+//   えのきとしめじの塩昆布和え）。蒸ししゃぶが15分で仕上がったあと、和え物の残りを
+//   12分やってから食卓に出す段取りになっていた。
+//   熱い品が2つある組（147件）は、どちらかが先に仕上がるのを物理的に避けられないので対象外。
+//
+// 測るのは**利用者が確かめたいこと**＝「熱いうちに食べたい品が、最後に仕上がること」。
+// 工程が何番目に出るか・いくつに割れたかは見ない（段取りが伸びても縮んでも同じ判定になる形）。
+// あわせて、2026-08-23 便KDで直した器具の二重予約が復活していないことと、
+// 全体の目安が直す前より伸びていないことも同じ組で見る（並べ替えの代償を見逃さないため）。
+// ==========================================================================================
+{
+  const kqRecipe = (id, title, dishType, steps) => ({
+    id,
+    title,
+    dishType,
+    servings: 2,
+    ingredients: [],
+    steps: steps.map(([text, minutes]) => (minutes == null ? { text } : { text, minutes })),
+  })
+
+  // 本文は実データ（レタスクラブ／デリッシュキッチン／クラシル）から取り込んだものそのまま
+  const kqMushishabu = kqRecipe(9101, '豚肉とキャベツの蒸ししゃぶ', 'main', [
+    ['キャベツはざく切りにする。トマトは1cm角に切ってボウルに入れ、Aを混ぜてトマトだれを作る。'],
+    [
+      'フライパンにキャベツを広げて入れ、豚肉を広げてのせて、塩少々、酒大さじ3をふる。ふたをして中火にかけ、肉に火が通るまで7～8分蒸し焼きにする。',
+      8,
+    ],
+    ['器に盛ってトマトだれをかける。'],
+  ])
+  const kqShiokonbu = kqRecipe(9102, '簡単副菜 えのきとしめじの塩昆布和え', 'side', [
+    ['えのき、しめじは石づきを切り落としておきます。'],
+    ['えのきは半分に切ってほぐします。'],
+    ['しめじは小房にほぐします。'],
+    ['耐熱ボウルに1、2を入れ、ふんわりとラップをかけ、600Wの電子レンジで2分程加熱します。水気を切り、粗熱を取ります。', 2],
+    ['ボウルに3、塩昆布、(A)を入れて和えます。'],
+    ['器に盛り付けて完成です。'],
+  ])
+  const kqShumai = kqRecipe(9103, 'レンチンコーンシューマイ', 'main', [
+    ['キャベツは1cm幅に切る。'],
+    ['ボウルにあんの材料を入れてよく練り混ぜ、8等分して丸める。'],
+    ['コーンは水けをしっかりきって別のボウルに入れ、片栗粉大さじ1を加えて混ぜる。２にまんべんなくつけ、もう一度丸め直す。'],
+    ['耐熱の器にキャベツを広げて入れて３を間隔をあけて並べ、ラップをかけて6分レンチンする。しょうゆ適量を添える。', 6],
+  ])
+  const kqMizoreni = kqRecipe(9104, '火を使わずにとろとろおかず！ 鶏むね肉ときのこのレンチンみぞれ煮', 'main', [
+    ['鶏肉はキッチンペーパーで水気をふきとり、一口大に切る。ビニール袋に鶏肉、マヨネーズを入れて揉み込む。'],
+    ['しめじは根元を切り落とし、手でほぐす。大根は皮を厚めにむき、すりおろして軽く水気を切る(大根おろし)。'],
+    ['耐熱容器に☆、1を入れて混ぜ、しめじ、大根おろしをのせてふんわりとラップをし、600Wのレンジで6分加熱し、ラップをしたまま2分おく。', 6],
+    ['器に盛り、細ねぎをちらす。'],
+  ])
+
+  /** その組で熱いうちに食べたい品（1つだけのときに対象にする） */
+  const kqHotOnes = (recipes) => recipes.filter((r) => recipeServeTemp(r) === 'hot')
+  /** 熱い品が、全体の終わりより何分前に仕上がるか（大きいほど長く放置される） */
+  const kqHotIdle = (recipes, plan) => {
+    const hot = kqHotOnes(recipes)[0]
+    const end = plan.items.reduce(
+      (max, it) => (it.recipeId === hot.id ? Math.max(max, it.endMin) : max),
+      0,
+    )
+    return plan.totalMinutes - end
+  }
+  /** 器具の台数を超えて同時に使っている瞬間があるか（数え方は KD-1 と同じ） */
+  const kqOverCapacity = (items, kitchen) => {
+    const over = []
+    for (const key of APPLIANCE_KEYS) {
+      const capacity = applianceCapacity(kitchen, key)
+      const uses = items
+        .map((it) => ({
+          key: stepApplianceFor(it.text, kitchen),
+          start: it.startMin,
+          end: it.endMin,
+          title: it.recipeTitle,
+        }))
+        .filter((u) => u.key === key && u.end > u.start)
+      for (const at of new Set(uses.map((u) => u.start))) {
+        const busy = new Set(uses.filter((u) => u.start <= at && u.end > at).map((u) => u.title))
+        if (busy.size > capacity) over.push(`${key} ${at}分 ${[...busy].join(' / ')}`)
+      }
+    }
+    return over
+  }
+
+  // 3つ目の数字は**直す前の全体の目安**（分）。これを上回ったら赤＝並べ替えで段取りが伸びている
+  // （下回るのは構わない。伸びていないことだけを見る保険の上限）
+  for (const [label, kqRecipes, wasTotal] of [
+    ['蒸ししゃぶ ＋ 塩昆布和え', [kqMushishabu, kqShiokonbu], 27],
+    ['コーンシューマイ ＋ 蒸ししゃぶ', [kqShumai, kqMushishabu], 25],
+    ['塩昆布和え ＋ レンチンみぞれ煮', [kqShiokonbu, kqMizoreni], 32],
+  ]) {
+    const plan = buildCookPlan(kqRecipes, DEFAULT_KITCHEN)
+    eq(
+      `KQ-1 前提: 並行の段取りが出て、熱い品はこの組に1つだけ: ${label}`,
+      [plan.mode, kqHotOnes(kqRecipes).length],
+      ['parallel', 1],
+    )
+    const idle = kqHotIdle(kqRecipes, plan)
+    eq(
+      `KQ-1 熱い品が先に仕上がって放置にならない: ${label}（全体${plan.totalMinutes}分・熱い品はその${idle}分前に完成）`,
+      idle < 4,
+      true,
+    )
+    const over = kqOverCapacity(plan.items, DEFAULT_KITCHEN)
+    eq(
+      `KQ-2 並べ替えで器具の二重予約を作らない: ${label}（${over.join(' / ') || '重なりなし'}）`,
+      over.length,
+      0,
+    )
+    eq(
+      `KQ-3 並べ替えで全体の目安が伸びていない: ${label}（${plan.totalMinutes}分 ≦ 直す前${wasTotal}分）`,
+      plan.totalMinutes <= wasTotal,
+      true,
+    )
+  }
+
+  // ---- KQ-5: 同梱レシピでも、並べ替えの代償が出ていないか ----
+  // 実データ30品だけで見ると「その30品に合わせただけ」になりうるので、**別の顔ぶれ**
+  // （同梱の基本レシピ）でも同じ2つを見る。上限の数字は**直す前に測った値**で、
+  // 増えたら赤・減らしたらその数字を下げる（理由なしに緩めない）。
+  {
+    const kqStarters = starterDefs.slice(0, 24).map((d, i) => ({ ...d, id: 91000 + i }))
+    let kqSum = 0
+    let kqPairs = 0
+    let kqParallel = 0
+    let kqIdlePairs = 0
+    for (let a = 0; a < kqStarters.length; a++) {
+      for (let b = a + 1; b < kqStarters.length; b++) {
+        const pair = [kqStarters[a], kqStarters[b]]
+        const plan = buildCookPlan(pair, DEFAULT_KITCHEN)
+        kqSum += plan.totalMinutes
+        kqPairs++
+        if (plan.mode !== 'parallel') continue
+        kqParallel++
+        if (kqHotOnes(pair).length !== 1) continue
+        if (kqHotIdle(pair, plan) >= 4) kqIdlePairs++
+      }
+    }
+    eq('KQ-5 前提: 同梱レシピ24品の全組を組めている', kqPairs, 276)
+    eq(
+      `KQ-5 並べ替えで同梱レシピの段取りが伸びていない（合計${kqSum}分 ≦ 直す前8975分）`,
+      kqSum <= 8975,
+      true,
+    )
+    eq(
+      `KQ-5 並行に組める組が減っていない（${kqParallel}組 ≧ 直す前252組）`,
+      kqParallel >= 252,
+      true,
+    )
+    eq(
+      `KQ-5 熱い品が先に仕上がって放置になる組が増えていない（${kqIdlePairs}組 ≦ 直す前22組）`,
+      kqIdlePairs <= 22,
+      true,
+    )
+  }
+
+  // 熱い品が2つある組は対象外＝どちらかが先に仕上がるのは物理的に避けられない。
+  // ここで見るのは「対象外の組まで並べ替えて壊していないこと」＝二重予約と全体の目安
+  {
+    const kqShogayaki = kqRecipe(9105, '簡単！ 子供も食べやすい生姜焼き', 'main', [
+      ['玉ねぎは根元を取り除き、薄切りにする。しょうがはすりおろす。トマトはへたを取り除き、4等分の放射状に切る(くし形切り)。'],
+      ['豚肉は一口大に切る。ポリ袋に豚肉、片栗粉を入れて全体にまぶす。'],
+      ['ボウルに1のしょうが、☆を入れて混ぜる(しょうがたれ)。'],
+      ['フライパンにサラダ油を入れて中火で熱し、2の豚肉を入れて全体に火が通って肉の色が変わるまで3分ほど炒める。', 3],
+      ['玉ねぎを加えてしんなりするまで炒め、しょうがたれを加えて炒め合わせる。'],
+      ['器に盛り、キャベツ、トマトを添える。'],
+    ])
+    const kqMaboNasu = kqRecipe(9106, '子供でも食べられる！ 辛くない！麻婆茄子', 'main', [
+      ['なすはへたを切り落とし、縦半分に切る。切り口を下にして横1cm幅に切る。水にさらして水気を切る。ねぎはみじん切りにする。'],
+      ['ボウルに☆を入れて混ぜる。'],
+      ['フライパンにごま油を入れて中火で熱し、豚ひき肉、おろしにんにく、おろししょうがを入れて肉の色が変わるまで炒める。なす、ねぎを加えてなすがしんなりするまで炒める。'],
+      ['☆、水を加えて混ぜ、煮立ったらふたをして弱めの中火で3分ほど煮る。ふたを取り、弱火にして水溶き片栗粉を回し入れる。中火にし、とろみがつくまで混ぜる。', 3],
+    ])
+    const kqTwoHot = [kqShogayaki, kqMaboNasu]
+    const plan = buildCookPlan(kqTwoHot, DEFAULT_KITCHEN)
+    eq('KQ-4 前提: 熱い品が2つある組', kqHotOnes(kqTwoHot).length, 2)
+    const over = kqOverCapacity(plan.items, DEFAULT_KITCHEN)
+    eq(
+      `KQ-4 熱い品が2つの組でも器具の二重予約を作らない（${over.join(' / ') || '重なりなし'}）`,
+      over.length,
+      0,
+    )
+    eq(
+      `KQ-4 熱い品が2つの組の全体の目安が伸びていない（${plan.totalMinutes}分 ≦ 直す前39分）`,
+      plan.totalMinutes <= 39,
+      true,
+    )
+  }
+}
+
 // ---------- 結果 ----------
 console.log(`合格: ${passed}件 / 失敗: ${failures.length}件`)
 for (const f of failures) console.log(`  NG ${f}`)
