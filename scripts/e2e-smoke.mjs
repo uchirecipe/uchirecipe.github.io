@@ -38027,12 +38027,12 @@ try {
           `内訳合計=${soloSum} / ${compareText}`,
         )
         const countNote = noZw(await p.locator('[data-testid="navi-total-count-note"]').innerText())
+        // 何と書くかは ja.ts 側の見張り（test-logic の KM-2）が持つ。ここは
+        // 「ja.ts の文言がそのまま画面に出ているか」だけを見る（書き写さない）
         check(
           'FN-04 レシピの「調理時間」と数え方が違うことが画面に書いてある',
-          countNote.includes('手順ごとの時間を数えて合計した目安') &&
-            countNote.includes('「調理時間」とは数え方が違う') &&
-            countNote.includes('一覧の合計とは一致しません'),
-          countNote,
+          countNote === noZw(ja.cookNavi.totalCountNote),
+          `画面=${countNote} / ja.ts=${noZw(ja.cookNavi.totalCountNote)}`,
         )
 
         // --- GF-C: 各品が何分後にできあがるかと、その開きが画面に出る ---
@@ -38059,7 +38059,15 @@ try {
           )
           // 段取りの合計は「いちばん遅い品ができあがる時刻」。画面の上で読み合わせられること
           const naviBody = noZw(await p.textContent('body'))
-          const totalOnScreen = Number(/全体の目安\s*約(\d+)分/.exec(naviBody)?.[1] ?? -1)
+          // 見出しの言い方（2026-08-25 便KM で「全体の目安」→「全体の調理時間」）に
+          // 引きずられないよう、拾う形も ja.ts から組み立てる
+          const totalRe = new RegExp(
+            ja.cookNavi.totalEstimate
+              .replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+              .replace(/\s+/g, '\\s*')
+              .replace('\\{n\\}', '(\\d+)'),
+          )
+          const totalOnScreen = Number(totalRe.exec(naviBody)?.[1] ?? -1)
           check(
             'GF-C いちばん遅い品の「約◯分後」が、全体の目安と一致する（自分で足し算しなくてよい）',
             finishRows != null && Math.max(...finishRows.map((r) => r.minutes)) === totalOnScreen,
@@ -38640,6 +38648,12 @@ try {
       //    画面の中の窓に変わり、行き先が3つになった）
       await foPage.locator('[data-testid="cook-session-finish"]').click()
       await foPage.waitForTimeout(800)
+      // 2026-08-25 便KM: 消えるもの・残るものの説明は畳んで出すようになった。
+      // この節が見るのは「その説明が書いてあるか」なので、読む前に開く（中身は減らしていない）
+      if ((await foPage.locator('[data-testid="cook-finish-detail-toggle"]').count()) === 1) {
+        await foPage.locator('[data-testid="cook-finish-detail-toggle"]').click()
+        await foPage.waitForTimeout(500)
+      }
       const foFinishBody = await foPage.locator('[data-testid="cook-finish-modal"]').innerText()
       check(
         'FO-09 「完成！」を押すと、その場で作った記録の確認が出る',
@@ -40038,9 +40052,15 @@ try {
       const ftKeepNote = ftNoZw(
         await ftPage.locator('[data-testid="navi-restore-keep-note"]').innerText(),
       ).trim()
+      // 2026-08-25 便KM: 「日付が変わると残しません」は「今日のうちは残ります」の裏返しで
+      // 同じことの2回目だったので落とした（オーナー原文「必要ない分は省いて。」）。
+      // 残るもの（段取りと進んだところ）と、いつまで残るか（今日のうち）は今までどおり書いてある。
+      // 日付をまたいで捨てたときは restoreExpiredByDate がその場で理由を言う（FT-05 が見張る）
       check(
-        'FT-01 段取りの説明に「何が残って何が残らないか」が書いてある',
-        ftKeepNote.includes('開き直しても') && ftKeepNote.includes('日付が変わると残しません'),
+        'FT-01 段取りの説明に「何がいつまで残るか」が書いてある',
+        ftKeepNote === ftNoZw(ja.cookNavi.restoreKeepNote).trim() &&
+          ftKeepNote.includes('開き直しても') &&
+          ftKeepNote.includes('今日のうちは残ります'),
         ftKeepNote,
       )
 
@@ -40829,15 +40849,22 @@ try {
       )
       // 2026-08-14 便GL: 数え方の一文に「タイマーが何分ではかるか」を足した（利用者テスト
       // 「押すと5分固定で始まるが、事前に分数がどこにも書いていない」）。数え方の説明は残す
+      // 文言は ja.ts から組み立てる（2026-08-25 便KM で「全体の目安」→「全体の調理時間」に
+      // 変わったときに、書き写しが残っていて落ちた。CLAUDE.md の禁じ手②）
+      const fxBoilNote = stripZwspText(ja.cookNavi.waitBlockBoilNote).replaceAll('{n}', '5')
       check(
-        'FX-11 待ちブロックに、全体の目安への数え方が添えてある',
-        fxBoilBlock.includes('全体の目安に数えているのも同じ5分です'),
-        fxBoilBlock,
+        'FX-11 待ちブロックに、全体の調理時間への数え方が添えてある',
+        stripZwspText(fxBoilBlock).replace(/\s+/g, '').includes(
+          fxBoilNote.split('。')[1].replace(/\s+/g, ''),
+        ),
+        `${fxBoilBlock} / ja.ts=${fxBoilNote}`,
       )
       check(
         'FX-11 押す前に、タイマーが何分ではかるかも読める',
-        fxBoilBlock.includes('タイマーは5分ではかります'),
-        fxBoilBlock,
+        stripZwspText(fxBoilBlock).replace(/\s+/g, '').includes(
+          fxBoilNote.split('。')[0].replace(/\s+/g, ''),
+        ),
+        `${fxBoilBlock} / ja.ts=${fxBoilNote}`,
       )
       check(
         'FX-11 沸くまでの時間は言い切らない（火力と量で変わると書く）',
@@ -41811,13 +41838,30 @@ try {
         const down = document.querySelectorAll('[data-testid="navi-step-down"]')[1]
         const box = (el) => {
           const b = el.getBoundingClientRect()
-          return { w: Math.round(b.width), h: Math.round(b.height), left: Math.round(b.left), right: Math.round(b.right) }
+          el.scrollIntoView({ block: 'center', inline: 'center' })
+          const r = el.getBoundingClientRect()
+          const cx = r.left + r.width / 2
+          const cy = r.top + r.height / 2
+          // 2026-08-25 便KM: 見た目を低くして .tap-target で44pxの当たり判定を作る形にした
+          //（オーナー原文「上へ下へボタンの縦幅低くして。これのせいでページ全体が無駄に長い。」）。
+          // 測るのは**押せるかどうか**なので、中心から上下21pxの点を突いて確かめる
+          const dead = [[cx, cy - 21], [cx, cy + 21]].filter(([x, y]) => {
+            const hit = document.elementFromPoint(x, y)
+            return !(hit && (hit === el || el.contains(hit)))
+          }).length
+          return {
+            w: Math.round(b.width),
+            h: Math.round(b.height),
+            left: Math.round(b.left),
+            right: Math.round(b.right),
+            dead,
+          }
         }
         return { up: box(up), down: box(down) }
       })
       check(
-        'GJ-01 「上へ」「下へ」は指で押せる大きさ（実測 幅70px以上・高さ44px以上）',
-        gjBtn.up.w >= 70 && gjBtn.up.h >= 44 && gjBtn.down.w >= 70 && gjBtn.down.h >= 44,
+        'GJ-01 「上へ」「下へ」は指で押せる大きさ（実測 幅70px以上・当たり判定44px）',
+        gjBtn.up.w >= 70 && gjBtn.down.w >= 70 && gjBtn.up.dead === 0 && gjBtn.down.dead === 0,
         JSON.stringify(gjBtn),
       )
       check(
@@ -52855,6 +52899,232 @@ try {
       }
     } finally {
       await klBrowser.close()
+    }
+  }
+
+
+  // ============================================================================
+  // KMNAVI-01/02・KMFINISH-01: 並行調理ナビの上段・並べ替え・「完成！」の窓
+  // （2026-08-25 便KM・オーナー書き溜め）
+  //
+  //   「・全体の目安約◯分→全体の調理時間約◯分
+  //     　下の説明もながい。短く簡潔に。必要ない分は省いて。
+  //     ・順番の入れ替えをしても元に戻せない。
+  //     　上へ下へボタンの縦幅低くして。これのせいでページ全体が無駄に長い。
+  //     ・完成押下後の窓の説明も長い。読みたい人だけ読めるように、折りたたんでしまうか、
+  //     　さらに別の窓で表示のにしたい。」
+  //
+  //   KMNAVI-01 全体の分数の見出しと、その下の説明の量／上へ・下への見た目の高さと当たり判定
+  //   KMNAVI-02 動かした直後にその場で1回で戻せる（他の操作と同じトーストの「元に戻す」）
+  //   KMFINISH-01 「完成！」の窓の説明は畳んであり、押した人だけが読める
+  // ============================================================================
+  currentCheck = 'KMNAVI-01'
+  {
+    const kmBrowser = await chromium.launch()
+    const kmCtx = await kmBrowser.newContext({ viewport: { width: 390, height: 844 } })
+    const kmPage = await kmCtx.newPage()
+    kmPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@KM] ${err.message}`)
+    })
+    /** 段取りに出ている手順の本文（ゼロ幅スペース・改行を外して比べる） */
+    const kmOrder = async () =>
+      (await kmPage.locator('[data-testid="navi-step-text"]').allInnerTexts()).map((t) =>
+        stripZwspText(t).replace(/\s+/g, ''),
+      )
+    try {
+      await kmPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await kmPage.waitForTimeout(1800)
+      await kmPage.evaluate(async () => {
+        const openDb = () =>
+          new Promise((resolve, reject) => {
+            const r = indexedDB.open('uchi-recipe')
+            r.onsuccess = () => resolve(r.result)
+            r.onerror = () => reject(r.error)
+          })
+        const db = await openDb()
+        const P = (req) => new Promise((res, rej) => { req.onsuccess = () => res(req.result); req.onerror = () => rej(req.error) })
+        const store = (name) => db.transaction(name, 'readwrite').objectStore(name)
+        const mk = (title, steps) => ({
+          title, servings: 2, effortLevel: 'normal', tags: [], ingredients: [], steps,
+          isFavorite: false, cookedLogs: [], searchWords: [], isStarter: false, updatedAt: Date.now(),
+        })
+        const a = await P(store('recipes').add(mk('KM煮物', [
+          { text: '大根を一口大に切る。', minutes: 4 },
+          { text: '鍋に大根とだしを入れて中火で12分煮る。', minutes: 12 },
+          { text: '器に盛る。', minutes: 2 },
+        ])))
+        const b = await P(store('recipes').add(mk('KM炒めもの', [
+          { text: 'にんじんを細切りにする。', minutes: 3 },
+          { text: 'フライパンで豚肉を炒める。', minutes: 5 },
+          { text: '器に盛る。', minutes: 2 },
+        ])))
+        let addedAt = Date.now()
+        for (const id of [a, b]) await P(store('todayList').add({ recipeId: id, addedAt: addedAt++ }))
+        const cur = (await P(store('settings').get(1))) || { id: 1 }
+        await P(store('settings').put({ ...cur, id: 1, proCode: 'UR-E2E-TEST-ONLY', proActivatedAt: Date.now() }))
+        db.close()
+      })
+      await kmPage.goto(`${BASE}/#/cook-navi`)
+      await kmPage.reload({ waitUntil: 'networkidle' })
+      await kmPage.waitForTimeout(1500)
+      await kmPage.getByRole('button', { name: ja.cookNavi.build }).click()
+      await kmPage.waitForTimeout(1000)
+
+      // --- KMNAVI-01: 見出しと、その下の説明の量 ---
+      const kmEstimate = stripZwspText(
+        await kmPage.locator('[data-testid="navi-total-estimate"]').innerText(),
+      ).replace(/\s+/g, '')
+      // 文言は ja.ts から組み立てる（画面の日本語を書き写さない・CLAUDE.md の禁じ手②）
+      const kmEstimateRe = new RegExp(
+        `^${ja.cookNavi.totalEstimate.replace(/\s+/g, '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace('\\{n\\}', '\\d+')}$`,
+      )
+      // 何と書くか（「全体の調理時間」）は ja.ts 側の見張り（test-logic の KM-1）が持つ。
+      // ここが見るのは「ja.ts の文言がそのまま画面に出ているか」だけ（書き写さない）
+      check(
+        'KMNAVI-01 全体の分数の見出しが ja.ts の文言どおり出ている',
+        kmEstimateRe.test(kmEstimate),
+        `画面=${kmEstimate} 期待の形=${ja.cookNavi.totalEstimate}`,
+      )
+      // 「短く簡潔に。必要ない分は省いて。」＝この枠に載る字数そのものを見張る。
+      // 文言が変わっても測り方は変わらない（言い回しに固定しない）
+      const KM_CARD_LIMIT = 320
+      // 掴めなかったときに30秒待って実行を中断させない（CLAUDE.md の禁じ手・2026-08-22 UI-390-01）。
+      // 見つからなければその場で赤にして、後ろの節は走らせる
+      const kmCardCount = await kmPage.locator('[data-testid="navi-total-card"]').count()
+      const kmCardText =
+        kmCardCount === 0
+          ? ''
+          : stripZwspText(await kmPage.locator('[data-testid="navi-total-card"]').innerText()).replace(/\s+/g, '')
+      check(
+        `KMNAVI-01 全体の分数の枠に載る字数が${KM_CARD_LIMIT}字以内`,
+        kmCardCount === 1 && kmCardText.length <= KM_CARD_LIMIT,
+        `枠の数=${kmCardCount} 実際=${kmCardText.length}字 中身=${kmCardText.slice(0, 320)}`,
+      )
+
+      // --- KMNAVI-01: 上へ・下へは見た目が低く、当たり判定は44pxのまま ---
+      const kmTap = await kmPage.evaluate(() => {
+        const out = []
+        for (const sel of ['navi-step-up', 'navi-step-down']) {
+          const el = document.querySelector(`[data-testid="${sel}"]`)
+          if (!el) { out.push({ sel, found: false }); continue }
+          el.scrollIntoView({ block: 'center', inline: 'center' })
+          const r = el.getBoundingClientRect()
+          const cx = r.left + r.width / 2
+          const cy = r.top + r.height / 2
+          // 中心から上下21pxの点を突いて、そのボタンが受けるかを見る（TAP-44 と同じやり方）
+          const dead = [[cx, cy - 21], [cx, cy + 21]].filter(([x, y]) => {
+            const hit = document.elementFromPoint(x, y)
+            return !(hit && (hit === el || el.contains(hit)))
+          }).length
+          out.push({ sel, found: true, h: Math.round(r.height), w: Math.round(r.width), dead })
+        }
+        return out
+      })
+      check('KMNAVI-01 前提: 上へ・下へのボタンが画面にある', kmTap.every((t) => t.found), JSON.stringify(kmTap))
+      const KM_BTN_MAX_H = 34
+      check(
+        `KMNAVI-01 上へ・下への見た目の高さが${KM_BTN_MAX_H}px以下（ページを無駄に長くしない）`,
+        kmTap.every((t) => t.found && t.h <= KM_BTN_MAX_H),
+        JSON.stringify(kmTap),
+      )
+      check(
+        'KMNAVI-01 見た目を低くしても、押せる大きさ44pxは保たれている',
+        kmTap.every((t) => t.found && t.dead === 0),
+        JSON.stringify(kmTap),
+      )
+
+      // --- KMNAVI-02: 動かした直後に、その場で1回で戻せる ---
+      currentCheck = 'KMNAVI-02'
+      const kmBefore = await kmOrder()
+      check('KMNAVI-02 前提: 段取りが組めている', kmBefore.length >= 4, kmBefore.join(' | '))
+      await kmPage.locator('[data-testid="navi-step-down"]').first().click()
+      await kmPage.waitForTimeout(600)
+      const kmMoved = await kmOrder()
+      check(
+        'KMNAVI-02 前提: 「下へ」で並びが変わる',
+        kmMoved.join('|') !== kmBefore.join('|'),
+        `前=${kmBefore.join(' | ')} 後=${kmMoved.join(' | ')}`,
+      )
+      const kmUndoBtn = kmPage.getByRole('button', { name: ja.common.undo })
+      check(
+        'KMNAVI-02 動かした直後に「元に戻す」がその場に出る（探しに行かなくてよい）',
+        (await kmUndoBtn.count()) >= 1,
+        `見つかった数=${await kmUndoBtn.count()}`,
+      )
+      if ((await kmUndoBtn.count()) >= 1) {
+        await kmUndoBtn.first().click()
+        await kmPage.waitForTimeout(600)
+      }
+      const kmBack = await kmOrder()
+      check(
+        'KMNAVI-02 1回押すだけで動かす前の並びに戻る',
+        kmBack.join('|') === kmBefore.join('|'),
+        `戻り=${kmBack.join(' | ')} 期待=${kmBefore.join(' | ')}`,
+      )
+
+      // --- KMFINISH-01: 「完成！」の窓の説明は畳んである ---
+      currentCheck = 'KMFINISH-01'
+      await kmPage.locator('[data-testid="cook-session-start"]').click()
+      await kmPage.waitForTimeout(800)
+      for (let i = 0; i < 40; i++) {
+        if ((await kmPage.locator('[data-testid="cook-session-finish"]').count()) > 0) break
+        await kmPage.locator('[data-testid="cook-session-next"]').click()
+        await kmPage.waitForTimeout(120)
+      }
+      check(
+        'KMFINISH-01 前提: 段取りの最後まで進めて「完成！」が出る',
+        (await kmPage.locator('[data-testid="cook-session-finish"]').count()) === 1,
+      )
+      await kmPage.locator('[data-testid="cook-session-finish"]').click()
+      await kmPage.waitForTimeout(800)
+      const kmModal = kmPage.locator('[data-testid="cook-finish-modal"]')
+      check('KMFINISH-01 前提: 「完成！」の窓が開く', (await kmModal.count()) === 1)
+      const kmClosedText = stripZwspText(await kmModal.innerText()).replace(/\s+/g, '')
+      // 畳んだ状態で読ませるのは「何品に記録が付くか」＝押す前に要る情報だけ
+      check(
+        'KMFINISH-01 畳んだ状態でも、何品に記録が付くかは読める',
+        kmClosedText.includes('KM煮物') && kmClosedText.includes('KM炒めもの'),
+        kmClosedText.slice(0, 240),
+      )
+      // 消えるもの・残るものの長い説明は、押すまで出さない
+      const kmDetailMark = ja.cookNavi.markAllCookedConfirmEdit.replace(/\s+/g, '').slice(0, 12)
+      check(
+        'KMFINISH-01 長い説明は、開くまで出ていない',
+        !kmClosedText.includes(kmDetailMark),
+        `目印=${kmDetailMark} 中身=${kmClosedText.slice(0, 300)}`,
+      )
+      const KM_MODAL_CLOSED_LIMIT = 200
+      check(
+        `KMFINISH-01 畳んだ状態の窓の字数が${KM_MODAL_CLOSED_LIMIT}字以内`,
+        kmClosedText.length <= KM_MODAL_CLOSED_LIMIT,
+        `実際=${kmClosedText.length}字 中身=${kmClosedText.slice(0, 300)}`,
+      )
+      const kmDetailBtn = kmPage.getByRole('button', { name: ja.cookNavi.sessionFinishDetailOpen ?? '' })
+      const kmDetailBtnCount = ja.cookNavi.sessionFinishDetailOpen ? await kmDetailBtn.count() : 0
+      check(
+        'KMFINISH-01 「読む」ための入口が窓の中にある（行き止まりにしない）',
+        kmDetailBtnCount === 1,
+        `見つかった数=${kmDetailBtnCount} 文言=${ja.cookNavi.sessionFinishDetailOpen ?? '(未定義)'}`,
+      )
+      if (kmDetailBtnCount === 1) {
+        await kmDetailBtn.first().click()
+        await kmPage.waitForTimeout(700)
+      }
+      const kmOpenText = stripZwspText(await kmModal.innerText()).replace(/\s+/g, '')
+      check(
+        'KMFINISH-01 押すと、消えるもの・残るものの説明が読める（無くしていない）',
+        kmOpenText.includes(kmDetailMark) && kmOpenText.length > kmClosedText.length,
+        `開いた後=${kmOpenText.slice(0, 320)}`,
+      )
+      check(
+        'KMFINISH-01 3つの行き先は畳んでも畳まなくても押せる',
+        (await kmPage.locator('[data-testid="cook-finish-record"]').count()) === 1 &&
+          (await kmPage.locator('[data-testid="cook-finish-back"]').count()) === 1 &&
+          (await kmPage.locator('[data-testid="cook-finish-close"]').count()) === 1,
+      )
+    } finally {
+      await kmBrowser.close()
     }
   }
 

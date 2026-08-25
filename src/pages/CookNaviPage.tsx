@@ -478,7 +478,12 @@ function TimelineCard({
             onClick={onMoveUp}
             disabled={!canMoveUp}
             aria-label={ja.cookNavi.reorderUpAria.replace('{n}', String(item.order))}
-            className="inline-flex min-w-[4.5rem] items-center justify-center gap-1 rounded-md border border-edge bg-surface px-3 py-3 text-sm font-bold text-accent-ink shadow-sm disabled:opacity-30"
+            /* 見た目は低く（上下の余白を1段階小さくして46px→30px）、
+               押せる大きさは .tap-target が44pxを作る
+               （2026-08-25 便KM・オーナー原文「上へ下へボタンの縦幅低くして。
+               これのせいでページ全体が無駄に長い。」）。段取りは手順の数だけこの行が並ぶので、
+               1行16pxの差がそのままページの長さになる */
+            className="tap-target inline-flex min-w-[4.5rem] items-center justify-center gap-1 rounded-md border border-edge bg-surface px-3 py-1 text-sm font-bold text-accent-ink shadow-sm disabled:opacity-30"
           >
             <ChevronUp size={18} aria-hidden />
             {ja.cookNavi.reorderUp}
@@ -489,7 +494,7 @@ function TimelineCard({
             onClick={onMoveDown}
             disabled={!canMoveDown}
             aria-label={ja.cookNavi.reorderDownAria.replace('{n}', String(item.order))}
-            className="inline-flex min-w-[4.5rem] items-center justify-center gap-1 rounded-md border border-edge bg-surface px-3 py-3 text-sm font-bold text-accent-ink shadow-sm disabled:opacity-30"
+            className="tap-target inline-flex min-w-[4.5rem] items-center justify-center gap-1 rounded-md border border-edge bg-surface px-3 py-1 text-sm font-bold text-accent-ink shadow-sm disabled:opacity-30"
           >
             <ChevronDown size={18} aria-hidden />
             {ja.cookNavi.reorderDown}
@@ -844,6 +849,8 @@ export default function CookNaviPage() {
   // 記録したあとのトースト（「元に戻す」つき）
   const [toast, setToast] = useState('')
   const [undoCooked, setUndoCooked] = useState<{ recipeId: number }[] | null>(null)
+  /** いま出ているトーストが「並べ替えを1回戻す」ためのものか（2026-08-25 便KM） */
+  const [undoPull, setUndoPull] = useState(false)
   /**
    * 覚えていた選択のうち、今日の献立から外れた品を落としたことの知らせ（2026-08-09 便EH）。
    * 黙って段取りの中身を変えないための1行。選び直したら消す
@@ -1204,6 +1211,20 @@ export default function CookNaviPage() {
       direction === 'up' ? moveStepUpPull(planItems, index) : moveStepDownPull(planItems, index)
     if (!pull) return
     setPulls((prev) => [...prev, pull])
+    /**
+     * 動かしたことをその場に出し、そこから1回で戻せるようにする（2026-08-25 便KM・
+     * オーナー原文「順番の入れ替えをしても元に戻せない。」）。
+     * 戻す手立ては便GJ/GL からあったが、置き場が**一覧のいちばん上の欄**だけで、
+     * 下のほうの手順を動かすと画面の外にあった＝スクロールして探しに行くことになる。
+     * トーストは画面の下に固定で出るので、どこの手順を動かしても同じ場所に「元に戻す」が出る。
+     */
+    setUndoCooked(null)
+    setUndoPull(true)
+    setToast(
+      ja.cookNavi.reorderMovedToast
+        .replace('{n}', String(planItems[index].order))
+        .replace('{dir}', direction === 'up' ? ja.cookNavi.reorderUp : ja.cookNavi.reorderDown),
+    )
   }
   /**
    * 直前の1回だけ取り消す（規約F。押しすぎたときに1つずつ戻れる）。
@@ -1266,7 +1287,10 @@ export default function CookNaviPage() {
   useEffect(() => {
     if (!showTimeline && current) setCurrent(undefined)
     // 色で引き寄せた並べ替えも、その段取りだけのものなので一緒に捨てる（2026-08-10 便FI）
-    if (!showTimeline && pulls.length > 0) setPulls([])
+    if (!showTimeline && pulls.length > 0) {
+      setPulls([])
+      setUndoPull(false)
+    }
   }, [showTimeline, current, pulls])
 
   /** 調理中の位置が段取りの何番目か（-1＝覚えていない・段取りに無い） */
@@ -1464,6 +1488,16 @@ export default function CookNaviPage() {
   const startSession = () => {
     if (!timeline) return
     setSessionLostNotice(false)
+    /**
+     * 並べ替えの「元に戻す」の知らせは、ここで引っ込める（2026-08-25 便KM）。
+     * 理由は2つ。①全画面に切り替わると、戻す相手（段取りの一覧）が見えなくなる
+     * ②トーストは画面の下に固定で出るので、**そのまま残ると「完成！」の窓の
+     * いちばん下のボタン（記録をつけずに閉じる）を覆って押せなくなる**
+     *（見張り GL-06 が実際にここで詰まった。トーストと窓はどちらも z-[70] で、
+     *  後から描くトーストが上に乗る）
+     */
+    setToast('')
+    setUndoPull(false)
     // 覚えている手順がまだ段取りにあれば**その続きから**、無ければ先頭から
     // （2026-08-10 便FC。どちらを開くかの判断は logic/cookSession.ts の resumeCursor）
     setCurrent(resumeCursor(planItems, current))
@@ -1505,11 +1539,12 @@ export default function CookNaviPage() {
     // まとめて付けた記録も、あとから1件ずつ直せる（2026-08-12 便FX・オーナー指摘）
     ja.cookNavi.markAllCookedConfirmEdit
   /**
-   * 「完成！」の窓（CookFinishModal）へ渡す本文。あちらは自前の見出し
-   * （sessionFinishTitle）を持つので、1行目も本文に含めて渡す＝出る文字は今までと同じ
+   * 「完成！」の窓（CookFinishModal）へ渡す文。あちらは自前の見出し（sessionFinishTitle）を
+   * 持つので、1行目（何品に記録が付くか）はそのまま渡す。
+   * 2026-08-25 便KM: 1行目と、その後ろ（何が消えて何が残るか）を**別々に渡す**。
+   * 窓は1行目を畳まずに出し、後ろは折りたたみに入れる（出る文字は今までと同じ）
    */
-  const cookedConfirmBody = (keepTimers: boolean) =>
-    `${cookedConfirmTitle()}。\n${cookedConfirmRest(keepTimers)}`
+  const cookedConfirmBody = () => `${cookedConfirmTitle()}。`
 
   /**
    * 全画面の調理中モードを閉じる（2026-08-10 便FC・オーナー実機
@@ -1693,6 +1728,25 @@ export default function CookNaviPage() {
         : ja.cookNavi.markAllCookedUndone.replace('{n}', String(undone)),
     )
   }
+
+  /**
+   * いま出ているトーストの「元に戻す」で何を戻すか（2026-08-25 便KM）。
+   * 記録の取り消し（まとめて作った！）と並べ替えの取り消しの2つがここに乗る。
+   * どちらも無ければ undefined＝トーストはボタンの無い普通の知らせになる。
+   * 並べ替えのほうは**直前の1回ぶんだけ**を戻す（undoLastPull）＝押しすぎても全部は捨てない。
+   */
+  const toastUndo = undoCooked
+    ? () => void runUndoCooked()
+    : /* 戻す相手（並べ替え）が1件も残っていなければボタンを出さない。
+         段取りを消す・自動の並びに戻す・記録をつける、のどれかで並べ替えが白紙に戻った直後に
+         知らせだけが残っていても、押しても何も起きないボタンを見せないため */
+      undoPull && pulls.length > 0
+      ? () => {
+          undoLastPull()
+          setUndoPull(false)
+          setToast('')
+        }
+      : undefined
 
   return (
     // 下余白はページ全体を包む main が実測ぶん空ける（2026-08-11 便FN）。
@@ -1925,8 +1979,11 @@ export default function CookNaviPage() {
                 {/* タイムライン */}
                 {timeline && (
                   <section ref={timelineRef} className="mt-[var(--space-lg)]">
-                    {/* 凡例 */}
-                    <div className="rounded-md border border-edge bg-surface p-[var(--space-md)]">
+                    {/* 凡例（この枠に載る字数は e2e の KMNAVI-01 が見張る。2026-08-25 便KM） */}
+                    <div
+                      data-testid="navi-total-card"
+                      className="rounded-md border border-edge bg-surface p-[var(--space-md)]"
+                    >
                       <p className="text-sm font-bold text-ink-muted">
                         {ja.cookNavi.legendTitle.replace('{n}', String(timeline.recipes.length))}
                       </p>
@@ -2017,7 +2074,6 @@ export default function CookNaviPage() {
                           {ja.cookNavi.totalAwayNote.replace('{n}', String(timeline.awayMinutes))}
                         </p>
                       )}
-                      <p className="mt-1 text-xs text-ink-muted">{ja.cookNavi.totalNote}</p>
                       {/* レシピの一覧に出ている「調理時間」と数え方が違うことを画面に書く
                           （2026-08-11 便FN・利用者テスト「多く出たり少なく出たりするので、
                           どちらを信じてよいか分からない」）。数え方の違いは黙っていると
@@ -2377,7 +2433,8 @@ export default function CookNaviPage() {
           の3つから選ぶ。全画面（z-50）より上に重ねる */}
       <CookFinishModal
         open={finishAsking}
-        body={cookedConfirmBody(false)}
+        body={cookedConfirmBody()}
+        detail={cookedConfirmRest(false)}
         runningTimers={runningTimers}
         onRecord={(stopTimers) => {
           setFinishAsking(false)
@@ -2413,9 +2470,12 @@ export default function CookNaviPage() {
         onClose={() => {
           setToast('')
           setUndoCooked(null)
+          setUndoPull(false)
         }}
-        actionLabel={undoCooked ? ja.common.undo : undefined}
-        onAction={undoCooked ? () => void runUndoCooked() : undefined}
+        /* 「元に戻す」はアプリ共通の言い方（ja.common.undo）で、記録の取り消しと
+           並べ替えの取り消しの両方がここに乗る（2026-08-25 便KM） */
+        actionLabel={toastUndo ? ja.common.undo : undefined}
+        onAction={toastUndo}
       />
     </div>
   )
