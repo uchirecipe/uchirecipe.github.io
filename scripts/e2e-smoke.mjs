@@ -48934,7 +48934,7 @@ try {
     }
   }
 
-  // --- JHSAFE-01(2026-08-22 便JH): 取り込んだレシピにも安全のめやすが出る ---
+  // --- JHSAFE-01(2026-08-22 便JH): 取り込んだレシピにもアプリが添える注意が出る ---
   //
   // オーナー原文:
   //   「レンジ温泉卵
@@ -48995,7 +48995,7 @@ try {
       // ① 手順に注記が出る
       const jhStepNote = jhPage.locator('[data-testid="safety-step-0"]')
       check('JHSAFE-01 前提: 取り込み相当のレシピを開けた', (await jhPage.textContent('body')).includes('E2Eレンジで温泉卵'))
-      check('JHSAFE-01 レンジ加熱＋卵の手順に安全のめやすが出る', (await jhStepNote.count()) === 1)
+      check('JHSAFE-01 レンジ加熱＋卵の手順に注意が出る', (await jhStepNote.count()) === 1)
       const jhStepText = ((await jhStepNote.count()) === 1 ? await jhStepNote.textContent() : '').replaceAll('​', '')
       check(
         'JHSAFE-01 注記に、穴を開けることが書いてある',
@@ -49004,7 +49004,7 @@ try {
       )
       check(
         'JHSAFE-01 注記に見出しが付いていて、利用者が書いた文と区別できる',
-        jhStepText.includes('安全のめやす'),
+        jhStepText.includes(ja.safety.title),
         `注記=${jhStepText}`,
       )
       // ② 手順の本文は1文字も変わっていない
@@ -49020,7 +49020,7 @@ try {
       const jhRecipeText = ((await jhRecipeNote.count()) === 1 ? await jhRecipeNote.textContent() : '').replaceAll('​', '')
       check(
         'JHSAFE-01 レシピ全体の枠に、誰が添えた文なのかが書いてある',
-        jhRecipeText.includes('アプリが添えた'),
+        jhRecipeText.includes(ja.safety.source),
         `枠=${jhRecipeText}`,
       )
 

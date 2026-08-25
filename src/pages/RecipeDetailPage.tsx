@@ -78,7 +78,7 @@ import PhotoFocusModal from '../components/PhotoFocusModal'
 import CustomTimerModal from '../components/CustomTimerModal'
 import FocusMode from '../components/FocusMode'
 import SafetyNotes from '../components/SafetyNotes'
-// 安全のめやす（2026-08-22 便JH）。レシピのデータには書き込まず、開くたびに材料と手順から組み立てる
+// レシピに添える注意（2026-08-22 便JH）。レシピのデータには書き込まず、開くたびに材料と手順から組み立てる
 import { safetyNotesFor, stepSafetyNotes, wholeRecipeSafetyNotes } from '../logic/safetyNotes'
 import NutritionTeaser from '../components/NutritionTeaser'
 import FirstSetupNotice from '../components/FirstSetupNotice'
@@ -705,7 +705,7 @@ export default function RecipeDetailPage() {
     ? { ...recipe, steps: recipe.quickSteps!, cookMinutes: displayCookMinutes }
     : recipe
 
-  // 安全のめやす（2026-08-22 便JH）。**いま画面に出している手順**に対して組み立てる
+  // レシピに添える注意（2026-08-22 便JH）。**いま画面に出している手順**に対して組み立てる
   // （時短版を見ているときは時短版の手順を見る）。設定で切っていれば1件も出さない。
   // 同梱の基本レシピは原稿に注記が入っているので safetyNotesFor 側で弾いている
   const safetyNotes = settings?.safetyNotesOff
@@ -1234,7 +1234,7 @@ export default function RecipeDetailPage() {
                         seen={stepTermSeen}
                       />
                     )}
-                    {/* 安全のめやす（便JH）。手順の本文・利用者のメモは1文字も変えず、その下に別の枠で添える */}
+                    {/* レシピに添える注意（便JH）。手順の本文・利用者のメモは1文字も変えず、その下に別の枠で添える */}
                     <SafetyNotes
                       notes={stepSafetyNotes(safetyNotes, index)}
                       place="step"
@@ -1294,7 +1294,7 @@ export default function RecipeDetailPage() {
             />
           </section>
         )}
-        {/* 安全のめやす（便JH）。保存・再加熱・対象者の案内はレシピ全体の話なのでメモの並びに置く（D-④の置き場所） */}
+        {/* レシピに添える注意（便JH）。保存・再加熱・対象者の案内はレシピ全体の話なのでメモの並びに置く（D-④の置き場所） */}
         {recipeSafetyNotes.length > 0 && (
           <section className="mt-[var(--space-lg)]">
             <SafetyNotes notes={recipeSafetyNotes} place="recipe" testId="safety-recipe" />

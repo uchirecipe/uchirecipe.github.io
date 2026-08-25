@@ -23677,9 +23677,16 @@ Aみりん 大さじ1
   //   ・「ひとつまみ」は外す … 分量の言い方（料理の言葉）で、数の「1つ」ではない
   //   ・「のぞく」は「〜は／を のぞく」の形だけ … 「（サイトを）のぞいてみる」＝覗く は
   //     常用漢字表に無いので、かなで書くのが正しい
-  //   ・「はかる」「めやす」「おまかせ」「まるごと」「いちばん」「まったく」「ほとんど」「すでに」は
+  //   ・「はかる」「おまかせ」「まるごと」「いちばん」「まったく」「ほとんど」「すでに」は
   //     見張らない … いずれも**このアプリでは、かな書きのほうが多数か唯一**で、
   //     かな書きが慣用の語（便IMの報告に一覧と数を載せた。倒すなら司令部の裁定が要る）
+  //   ・「めやす」も見張らない。ただし**この語だけは、上の「かな書きのほうが多数」が事実と違う**。
+  //     2026-08-25 便KV の実測では ja.ts の文言は漢字「目安」16件・かな「めやす」4件で、
+  //     かな書きは栄養の公的基準値の4件だけ（nutritionBalance.guideNote / guideNoteFree /
+  //     guideSourcePrefix / guideScopeNote）。規約H-2（意味を担う語は漢字）に照らせば
+  //     漢字へそろえるのが筋だが、使い方ページ §5「「概算」と「めやす」の考え方」が
+  //     かな書きで書き分けを説明していて、同じ節の画面写真にも「1日分のめやすは〜」が写っている。
+  //     文言・ページ・写真を一緒に動かす話になるので、司令部の裁定待ち（便KVの報告）
   {
     // ゼロ幅スペース（BudouX）が挟まっても素通りしないよう、照合の前に外す。
     // 改行は消さないので、赤に出る行番号は原文のまま
@@ -28410,7 +28417,7 @@ import { safetyNotesFor, stepSafetyNotes, wholeRecipeSafetyNotes } from '../src/
       for (const ng of ['菌', '中毒', '危険', '死', '病気'])
         if (plain.includes(ng)) jhStyle.push(`${key}: 「${ng}」が入っている`)
     }
-    eq('JH-7 安全のめやすの文言が D-④ の作法から外れていない', jhStyle, [])
+    eq('JH-7 レシピに添える注意の文言が D-④ の作法から外れていない', jhStyle, [])
   }
 
   // --- JH-8: 同梱109品に当てても、人が書いた注記と食い違わない（誤検出の見張り） ---
@@ -32145,6 +32152,130 @@ import { safetyNotesFor, stepSafetyNotes, wholeRecipeSafetyNotes } from '../src/
   // --- KP-10: 版番号を上げてある（上げないと新しい行が既存の端末に届かない） ---
   eq('KP-10 価格マスタの版番号は13以上', PRICE_DEFAULTS_VERSION_FOR_JG >= 13, true)
   eq('KP-10 成分表の版番号は9以上', NUTRITION_DB_VERSION_FOR_KP >= 9, true)
+}
+
+
+// ---------- 便KV: 「めやす／目安」の使いどころ（2026-08-25 オーナー書き溜め・実機確認18）----------
+// オーナー原文:
+//   「『安全のめやす』→『注意』。安全のめやすは日本語として変です。何度も指摘していますが、
+//     「めやす」を多用しすぎです。日本語として変になる場所にもしょっ中使用してくるので
+//     指摘するのが面倒です。」
+//
+// 1か所直して終わりにすると、次に書く人が同じ形でまた足す（現に「何度も」足してきた）。
+// 線そのものは CLAUDE.md 規約H に書いた:
+//   「めやす／目安」は、量・金額・時間など**数で表せるもの**の、おおよその値か、その基準にだけ使う。
+//   「◯◯のめやす」と書けるのは◯◯が数で表せるときだけ。
+// ここでは、その線を2本立てで見張る:
+//   KV-1 いま許している使い方を一覧で持ち、**増えても減っても赤**にする
+//   KV-2 数で表せない語に「めやす／目安」を付ける形そのものを掃く（アプリと利用者が読むページの両方）
+{
+  const kvRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
+  const kvRead = (rel) => readFileSync(path.join(kvRoot, rel), 'utf-8')
+
+  // ---- KV-1: ja.ts の文言に出てくる「めやす／目安」を、一覧と突き合わせる ----
+  // 数えるのは**文言そのもの**だけ（ja を走って値を見るので、コメントは初めから入らない）。
+  // 一覧（scripts/data/ja-meyasu-known.json）には1件ずつ
+  // 「**何の数**のおおよその値なのか」を書く。書けないものは、そもそも「目安」と呼べない。
+  {
+    const kvStrings = []
+    const kvWalk = (obj, prefix) => {
+      for (const [key, value] of Object.entries(obj)) {
+        const full = prefix ? `${prefix}.${key}` : key
+        if (typeof value === 'string') kvStrings.push({ key: full, value })
+        else if (value && typeof value === 'object') kvWalk(value, full)
+      }
+    }
+    kvWalk(ja, '')
+    eq('KV-1 ja.ts の文言を読めている（0件なら見張りが壊れている）', kvStrings.length > 1000, true)
+
+    const kvHits = kvStrings
+      .filter(({ value }) => value.includes('めやす') || value.includes('目安'))
+      .map(({ key }) => key)
+    eq('KV-1 「めやす／目安」の文言が実在する（0件なら数え方が壊れている）', kvHits.length > 0, true)
+
+    const kvKnown = JSON.parse(kvRead('scripts/data/ja-meyasu-known.json'))
+    // 「_」で始まる項目は読み手向けの説明。一覧そのものではない
+    const kvAllowed = Object.keys(kvKnown).filter((k) => !k.startsWith('_'))
+    eq(
+      'KV-1 「めやす／目安」が、一覧に無いところに増えていない',
+      kvHits.filter((k) => !kvAllowed.includes(k)),
+      [],
+    )
+    eq(
+      'KV-1 一覧に、もう「めやす／目安」を使っていないものが残っていない（直したら消す）',
+      kvAllowed.filter((k) => !kvHits.includes(k)),
+      [],
+    )
+    eq(
+      'KV-1 一覧のすべてに、何の数のおおよその値なのかが書いてある',
+      kvAllowed.filter((k) => typeof kvKnown[k] !== 'string' || kvKnown[k].length < 10),
+      [],
+    )
+    // オーナーが名指しで直させた言い方。直した先（「注意」）も一緒に確かめる
+    eq('KV-1 設定の見出しが「注意」', ja.settings.safetyTitle, '注意')
+    eq('KV-1 設定の切り替えが「注意を表示する」', ja.settings.safetyShow, '注意を表示する')
+    eq('KV-1 枠の見出しも同じ語（同じものを2つの名前で呼ばない）', ja.safety.title, ja.settings.safetyTitle)
+  }
+
+  // ---- KV-2: 数で表せないものに「めやす／目安」を付けていない ----
+  // 「◯◯が数で表せるか」は機械では決められないので、**実際に事故になった語と、
+  // 同じ形で書きたくなる語**を表で持つ。表から語を落とすときは理由を残すこと。
+  // 掃く先はアプリの文言（ja.ts）と、利用者が読むページ（public/about/*.html）の両方。
+  // オーナーは実機で気づくので、アプリだけ直してページに残る形にしない。
+  {
+    const KV_NOT_MEASURABLE = ['安全', '品質', '注意', '危険', '衛生', '清潔', 'おいしさ', '使い方']
+    // 「安全のめやす」「安全の目安」「安全なめやす」のどれでも当たるようにする
+    const kvBad = new RegExp(`(${KV_NOT_MEASURABLE.join('|')})[のなにはを]?(めやす|目安)`, 'g')
+
+    const kvTargets = []
+    const kvJaValues = []
+    const kvWalk2 = (obj, prefix) => {
+      for (const [key, value] of Object.entries(obj)) {
+        const full = prefix ? `${prefix}.${key}` : key
+        if (typeof value === 'string') kvJaValues.push({ where: `ja.ts ${full}`, text: value })
+        else if (value && typeof value === 'object') kvWalk2(value, full)
+      }
+    }
+    kvWalk2(ja, '')
+    kvTargets.push(...kvJaValues)
+
+    const kvAboutDir = path.join(kvRoot, 'public/about')
+    let kvPages = 0
+    for (const e of readdirSync(kvAboutDir, { withFileTypes: true }).sort((a, b) => (a.name < b.name ? -1 : 1))) {
+      const rels = []
+      if (e.isDirectory()) {
+        if (e.name === 'img') continue
+        for (const f of readdirSync(path.join(kvAboutDir, e.name)).filter((f) => f.endsWith('.html')).sort())
+          rels.push(`${e.name}/${f}`)
+      } else if (e.name.endsWith('.html')) rels.push(e.name)
+      for (const rel of rels) {
+        kvPages += 1
+        // ゼロ幅スペース（BudouX）が挟まっても素通りしないよう、照合の前に外す
+        kvTargets.push({ where: `public/about/${rel}`, text: kvRead(`public/about/${rel}`).replace(/​/g, '') })
+      }
+    }
+    eq('KV-2 利用者が読むページを走査できている（0件なら見張りが壊れている）', kvPages > 0, true)
+    eq(
+      'KV-2 掃く文字を読めている（0なら見張りが壊れている）',
+      kvTargets.reduce((n, t) => n + t.text.length, 0) > 100000,
+      true,
+    )
+    // 見張りそのものの自己確認。掃く相手が今は1件も無いので、
+    // 「見つからなかった＝合格」に倒れていないかを、当たるはずの形・当たってはいけない形で確かめる
+    const kvSelf = (text) => [...text.matchAll(new RegExp(kvBad.source, 'g'))].map((m) => m[0])
+    eq('KV-2 自己確認: 「安全のめやす」は当たる', kvSelf('安全のめやすを表示する'), ['安全のめやす'])
+    eq('KV-2 自己確認: 「品質の目安」も当たる', kvSelf('品質の目安です'), ['品質の目安'])
+    eq('KV-2 自己確認: 金額・時間・基準値の正しい使い方には当たらない', [
+      ...kvSelf('食材の目安価格で自動計算しています'),
+      ...kvSelf('目安30分'),
+      ...kvSelf('1日分のめやすは、野菜350gです。'),
+      ...kvSelf('注意を表示する'),
+    ], [])
+    const kvViolations = []
+    for (const { where, text } of kvTargets)
+      for (const m of text.matchAll(kvBad)) kvViolations.push(`${where}: 「${m[0]}」`)
+    eq('KV-2 数で表せないものに「めやす／目安」を付けた言い方が1つも無い', kvViolations, [])
+  }
 }
 
 
