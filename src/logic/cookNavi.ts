@@ -2312,6 +2312,63 @@ export function insertHeatBreakSteps(
 }
 
 /**
+ * 熱い品が「先に仕上がって放置になった」とみなす分数（2026-08-25 便KQ）。
+ * 2026-08-23 便KDの調査がこの線で数えている（実データ435組で178件）ので、同じ物差しを使う。
+ */
+const LATE_HOT_IDLE_MINUTES = 4
+
+/**
+ * その段取りで、**熱いうちに食べたい品が1つだけ**のとき、その品が全体の終わりより
+ * 何分前に仕上がるか（2026-08-25 便KQ）。対象でない組（熱い品が0・2つ以上、1品だけの段取り）は0。
+ *
+ * 熱い品が2つある組は数えない＝手は1組しかないので、どちらかが先に仕上がるのは物理的に避けられない
+ * （実データ435組のうち147件がこの形。無理に動かすとほかの場所が壊れる）。
+ */
+function lateHotIdleMinutes(timeline: CookTimeline, recipes: Recipe[]): number {
+  const valid = recipes.filter((r) => r.id != null && r.steps.length > 0)
+  if (valid.length < 2) return 0
+  const hot = valid.filter((r) => serveTempRank(r) >= SERVE_RANK.hot)
+  if (hot.length !== 1) return 0
+  const end = timeline.items.reduce(
+    (max, it) => (it.recipeId === hot[0].id ? Math.max(max, it.endMin) : max),
+    0,
+  )
+  return timeline.totalMinutes - end
+}
+
+/**
+ * 【熱い品が1つだけなら、その品を最後に仕上げる】2026-08-25 便KQ。
+ *
+ * 実データ30品の全435組を組み直して数えると、熱い品が全体の終わりより4分以上前に仕上がる場面が
+ * 178件あった。うち147件は熱い品が2つある組（避けられない）、15組が**熱い品が1つだけ**の組で、
+ * その1品を後ろへ持っていけば放置が消える場面だった。いちばん大きいのは12分前
+ * （豚肉とキャベツの蒸ししゃぶ ＋ えのきとしめじの塩昆布和え。蒸ししゃぶが15分で仕上がり、
+ * 和え物ができる27分まで冷めていく）。
+ *
+ * **並べ方を変えると段取りが伸びる組がある**（実測: 全部の組に一律で掛けると435組の合計が
+ * +131分、並行に組めなくなる組が11組増えた＝縮めるための機能が縮まなくなる）。
+ * そこで**両方組んでから選ぶ**: まず今までどおりの並べ方で組み、放置が出た組だけ
+ * 「熱い品を最後に着地させる」並べ方でもう一度組んで、**全体の目安が伸びず、放置も減るときだけ**
+ * そちらを使う。伸びる組は今までの段取りのまま（＝直せない理由が「伸びるから」だと数字で言える）。
+ *
+ * 実測（実データ30品の全435組・既定の台所）: 対象の15組が**7組**に、全体の目安の合計は
+ * 17238→17232分（縮んだ）、並行に組めた組は371組のまま、器具の二重予約は0組のまま。
+ * 同梱の基本レシピ24品の全276組でも 22組→19組・合計8975→8972分・並行252組のまま。
+ * 残った7組の内訳は、並べ替えると段取りが伸びる3組と、並べ替えても放置が減らない4組。
+ */
+export function buildCookTimeline(
+  recipes: Recipe[],
+  kitchen: KitchenEquipment = DEFAULT_KITCHEN,
+): CookTimeline {
+  const plain = planCookTimeline(recipes, kitchen, false)
+  const idle = lateHotIdleMinutes(plain, recipes)
+  if (idle < LATE_HOT_IDLE_MINUTES) return plain
+  const landed = planCookTimeline(recipes, kitchen, true)
+  if (landed.totalMinutes > plain.totalMinutes) return plain
+  return lateHotIdleMinutes(landed, recipes) < idle ? landed : plain
+}
+
+/**
  * 選んだレシピ（2〜3品想定）の手順を、1本の段取りタイムラインにまとめる。
  *
  * 貪欲法（料理人＝1人という前提の単純なシミュレーション）:
@@ -2351,7 +2408,9 @@ export function insertHeatBreakSteps(
  *      **これが「最後に仕上げる」と「最後に着火する」を分ける本体**。
  *      提供タイミング（次の5）は仕上げの順番であって、着火まで後ろへ送る理由にはならない
  *   5. **完成の順番**（finishBias・2026-08-08 便EG）。その品の最後の手順のときだけ効く。
- *      冷やす品は先に仕上げて冷蔵庫へ、熱々の品は最後に仕上げる。温度が読めない品は据え置き
+ *      冷やす品は先に仕上げて冷蔵庫へ、熱々の品は最後に仕上げる。温度が読めない品は据え置き。
+ *      **熱い品が1つだけの組をもう一度組み直すとき（landSingleHotLast）だけ、最後の手順に
+ *      限らず全部の手順に効かせる**（2026-08-25 便KQ）
  *   6. **残り時間が長いレシピを先に**（remainingSpan）。長く掛かる品を後回しにすると
  *      全体が伸びるため。待ちを早く仕掛けることにもなる
  *   7. **段階の大枠**（下ごしらえ→加熱→仕上げ）。同じくらい急ぐ品どうしなら、
@@ -2365,11 +2424,24 @@ export function insertHeatBreakSteps(
  * 全体の目安は伸びない（元から手が空いていた時間に置き直すだけ）。
  * 冷やす品には掛けない＝オーナー指示「冷たい方がいいものは先に仕上げて冷蔵庫で冷やしたい」のまま。
  */
-export function buildCookTimeline(
+function planCookTimeline(
   recipes: Recipe[],
-  kitchen: KitchenEquipment = DEFAULT_KITCHEN,
+  kitchen: KitchenEquipment,
+  /** 熱い品が1つだけの組で、その品を全体の終わりに着地させる並べ方にするか（2026-08-25 便KQ） */
+  landSingleHotLast: boolean,
 ): CookTimeline {
   const jobs = buildJobs(recipes, kitchen)
+  /**
+   * この段取りに、熱いうちに食べたい品が1つだけあるか（2026-08-25 便KQ）。
+   *
+   * 見るのは**組の顔ぶれ（最初から最後まで変わらない）**で、残っている品ではない。
+   * 途中で「もう1品が終わったから、いま熱いのはこれだけ」と切り替わると、
+   * 熱い品が2つある組の段取りまで途中から変わる（＝直す対象でない147件を動かしてしまう）。
+   */
+  const singleHotLast =
+    landSingleHotLast &&
+    jobs.length > 1 &&
+    jobs.filter((j) => j.serveRank >= SERVE_RANK.hot).length === 1
   const items: TimelineItem[] = []
   const schedule = new ApplianceSchedule(kitchen)
   let cookAt = 0
@@ -2420,7 +2492,16 @@ export function buildCookTimeline(
    * （実測: オムライス・照り焼き・トマトサラダの3品で、サラダが最後に回った）。
    */
   const finishBias = (j: Job) =>
-    j.ptr === j.steps.length - 1 || startsHeatRun(j) ? j.serveRank : 1
+    j.ptr === j.steps.length - 1 || startsHeatRun(j)
+      ? j.serveRank
+      : // 熱い品が1つだけの並べ方では、**最後の1手だけでなく途中の手順も出したい温度の順に見る**
+        // （2026-08-25 便KQ）。冷たい品の残り（和える・器に盛る）が熱い品の仕上げより後ろに
+        // 落ちると、そのぶん熱い品は食卓の前でそのままになる。1品ずつ作る段取り
+        // （buildSequentialTimeline）が冷たい品から並べているのと同じ考え方を、
+        // 並行の段取りの並べ替えにも掛ける
+        singleHotLast
+        ? j.serveRank
+        : 1
 
   while (hasRemaining()) {
     const active = jobs.filter((j) => j.ptr < j.steps.length)
@@ -2526,6 +2607,20 @@ export function buildCookTimeline(
         -1,
       )
       if (othersEnd < 0) return cookAt
+      /**
+       * **熱い品が1つだけの並べ方では、ほかの品の完成にそのまま着地させる**（2026-08-25 便KQ）。
+       *
+       * 下の `othersActive` を丸ごと引く安全側の見積りは、熱い品が2つあって手を取り合う場面のもの。
+       * 熱い品が1つだけの組では、この品が手を使うのは火を止めたあとの仕上げだけで、
+       * 火にかかっている間はほかの品の手作業がそのまま入る（それが並行の段取りそのもの）。
+       * それでも `othersActive` を丸ごと引くと着火の時刻が必ず現在時刻より前に出て、
+       * 「後ろへ回す」判断が一度も働かないまま先に火がつく
+       * （実データ: 蒸ししゃぶが5分で火にかかり13分で完成、和え物ができるのは27分）。
+       *
+       * 着地の目安（othersEnd）は**ほかの品を1品だけで作ったときの見込み**なので、
+       * 手の取り合いで実際にはそれより遅くなる＝この逆算は必ず「必要より少し早い」側に出る。
+       */
+      if (singleHotLast && j.serveRank >= SERVE_RANK.hot) return othersEnd - remainingSpan(j)
       const othersActive = jobs.reduce(
         (sum, k) => (k !== j && k.ptr < k.steps.length ? sum + remainingActive(k) : sum),
         0,

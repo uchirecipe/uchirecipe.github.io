@@ -457,6 +457,8 @@ import { FREE_LIMIT } from '../src/logic/freeLimit.ts'
 import { MEAL_GENRES } from '../src/logic/mealPlan.ts'
 // 便KD（レンジの二重予約）で、段取りの工程がどの器具を使うかを見分けるのに使う
 import { stepAppliance } from '../src/logic/cookAppliance.ts'
+// 便KQ（熱い品が先に仕上がって冷める）で、その品を熱いうちに食べたい品として扱うかを見分ける
+import { recipeServeTemp } from '../src/logic/cookNavi.ts'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const appRoot = path.join(__dirname, '..')
@@ -51665,6 +51667,139 @@ try {
       )
     } finally {
       await kdBrowser.close()
+    }
+  }
+
+
+  // --- KQFIN-01: 熱いうちに食べたい品が先に仕上がって冷める
+  // （2026-08-25 便KQ・影響範囲テストC「時間が無い人」の実データ）。
+  //
+  // 起きていたこと（画面の「できあがりの目安」から書き写した実際の数字）:
+  //   豚肉とキャベツの蒸ししゃぶ      約15分後
+  //   えのきとしめじの塩昆布和え      約27分後
+  // 熱いうちに食べたい品はこの組に1つだけなのに、和え物より12分早く仕上がる
+  // ＝蒸ししゃぶは12分そのままになる。
+  //
+  // e2eが見張るのは**画面が利用者に見せている数字**＝「できあがりの目安」の並び。
+  // 熱い品が1つだけの組では、その品の目安が、いちばん遅い品と4分以上離れないこと。
+  // 何番目のカードに出るか・工程がいくつに割れたかは見ない
+  // （段取りが伸びても縮んでも同じ判定になる形）。熱い品が2つある組は対象にしない
+  // ＝どちらかが先に仕上がるのは物理的に避けられないため。 ---
+  currentCheck = 'KQFIN-01'
+  {
+    // 本文は実データ（レタスクラブ／クラシル）から取り込んだものそのまま
+    const kqHotSteps = [
+      { text: 'キャベツはざく切りにする。トマトは1cm角に切ってボウルに入れ、Aを混ぜてトマトだれを作る。' },
+      { text: 'フライパンにキャベツを広げて入れ、豚肉を広げてのせて、塩少々、酒大さじ3をふる。ふたをして中火にかけ、肉に火が通るまで7～8分蒸し焼きにする。', minutes: 8 },
+      { text: '器に盛ってトマトだれをかける。' },
+    ]
+    const kqColdSteps = [
+      { text: 'えのき、しめじは石づきを切り落としておきます。' },
+      { text: 'えのきは半分に切ってほぐします。' },
+      { text: 'しめじは小房にほぐします。' },
+      { text: '耐熱ボウルに1、2を入れ、ふんわりとラップをかけ、600Wの電子レンジで2分程加熱します。水気を切り、粗熱を取ります。', minutes: 2 },
+      { text: 'ボウルに3、塩昆布、(A)を入れて和えます。' },
+      { text: '器に盛り付けて完成です。' },
+    ]
+    const kqHotTitle = 'E2E豚肉とキャベツの蒸ししゃぶ'
+    const kqColdTitle = 'E2Eえのきとしめじの塩昆布和え'
+    // 「熱いうちに食べたい品」かどうかは、画面と同じ関数に通して決める（判定を書き写さない）
+    const kqHotCount = [
+      { title: kqHotTitle, steps: kqHotSteps, dishType: 'main' },
+      { title: kqColdTitle, steps: kqColdSteps, dishType: 'side' },
+    ].filter((r) => recipeServeTemp(r) === 'hot')
+
+    const kqBrowser = await chromium.launch()
+    const kqContext = await kqBrowser.newContext({ viewport: { width: 390, height: 844 } })
+    const kqPage = await kqContext.newPage()
+    kqPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin'))
+        return
+      errors.push(`[pageerror@KQFIN-01] ${err.message}`)
+    })
+    try {
+      await kqPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await kqPage.waitForTimeout(2400) // 初回シード完了待ち
+      await kqPage.evaluate(
+        async ({ hotTitle, coldTitle, hotSteps, coldSteps }) => {
+          const openDb = () =>
+            new Promise((resolve, reject) => {
+              const r = indexedDB.open('uchi-recipe')
+              r.onsuccess = () => resolve(r.result)
+              r.onerror = () => reject(r.error)
+            })
+          const db = await openDb()
+          const P = (req) =>
+            new Promise((res, rej) => {
+              req.onsuccess = () => res(req.result)
+              req.onerror = () => rej(req.error)
+            })
+          const store = (name) => db.transaction(name, 'readwrite').objectStore(name)
+          const mk = (title, dishType, steps) => ({
+            title,
+            servings: 2,
+            effortLevel: 'normal',
+            tags: [],
+            dishType,
+            ingredients: [],
+            steps,
+            isFavorite: false,
+            cookedLogs: [],
+            searchWords: [],
+            isStarter: false,
+            updatedAt: Date.now(),
+          })
+          const idHot = await P(store('recipes').add(mk(hotTitle, 'main', hotSteps)))
+          const idCold = await P(store('recipes').add(mk(coldTitle, 'side', coldSteps)))
+          // 今日の予定に入っている品を段取りが読む。ここだけ入れ替える
+          const today = await P(store('todayList').getAll())
+          for (const row of today) await P(store('todayList').delete(row.id))
+          let addedAt = Date.now()
+          await P(store('todayList').add({ recipeId: idHot, addedAt: addedAt++ }))
+          await P(store('todayList').add({ recipeId: idCold, addedAt: addedAt++ }))
+          const cur = (await P(store('settings').get(1))) || { id: 1 }
+          await P(
+            store('settings').put({ ...cur, id: 1, proCode: 'UR-E2E-TEST-ONLY', proActivatedAt: Date.now() }),
+          )
+          db.close()
+        },
+        { hotTitle: kqHotTitle, coldTitle: kqColdTitle, hotSteps: kqHotSteps, coldSteps: kqColdSteps },
+      )
+      // 生のIndexedDBへ書いたので、必ず読み込み直す（Dexieのライブ購読はDexie経由しか見ていない）
+      await kqPage.goto(`${BASE}/#/cook-navi`)
+      await kqPage.reload({ waitUntil: 'networkidle' })
+      await kqPage.waitForTimeout(1600)
+      await kqPage.getByRole('button', { name: ja.cookNavi.build }).click()
+      await kqPage.waitForTimeout(900)
+
+      // 画面の「できあがりの目安」をそのまま読む（品名と、その品が何分後にできるか）
+      const kqFinishes = await kqPage.$$eval('[data-testid="navi-finish-times"] li', (lis) =>
+        lis.map((li) => {
+          const row = (li.textContent ?? '').replaceAll('​', '')
+          const shown = (
+            li.querySelector('[data-testid="navi-finish-minutes"]')?.textContent ?? ''
+          ).replaceAll('​', '')
+          const digits = shown.match(/[0-9]+/)
+          return { row, minutes: digits ? Number(digits[0]) : null }
+        }),
+      )
+      const kqHotRow = kqFinishes.find((f) => f.row.includes(kqHotTitle))
+      const kqLatest = kqFinishes.reduce((max, f) => (f.minutes != null ? Math.max(max, f.minutes) : max), 0)
+      check(
+        'KQFIN-01 前提: できあがりの目安が2品ぶん出て、熱い品はこの組に1つだけ',
+        kqFinishes.length === 2 &&
+          kqFinishes.every((f) => f.minutes != null) &&
+          kqHotRow != null &&
+          kqHotCount.length === 1,
+        `行=${kqFinishes.map((f) => `${f.row}`).join(' / ')} 熱い品=${kqHotCount.length}品`,
+      )
+      check(
+        'KQFIN-01 熱いうちに食べたい品が、ほかの品より先に仕上がってそのままにならない',
+        kqHotRow != null && kqHotRow.minutes != null && kqLatest - kqHotRow.minutes < 4,
+        `熱い品=約${kqHotRow?.minutes}分後 / いちばん遅い品=約${kqLatest}分後`,
+      )
+    } finally {
+      await kqBrowser.close()
     }
   }
 
