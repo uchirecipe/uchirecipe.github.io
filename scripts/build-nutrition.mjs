@@ -1,7 +1,9 @@
 // 栄養価概算(M6-1)用: 文部科学省「日本食品標準成分表（八訂）増補2023年」の公式Excelから、
 // scripts/nutrition-foods.mjs で指定した食品だけを抜き出して src/logic/nutritionData.ts を生成する。
 //
-// 実行: node scripts/build-nutrition.mjs   （Node 24。外部ライブラリ不要）
+// 実行: npx tsx scripts/build-nutrition.mjs
+//   （2026-08-25 便KY で node → npx tsx に変えた。下の「身元の確かめ表」を作るのに
+//     src/logic/kana.ts の材料名の正規化をそのまま使うため。外部ライブラリは要らないまま）
 //
 // - 公式Excelは scripts/data/mext-honpyo-2023.xlsx にキャッシュする（無ければ自動ダウンロード。
 //   バイナリなのでリポジトリにはコミットしない=.gitignore対象）
@@ -12,7 +14,9 @@ import { readFile, writeFile, mkdir, access } from 'node:fs/promises'
 import { inflateRawSync } from 'node:zlib'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
-import { FOODS, NUTRITION_DB_VERSION } from './nutrition-foods.mjs'
+import { FOODS, NUTRITION_DB_VERSION, OTHER_FOODS } from './nutrition-foods.mjs'
+// 材料名の正規化は実行時とまったく同じものを使う（ここで別に書くと必ず食い違う）
+import { toIngredientKey } from '../src/logic/kana.ts'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -129,6 +133,85 @@ function parseNutrientValue(raw) {
   const n = Number(s)
   if (!Number.isFinite(n)) throw new Error(`成分値を数値化できません: "${raw}"`)
   return Math.round(n * 10) / 10 // 浮動小数の桁ゴミ(4.099999...)を小数1桁に整える
+}
+
+// ---------- 身元の確かめ表の作り方（2026-08-25 便KY） ----------
+
+// 八訂の収載食品名「こむぎ ［小麦粉］ 薄力粉 １等」を語に割る
+function officialNameTokens(name) {
+  return name
+    .replace(/[［\[\]］＜＞<>（）()]/g, ' ')
+    .split(/[\s,、･・]+/)
+    .map((t) => t.trim())
+    .filter((t) => t.length >= 2)
+}
+
+// 100gあたりの値が「同じ数字」と言えるか。ここを超えたら1人分の表示が実際に変わる
+// （八訂の食品群が違うときは、値が近くても「別の分類の食べ物」として扱う。
+//   りんご酢(調味料17)とりんご(果実07)、麻婆豆腐(調理済み18)と木綿豆腐(豆04)のような組で、
+//   アプリは食品群で野菜量を数えている＝logic/nutritionBalance.ts の VEGETABLE_GROUP_CODE ので、
+//   群が違うまま当てると野菜量まで狂う）
+function numbersDiffer(a, b) {
+  const dk = Math.abs(a.kcal - b.kcal)
+  if (dk > 30 && dk / Math.max(a.kcal, b.kcal, 1) > 0.3) return true
+  if (Math.abs(a.saltG - b.saltG) > 2) return true
+  if (Math.abs(a.proteinG - b.proteinG) > 5) return true
+  if (Math.abs(a.fatG - b.fatG) > 5) return true
+  return false
+}
+
+function buildOtherFoodNames(outFoods, byId) {
+  // アプリが持っている食品番号（blendは「番号+番号」なので割って全部入れる）
+  const ourIds = new Set()
+  for (const f of outFoods) for (const id of String(f.id).split('+')) if (/^\d{5}$/.test(id)) ourIds.add(id)
+
+  // 実行時と同じ索引（完全一致・部分一致）を組む
+  const exact = new Map()
+  for (const f of outFoods) for (const a of f.aliases) {
+    const k = toIngredientKey(a)
+    if (!exact.has(k)) exact.set(k, f)
+  }
+  const partialKeys = [...exact.keys()].filter((k) => k.length >= 3).sort((a, b) => b.length - a.length)
+  const partialHit = (key) => {
+    for (const p of partialKeys) if (key.includes(p)) return exact.get(p)
+    return null
+  }
+
+  // 八訂の収載食品名の語 → その語を名乗る食品番号
+  const idsByToken = new Map()
+  for (const [id, food] of byId) {
+    for (const t of officialNameTokens(food.name)) {
+      if (!idsByToken.has(t)) idsByToken.set(t, new Set())
+      idsByToken.get(t).add(id)
+    }
+  }
+
+  const names = new Set()
+  for (const [token, ids] of idsByToken) {
+    if ([...ids].some((id) => ourIds.has(id))) continue // ①アプリが持っている食品の名前は塞がない
+    const key = toIngredientKey(token)
+    if (!key || exact.has(key)) continue // 別名として登録済みなら完全一致が先に当たる
+    const hit = partialHit(key)
+    if (!hit) continue // そもそも部分一致しないなら塞ぐ必要が無い
+    // ②その名前を名乗るどの八訂の食品とも数字が合わないときだけ塞ぐ
+    const hitGroup = String(hit.id).match(/\d{5}/)?.[0].slice(0, 2)
+    const anyClose = [...ids].some(
+      (id) =>
+        (hitGroup === undefined || id.slice(0, 2) === hitGroup) &&
+        !numbersDiffer(hit.per100g, byId.get(id).per100g),
+    )
+    if (anyClose) continue
+    names.add(key)
+  }
+
+  // 八訂に収載が無いために機械では分からない分（手書き・理由つき）
+  for (const entry of OTHER_FOODS ?? []) {
+    if (!entry.note) throw new Error(`OTHER_FOODS「${entry.name}」: note(理由)が必須です`)
+    const key = toIngredientKey(entry.name)
+    if (exact.has(key)) throw new Error(`OTHER_FOODS「${entry.name}」はFOODSの別名と重なっています`)
+    names.add(key)
+  }
+  return [...names].sort()
 }
 
 async function main() {
@@ -252,6 +335,18 @@ async function main() {
     })
   }
 
+  // ---------- 5. 身元の確かめ表を作る（2026-08-25 便KY） ----------
+  // 材料名のどこかに成分表の別名(3文字以上)が入っているだけで成分値を当てる「部分一致」は、
+  // 日本語の複合語（別の食材名＋食材名）で別の食べ物に当たる（杏仁豆腐→木綿豆腐／りんご酢→りんご）。
+  // 八訂に収載がある名前なら「別の食品だ」と機械で分かるので、公式Excelから洗い出して表にする。
+  //
+  // 表に入れる条件は2つとも満たすもの:
+  //   ①その名前を名乗る八訂の食品を、アプリが1品も持っていない
+  //   ②その名前を部分一致に通すと、**栄養の数字が実際に狂う**（下の numbersDiffer）
+  // ②を付けているのは**塞ぎすぎないため**。値が同じなら当てても表示は変わらないので塞ぐ理由が無い
+  // （「赤たまねぎ→玉ねぎ」「黒砂糖→砂糖」「かに風味かまぼこ→かまぼこ」は今までどおり当たる）。
+  const otherFoodNames = buildOtherFoodNames(outFoods, byId)
+
   const data = {
     source: SOURCE_NAME,
     sourcePage: SOURCE_PAGE,
@@ -259,10 +354,11 @@ async function main() {
     generatedAt: new Date().toISOString().slice(0, 10),
     dbVersion: NUTRITION_DB_VERSION,
     foods: outFoods,
+    otherFoodNames,
   }
 
   const banner = `// このファイルは自動生成です。手で編集しないこと。
-// 生成: node scripts/build-nutrition.mjs
+// 生成: npx tsx scripts/build-nutrition.mjs
 // 対応表(どの食品を載せるか): scripts/nutrition-foods.mjs
 // 出典: ${SOURCE_NAME}
 //       ${SOURCE_PAGE}
@@ -311,6 +407,14 @@ export interface NutritionData {
   generatedAt: string
   dbVersion: number
   foods: NutritionFood[]
+  /**
+   * 身元の確かめ表（2026-08-25 便KY）。**この名前には部分一致を使わない**。
+   * 中身は「その名前を名乗る八訂の食品をアプリが1品も持っておらず、
+   * 部分一致に通すと栄養の数字が実際に狂う」名前を、公式Excelから機械で洗い出したもの
+   * （＋八訂に収載が無いため機械では分からないものを scripts/nutrition-foods.mjs の
+   * OTHER_FOODS に理由つきで手書きした分）。材料名の正規化後の形で持つ。
+   */
+  otherFoodNames: string[]
 }
 
 export const NUTRITION_DATA: NutritionData = ${JSON.stringify(data, null, 2)}
