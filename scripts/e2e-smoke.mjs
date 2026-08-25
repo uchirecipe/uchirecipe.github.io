@@ -53722,6 +53722,145 @@ try {
     }
   }
 
+  // --- KTSPREAD-03: 先にできた品が待つことになる、という警告（2026-08-25 便KT・司令部裁定）---
+  //
+  // 便KQが熱い品が1つだけの組の放置を 15組→7組 に減らしたが、残る7組は**熱い品が2つあって
+  // 物理的に避けられない**組で、実際に置いたままになる。オーナー指示で消したのは
+  // **分数の予測**（「約◯分あきます」）なので、事実の警告だけを分数抜きで残した。
+  //
+  // ここで見るのは2つ:
+  //   ①熱い品が2つで開きが大きい組では、警告が画面に出る
+  //   ②その警告に**分数が1つも入っていない**（数字を戻す次の便を止める）
+  // 掴み方は data-testid と ja.ts の文言だけ（何番目のカードか・工程がいくつに割れたかは見ない）---
+  currentCheck = 'KTSPREAD-03'
+  {
+    const ksBrowser = await chromium.launch()
+    const ksContext = await ksBrowser.newContext({ viewport: { width: 390, height: 844 } })
+    const ksPage = await ksContext.newPage()
+    ksPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin'))
+        return
+      errors.push(`[pageerror@KTSPREAD-03] ${err.message}`)
+    })
+    // どちらも熱いうちに食べたい主菜＝便KQでも並べ替えでは揃えられない組（残る7組の形）。
+    // 煮こみが先にできあがり、炊き上がりを待つあいだ置いたままになる
+    const ksFirstTitle = 'E2Eじっくり煮こみの牛すね肉'
+    const ksLastTitle = 'E2E五目炊き込みごはん'
+    try {
+      await ksPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await ksPage.waitForTimeout(2400) // 初回シード完了待ち
+      await ksPage.evaluate(
+        async ({ firstTitle, lastTitle }) => {
+          const openDb = () =>
+            new Promise((resolve, reject) => {
+              const r = indexedDB.open('uchi-recipe')
+              r.onsuccess = () => resolve(r.result)
+              r.onerror = () => reject(r.error)
+            })
+          const db = await openDb()
+          const P = (req) =>
+            new Promise((res, rej) => {
+              req.onsuccess = () => res(req.result)
+              req.onerror = () => rej(req.error)
+            })
+          const store = (name) => db.transaction(name, 'readwrite').objectStore(name)
+          const mk = (title, dishType, steps) => ({
+            title,
+            servings: 2,
+            effortLevel: 'normal',
+            tags: [],
+            dishType,
+            ingredients: [],
+            steps,
+            isFavorite: false,
+            cookedLogs: [],
+            searchWords: [],
+            isStarter: false,
+            updatedAt: Date.now(),
+          })
+          // どちらも熱いうちに食べる主菜。炊き上がりまでが長いので、煮こみが先にできあがる
+          const idFirst = await P(
+            store('recipes').add(
+              mk(firstTitle, 'main', [
+                { text: '牛すね肉と玉ねぎを一口大に切る。' },
+                { text: '鍋に牛すね肉・玉ねぎ・水を入れ、ふたをして弱火で30分煮こむ。', minutes: 30 },
+                { text: '塩こしょうで味をととのえて器に盛る。' },
+              ]),
+            ),
+          )
+          const idLast = await P(
+            store('recipes').add(
+              mk(lastTitle, 'main', [
+                { text: '米を研ぎ、30分浸水させる。', minutes: 30 },
+                { text: 'にんじんとしいたけを細切りにする。' },
+                { text: '炊飯器に米と具材、だしを入れて普通に炊く。', minutes: 40 },
+                { text: '炊き上がったら10分蒸らして全体を混ぜる。', minutes: 10 },
+              ]),
+            ),
+          )
+          const today = await P(store('todayList').getAll())
+          for (const row of today) await P(store('todayList').delete(row.id))
+          let addedAt = Date.now()
+          await P(store('todayList').add({ recipeId: idFirst, addedAt: addedAt++ }))
+          await P(store('todayList').add({ recipeId: idLast, addedAt: addedAt++ }))
+          const cur = (await P(store('settings').get(1))) || { id: 1 }
+          await P(
+            store('settings').put({ ...cur, id: 1, proCode: 'UR-E2E-TEST-ONLY', proActivatedAt: Date.now() }),
+          )
+          db.close()
+        },
+        { firstTitle: ksFirstTitle, lastTitle: ksLastTitle },
+      )
+      // 生のIndexedDBへ書いたので、必ず読み込み直す（Dexieのライブ購読はDexie経由しか見ていない）
+      await ksPage.goto(`${BASE}/#/cook-navi`)
+      await ksPage.reload({ waitUntil: 'networkidle' })
+      await ksPage.waitForTimeout(1600)
+      await ksPage.getByRole('button', { name: ja.cookNavi.build }).click()
+      await ksPage.waitForTimeout(1000)
+
+      const ksWait = ksPage.locator('[data-testid="navi-finish-wait"]')
+      const ksText = (await ksWait.count()) === 0 ? '' : stripZwspText(await ksWait.innerText())
+      check(
+        'KTSPREAD-03 熱い品が2つで完成が大きくずれる組では、待つことになる品を知らせる',
+        (await ksWait.count()) === 1 && ksText.includes(ksFirstTitle) && ksText.includes(ksLastTitle),
+        `画面=${ksText}`,
+      )
+      check(
+        'KTSPREAD-03 その一文は ja.ts の文言どおり（画面の日本語を書き写さない）',
+        ksText ===
+          ja.cookNavi.finishWaitNote.replace('{first}', ksFirstTitle).replace('{last}', ksLastTitle),
+        `画面=${ksText} / 期待=${ja.cookNavi.finishWaitNote}`,
+      )
+      check(
+        'KTSPREAD-03 警告に分数が入っていない（消した「約◯分あきます」を戻さない）',
+        !/\d+\s*分/.test(ksText) && !ksText.includes('あきます'),
+        `画面=${ksText}`,
+      )
+      // 品ごとの「約◯分後」の一覧は消したまま（戻していない）
+      check(
+        'KTSPREAD-03 品ごとの「できあがりの目安」の枠は消えたまま',
+        (await ksPage.locator('[data-testid="navi-finish-times"]').count()) === 0 &&
+          !stripZwspText(await ksPage.textContent('body')).includes('できあがりの目安'),
+      )
+      // 警告は「全体の調理時間」の枠より後・手順カードより前に出る＝読み進める流れの中にある
+      const ksOrder = await ksPage.evaluate(() => {
+        const card = document.querySelector('[data-testid="navi-total-card"]')
+        const note = document.querySelector('[data-testid="navi-finish-wait"]')
+        const firstStep = document.querySelector('[data-testid="navi-step-text"]')
+        if (!card || !note || !firstStep) return null
+        const y = (el) => Math.round(el.getBoundingClientRect().top + window.scrollY)
+        return { card: y(card), note: y(note), step: y(firstStep) }
+      })
+      check(
+        'KTSPREAD-03 警告は全体の調理時間の下・手順カードの上にある（手順より先に読める）',
+        ksOrder != null && ksOrder.card < ksOrder.note && ksOrder.note < ksOrder.step,
+        JSON.stringify(ksOrder),
+      )
+    } finally {
+      await ksBrowser.close()
+    }
+  }
+
 } catch (err) {
   ng(`実行中断(${currentCheck})`, err.message)
 } finally {

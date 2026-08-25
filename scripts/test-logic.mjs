@@ -19958,8 +19958,8 @@ Aみりん 大さじ1
     'utf-8',
   )
   eq(
-    'KT-5 画面（並行調理ナビ）からも「できあがりの目安」の枠が消えている',
-    /navi-finish-times|recipeFinishTimes|finishSpread/.test(ktNaviPageSrc),
+    'KT-5 画面（並行調理ナビ）からも品ごとの目安の枠が消えている',
+    /navi-finish-times|navi-finish-minutes/.test(ktNaviPageSrc),
     false,
   )
 }
@@ -20210,10 +20210,10 @@ Aみりん 大さじ1
     4,
   )
   eq('GK-6 1品だけなら開きは言わない', finishSpread([{ recipeId: 1, minutes: 20, cold: false }]).minutes, 0)
-  // 開きを画面に出す文言（finishSpreadCold ほか）は 2026-08-25 便KT で節ごと消した
-  // （オーナー原文「「出来上がりの目安」削除。……ここまで細かく表示してもあまり意味がない。」）。
-  // 開きを数える純ロジックは上のとおり残してある＝段取りの質はこの物差しで測り続ける。
-  // 消えていることの見張りは KT-5 が持つ
+  // 開きの**分数**を画面に出す文言（finishSpread・finishSpreadCold ほか）は 2026-08-25 便KT で
+  // 節ごと消した（オーナー原文「……ここまで細かく表示してもあまり意味がない。」）。
+  // 「先にできた品が待つことになる」という**警告だけ**は分数抜きで残してある（KT-10）。
+  // 開きを数える純ロジックは上のとおり残してある＝段取りの質はこの物差しで測り続ける
 }
 
 // ---------- 便GL: 手順を進めたときのタイマーの一言 / 読み上げ名 ----------
@@ -32427,6 +32427,77 @@ import { safetyNotesFor, stepSafetyNotes, wholeRecipeSafetyNotes } from '../src/
         ktRead('src/pages/MealPlanPage.tsx').includes('plan.keptItemCount'),
       ],
       [true, true, true],
+    )
+  }
+
+  /* ---- KT-10: 「先にできた品が待つことになる」警告は、分数抜きで残す（司令部裁定）----
+   *
+   * 便KQが直前に、熱い品が1つだけの組の放置を 15組→7組 に減らした。残る7組は
+   * **熱い品が2つあって物理的に避けられない**組で、そこでは実際に置いたままになる。
+   * オーナーの削除理由（「個人の手のスピードや状況によってすぐに変わる」）は
+   * **分数の予測**への指摘であって、この事実には当たらない。
+   *
+   * ここが見張るのは2つ:
+   *   ①分数を書いていない（差し込み口も、分の言い回しも持たない）＝数字を戻す便を止める
+   *   ②開きが大きい組では出て、そうでない組・冷たい品が先の組では出ない
+   */
+  {
+    const naviSrc = ktRead('src/pages/CookNaviPage.tsx')
+    eq(
+      'KT-10 警告に分数を書かない（差し込み口を持たない）',
+      /\{n\}|分/.test(ja.cookNavi.finishWaitNote),
+      false,
+    )
+    eq(
+      'KT-10 どの品がどの品を待つのかは名前で書く（「その間」だけにしない）',
+      ja.cookNavi.finishWaitNote.includes('{first}') && ja.cookNavi.finishWaitNote.includes('{last}'),
+      true,
+    )
+    eq(
+      'KT-10 消した「約◯分あきます」の言い方は戻っていない',
+      Object.values(ja.cookNavi).filter((v) => typeof v === 'string' && v.includes('あきます')),
+      [],
+    )
+    // 出す条件は docs/72 N1 と同じ物差し（logic/cookFinish.ts）から取っていること
+    eq(
+      'KT-10 出す条件はロジック側の線（isFinishSpreadWide）で決めている',
+      naviSrc.includes('isFinishSpreadWide(gap.minutes, timeline.totalMinutes)'),
+      true,
+    )
+    eq(
+      'KT-10 先にできる品が冷たいまま出す品なら出さない（そう組んでいるので咎めない）',
+      /gap\.first\.cold\) return null/.test(naviSrc),
+      true,
+    )
+    // 線そのものの通り方（全体30分・開き20分＝大きい／開き5分＝大きくない）
+    const { isFinishSpreadWide: ktWide, finishSpread: ktSpread } = await import('../src/logic/cookFinish.ts')
+    const ktHotPair = [
+      { recipeId: 1, minutes: 10, cold: false },
+      { recipeId: 2, minutes: 30, cold: false },
+    ]
+    eq(
+      'KT-10 熱い品が2つで開きが大きい組は「出す」側になる（便KQで残る7組の形）',
+      ktWide(ktSpread(ktHotPair).minutes, 30) && !ktSpread(ktHotPair).first.cold,
+      true,
+    )
+    eq(
+      'KT-10 開きが小さい組は出さない（全部の組に出すと読まれなくなる）',
+      ktWide(
+        ktSpread([
+          { recipeId: 1, minutes: 27, cold: false },
+          { recipeId: 2, minutes: 30, cold: false },
+        ]).minutes,
+        30,
+      ),
+      false,
+    )
+    eq(
+      'KT-10 先にできるのが冷たい品なら、開きが大きくても出さない',
+      ktSpread([
+        { recipeId: 1, minutes: 10, cold: true },
+        { recipeId: 2, minutes: 30, cold: false },
+      ]).first.cold,
+      true,
     )
   }
 

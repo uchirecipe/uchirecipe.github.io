@@ -52,6 +52,9 @@ import {
   type TimelineItem,
 } from '../logic/cookNavi'
 import { NAVI_RECIPE_COLORS } from '../logic/naviColors'
+// 品ごとの分数は画面に出さない（2026-08-25 便KT）。借りるのは「開きが大きいか」の判定と、
+// どの品がどの品を待つのかの2つだけ＝docs/72 N1 と同じ物差しで出し分けるため
+import { finishSpread, isFinishSpreadWide, recipeFinishTimes } from '../logic/cookFinish'
 import {
   clearCookNaviSession,
   endCookNaviTrial,
@@ -1197,6 +1200,28 @@ export default function CookNaviPage() {
   }, [timeline, kitchen.burners])
 
   /**
+   * 「先にできた品が待つことになる」ことだけを知らせるための導出（2026-08-25 便KT・司令部裁定）。
+   *
+   * 品ごとの分数は画面に出さない（オーナー指示で「できあがりの目安」の節は消したまま）。
+   * ここで使うのは**出す/出さないの判定**と**どの品がどの品を待つのか**の2つだけ
+   * ＝数え方は docs/72 の N1 と同じ物差し（logic/cookFinish.ts）をそのまま借りる。
+   */
+  const finishWait = useMemo(() => {
+    if (!timeline) return null
+    const finishes = recipeFinishTimes(timeline.items, timeline.recipes, (id) => recipeById.get(id))
+    const gap = finishSpread(finishes)
+    // 開きが大きい組だけに出す（全部の組に出すと読まれなくなる）。
+    // 先にできる品が冷たいまま出す品のときは、放置ではなく**そう組んでいる**ので出さない
+    if (!gap.first || !gap.last || gap.first.cold) return null
+    if (!isFinishSpreadWide(gap.minutes, timeline.totalMinutes)) return null
+    const titleOf = (id: number) => timeline.recipes.find((r) => r.id === id)?.title ?? ''
+    const first = titleOf(gap.first.recipeId)
+    const last = titleOf(gap.last.recipeId)
+    if (first === '' || last === '') return null
+    return { first, last }
+  }, [timeline, recipeById])
+
+  /**
    * 画面に出す段取り（2026-08-10 便FI）。組み直した段取りに、色で引き寄せた並べ替えを
    * 当て直したもの。**引き寄せが1つも無ければ組み直したそのまま**（＝今までと同じ）。
    *
@@ -2095,14 +2120,32 @@ export default function CookNaviPage() {
                     </div>
 
                     {/*
-                      「できあがりの目安」（品ごとの完成時刻と、その開き）は**節ごと消した**。
-                      2026-08-25 便KT・オーナー原文:
+                      「できあがりの目安」（品ごとの完成時刻の一覧と「約◯分あきます」）は
+                      **節ごと消した**。2026-08-25 便KT・オーナー原文:
                         「「出来上がりの目安」削除。全体の調理時間が分かれば十分。細かく出した
                           ところで、個人の手のスピードや状況によってすぐに変わるので、ここまで
                           細かく表示してもあまり意味がない。」
-                      品ごとの完成時刻を数える純ロジック（logic/cookFinish.ts）は残してある
-                      ＝docs/72 N1（完成の揃い）の物差しで、段取りの質は今までどおり検査できる。
+
+                      残したのは**分数を使わない警告1行だけ**（司令部裁定）。オーナーの理由は
+                      分数の予測への指摘で、「先にできた品は待つことになる」という事実には
+                      当たらないため。便KQで熱い品が1つの組の放置は7組まで減ったが、残る7組は
+                      熱い品が2つあって避けられない＝知らせる場所が要る。
+                      置き場所は「全体の調理時間」の枠のすぐ下＝段取りを読み進める流れの中で
+                      必ず目に入り、手順カードより先に読める位置。
                     */}
+                    {finishWait && (
+                      <p
+                        data-testid="navi-finish-wait"
+                        className="ja-phrase mt-[var(--space-sm)] flex items-start gap-1 rounded-md border border-edge bg-surface p-[var(--space-md)] text-sm font-bold text-accent-ink"
+                      >
+                        <Hourglass size={16} className="mt-0.5 shrink-0" aria-hidden />
+                        <span>
+                          {ja.cookNavi.finishWaitNote
+                            .replace('{first}', finishWait.first)
+                            .replace('{last}', finishWait.last)}
+                        </span>
+                      </p>
+                    )}
 
                     {/* 並行の余地が無かったときの説明（2026-08-08 便ED・docs/68 打ち手#4）。
                         縮んでいないのに縮んだように見せないため、理由と次の一手を書く。
