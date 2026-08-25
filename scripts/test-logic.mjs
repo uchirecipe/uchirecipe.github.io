@@ -32540,6 +32540,144 @@ import { safetyNotesFor, stepSafetyNotes, wholeRecipeSafetyNotes } from '../src/
       [],
     )
   }
+  // ---------- KS-9: 「1食」に分けて食べる品ではないレシピの、栄養とシェアの言い方 ----------
+  // 2026-08-25 便KS・④の続き（司令部の裁定「栄養パネルの『1食あたり』も wholeBatch を効かせる」）。
+  // オーナー原文「１食あたり７０円とあるが、出汁だけで１食とは言わない」＝引っかかっているのは
+  // 金額ではなく**「1食」という数え方そのもの**なので、金額と同じ印で栄養・シェアもそろえる。
+  {
+    // --- 栄養パネル（レシピ詳細）---
+    eq('KS-9 でき上がり全体の言い方を持っている', [
+      typeof ja.nutrition.summaryLabelWholeBatch,
+      typeof ja.nutrition.wholeBatchHeader,
+    ], ['string', 'string'])
+    eq('KS-9 でき上がり全体の要約に「1食」と書かない', ja.nutrition.summaryLabelWholeBatch.includes('1食'), false)
+    const ksTeaser = ksRead('src/components/NutritionTeaser.tsx')
+    eq('KS-9 栄養パネルが印を見て言い方を変えている', ksTeaser.includes('summaryLabelWholeBatch'), true)
+    eq('KS-9 栄養パネルは印をレシピから受け取る', ksTeaser.includes("'wholeBatch'"), true)
+    // 数値の表は1人分の列を出さず、でき上がり全体の1列にする
+    eq('KS-9 表の列も印で切り替える', ksTeaser.includes('wholeBatchHeader'), true)
+    eq('KS-9 表の列数も切り替える', ksTeaser.includes("wholeBatch ? 'grid-cols-[1fr_auto]'"), true)
+
+    // --- シェア文（アプリの外へ出るので、画面と同じ言い方でなければならない）---
+    const ksShareBase = {
+      image: false, cookMinutes: false, cost: false, nutrition: true, allIngredients: false,
+      kcalPerServing: 100, saltPerServing: 1.2,
+    }
+    // シェア文の検査用（別の節の shareRecipe は節の中の変数なので、ここで最小の形を作る）
+    const ksNormalRecipe = {
+      title: 'KSだしのとり方',
+      servings: 2,
+      effortLevel: 'normal',
+      tags: [],
+      ingredients: [{ name: '昆布', amount: '10', unit: 'g' }],
+      steps: [{ text: '煮る' }],
+      isFavorite: false,
+      cookedLogs: [],
+      searchWords: [],
+      createdAt: 0,
+      updatedAt: 0,
+    }
+    const ksBatchRecipe = { ...ksNormalRecipe, wholeBatch: true }
+    eq(
+      'KS-9 ふつうの品のシェア文は今までどおり「1食あたり」',
+      buildShareText(ksNormalRecipe, ksShareBase).includes('1食あたり 約100kcal・塩分 約1.2g（概算）'),
+      true,
+    )
+    eq(
+      'KS-9 1食に分けない品は「でき上がり全体で」（数値も全体ぶん＝1人分×人数）',
+      buildShareText(ksBatchRecipe, ksShareBase).includes('でき上がり全体で 約200kcal・塩分 約2.4g（概算）'),
+      true,
+    )
+    eq(
+      'KS-9 1食に分けない品のシェア文に「1食あたり」が出ない',
+      buildShareText(ksBatchRecipe, ksShareBase).includes('1食あたり'),
+      false,
+    )
+    const ksCostOpts = { ...ksShareBase, nutrition: false, cost: true, costPerServingYen: 70, costTotalYen: 140 }
+    eq(
+      'KS-9 ふつうの品の原価行は今までどおり1人分と全量',
+      buildShareText(ksNormalRecipe, ksCostOpts).includes('原価 1人分 約70円／全量（2人分） 約140円'),
+      true,
+    )
+    eq(
+      'KS-9 1食に分けない品の原価行はでき上がり全体だけ',
+      buildShareText(ksBatchRecipe, ksCostOpts).includes('原価 でき上がり全体 約140円'),
+      true,
+    )
+    eq(
+      'KS-9 1食に分けない品の原価行に「1人分」が出ない',
+      buildShareText(ksBatchRecipe, ksCostOpts).includes('1人分 約70円'),
+      false,
+    )
+    // 選ぶときの名前も、出る文と同じ言い方にする（チェック欄と結果が食い違わない）
+    eq('KS-9 シェアの選択肢もでき上がり全体で言う', [
+      ja.share.optNutritionWholeBatch.includes('でき上がり全体'),
+      ja.share.optNutritionKcalOnlyWholeBatch.includes('でき上がり全体'),
+      ksRead('src/components/ShareModal.tsx').includes('optNutritionWholeBatch'),
+    ], [true, true, true])
+    // 文の形は1つだけ持つ（同じ文を2通り書き分けない＝片方だけ直して言い方が割れるのを防ぐ）
+    eq('KS-9 栄養行の雛形は「何あたりか」を差し込む形になっている', [
+      ja.share.lineNutrition.includes('{scope}'),
+      ja.share.lineNutritionKcalOnly.includes('{scope}'),
+      ja.share.lineNutritionPartial.includes('{scope}'),
+      ja.share.lineNutritionKcalOnlyPartial.includes('{scope}'),
+    ], [true, true, true, true])
+
+    // --- レシピ一覧の「1食あたりの原価順」---
+    // 1食あたりの物差しに乗らない品なので、並びの最後のまとまりに置き、
+    // カードにはでき上がり全体の金額を出す（一覧に「1食あたり 約70円」を残さない）
+    {
+      const ksIndex2 = buildPriceIndex([{ id: 1, name: 'たまねぎ', pricePerUnit: 50, unit: '1個' }])
+      const ksMake = (id, wholeBatch) => ({
+        id, title: `KS9-${id}`, servings: 2, effortLevel: 'normal', tags: [],
+        ingredients: [{ name: 'たまねぎ', amount: '1', unit: '個' }],
+        steps: [], isFavorite: false, cookedLogs: [], searchWords: [],
+        createdAt: 0, updatedAt: id, ...(wholeBatch ? { wholeBatch: true } : {}),
+      })
+      const ksNormal = ksMake(1, false)
+      const ksBatch = ksMake(2, true)
+      const ksVals = buildCostSortValues([ksNormal, ksBatch], ksIndex2)
+      eq('KS-9 ふつうの品は1食あたりの金額を持つ', ksVals.get(1).perServingYen, 25)
+      eq('KS-9 1食に分けない品は1食あたりの金額を持たない', ksVals.get(2).perServingYen, null)
+      eq('KS-9 1食に分けない品はでき上がり全体の金額を持つ', ksVals.get(2).wholeBatchYen, 50)
+      const ksSorted = (dir) =>
+        sortResults(
+          [ksBatch, ksNormal].map((recipe) => ({ recipe, usedCount: 0, wantedCount: 0 })),
+          'cost', [], dir, undefined, ksVals,
+        ).map((r) => r.recipe.id)
+      eq('KS-9 安い順でも1食に分けない品は最後', ksSorted('asc'), [1, 2])
+      eq('KS-9 高い順でも1食に分けない品は最後', ksSorted('desc'), [1, 2])
+    }
+
+    // --- 献立に入れたときの合計（数え方は変えていないことを固定する）---
+    // 司令部の問い「『でき上がり全体』を1食として合計に足していたら辻褄が合わなくなる」への答え:
+    // 献立の合計は**どの品も「登録人数で割った1人分」を1回足す**規則で、印では変えていない
+    // （logic/nutrition.ts の sumPersonalNutrition / logic/priceEstimate.ts の
+    //  sumMealPlanEntriesCost）。だしのとり方（2人分・140円）を1食分入れた日は70円が乗る＝
+    // 「でき上がりの半分を使った」という意味になり、レシピ詳細の「でき上がり全体で 約140円」と
+    // 矛盾しない（全体を使えば2食分＝140円）。**1食あたりを画面に出さないのは詳細画面の話で、
+    // 合計の数え方そのものは変えていない**
+    {
+      const ksIndex3 = buildPriceIndex([{ id: 1, name: 'たまねぎ', pricePerUnit: 50, unit: '1個' }])
+      const ksBatchRecipe2 = {
+        ingredients: [{ name: 'たまねぎ', amount: '2', unit: '個' }],
+        servings: 2,
+        wholeBatch: true,
+      }
+      const ksSum = sumMealPlanEntriesCost(
+        [{ recipeId: 1, servings: 1 }],
+        new Map([[1, ksBatchRecipe2]]),
+        ksIndex3,
+      )
+      eq('KS-9 献立の合計は1人分ずつ数える（印では変えていない）', [ksSum.total, ksSum.personalTotal], [50, 50])
+      const ksSumWhole = sumMealPlanEntriesCost(
+        [{ recipeId: 1, servings: 2 }],
+        new Map([[1, ksBatchRecipe2]]),
+        ksIndex3,
+      )
+      eq('KS-9 2食分ぶん入れればでき上がり全体の金額になる', ksSumWhole.total, 100)
+    }
+  }
 }
 
 

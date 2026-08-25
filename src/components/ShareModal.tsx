@@ -28,6 +28,11 @@ type Props = {
    * 選択肢の名前を、実際にシェア文へ入る中身と一致させるために使う。
    */
   nutritionIncludesSalt: boolean
+  /**
+   * 「1食」に分けて食べる品ではないレシピか（2026-08-25 便KS・④）。
+   * 選択肢の名前を、実際に出るシェア文と同じ言い方（でき上がり全体）にそろえるためだけに使う
+   */
+  wholeBatch?: boolean
   sharing: boolean
   /** コピー完了・画像生成中などの結果メッセージ(空なら非表示) */
   message: string
@@ -52,6 +57,7 @@ export default function ShareModal({
   nutritionRowVisible,
   nutritionAvailable,
   nutritionIncludesSalt,
+  wholeBatch = false,
   sharing,
   message,
   onShare,
@@ -143,7 +149,13 @@ export default function ShareModal({
           {optionRow(ja.share.optCost, cost, setCost, { disabled: !costAvailable })}
           {nutritionRowVisible &&
             optionRow(
-              nutritionIncludesSalt ? ja.share.optNutrition : ja.share.optNutritionKcalOnly,
+              nutritionIncludesSalt
+                ? wholeBatch
+                  ? ja.share.optNutritionWholeBatch
+                  : ja.share.optNutrition
+                : wholeBatch
+                  ? ja.share.optNutritionKcalOnlyWholeBatch
+                  : ja.share.optNutritionKcalOnly,
               nutrition,
               setNutrition,
               { disabled: !nutritionAvailable },

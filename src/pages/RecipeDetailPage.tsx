@@ -1530,6 +1530,8 @@ export default function RecipeDetailPage() {
         nutritionRowVisible={NUTRITION_TEASER_ENABLED}
         nutritionAvailable={shareNutritionAvailable}
         nutritionIncludesSalt={shareNutritionSalt}
+        // 選択肢の名前を、実際に出るシェア文と同じ言い方にそろえる（2026-08-25 便KS・④）
+        wholeBatch={recipe.wholeBatch === true}
         sharing={sharing}
         message={shareMessage}
         onShare={(kind, selection) => void runShare(kind, selection)}

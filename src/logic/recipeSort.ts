@@ -226,10 +226,21 @@ export function buildNutrientSortValues(recipes: Recipe[]): Map<number, Nutrient
  * ②を末尾へ回さず②のまとまりの中でも金額順に並べるのは、材料10件中1件だけ抜けている品まで
  * 「並べない」にすると、自分で登録したレシピの多くが原価順から締め出されるため。
  * どのまとまりに入るかは、レシピ詳細の「※」と同じ根拠なので、画面で理由を確かめられる。
+ *
+ * 【「1食」に分けて食べる品ではないレシピ（Recipe.wholeBatch）・2026-08-25 便KS・④】
+ * だしのとり方のような品は 1食あたりの金額そのものを持たない（オーナー「出汁だけで1食とは
+ * 言わない」）。**1食あたりを物差しにした並びには乗せられない**ので、金額が分からない品と
+ * 同じ最後のまとまりに置き、カードにはでき上がり全体の金額を出す
+ * （並びの中に「1食あたり 約70円」が出ると、レシピ詳細で消したはずの言い方が一覧に残る）。
  */
 export interface RecipeCostSortValue {
-  /** 1食あたりの概算（円）。金額が1円も分からない品は null */
+  /** 1食あたりの概算（円）。金額が1円も分からない品と、1食に分けない品は null */
   perServingYen: number | null
+  /**
+   * でき上がり全体ぶんの概算（円）。「1食」に分けて食べる品ではないレシピだけが持つ。
+   * 並べ替えには使わない（1食あたりとは物差しが違うので、同じ並びで比べない）
+   */
+  wholeBatchYen: number | null
   /** 価格が分からない材料が1件も無い（＝金額がそろっている） */
   complete: boolean
 }
@@ -249,10 +260,13 @@ export function buildCostSortValues(
     if (recipe.id === undefined) continue
     const cost = estimateRecipeCost(recipe.ingredients, priceIndex)
     const confidence = recipeCostConfidence(recipe.ingredients, priceIndex)
+    const wholeBatch = recipe.wholeBatch === true
     map.set(recipe.id, {
-      perServingYen: cost.hasAnyPriceInfo
-        ? Math.round(recipe.servings > 0 ? cost.total / recipe.servings : cost.total)
-        : null,
+      perServingYen:
+        cost.hasAnyPriceInfo && !wholeBatch
+          ? Math.round(recipe.servings > 0 ? cost.total / recipe.servings : cost.total)
+          : null,
+      wholeBatchYen: cost.hasAnyPriceInfo && wholeBatch ? Math.round(cost.total) : null,
       complete: !confidence.shouldWarn,
     })
   }

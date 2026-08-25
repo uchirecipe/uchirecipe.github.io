@@ -1415,9 +1415,16 @@ export default function RecipesPage() {
     // 並べ替えに使っている値そのものをカードに出す。言い方はレシピ詳細と同じ文言を使う
     // （同じ金額を画面ごとに違う言い方で呼ばない）。金額が1円も分からない品には出さない
     if (costSortActive) {
-      const yen = costSortValues?.get(recipeId)?.perServingYen
-      if (yen == null) return undefined
-      return ja.detail.pricePerServing.replace('{n}', yen.toLocaleString())
+      const value = costSortValues?.get(recipeId)
+      if (value?.perServingYen != null) {
+        return ja.detail.pricePerServing.replace('{n}', value.perServingYen.toLocaleString())
+      }
+      // 「1食」に分けて食べる品ではないレシピ（2026-08-25 便KS・④）は、1食あたりの金額を
+      // 持たない（並びでも最後のまとまりに入る）。金額は分かるので、言い方だけ変えて出す
+      if (value?.wholeBatchYen != null) {
+        return ja.detail.priceWholeBatch.replace('{n}', value.wholeBatchYen.toLocaleString())
+      }
+      return undefined
     }
     if (!nutrientSortActive || !isNutrientSortOption(sort)) return undefined
     if (!nutritionUnlocked && !isFreeSortOption(sort)) return undefined

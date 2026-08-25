@@ -4192,15 +4192,36 @@ export const ja = {
     // 外に出ることがないように、選択肢の名前も入る中身に合わせて出し分ける）
     optNutrition: '1食あたりのカロリー・塩分',
     optNutritionKcalOnly: '1食あたりのカロリー',
+    /**
+     * 「1食」に分けて食べる品ではないレシピ（Recipe.wholeBatch・2026-08-25 便KS・④）の選択肢。
+     * 出るシェア文が「でき上がり全体で 約◯kcal」なので、**選ぶときの名前も同じ言い方**にする
+     * （チェック欄が「1食あたり」で、送られる文が「でき上がり全体」だと食い違う）。
+     */
+    optNutritionWholeBatch: 'でき上がり全体のカロリー・塩分',
+    optNutritionKcalOnlyWholeBatch: 'でき上がり全体のカロリー',
     optAllIngredients: '材料をすべて載せる',
     lineCookMinutes: '調理時間 約{n}分',
     lineCost: '原価 1人分 約{n}円／全量（{s}人分） 約{m}円',
-    lineNutrition: '1食あたり 約{kcal}kcal・塩分 約{salt}g（概算）',
-    lineNutritionKcalOnly: '1食あたり 約{kcal}kcal（概算）',
+    /**
+     * 「1食」に分けて食べる品ではないレシピ（Recipe.wholeBatch・2026-08-25 便KS・④）の原価。
+     * 1人分の金額を出しても意味を成さないので、でき上がり全体の金額だけを書く
+     * （レシピ詳細の detail.priceWholeBatch と同じ言い方）。
+     */
+    lineCostWholeBatch: '原価 でき上がり全体 約{m}円',
+    /**
+     * 栄養行の「何あたりの値か」（2026-08-25 便KS・④で {scope} に切り出した）。
+     * ふつうの品は「1食あたり」、でき上がりを何回かに分けて使う品（Recipe.wholeBatch）は
+     * 「でき上がり全体で」。**行の形は1つだけ持つ**＝同じ文を2通り書き分けない
+     * （書き分けると、片方だけ直したときに言い方が割れる）。
+     */
+    scopePerServing: '1食あたり',
+    scopeWholeBatch: 'でき上がり全体で',
+    lineNutrition: '{scope} 約{kcal}kcal・塩分 約{salt}g（概算）',
+    lineNutritionKcalOnly: '{scope} 約{kcal}kcal（概算）',
     // 量が書いてあるのに計算できなかった材料があるとき(2026-07-28 便BY/NUT-01)。
     // 受け取った人は元のレシピを見られないので、数値だけが独り歩きしないよう断りを付ける
-    lineNutritionPartial: '1食あたり 約{kcal}kcal・塩分 約{salt}g（概算・一部の材料を除く）',
-    lineNutritionKcalOnlyPartial: '1食あたり 約{kcal}kcal（概算・一部の材料を除く）',
+    lineNutritionPartial: '{scope} 約{kcal}kcal・塩分 約{salt}g（概算・一部の材料を除く）',
+    lineNutritionKcalOnlyPartial: '{scope} 約{kcal}kcal（概算・一部の材料を除く）',
   },
   /**
    * 写真の見える範囲（2026-08-22 便JK）。
@@ -5005,6 +5026,16 @@ export const ja = {
     // 外した。人数分は同じ画面の人数ステッパーと「登録: ◯人分」に出ている。原価側の
     // detail.pricePerServing と同じ言い方に揃えたまま短くしている
     summaryLabel: '（1食あたり）: ',
+    /**
+     * 「1食」に分けて食べる品ではないレシピ（Recipe.wholeBatch・2026-08-25 便KS・④）の要約。
+     *
+     * オーナー原文「出汁だけで１食とは言わない」。引っかかっているのは金額ではなく
+     * **「1食」という数え方そのもの**なので、金額（detail.priceWholeBatch）だけでなく
+     * 栄養の言い方も同じ印で切り替える。数値も1食あたりではなく、でき上がり全体ぶんを出す。
+     */
+    summaryLabelWholeBatch: '（でき上がり全体）: ',
+    /** 数値の表で、1人分／全量の2列の代わりに出す1列の見出し（同じくwholeBatchの品だけ） */
+    wholeBatchHeader: 'でき上がり全体',
     // 材料が丸ごと計算対象外などで1食あたりが実質求まらないときの1行表示(「0kcal」という
     // 誤解を招く数値を出さないためのフォールバック)
     unavailableSummary: '材料からは計算できませんでした',

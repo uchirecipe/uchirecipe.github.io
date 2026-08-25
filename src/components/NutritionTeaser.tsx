@@ -56,8 +56,8 @@ export default function NutritionTeaser({
   servings,
 }: {
   isPro: boolean
-  /** レシピ本体（実計算に使う。materials/servingsだけ参照） */
-  recipe: Pick<Recipe, 'ingredients' | 'servings'>
+  /** レシピ本体（実計算に使う。ingredients/servings と、1食に分けない品の印だけ参照） */
+  recipe: Pick<Recipe, 'ingredients' | 'servings' | 'wholeBatch'>
   /** 詳細画面で現在表示中の人数（全量の表示に使う）。未指定ならレシピ登録時の人数 */
   servings?: number
 }) {
@@ -78,15 +78,26 @@ export default function NutritionTeaser({
   const displayServings = servings != null && servings > 0 ? servings : nutrition.servings
   // 計算に含められた材料が1つも無ければ「0kcal」表示は誤解を招くため出さない
   const canShowSummary = nutrition.items.length > 0
+  /**
+   * 「1食」に分けて食べる品ではない（だしのとり方など・2026-08-25 便KS・④）。
+   *
+   * オーナー原文「１食あたり７０円とあるが、出汁だけで１食とは言わない」。
+   * 引っかかっているのは金額ではなく**「1食」という数え方そのもの**なので、
+   * 金額（detail.priceWholeBatch）と同じ印で、栄養の言い方と数値も切り替える。
+   * 出す値は「表示している1人分 × 表示している人数」＝でき上がり全体ぶん
+   * （数値の表の「全量」と同じ作り方。画面の数字どうしが必ず噛み合う）。
+   */
+  const wholeBatch = recipe.wholeBatch === true
+  const summaryScale = wholeBatch ? displayServings : 1
   // 折りたたんだ1行に出すのは無料で見える2値＝エネルギーと野菜量（2026-08-02 オーナー指示）。
   // 線引きB'（無料＝エネルギー＋野菜量）と一致させ、展開しないと野菜量が分からない状態をなくす。
   // 塩分はPro側の8項目表にあるのでここには出さない
   const summaryText = canShowSummary
     ? [
-        `${roundNutrient('kcal', per.kcal).toLocaleString()}${ja.nutrition.kcalUnit}`,
+        `${(roundNutrient('kcal', per.kcal) * summaryScale).toLocaleString()}${ja.nutrition.kcalUnit}`,
         ja.nutritionBalance.summaryVegetable.replace(
           '{n}',
-          roundVegetableGrams(vegetableGramsOf(nutrition)).toLocaleString(),
+          (roundVegetableGrams(vegetableGramsOf(nutrition)) * summaryScale).toLocaleString(),
         ),
       ].join(ja.nutritionBalance.summarySeparator)
     : ja.nutrition.unavailableSummary
@@ -138,8 +149,10 @@ export default function NutritionTeaser({
             <Sparkles size={14} className="mr-1 inline-block shrink-0 text-accent-ink" aria-hidden />
             {ja.nutrition.title}
             {/* 2026-08-25 便KN: 「◯人分で作るときの1食あたり」→「1食あたり」。
-                人数分はレシピ詳細の人数ステッパーと「登録: ◯人分」に出ている */}
-            {ja.nutrition.summaryLabel}
+                人数分はレシピ詳細の人数ステッパーに出ている。
+                2026-08-25 便KS・④: でき上がりを何回かに分けて使う品は「1食あたり」で
+                割っても意味を成さないので、印（Recipe.wholeBatch）で言い方を変える */}
+            {wholeBatch ? ja.nutrition.summaryLabelWholeBatch : ja.nutrition.summaryLabel}
             {summaryText}
             {canShowSummary && (saltGap || materialGap) && (
               <span
@@ -183,12 +196,14 @@ export default function NutritionTeaser({
               <UnlockedBody
                 nutrition={nutrition}
                 displayServings={displayServings}
+                wholeBatch={wholeBatch}
                 trialActive={trialActive}
               />
             ) : (
               <LockedBody
                 nutrition={nutrition}
                 displayServings={displayServings}
+                wholeBatch={wholeBatch}
                 isPro={isPro}
                 trialExhausted={trialExhausted}
               />
@@ -319,10 +334,17 @@ function VegetableCountNote() {
 function NutrientTable({
   nutrition,
   displayServings,
+  wholeBatch,
   unlocked,
 }: {
   nutrition: Nutrition
   displayServings: number
+  /**
+   * 「1食」に分けて食べる品ではない（2026-08-25 便KS・④）。
+   * 1人分の列は意味を成さないので**出さず**、でき上がり全体の1列だけにする
+   * （数字そのものは今までの「全量」の列と同じ値。列の名前と本数だけが変わる）。
+   */
+  wholeBatch: boolean
   unlocked: boolean
 }) {
   const per = nutrition.perServing
@@ -362,14 +384,26 @@ function NutrientTable({
         className="mt-[var(--space-sm)] rounded-md border border-edge p-[var(--space-sm)]"
         style={{ background: 'color-mix(in oklab, var(--accent) 8%, var(--bg))' }}
       >
-        <div className="grid grid-cols-[1fr_auto_auto] items-baseline gap-x-4 gap-y-2">
+        <div
+          className={`grid items-baseline gap-x-4 gap-y-2 ${
+            wholeBatch ? 'grid-cols-[1fr_auto]' : 'grid-cols-[1fr_auto_auto]'
+          }`}
+        >
           <span aria-hidden />
-          <span className="text-right text-xs font-bold text-accent-ink">
-            {ja.nutrition.servingHeader}
-          </span>
-          <span className="text-right text-xs text-ink-muted">
-            {ja.nutrition.totalHeader.replace('{n}', String(displayServings))}
-          </span>
+          {wholeBatch ? (
+            <span className="text-right text-xs font-bold text-accent-ink">
+              {ja.nutrition.wholeBatchHeader}
+            </span>
+          ) : (
+            <>
+              <span className="text-right text-xs font-bold text-accent-ink">
+                {ja.nutrition.servingHeader}
+              </span>
+              <span className="text-right text-xs text-ink-muted">
+                {ja.nutrition.totalHeader.replace('{n}', String(displayServings))}
+              </span>
+            </>
+          )}
           {rows.map(({ key, label }) => (
             <div key={key} className="contents">
               {/* data-nutrient-label: 栄養価の表示に出ている項目の顔ぶれを、画面から読み取れるようにする
@@ -378,23 +412,39 @@ function NutrientTable({
               <span className="text-sm" data-nutrient-label={key}>
                 {label}
               </span>
-              <span className="text-right text-base font-bold text-accent-ink tabular-nums">
-                {fmt(key, per[key])}
-              </span>
-              <span className="text-right text-sm text-ink-muted tabular-nums">
-                {fmt(key, scaleForDisplay(key))}
-              </span>
+              {wholeBatch ? (
+                <span className="text-right text-base font-bold text-accent-ink tabular-nums">
+                  {fmt(key, scaleForDisplay(key))}
+                </span>
+              ) : (
+                <>
+                  <span className="text-right text-base font-bold text-accent-ink tabular-nums">
+                    {fmt(key, per[key])}
+                  </span>
+                  <span className="text-right text-sm text-ink-muted tabular-nums">
+                    {fmt(key, scaleForDisplay(key))}
+                  </span>
+                </>
+              )}
             </div>
           ))}
           {/* 野菜量は無料でも出す（2026-08-01 線引きB'・docs/60 §7 未決#3＝(a)） */}
           <div className="contents">
             <span className="text-sm">{ja.nutritionBalance.vegetableLabel}</span>
-            <span className="text-right text-base font-bold text-accent-ink tabular-nums">
-              {vegetablePerServing.toLocaleString()} {ja.nutrition.gramUnit}
-            </span>
-            <span className="text-right text-sm text-ink-muted tabular-nums">
-              {(vegetablePerServing * displayServings).toLocaleString()} {ja.nutrition.gramUnit}
-            </span>
+            {wholeBatch ? (
+              <span className="text-right text-base font-bold text-accent-ink tabular-nums">
+                {(vegetablePerServing * displayServings).toLocaleString()} {ja.nutrition.gramUnit}
+              </span>
+            ) : (
+              <>
+                <span className="text-right text-base font-bold text-accent-ink tabular-nums">
+                  {vegetablePerServing.toLocaleString()} {ja.nutrition.gramUnit}
+                </span>
+                <span className="text-right text-sm text-ink-muted tabular-nums">
+                  {(vegetablePerServing * displayServings).toLocaleString()} {ja.nutrition.gramUnit}
+                </span>
+              </>
+            )}
           </div>
         </div>
       </div>
@@ -503,11 +553,14 @@ export function ProNutrientTeaser({
 function LockedBody({
   nutrition,
   displayServings,
+  wholeBatch,
   isPro,
   trialExhausted,
 }: {
   nutrition: Nutrition
   displayServings: number
+  /** 「1食」に分けて食べる品ではない（2026-08-25 便KS・④）。表を1列（でき上がり全体）にする */
+  wholeBatch: boolean
   isPro: boolean
   trialExhausted: boolean
 }) {
@@ -518,7 +571,12 @@ function LockedBody({
       <SaltGapNote nutrition={nutrition} showsSalt={false} />
       {/* 計算できた材料が1つも無いレシピは「0kcal」を出さない(見出し行と同じ判定) */}
       {nutrition.items.length > 0 && (
-        <NutrientTable nutrition={nutrition} displayServings={displayServings} unlocked={false} />
+        <NutrientTable
+          nutrition={nutrition}
+          displayServings={displayServings}
+          wholeBatch={wholeBatch}
+          unlocked={false}
+        />
       )}
       {/* Pro版で増える項目のティーザー(2026-07-28 便BY/PRO-01で blur+Lock 様式に統一)。
           詳しい提供時期の話(freeDescription系)より先に、まず「何が増えるか」を見せる */}
@@ -547,10 +605,13 @@ function LockedBody({
 function UnlockedBody({
   nutrition,
   displayServings,
+  wholeBatch,
   trialActive,
 }: {
   nutrition: Nutrition
   displayServings: number
+  /** 「1食」に分けて食べる品ではない（2026-08-25 便KS・④）。表を1列（でき上がり全体）にする */
+  wholeBatch: boolean
   /** お試しで開いている状態か（2026-08-08 便DZ）。1回だけの表示であることを画面上でも伝える */
   trialActive?: boolean
 }) {
@@ -567,7 +628,12 @@ function UnlockedBody({
       {/* 塩分相当量の数値を読む前に届く位置へ置く(便KF)。ここは8項目が実際に出ている状態なので、
           「表示している塩分相当量は実際より小さい」まで言い切る */}
       <SaltGapNote nutrition={nutrition} showsSalt />
-      <NutrientTable nutrition={nutrition} displayServings={displayServings} unlocked />
+      <NutrientTable
+        nutrition={nutrition}
+        displayServings={displayServings}
+        wholeBatch={wholeBatch}
+        unlocked
+      />
 
       <MaterialGapNote nutrition={nutrition} />
       <AssumedBlock nutrition={nutrition} />

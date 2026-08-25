@@ -82,11 +82,16 @@ function buildCostNutritionLines(recipe: Recipe, opts: ShareOptions | undefined)
   const lines: string[] = []
   if (opts.cost && opts.costPerServingYen != null && opts.costTotalYen != null) {
     lines.push(
-      ja.share.lineCost
-        .replace('{n}', opts.costPerServingYen.toLocaleString())
-        // 全量の人数は共有する人数に合わせる(便CI/C18。金額側も呼び出し元が同じ人数で渡す)
-        .replace('{s}', String(shareServings(recipe, opts)))
-        .replace('{m}', opts.costTotalYen.toLocaleString()),
+      // 「1食」に分けて食べる品ではないレシピ（2026-08-25 便KS・④）は、1人分の金額を出さない。
+      // 画面（レシピ詳細）が「でき上がり全体で 約◯円」しか出していないのに、シェア文にだけ
+      // 「1人分 約◯円」が出ると、アプリの外にだけ違う言い方が出ていくことになる
+      recipe.wholeBatch
+        ? ja.share.lineCostWholeBatch.replace('{m}', opts.costTotalYen.toLocaleString())
+        : ja.share.lineCost
+            .replace('{n}', opts.costPerServingYen.toLocaleString())
+            // 全量の人数は共有する人数に合わせる(便CI/C18。金額側も呼び出し元が同じ人数で渡す)
+            .replace('{s}', String(shareServings(recipe, opts)))
+            .replace('{m}', opts.costTotalYen.toLocaleString()),
     )
   }
   // 栄養行: カロリーは常に、塩分は渡されたとき（＝Pro解錠済み）だけ添える（2026-08-01 線引きB'）
@@ -99,10 +104,25 @@ function buildCostNutritionLines(recipe: Recipe, opts: ShareOptions | undefined)
         : opts.nutritionHasGap
           ? ja.share.lineNutritionKcalOnlyPartial
           : ja.share.lineNutritionKcalOnly
+    /**
+     * 「何あたりの値か」（2026-08-25 便KS・④）。
+     * でき上がりを何回かに分けて使う品（Recipe.wholeBatch）は「1食あたり」で割っても
+     * 意味を成さないので、言い方も数値もでき上がり全体ぶんにする。
+     * 全体ぶんの作り方は栄養の表と同じ規則＝**表示している1人分の値 × 人数**
+     * （丸める前の値に掛けてから丸めると、画面の数字を掛け算した結果と合わなくなる）。
+     */
+    const wholeBatch = recipe.wholeBatch === true
+    const scale = wholeBatch ? shareServings(recipe, opts) : 1
     lines.push(
       template
-        .replace('{kcal}', opts.kcalPerServing.toLocaleString())
-        .replace('{salt}', opts.saltPerServing?.toLocaleString() ?? ''),
+        .replace('{scope}', wholeBatch ? ja.share.scopeWholeBatch : ja.share.scopePerServing)
+        .replace('{kcal}', (opts.kcalPerServing * scale).toLocaleString())
+        .replace(
+          '{salt}',
+          opts.saltPerServing != null
+            ? Number((opts.saltPerServing * scale).toFixed(1)).toLocaleString()
+            : '',
+        ),
     )
   }
   return lines
