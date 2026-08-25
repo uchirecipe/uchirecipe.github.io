@@ -96,6 +96,18 @@ export function buildPriceIndex(
  * 1) かな正規化後の完全一致 → 2) 材料名がマスタ名で始まる前方一致（例:「たまねぎ薄切り」→「たまねぎ」、
  * 「トウフ」で登録した材料が「とうふ」のマスタに一致 等）の順で照合する（H-2: db/prices.tsの
  * 重複チェックと同じかな正規化キーで比較する）。
+ *
+ * 【2026-08-25 便KX: 前方一致の順番を組み替えた】
+ * 日本語の複合語は**主要語が末尾**にある（「ねぎ味噌」はみそ／「合わせ酢」は酢）。
+ * 前方一致はその逆を見る仕組みなので、確かめずに先頭だけで決めると別の食材に当たる。
+ * そこで確かめの強い順に並べ替え、**先頭で決めるのはいちばん最後**にした:
+ *   ① 完全一致
+ *   ② 成分表で同じ食品だと確認できた前方一致（matchPriceEntryExact）
+ *   ③ 飾り語・記号を落としてから ①②
+ *   ④ 成分表の食品名を経由（matchPriceEntryViaNutritionFood）
+ *   ⑤ **末尾一致**（matchPriceEntryBySuffix。主要語は末尾。「ねぎ味噌」→みそ）
+ *   ⑥ 確認できない前方一致（matchPriceEntryLoosePrefix。最後の手当て）
+ * 実測は下の各関数のコメントに書いた。
  */
 export function matchPriceEntry(name: string, index: PriceIndexEntry[]): PriceIndexEntry | undefined {
   const hit = matchPriceEntryExact(name, index)
@@ -112,7 +124,101 @@ export function matchPriceEntry(name: string, index: PriceIndexEntry[]): PriceIn
     stripped !== name.trim() ? matchPriceEntryExact(stripped, index) : undefined
   if (strippedHit) return strippedHit
   // それでも当たらなければ、栄養（成分表）の食品名を経由してもう一度探す（2026-08-22 便JG）
-  return matchPriceEntryViaNutritionFood(name, index)
+  const viaFood = matchPriceEntryViaNutritionFood(name, index)
+  if (viaFood) return viaFood
+  // ここから下は 2026-08-25 便KX。成分表で身元が分からなかった名前だけが来る
+  const suffixHit = matchPriceEntryBySuffix(name, index)
+  if (suffixHit) return suffixHit
+  return (
+    matchPriceEntryLoosePrefix(name, index) ??
+    (stripped !== name.trim() ? matchPriceEntryLoosePrefix(stripped, index) : undefined)
+  )
+}
+
+/**
+ * 末尾一致（2026-08-25 便KX）。日本語の複合名詞は**主要語が末尾**にあるので、
+ * 成分表で身元の分からない名前は、**先頭より末尾のほうが当たる**。
+ *   「ねぎ味噌」→ ねぎ(100円/1本)ではなく みそ(11円/大さじ1)
+ *   「塩さば」  → 塩(1円/小さじ1)ではなく さば(100円/1切れ)
+ *   「酢みそ」  → 酢(340円/1L)ではなく みそ
+ * 索引は照合キーの長い順に並んでいるので、いちばん長い末尾が採られる。
+ *
+ * **④の成分表経由より後に置くこと。**先に置くと「葉ねぎ」が末尾の「ねぎ」(100円/1本)に
+ * 当たってしまい、成分表が知っている「青ねぎ」(80円/100g)に届かなくなる
+ * （「細ねぎ→小ねぎ」「白ねぎ→長ねぎ」も同じ。実測で3件が壊れた）。
+ */
+function matchPriceEntryBySuffix(
+  name: string,
+  index: PriceIndexEntry[],
+): PriceIndexEntry | undefined {
+  const normalized = normalizeIngredientNameForPrice(name)
+  if (!normalized) return undefined
+  const key = toHiragana(normalized)
+  return index.find((e) => key.length > e.matchKey.length && key.endsWith(e.matchKey))
+}
+
+/**
+ * 確認できない前方一致（2026-08-25 便KX）。**最後の手当て**。
+ *
+ * ここへ来るのは「材料名が成分表のどの食品にも解決できなかった」名前だけで、
+ * 前方一致が正しいかどうかを確かめる手立てが無い。それでも落とさずに拾うのは、
+ * オーナーの実データで**書き足し・並記が普通にある**から:
+ *   「ねぎのみじん切り・大さじ2」(20g=20円) 「みそだれ」 「みそ、水 各」 「塩、酒」
+ * これらは先頭の語がそのまま材料で、前方一致が正しい。
+ *
+ * ただし2つだけ条件を付ける。
+ *
+ * 【条件1】**切り取った残りが「別の語の始まり」なら認めない**（restStartsNewWord）。
+ * 【条件2】**マスタ側の身元が成分表で分からない組は認めない**（entryFood が無いとき）。
+ *   これで塞げた誤爆（2026-08-25 実測）:
+ *     「ワインビネガー／白ワインビネガー／赤ワインビネガー／ぶどう酢」大さじ2 → 赤ワイン 600円/1L で18円
+ *     （成分表は 17017 果実酢ぶどう酢 と正しく分かっているのに、価格マスタの「赤ワイン」は
+ *       成分表に無いため素通りしていた。ワインとワインビネガーは別物）
+ *   逆に、この条件を付けたことで当たらなくなった正しい組は、実測で1件も無かった。
+ */
+function matchPriceEntryLoosePrefix(
+  name: string,
+  index: PriceIndexEntry[],
+): PriceIndexEntry | undefined {
+  const normalized = normalizeIngredientNameForPrice(name)
+  if (!normalized) return undefined
+  if (matchNutritionFood(normalized)) return undefined // ②で確かめ済み。ここは身元不明の名前だけ
+  const key = toHiragana(normalized)
+  return index.find(
+    (e) =>
+      key.startsWith(e.matchKey) &&
+      !restStartsNewWord(normalized, e.matchKey) &&
+      matchNutritionFood(e.normalizedName) != null,
+  )
+}
+
+/**
+ * 前方一致で切り取った「残り」が、**別の語の始まり**かどうかを見る（2026-08-25 便KX）。
+ *
+ * 日本語の書き分けをそのまま使う: **接尾辞・助詞・並記はひらがなや区切り記号で続き、
+ * 新しい名詞は漢字かカタカナで始まる。**
+ *   続き（＝前方一致でよい）… みそ**だれ** ／ ねぎ**の**みじん切り ／ みそ**、**水 各
+ *   別の語（＝前方一致は誤り）… 塩**麹** ／ 米**粉** ／ さば**節** ／ 酢**豚** ／ ブリ**ットル**
+ *
+ * 2,235件（同梱109品＋価格マスタ＋成分表の別名＋八訂の全収載食品名の語）と、
+ * オーナーの実データ121品の全材料で実測した結果:
+ *   この条件で新しく塞げた誤爆 24件（塩麹・米粉・さば節・酢豚・みそ煮 ほか）
+ *   この条件で当たらなくなった正しい組 0件
+ * 実データの「塩麹 大さじ2 → 塩 1円/小さじ1 で6円」（2品で実発）もここで止まる。
+ *
+ * かな正規化した索引キーと元の名前は文字数が違う（「塩」1文字＝「しお」2文字）ので、
+ * 元の名前を頭から1文字ずつ伸ばして、かな化した形が索引キーと一致する位置を探す。
+ * 見つからなければ false（＝従来どおり通す）に倒す。
+ */
+const NEW_WORD_HEAD = /[\u4e00-\u9fff\u3005\u30a1-\u30fa]/
+
+function restStartsNewWord(normalized: string, matchKey: string): boolean {
+  for (let i = 1; i <= normalized.length; i++) {
+    if (toHiragana(normalized.slice(0, i)) !== matchKey) continue
+    const next = normalized[i]
+    return next != null && NEW_WORD_HEAD.test(next)
+  }
+  return false
 }
 
 /**
@@ -126,15 +232,17 @@ export function matchPriceEntry(name: string, index: PriceIndexEntry[]): PriceIn
  * どれも値段が桁で違う。両方が成分表の食品に解決できて、それが**別の食品**なら前方一致を
  * 認めない（同じ食品なら今までどおり通す）。
  *
- * どちらかが成分表に無いときは true を返して従来どおり通す＝この判定で新しく
- * 「価格なし」に落ちる材料を作らない（同梱109品＋オーナーの31品で実測し、
- * 通っていた前方一致15件はすべて「同じ食品」で、落ちるのは上の誤爆4件だけだった）。
+ * どちらかが成分表に無いときは、**この段階では認めない**（2026-08-25 便KX で false に変更）。
+ * 以前は true を返して素通りさせていたが、それが「ねぎ味噌→ねぎ」「塩さば→塩」「米粉→米」
+ * の入口だった。素通りをやめた代わりに、matchPriceEntry の⑤末尾一致・⑥確認できない前方一致
+ * （どちらもこの関数より後ろ）で拾い直すので、**正しく当たっていた材料は落ちない**
+ * （同梱109品＋オーナーの実データ121品の全材料で実測。落ちた行は0件）。
  */
 function isSameNutritionFood(ingredientName: string, entryName: string): boolean {
   const ingredientFood = matchNutritionFood(ingredientName)
-  if (!ingredientFood) return true
+  if (!ingredientFood) return false
   const entryFood = matchNutritionFood(entryName)
-  if (!entryFood) return true
+  if (!entryFood) return false
   return ingredientFood.id === entryFood.id
 }
 
@@ -285,6 +393,9 @@ function prorated(rawYen: number, source: PriceSource): IngredientPriceEstimate 
 const SINGLE_USE_MASTER_UNITS = new Set([
   '大さじ', '小さじ', '大匙', '小匙', 'おおさじ', 'こさじ',
   '少々', 'かけ', '個分', '使用分', '杯',
+  // 2026-08-25 便KX: 「みそ汁の素 18円/1食分」を足したので「食分」も並べる。
+  // 名前のとおり1回に使う量そのもの（小袋1つ＝1食分でしか売っていない商品の登録単位）
+  '食分',
 ])
 
 function isSingleUseMasterUnit(baseUnit: string): boolean {

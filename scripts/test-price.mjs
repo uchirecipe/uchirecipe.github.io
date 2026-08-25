@@ -81,7 +81,9 @@ for (const [name, count] of nameCounts) {
 //   サバみそ煮缶・米油・赤みそ・ぶり・三温糖・粒マスタード・練りからし・コーン缶・粉チーズ）
 // 201→204件（2026-08-25 便KW・オーナー申し送り3「味噌は種類で価格も塩分量も異なります」:
 //   だし入りみそ・麦みそ・豆みそ。1件ずつ容量をそろえて実売を調べ直した根拠は priceDefaults.ts）
-const PRICE_DEFAULTS_COUNT = 204
+// 204→205件（2026-08-25 便KX: みそ汁の素。前方一致で「みそ」に当たっていたのを直すのに合わせて、
+//   成分表の即席みそ(17050)と同時に足した。値段の根拠は priceDefaults.ts）
+const PRICE_DEFAULTS_COUNT = 205
 check(
   PRICE_DEFAULTS.length === PRICE_DEFAULTS_COUNT,
   `PRICE_DEFAULTSの件数が想定と違う: 実際=${PRICE_DEFAULTS.length}件 / 想定=${PRICE_DEFAULTS_COUNT}件。` +
