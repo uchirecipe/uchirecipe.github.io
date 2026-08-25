@@ -363,6 +363,12 @@ interface MatchIndex {
   exact: Map<string, NutritionFood>
   /** 部分一致用: 正規化済みalias（3文字以上）を長い順に並べたもの */
   partial: { key: string; food: NutritionFood }[]
+  /**
+   * 身元の確かめ表（2026-08-25 便KY）。この名前には部分一致を使わない。
+   * 中身は scripts/build-nutrition.mjs が八訂の公式Excelから機械で作ったもの
+   * （＋八訂に収載が無くて機械では分からない分の手書き。scripts/nutrition-foods.mjs の OTHER_FOODS）。
+   */
+  otherFoods: Set<string>
 }
 
 function buildIndex(): MatchIndex {
@@ -387,7 +393,7 @@ function buildIndex(): MatchIndex {
     .filter(([key]) => key.length >= 3)
     .map(([key, food]) => ({ key, food }))
     .sort((a, b) => b.key.length - a.key.length)
-  return { raw, exact, partial }
+  return { raw, exact, partial, otherFoods: new Set(NUTRITION_DATA.otherFoodNames ?? []) }
 }
 
 let index: MatchIndex | null = null
@@ -399,7 +405,34 @@ function getIndex(): MatchIndex {
 /**
  * 材料名から成分表の食品を探す（飾り語を落とす前の、素の名前での照合）。
  * 1) 正規化前の完全一致 → 2) 正規化後の完全一致 → 3) 括弧を除いた完全一致
- * → 4) 最長の部分一致（3文字以上のaliasのみ）の順で照合する。
+ * → **4) 身元の確かめ** → 5) 最長の部分一致（3文字以上のaliasのみ）の順で照合する。
+ *
+ * 【2026-08-25 便KY: 部分一致の手前に「身元の確かめ」を入れた】
+ * 部分一致は材料名の**どこかに**別名が入っていれば当てるので、日本語の複合語
+ * （別の食材名＋食材名＝別の食べ物）で別の食品の成分値を当てていた。**栄養の数字が直接狂う**:
+ *   杏仁豆腐・ごま豆腐 → 木綿豆腐 ／ 玉子豆腐 → 卵 ／ バターピーナッツ → バター
+ *   りんご酢 → りんご ／ みりん干し → みりん ／ 昆布茶(食塩51.3g/100g) → 昆布(6.6g)
+ *
+ * 【全数を数えた】便KXの価格側と同じ数え方で、同梱109品の全材料名＋価格マスタ全項目＋
+ * 成分表の全別名に、八訂の全収載食品名2,538品の語を足した**2,414件**を1つずつ当てた:
+ *   完全一致など 566 ／ **部分一致 260** ／ 当たらない 1,586
+ * 部分一致260件のうち240件は八訂の食品名なので、当たった食品の100gあたりの値と
+ * 「その名前が指す八訂の食品」の値を突き合わせて数えられる。**数字が合っていなかったのが90件**。
+ *
+ * 【便KXのやり方は、そのままでは持ってこられなかった】価格側は「成分表で身元が分かるか」を
+ * 確かめに使えたが、栄養側にはその上が無い。末尾優先（主要語は末尾）だけでは 90→89件しか減らず
+ * （「杏仁豆腐」も「ごま豆腐」も末尾が「豆腐」なので、末尾を見ても直らない）、
+ * 「残りが漢字・カタカナで始まる/終わるなら別の語」を足すと誤爆は33件まで減る代わりに、
+ * 正しく当たっていた119件と**オーナーの実データの38件**（「乾燥ひじき」「白すりごま」など）が落ちた。
+ * カタカナの複合語には語の切れ目の印が無い（スイートコーンとコーンフレークが同じ形）のが理由。
+ *
+ * 【代わりに八訂そのものを確かめに使う】「その名前を名乗る八訂の食品を1品も持っておらず、
+ * 部分一致に通すと数字が狂う」名前を、公式Excelから機械で洗い出して持つ
+ * （NUTRITION_DATA.otherFoodNames。作り方は scripts/build-nutrition.mjs）。
+ * 塞ぐのは**数字が狂うときだけ**にしてあるので、「赤たまねぎ→玉ねぎ」「黒砂糖→砂糖」
+ * 「かに風味かまぼこ→かまぼこ」は今までどおり当たる。
+ * 実測: 誤爆 90→0件 ／ 正しく当たっていた組が落ちた数 0件 ／ 同梱109品・オーナーの実データ121品の
+ * どちらも「栄養の分からない材料」は1件も増えていない。
  */
 function matchNutritionFoodExact(name: string): NutritionFood | null {
   const idx = getIndex()
@@ -417,6 +450,10 @@ function matchNutritionFoodExact(name: string): NutritionFood | null {
     const strippedHit = idx.exact.get(stripped)
     if (strippedHit) return strippedHit
   }
+
+  // 身元の確かめ（2026-08-25 便KY）。八訂で「アプリが持っていない別の食品」だと分かる名前には
+  // 部分一致を使わない。値を持てない食品は「計算に含めていない材料」として出すのが正しい
+  if (idx.otherFoods.has(normalized) || (stripped && idx.otherFoods.has(stripped))) return null
 
   for (const { key, food } of idx.partial) {
     if (normalized.includes(key)) return food

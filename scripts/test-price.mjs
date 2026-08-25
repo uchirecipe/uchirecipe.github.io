@@ -83,7 +83,10 @@ for (const [name, count] of nameCounts) {
 //   だし入りみそ・麦みそ・豆みそ。1件ずつ容量をそろえて実売を調べ直した根拠は priceDefaults.ts）
 // 204→205件（2026-08-25 便KX: みそ汁の素。前方一致で「みそ」に当たっていたのを直すのに合わせて、
 //   成分表の即席みそ(17050)と同時に足した。値段の根拠は priceDefaults.ts）
-const PRICE_DEFAULTS_COUNT = 205
+// 205→206件（2026-08-25 便KY: ワインビネガー。成分表には八訂17017「果実酢 ぶどう酢」があるのに
+//   価格マスタに項目が無く、便KXが前方一致の誤爆「ワインビネガー→赤ワイン600円/1L」を塞いだ結果
+//   「価格が分からない材料」になっていた。家庭用500mlでそろえた実売4件の根拠は priceDefaults.ts）
+const PRICE_DEFAULTS_COUNT = 206
 check(
   PRICE_DEFAULTS.length === PRICE_DEFAULTS_COUNT,
   `PRICE_DEFAULTSの件数が想定と違う: 実際=${PRICE_DEFAULTS.length}件 / 想定=${PRICE_DEFAULTS_COUNT}件。` +
