@@ -1251,26 +1251,23 @@ function RecipeFormInner() {
       const importedServings = resolveImportedServings(result.servings, servings)
       const nextServings = importedServings.unread ? undefined : importedServings.servings
       if (nextServings !== undefined && nextServings !== servings) {
-        alsoApplied.push(ja.urlImport.alsoAppliedServings)
+        alsoApplied.push(ja.urlImport.itemServings)
       }
       if (result.cookMinutes && String(result.cookMinutes) !== cookMinutes.trim()) {
-        alsoApplied.push(ja.urlImport.alsoAppliedCookMinutes)
+        alsoApplied.push(ja.urlImport.itemCookMinutes)
       }
       const nextSourceUrl = result.sourceUrl || target
       if (sourceUrl.trim() && sourceUrl.trim() !== nextSourceUrl) {
-        alsoApplied.push(ja.urlImport.alsoAppliedSourceUrl)
+        alsoApplied.push(ja.urlImport.itemSourceUrl)
       }
       // 2026-08-25 便KS・⑧: 1つの知らせ＝1行にしたので、句点でつなぐための出し分けは要らない
       const alsoAppliedNote =
         alsoApplied.length > 0
           ? ja.urlImport.alsoApplied.replace(
               '{items}',
-              alsoApplied.join(ja.urlImport.alsoAppliedSeparator),
+              alsoApplied.join(ja.urlImport.itemSeparator),
             )
           : ''
-      /** 手順の「分」を本文から入れた件数の一言（0件のときは何も言わない） */
-      const stepMinutesNote = (filled: number) =>
-        filled > 0 ? ja.form.stepMinutesFilled.replace('{n}', String(filled)) : ''
       /** 注記を手順のメモへ寄せた件数の一言（0件のときは何も言わない・便IL/②） */
       const stepNotesNote = (moved: number) =>
         moved > 0 ? ja.form.stepNotesMoved.replace('{n}', String(moved)) : ''
@@ -1308,7 +1305,6 @@ function RecipeFormInner() {
       )
       // 手順の本文に書かれている時間を「分」の欄に写す（便ED・docs/68 打ち手#2）
       const importedStepRows = toImportedStepRows(importedSteps)
-      const filledMinutes = importedStepRows.filter((row) => row.minutesAuto).length
       if (importedStepRows.length > 0) {
         setSteps(importedStepRows)
       }
@@ -1329,31 +1325,31 @@ function RecipeFormInner() {
       }
       // 片側だけ読み込めたときは警告トーンで正直に伝える(便BW/C-02。貼り付け経路と同じ扱い)。
       // どの結果文にも、材料・手順以外で置き換わった項目(便BX/C02)を書き添える
-      const minutesNote = stepMinutesNote(filledMinutes)
       const notesNote = stepNotesNote(movedNotes)
-      // 人数分が読み取れなかったことは、結果の文でも言う(2026-08-23 便KF)。
-      // 人数分の欄の下に出る印(ja.form.servingsNotReadNote)と対になる
-      const servingsNote = importedServings.unread ? ja.urlImport.servingsNotRead : ''
       /**
-       * 取り込んだページに調理時間が書かれておらず、欄も空のまま終わるとき(2026-08-23 便KG)。
+       * 取り込み元に書かれておらず、欄が埋まらなかったものを**1行にまとめる**（2026-08-25 便KW・①）。
        *
-       * 貼り付け経路には同じ知らせ(ja.paste.cookMinutesNotWritten)があるのに、URL取り込みには
-       * 無かった。影響範囲テストの実測では、クックパッド25品すべてで調理時間が空のまま保存され
-       * (ページ側に cookTime/totalTime が無いことを実際のページで確認済み)、「時短で絞る」
-       * 「◯分以内」が効かない理由が利用者に何も伝わっていなかった。
-       * **書かれていない時間を機械が見積って入れることはしない**ので、欄が空である事実を伝える。
+       * 旧は人数分（便KF）と調理時間（便KG）が別々の行で、しかも調理時間の行だけで40字あった
+       * （実測: この2行で55字）。どちらも「取り込み元に無かったので欄が埋まっていない」という
+       * 同じ性質の知らせなので、項目名を並べた1行にする（実測19字）。
+       * 並びは画面の欄と同じ順（人数分 → 調理時間）にして、上から順に埋められるようにする。
        */
-      const cookMinutesNote =
-        !result.cookMinutes && cookMinutes.trim() === '' ? ja.urlImport.cookMinutesNotWritten : ''
+      const notImported: string[] = []
+      if (importedServings.unread) notImported.push(ja.urlImport.itemServings)
+      if (!result.cookMinutes && cookMinutes.trim() === '') {
+        notImported.push(ja.urlImport.itemCookMinutes)
+      }
+      const notImportedNote =
+        notImported.length > 0
+          ? ja.urlImport.notImported.replace('{items}', notImported.join(ja.urlImport.itemSeparator))
+          : ''
       if (importedRows.length === 0) {
         showUrlImportMessage(
           [
             ja.urlImport.resultNoIngredients.replace('{s}', String(importedSteps.length)),
+            notImportedNote,
             alsoAppliedNote,
-            minutesNote,
             notesNote,
-            servingsNote,
-            cookMinutesNote,
           ],
           'warn',
         )
@@ -1361,9 +1357,8 @@ function RecipeFormInner() {
         showUrlImportMessage(
           [
             ja.urlImport.resultNoSteps.replace('{i}', String(importedRows.length)),
+            notImportedNote,
             alsoAppliedNote,
-            servingsNote,
-            cookMinutesNote,
           ],
           'warn',
         )
@@ -1388,11 +1383,9 @@ function RecipeFormInner() {
                   : '',
               )
               .replace('{s}', String(importedSteps.length)),
+            notImportedNote,
             alsoAppliedNote,
-            minutesNote,
             notesNote,
-            servingsNote,
-            cookMinutesNote,
           ],
           'info',
         )
@@ -1457,23 +1450,28 @@ function RecipeFormInner() {
     const pasteServings = resolveImportedServings(parsed.servings, servings)
     const nextPasteServings = pasteServings.unread ? undefined : pasteServings.servings
     if (nextPasteServings !== undefined && nextPasteServings !== servings) {
-      pasteAlsoApplied.push(ja.paste.alsoAppliedServings)
+      pasteAlsoApplied.push(ja.paste.itemServings)
     }
     if (parsed.cookMinutes && String(parsed.cookMinutes) !== cookMinutes.trim()) {
-      pasteAlsoApplied.push(ja.paste.alsoAppliedCookMinutes)
+      pasteAlsoApplied.push(ja.paste.itemCookMinutes)
     }
     const pasteAlsoAppliedNote =
       pasteAlsoApplied.length > 0
-        ? ja.paste.alsoApplied.replace('{items}', pasteAlsoApplied.join(ja.paste.alsoAppliedSeparator))
+        ? ja.paste.alsoApplied.replace('{items}', pasteAlsoApplied.join(ja.paste.itemSeparator))
         : ''
     /**
-     * 貼り付けた文章に調理時間が書かれておらず、欄も空のまま終わるとき。
-     * URL取り込みはページの構造化データから調理時間を受け取れるが、貼り付けは本文に
-     * 書かれた行を写すしかない。書かれていない時間を機械が見積って入れることはしないので、
-     * 欄が空のままである事実だけを伝える(黙っていると「取り込みが効いていない」に見える)
+     * 取り込み元に書かれておらず、欄が埋まらなかったものを1行にまとめる（2026-08-25 便KW・①）。
+     * URL取り込みと同じ組み立て・同じ文言にする（2つの経路で説明の形が違わないように）
      */
-    const pasteCookMinutesNote =
-      !parsed.cookMinutes && cookMinutes.trim() === '' ? ja.paste.cookMinutesNotWritten : ''
+    const pasteNotImported: string[] = []
+    if (pasteServings.unread) pasteNotImported.push(ja.paste.itemServings)
+    if (!parsed.cookMinutes && cookMinutes.trim() === '') {
+      pasteNotImported.push(ja.paste.itemCookMinutes)
+    }
+    const pasteNotImportedNote =
+      pasteNotImported.length > 0
+        ? ja.paste.notImported.replace('{items}', pasteNotImported.join(ja.paste.itemSeparator))
+        : ''
     // 貼り付けた「50人分」も範囲に収める(便CK/①-1。手では21人分以上を作れないのに素通りしていた)
     if (nextPasteServings !== undefined) setServings(nextPasteServings)
     setServingsNotRead(pasteServings.unread)
@@ -1509,9 +1507,6 @@ function RecipeFormInner() {
     const pastedNotes = parsed.steps.length - pastedSteps.length
     // 手順の本文に書かれている時間を「分」の欄に写す（便ED・docs/68 打ち手#2。URL取り込みと同じ扱い）
     const pastedStepRows = toImportedStepRows(pastedSteps)
-    const filledMinutes = pastedStepRows.filter((row) => row.minutesAuto).length
-    const stepMinutesNote =
-      filledMinutes > 0 ? ja.form.stepMinutesFilled.replace('{n}', String(filledMinutes)) : ''
     const stepNotesNote =
       pastedNotes > 0 ? ja.form.stepNotesMoved.replace('{n}', String(pastedNotes)) : ''
     if (pastedStepRows.length > 0) {
@@ -1559,7 +1554,6 @@ function RecipeFormInner() {
       ingredients: parsed.ingredients.map((row) => ({ name: row.name })),
       steps: pastedStepRows.map((row) => ({ text: row.text })),
     })
-    const pasteServingsNote = pasteServings.unread ? ja.paste.servingsNotRead : ''
     // 2026-08-25 便KS・⑧: 1本の長文にまとめる（句点でつなぐ）のをやめ、1つの知らせ＝1行にする。
     // 空の行は showPasteMessage が落とすので、ここでは並べるだけでよい
     showPasteMessage(
@@ -1567,11 +1561,9 @@ function RecipeFormInner() {
         ja.paste.resultSummary
           .replace('{i}', String(parsed.ingredients.length))
           .replace('{s}', String(pastedSteps.length)),
+        pasteNotImportedNote,
         pasteAlsoAppliedNote,
-        stepMinutesNote,
         stepNotesNote,
-        pasteCookMinutesNote,
-        pasteServingsNote,
       ],
       'info',
     )

@@ -30500,11 +30500,14 @@ import { safetyNotesFor, stepSafetyNotes, wholeRecipeSafetyNotes } from '../src/
 
 // ---------- KG-5: 調理時間が書かれていないことを、URL取り込みでも知らせる ----------
 // 実データ: クックパッド25品すべてで調理時間が空（実測でページ側に cookTime/totalTime が無い）。
-// 貼り付け経路には「書かれていなかったので空のままです」の知らせがあるのに、URL経路には無かった。
+// 貼り付け経路には知らせがあるのに、URL経路には無かった。
+// 2026-08-25 便KW・①: 人数分の知らせ（便KF）と1行にまとめたので、
+// 「調理時間という項目名が、読み取れなかったものの並びに出せること」を見張る形に変えた。
 {
-  eq('KG-5 貼り付け経路に調理時間の知らせがある', typeof ja.paste.cookMinutesNotWritten === 'string' && ja.paste.cookMinutesNotWritten !== '', true)
-  eq('KG-5 URL取り込み経路にも同じ知らせがある', typeof ja.urlImport.cookMinutesNotWritten === 'string' && ja.urlImport.cookMinutesNotWritten !== '', true)
-  eq('KG-5 URL取り込みの知らせは「調理時間」を名指ししている', (ja.urlImport.cookMinutesNotWritten ?? '').includes('調理時間'), true)
+  eq('KG-5 貼り付け経路に「読み取れなかったもの」の知らせがある', typeof ja.paste.notImported === 'string' && ja.paste.notImported.includes('{items}'), true)
+  eq('KG-5 URL取り込み経路にも同じ知らせがある', typeof ja.urlImport.notImported === 'string' && ja.urlImport.notImported.includes('{items}'), true)
+  eq('KG-5 どちらの経路も「調理時間」を項目名として出せる', [ja.paste.itemCookMinutes, ja.urlImport.itemCookMinutes], ['調理時間', '調理時間'])
+  eq('KG-5 「調理時間」が入った1行を組み立てられる', ja.urlImport.notImported.replace('{items}', ja.urlImport.itemCookMinutes).includes('調理時間'), true)
 }
 
 // ---------- KG-6: 写真が届く前に保存できてしまう ----------
@@ -32564,13 +32567,12 @@ import { safetyNotesFor, stepSafetyNotes, wholeRecipeSafetyNotes } from '../src/
     })(), true)
     const ksResultLines = [
       ja.paste.resultSummary,
-      ja.paste.cookMinutesNotWritten,
-      ja.paste.servingsNotRead,
+      ja.paste.notImported,
       ja.urlImport.resultSummary,
-      ja.urlImport.cookMinutesNotWritten,
-      ja.urlImport.servingsNotRead,
-      ja.form.stepMinutesFilled,
+      ja.urlImport.notImported,
       ja.form.stepNotesMoved,
+      ja.urlImport.photoImported,
+      ja.urlImport.photoReplaced,
     ]
     eq(
       'KS-8 結果の文言に「・」を書き込んでいない',
@@ -32578,6 +32580,68 @@ import { safetyNotesFor, stepSafetyNotes, wholeRecipeSafetyNotes } from '../src/
       [],
     )
   }
+  // ---------- KW-1: 取り込みの結果は「短く・読みやすく」 ----------
+  // オーナー原文（2026-08-25 夜）「画像はレシピの取り込み文章です。改行や内容を絞って短く
+  // 読みやすくしてください。」オーナーが見た実物は1つづきの6文（実測 URL経路 5行141字・高さ196px）。
+  // 便KS・⑧で改行（箇条書き）は入っていたので、便KWは**内容を絞る**ほうを担当した。
+  // 実測（390px・材料6件/手順7件/人数分なし/調理時間なし/手順1件に時間/写真あり）:
+  //   URL   5行141字 196px → 3行67字 88px
+  //   貼付  4行131字 172px → 2行52字 64px
+  {
+    // ① 同じ性質のもの（取り込み元に無くて欄が埋まらなかったもの）は1行にまとめる
+    eq('KW-1 読み取れなかったものは1行にまとめる形を持つ', [
+      ja.paste.notImported.includes('{items}'),
+      ja.urlImport.notImported.includes('{items}'),
+    ], [true, true])
+    eq('KW-1 2つの経路で同じ文言にする（経路で説明の形が違わない）', ja.paste.notImported, ja.urlImport.notImported)
+    eq('KW-1 人数分と調理時間を並べた1行が40字未満に収まる', (() => {
+      const items = [ja.urlImport.itemServings, ja.urlImport.itemCookMinutes].join(ja.urlImport.itemSeparator)
+      return ja.urlImport.notImported.replace('{items}', items).length
+    })() < 40, true)
+    // 旧: 経路ごとに「貼り付けた文章に書かれていなかったので」「取り込んだページに書かれて
+    //     いなかったので」を繰り返す2行だった。同じ言い回しの繰り返しを残さない
+    eq('KW-1 「書かれていなかったので」の繰り返しを残さない', [
+      ja.paste.notImported.includes('書かれていなかったので'),
+      ja.urlImport.notImported.includes('書かれていなかったので'),
+    ], [false, false])
+    // ② 手順の「分」を入れた件数は、結果の並びから外した（手順ごとの印がその場に出るため）。
+    //    黙って落としたのではない＝印の文言が残っていることをここで見張る（規約B）
+    eq('KW-1 手順の分を入れた印は、手順のその場に残っている', ja.form.stepMinutesAuto.includes('時間'), true)
+    eq('KW-1 結果の並びに件数の一言を作り直していない', 'stepMinutesFilled' in ja.form, false)
+    eq('KW-1 画面も件数の一言を組み立てていない', ksForm.includes('stepMinutesFilled'), false)
+    // ③ 「手順の写真は取り込みません」は、取り込む前に読む説明（チェックの下）へ移した。
+    //    2026-08-02 オーナー指示（手順の写真まで入ったと受け取られない）はそちらが担う
+    eq('KW-1 取り込む範囲は、取り込む前の説明に書いてある', ja.urlImport.fetchPhotoNote.includes('手順の写真は取り込みません'), true)
+    eq('KW-1 結果の写真の行は但し書きを繰り返さない', [
+      ja.urlImport.photoImported.includes('手順の写真'),
+      ja.urlImport.photoReplaced.includes('手順の写真'),
+    ], [false, false])
+    eq('KW-1 結果の写真の行は「1枚」を言い切ったまま', [
+      ja.urlImport.photoImported.includes('1枚'),
+      ja.urlImport.photoReplaced.includes('1枚'),
+    ], [true, true])
+    // ④ 手順の件数が取り込み元より減る唯一の場面（注記をメモへ寄せた）は落とさない（規約B）。
+    //    手順の側には印が出ないので、ここでしか言えない
+    eq('KW-1 注記をメモへ寄せた知らせは残す', ja.form.stepNotesMoved.includes('メモ'), true)
+    eq('KW-1 画面も注記の知らせを組み立てている', ksForm.includes('stepNotesMoved'), true)
+    // ⑤ 並びの中の1行なので、行末に句点は付けない（1つの知らせ＝1行）
+    eq('KW-1 結果の各行は行末に句点を付けない', [
+      ja.paste.notImported.endsWith('。'),
+      ja.urlImport.notImported.endsWith('。'),
+      ja.paste.alsoApplied.endsWith('。'),
+      ja.urlImport.alsoApplied.endsWith('。'),
+      ja.form.stepNotesMoved.endsWith('。'),
+      ja.urlImport.photoImported.endsWith('。'),
+      ja.urlImport.photoReplaced.endsWith('。'),
+    ], [false, false, false, false, false, false, false])
+    // ⑥ 項目名は1か所だけで持つ（同じ文字を再定義しない＝CLAUDE.md コーディング規約）
+    eq('KW-1 項目名は「も合わせました」と「読み取れませんでした」で共用する', [
+      'alsoAppliedServings' in ja.urlImport,
+      'alsoAppliedCookMinutes' in ja.urlImport,
+      'alsoAppliedServings' in ja.paste,
+    ], [false, false, false])
+  }
+
   // ---------- KS-9: 「1食」に分けて食べる品ではないレシピの、栄養とシェアの言い方 ----------
   // 2026-08-25 便KS・④の続き（司令部の裁定「栄養パネルの『1食あたり』も wholeBatch を効かせる」）。
   // オーナー原文「１食あたり７０円とあるが、出汁だけで１食とは言わない」＝引っかかっているのは
@@ -33427,6 +33491,110 @@ import { safetyNotesFor, stepSafetyNotes, wholeRecipeSafetyNotes } from '../src/
     [ja.mealPlan.weekGroupShoppingTitle, ja.mealPlan.weekGroupNutritionCostTitle],
     ['買い物メモ', '栄養と食費'],
   )
+}
+
+// ==========================================================================================
+// 便KW・②: みそを、種類ごとに価格も塩分も正しく扱う
+// ==========================================================================================
+// オーナー原文（2026-08-25 夜・申し送り3）:
+//   「味噌は種類で価格も塩分量も異なります。分けて扱うならどちらも対応してください。」
+//
+// 直す前の実測（scratchpad/miso-probe）: 成分表は米みその3種＋減塩みその**4件**しかなく、
+// 「だし入りみそ」「麦みそ」「八丁味噌」「西京みそ」は**栄養も価格も解決せず、材料が丸ごと
+// 計算から落ちていた**（＝塩分が少なく出る）。さらに「米みそ」は価格側の前方一致で
+// 「米 60円/1合」＝生の米の値段に当たっていた。
+{
+  const kwIndex = buildPriceIndex(PRICE_DEFAULTS.map((d) => ({ ...d, isDefault: true })))
+  const { matchNutritionFood: kwFood } = await import('../src/logic/nutrition.ts')
+  const kwId = (name) => kwFood(name)?.id ?? null
+  const kwSalt = (name) => kwFood(name)?.per100g.saltG ?? null
+  const kwYen = (name, amount, unit) =>
+    estimateIngredientYen({ name, amount, unit }, kwIndex)?.yen ?? null
+
+  // --- KW-2: 八訂に収載のあるみそは、種類ごとに別の食品として持つ ---
+  eq('KW-2 米みそ 淡色辛みそ（代表の「みそ」）', kwId('みそ'), '17045')
+  eq('KW-2 米みそ 甘みそ（白みそ）', kwId('白みそ'), '17044')
+  eq('KW-2 米みそ 赤色辛みそ（赤みそ）', kwId('赤みそ'), '17046')
+  eq('KW-2 米みそ だし入りみそ', kwId('だし入りみそ'), '17120')
+  eq('KW-2 麦みそ', kwId('麦みそ'), '17047')
+  eq('KW-2 豆みそ（八丁味噌）', kwId('八丁味噌'), '17048')
+  eq('KW-2 減塩みそ', kwId('減塩みそ'), '17119')
+  // 種類ごとに食塩相当量が違う（＝1つで代表させると外れる）。値は八訂そのまま
+  eq('KW-2 食塩相当量は種類ごとに違う（八訂の値そのまま・g/100g）', [
+    kwSalt('白みそ'), kwSalt('減塩みそ'), kwSalt('麦みそ'), kwSalt('豆みそ'),
+    kwSalt('だし入りみそ'), kwSalt('みそ'), kwSalt('赤みそ'),
+  ], [6.1, 10.7, 10.7, 10.9, 11.9, 12.4, 13])
+  eq('KW-2 いちばん薄い白みそと、いちばん濃い赤みそで2倍以上ひらく', kwSalt('赤みそ') / kwSalt('白みそ') > 2, true)
+  // 大さじ・小さじの重さは、みそ類すべてで同じ値をそのまま使う（新しい重さを作っていない）
+  eq('KW-2 みそ類の大さじは全部同じ重さ', [
+    convertToGrams(1, '大さじ', kwFood('だし入りみそ') ?? {}),
+    convertToGrams(1, '大さじ', kwFood('麦みそ') ?? {}),
+    convertToGrams(1, '大さじ', kwFood('豆みそ') ?? {}),
+  ], [
+    convertToGrams(1, '大さじ', kwFood('みそ') ?? {}),
+    convertToGrams(1, '大さじ', kwFood('みそ') ?? {}),
+    convertToGrams(1, '大さじ', kwFood('みそ') ?? {}),
+  ])
+
+  // --- KW-3: 書き方のちがいが、同じ種類に寄る（実測した16通り） ---
+  eq('KW-3 漢字・かなのちがいは同じ種類に寄る', [
+    kwId('味噌'), kwId('赤味噌'), kwId('白味噌'), kwId('だし入り味噌'), kwId('出汁入りみそ'),
+    kwId('麦味噌'), kwId('豆味噌'), kwId('八丁みそ'), kwId('減塩味噌'),
+  ], ['17045', '17046', '17044', '17120', '17120', '17047', '17048', '17048', '17119'])
+  eq('KW-3 「合わせみそ」「信州みそ」は代表の淡色辛みそに寄る', [
+    kwId('合わせみそ'), kwId('合わせ味噌'), kwId('信州みそ'),
+  ], ['17045', '17045', '17045'])
+  eq('KW-3 「西京みそ」は白みそ（甘みそ）に寄る＝同梱レシピの西京焼きと同じ扱い', [
+    kwId('西京みそ'), kwId('西京味噌'),
+  ], ['17044', '17044'])
+  eq('KW-3 「米みそ」は八訂の分類名なので代表の淡色辛みそに寄る', kwId('米みそ'), '17045')
+  // 根拠が書けないものは足さない（「分からない」と出すほうが正しい）
+  eq('KW-3 「赤だし」は足していない（豆みそと米みその調合で、八訂に収載が無い）', [
+    kwFood('赤だし'), kwFood('赤だしみそ'),
+  ], [null, null])
+
+  // --- KW-4: 価格の誤爆（前方一致で別の食材の値段に当たる）を塞ぐ ---
+  // 直す前: 「米みそ 100g」→ 40円（米 60円/1合の値段）。成分表に「米みそ」が無いあいだは
+  // priceEstimate の isSameNutritionFood が前方一致を通してしまうため
+  eq('KW-4 「米みそ」に米の値段が当たらない', kwYen('米みそ', '1', '大さじ'), kwYen('みそ', '1', '大さじ'))
+  eq('KW-4 「米みそ 100g」も米の値段（40円）ではない', kwYen('米みそ', '100', 'g') !== 40, true)
+  eq('KW-4 「米」そのものは今までどおり', kwYen('米', '1', '合'), 60)
+
+  // --- KW-5: 価格も種類ごとに引ける（1件ずつ実売を調べ直した結果。根拠は priceDefaults.ts のコメント） ---
+  // 容量をそろえて測り直すと、家庭用の750gカップで売っている種類（基本・だし入り・赤・減塩・麦）は
+  // どれも500〜600円/kgの同じ帯で、種類による差は出ない。**はっきり違うのは豆みそ（八丁味噌）だけ**
+  // ＝家庭用に750g規格が無く、300g前後の袋でしか買えないため
+  eq('KW-5 750gカップで売っている種類は、みなじ同じ帯（大さじ1で11円）', [
+    kwYen('みそ', '1', '大さじ'), kwYen('だし入りみそ', '1', '大さじ'),
+    kwYen('赤みそ', '1', '大さじ'), kwYen('減塩みそ', '1', '大さじ'),
+    kwYen('麦みそ', '1', '大さじ'),
+  ], [11, 11, 11, 11, 11])
+  eq('KW-5 豆みそ（八丁味噌）だけは明確に高い（300g袋でしか買えない）', kwYen('豆みそ', '1', '大さじ'), 30)
+  eq('KW-5 八丁味噌の書き方ちがいも同じ値段に寄る', [
+    kwYen('八丁味噌', '1', '大さじ'), kwYen('八丁みそ', '1', '大さじ'),
+  ], [30, 30])
+  eq('KW-5 豆みそは基本のみその3倍近い（種類で価格が違ういちばん大きい例）', kwYen('豆みそ', '1', '大さじ') / kwYen('みそ', '1', '大さじ') > 2.5, true)
+  eq('KW-5 白みそは基本より高いまま（便JIの見直しを動かさない）', kwYen('白みそ', '1', '大さじ'), 15)
+  eq('KW-5 「西京みそ」も白みその値段で引ける', kwYen('西京みそ', '1', '大さじ'), kwYen('白みそ', '1', '大さじ'))
+  // 版番号を上げないと、新しい行が既存の端末に届かない
+  eq('KW-5 価格マスタの版番号を上げてある', PRICE_DEFAULTS_VERSION_FOR_JG >= 14, true)
+
+  // --- KW-6: 同梱109品への影響（数えたうえで、変わらないことを見張る） ---
+  // 109品で使っているみそは9件/9品で、書き方は「味噌」3件・「みそ」4件・「白みそ」2件だけ。
+  // 足したのは だし入り/麦/豆 と 西京・米の別名なので、**109品の数字は1つも動かない**
+  eq('KW-6 同梱レシピが使うみその書き方は3通りだけ', (() => {
+    const names = new Set()
+    for (const r of starterDefs) {
+      for (const ing of r.ingredients ?? []) {
+        if (/みそ|味噌/.test(ing.name) && !/煮缶|さば|サバ/.test(ing.name)) names.add(ing.name)
+      }
+    }
+    return [...names].sort()
+  })(), ['みそ', '味噌', '白みそ'])
+  eq('KW-6 その3通りは、足す前と同じ食品・同じ値段のまま', [
+    kwId('みそ'), kwId('味噌'), kwId('白みそ'),
+    kwYen('みそ', '2', '大さじ'), kwYen('味噌', '2', '大さじ'), kwYen('白みそ', '3', '大さじ'),
+  ], ['17045', '17045', '17044', 22, 22, 45])
 }
 
 // ---------- 結果 ----------

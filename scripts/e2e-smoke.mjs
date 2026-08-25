@@ -19986,13 +19986,20 @@ try {
         await uiPage.waitForTimeout(1000)
         check(
           'URLIMPORT-05 料理の写真を1枚取り込みました、の追記メッセージが出る',
-          (await uiPage.textContent('body')).includes('料理の写真を1枚取り込みました'),
+          (await uiPage.textContent('body')).includes(ja.urlImport.photoImported),
         )
         // 2026-08-02 オーナー指示(便DF): 取り込むのは料理の写真1枚だけで手順の写真は取り込まない。
-        // 「写真も取り込みました」だけだと手順の写真まで入ったと誤解されるため、その場で言い切る
+        // 2026-08-25 便KW・①(オーナー原文「改行や内容を絞って短く読みやすくしてください。」):
+        // この但し書きは、結果の並びから**「写真も取り込む」の説明**へ移した。取り込む範囲は
+        // 取り込む前に決める話で、取り込むたびに繰り返す必要が無い。画面から消したのではないので、
+        // 「同じ画面に出ていること」をここで見張り続ける
         check(
-          'URLIMPORT-05(便DF) 手順の写真は取り込まないことを同じ行で伝える',
-          (await uiPage.textContent('body')).includes('（手順の写真は取り込みません）'),
+          'URLIMPORT-05(便DF) 手順の写真は取り込まないことを同じ画面で伝える',
+          (await uiPage.textContent('body')).includes(ja.urlImport.fetchPhotoNote),
+        )
+        check(
+          'URLIMPORT-05(便KW) 結果の行は但し書きを繰り返さない（短くする）',
+          !ja.urlImport.photoImported.includes('手順の写真'),
         )
         check(
           'URLIMPORT-05 取り込んだ写真がフォームのプレビューに表示される(アイコンでなくimg)',
@@ -20022,7 +20029,7 @@ try {
         await uiPage.waitForTimeout(1000)
         check(
           'URLIMPORT-06 チェックOFFなら「料理の写真を1枚取り込みました」の追記メッセージは出ない',
-          !(await uiPage.textContent('body')).includes('料理の写真を1枚取り込みました'),
+          !(await uiPage.textContent('body')).includes(ja.urlImport.photoImported),
         )
         check(
           'URLIMPORT-06 チェックOFFなら写真はセットされない(imgが出ずアイコン表示のまま)',
@@ -20122,7 +20129,7 @@ try {
         check(
           'URLIMPORT-10 レシピ本体の成功メッセージは従来どおり(写真の失敗で成功文言を変えない)',
           photoFailBody.includes('材料1件・手順1件を読み込みました') &&
-            !photoFailBody.includes('料理の写真を1枚取り込みました'),
+            !photoFailBody.includes(ja.urlImport.photoImported),
         )
 
         // --- URLIMPORT-11(便BX/C07・C08): ゴミ行の除去とグループの引き継ぎ ---
@@ -20252,7 +20259,7 @@ try {
         )
         check(
           'URLIMPORT-14 置き換わった写真は「取り込みました」ではなく「置き換わりました」と伝える',
-          (await uiPage.textContent('body')).includes('写真は読み込んだ料理の写真1枚に置き換わりました'),
+          (await uiPage.textContent('body')).includes(ja.urlImport.photoReplaced),
         )
         // 「写真も取り込む」をOFFにすれば写真は守られる。そのことも確認文に書く(規約F「何が残るか」)
         await uiPage
@@ -20288,9 +20295,16 @@ try {
         await uiPage.locator('input[type="url"]').first().fill('https://example.com/group-marker')
         await uiPage.getByRole('button', { name: ja.urlImport.apply }).click()
         await uiPage.waitForTimeout(600)
+        // 2026-08-25 便KW・①: 人数分と調理時間は1行にまとまった。group-markerのモックは
+        // 人数分も調理時間も返さないので、2つ並んだ形がそのまま出る
         check(
-          'KG-C 取り込んだページに調理時間が無いとき、欄が空のままであることを知らせる',
-          stripZwspText(await uiPage.textContent('body')).includes(ja.urlImport.cookMinutesNotWritten),
+          'KG-C 取り込んだページに調理時間が無いとき、読み取れなかったものとして知らせる',
+          stripZwspText(await uiPage.textContent('body')).includes(
+            ja.urlImport.notImported.replace(
+              '{items}',
+              [ja.urlImport.itemServings, ja.urlImport.itemCookMinutes].join(ja.urlImport.itemSeparator),
+            ),
+          ),
         )
         await uiPage.reload({ waitUntil: 'networkidle' })
         await uiPage.waitForTimeout(500)
@@ -20300,8 +20314,10 @@ try {
         await uiPage.getByRole('button', { name: ja.urlImport.apply }).click()
         await uiPage.waitForTimeout(600)
         check(
-          'KG-C 調理時間が読み込めたときは、その知らせを出さない',
-          !stripZwspText(await uiPage.textContent('body')).includes(ja.urlImport.cookMinutesNotWritten),
+          'KG-C 調理時間も人数分も読み込めたときは、その知らせを出さない',
+          !stripZwspText(await uiPage.textContent('body')).includes(
+            ja.urlImport.notImported.replace('{items}', ''),
+          ),
         )
         // 写真が遅れて届く間は保存を止める（本体の読み込み中と同じ扱い）
         await uiPage.reload({ waitUntil: 'networkidle' })
@@ -20356,8 +20372,8 @@ try {
         )
         check(
           'URLIMPORT-15 「料理の写真を1枚取り込みました」が二重に追記されない',
-          !seqBody.includes('料理の写真を1枚取り込みました') &&
-            !seqBody.includes('写真は読み込んだ料理の写真1枚に置き換わりました'),
+          !seqBody.includes(ja.urlImport.photoImported) &&
+            !seqBody.includes(ja.urlImport.photoReplaced),
         )
         check(
           'URLIMPORT-15 2回目の取り込み結果は従来どおり出る(結果が消えたりしない)',
@@ -20829,7 +20845,12 @@ try {
         'NAVI-06 自動で入れた分数であることが手順に表示される',
         body6.includes(ja.form.stepMinutesAuto),
       )
-      check('NAVI-06 取り込みの結果にも件数が出る', body6.includes('手順1件は本文の時間を「分」の欄に入れました。'))
+      // 2026-08-25 便KW・①: 件数の一言は結果の並びから外した（同じことを、直した手順の
+      // その場（step-minutes-auto）が言っている＝黙って落としたのではない）
+      check(
+        'NAVI-06 結果の並びは件数の一言を繰り返さない（印は手順のその場に出る）',
+        !body6.includes('本文の時間を「分」の欄に入れました'),
+      )
       check(
         'NAVI-06 自動入力の印は1件だけ(時間のある手順のみ)',
         (await nav6Page.locator('[data-testid="step-minutes-auto"]').count()) === 1,
@@ -52053,9 +52074,18 @@ try {
         kfServText.includes(ja.form.servingsNotReadNote.replace('{n}', '2')),
         `印=${kfServText}`,
       )
+      // 2026-08-25 便KW・①: 人数分と調理時間は1行にまとまった。この文章はどちらも
+      // 書いていないので、2つ並んだ形がそのまま出る
       check(
         'KFSERV-02 取り込みの結果の文でも人数分を読めなかったと言う',
-        ((await kfPage.textContent('body')) ?? '').replaceAll('​', '').includes(ja.paste.servingsNotRead),
+        ((await kfPage.textContent('body')) ?? '')
+          .replaceAll('​', '')
+          .includes(
+            ja.paste.notImported.replace(
+              '{items}',
+              [ja.paste.itemServings, ja.paste.itemCookMinutes].join(ja.paste.itemSeparator),
+            ),
+          ),
       )
       // 人数分を直したら印は消える（確認が済んだとみなす）
       await kfPage.getByRole('button', { name: ja.detail.servingsUp }).click()
