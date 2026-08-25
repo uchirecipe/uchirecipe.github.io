@@ -2142,3 +2142,100 @@ const NUTRITION_DB_VERSION_FOR_KP = NUTRITION_DATA_FOR_KP.dbVersion
   }
 }
 
+
+// ---------- 便LB（2026-08-26）: 「ピザ用チーズ」をゴーダで代表する（オーナー裁定） ----------
+// オーナーの回答（2026-08-26）: 「**ゴーダチーズで**」
+//
+// 【何が起きていたか】八訂に「ピザ用チーズ」の収載は無く、名前に「チーズ」が入っているだけで
+// プロセスチーズ(13040・313kcal・食塩2.8g/100g)の値が使われていた。売り場のピザ用チーズは
+// 加熱で溶けるナチュラルチーズのシュレッドで、八訂の同じ形の収載はゴーダ(13036・356kcal)と
+// チェダー(13037・390kcal)。どちらで代表するかは判断になるためオーナーに諮り、ゴーダに決まった。
+//
+// 【動いた品】同梱109品で「ピザ用チーズ」を使うのは**豆腐グラタン1品だけ**（40g・2人分）。
+// 1人分: 262→271kcal ／ たんぱく質21.4→22.0g ／ 脂質16.3→16.9g ／ 食塩相当量1.5→1.3g ／
+// カルシウム379→389mg（炭水化物13.9g・食物繊維5.4g・鉄4.1mgは変わらず）。
+// スナップショット(scripts/data/nutrition-smoke-snapshot.json)を更新した理由は
+// scripts/test-nutrition.mjs の「3. スナップショット照合」のコメントにも残してある。
+{
+  const { matchNutritionFood: lbFood, computeRecipeNutrition: lbNut } = await import(
+    '../../src/logic/nutrition.ts'
+  )
+  const { starterDefs: lbStarters } = await import('../../src/db/starters.ts')
+  const { matchPriceEntry: lbMatchPrice } = await import('../../src/logic/priceEstimate.ts')
+  const lbIndex = buildPriceIndex(PRICE_DEFAULTS.map((d) => ({ ...d, isDefault: true })))
+  const lbId = (name) => lbFood(name)?.id ?? null
+  const lbPrice = (name) => {
+    const hit = lbMatchPrice(name, lbIndex)
+    return hit ? `${hit.normalizedName} ${hit.pricePerUnit}円/${hit.unit}` : null
+  }
+
+  // --- LB-1: 当たり先と、公式Excelから読んだ値そのもの ---
+  eq('LB-1 ピザ用チーズは13036「ナチュラルチーズ ゴーダ」', lbId('ピザ用チーズ'), '13036')
+  eq('LB-1 収載名も公式のまま', lbFood('ピザ用チーズ')?.mextName.includes('ゴーダ'), true)
+  eq('LB-1 ゴーダの値は八訂そのまま（356kcal・食塩2.0g/100g）', [
+    lbFood('ピザ用チーズ')?.per100g.kcal, lbFood('ピザ用チーズ')?.per100g.saltG,
+  ], [356, 2])
+  eq('LB-1 プロセスチーズ(13040)より高カロリーで、塩分は少ない', [
+    lbFood('ピザ用チーズ')?.per100g.kcal > lbFood('スライスチーズ')?.per100g.kcal,
+    lbFood('ピザ用チーズ')?.per100g.saltG < lbFood('スライスチーズ')?.per100g.saltG,
+  ], [true, true])
+
+  // --- LB-2: 同じものを指す書き方が、まとめて同じ食品に当たる ---
+  // 直す前はどれもプロセスチーズ(13040)に流れていた（栄養）／価格は「分からない」だった
+  eq('LB-2 シュレッド・とろける・ミックス・ピザチーズは同じゴーダ', [
+    lbId('シュレッドチーズ'), lbId('とろけるチーズ'), lbId('溶けるチーズ'), lbId('とけるチーズ'),
+    lbId('ミックスチーズ'), lbId('ピザチーズ'), lbId('とろけるミックスチーズ'),
+  ], ['13036', '13036', '13036', '13036', '13036', '13036', '13036'])
+  eq('LB-2 「ゴーダ」「ゴーダチーズ」も同じ（代表ではなく、そのものの名前）', [
+    lbId('ゴーダ'), lbId('ゴーダチーズ'),
+  ], ['13036', '13036'])
+  // スライスは実際にプロセスチーズなので、この当たり方が正しい（末尾の語が先に当たる）
+  eq('LB-2 「とろけるスライスチーズ」はプロセスチーズのまま', [
+    lbId('とろけるスライスチーズ'), lbId('スライスチーズ'), lbId('チーズ'),
+  ], ['13040', '13040', '13040'])
+  eq('LB-2 便KYが分けたチーズは巻き込まれていない', [
+    lbId('粉チーズ'), lbId('クリームチーズ'), lbId('マスカルポーネ'),
+  ], ['13038', '13035', '13055'])
+  // 価格側: 成分表の食品名を経由して「ピザ用チーズ 300円/200g」に届く（直す前は全部「価格なし」）
+  eq('LB-2 書き方ちがいでも原価が出る', [
+    lbPrice('シュレッドチーズ'), lbPrice('とろけるチーズ'), lbPrice('ミックスチーズ'),
+  ], ['ピザ用チーズ 300円/200g', 'ピザ用チーズ 300円/200g', 'ピザ用チーズ 300円/200g'])
+  eq('LB-2 「粉チーズ」の価格行は別のまま（振りかける粉で別物）', lbPrice('粉チーズ'), '粉チーズ 620円/80g')
+
+  // --- LB-3: 動いた品の数字そのもの（1人分）。ここが変わったらスナップショットも一緒に見る ---
+  {
+    const gratin = lbStarters.find((d) => d.title === '豆腐グラタン')
+    eq('LB-3 豆腐グラタンは同梱レシピにある', gratin != null, true)
+    const cheeseRows = lbStarters.filter((d) =>
+      (d.ingredients ?? []).some((i) => i.name === 'ピザ用チーズ'),
+    )
+    eq('LB-3 ピザ用チーズを使う同梱レシピは豆腐グラタン1品だけ', cheeseRows.map((d) => d.title), ['豆腐グラタン'])
+    const r = lbNut(gratin)
+    const per = r.perServing
+    const r1 = (v) => Math.round(v * 10) / 10
+    eq('LB-3 1人分のエネルギーは271kcal（旧262kcal）', Math.round(per.kcal), 271)
+    eq('LB-3 1人分のたんぱく質は22.0g（旧21.4g）', r1(per.proteinG), 22)
+    eq('LB-3 1人分の脂質は16.9g（旧16.3g）', r1(per.fatG), 16.9)
+    eq('LB-3 1人分の食塩相当量は1.3g（旧1.5g。ゴーダのほうが塩分が少ない）', r1(per.saltG), 1.3)
+    eq('LB-3 1人分のカルシウムは389mg（旧379mg）', Math.round(per.calciumMg), 389)
+    eq('LB-3 炭水化物・食物繊維・鉄は動いていない', [
+      r1(per.carbG), r1(per.fiberG), r1(per.ironMg),
+    ], [13.9, 5.4, 4.1])
+    eq('LB-3 計算に含めていない材料は増えていない', r.excluded.map((e) => e.name), [])
+  }
+
+  // --- LB-4: ぶどう酒の白と赤（八訂に実収載があるのに「分からない」に落ちていた） ---
+  eq('LB-4 白ワインは16010「ぶどう酒 白」', lbId('白ワイン'), '16010')
+  eq('LB-4 赤ワインは16011「ぶどう酒 赤」', lbId('赤ワイン'), '16011')
+  eq('LB-4 値は八訂そのまま（白75kcal・赤68kcal／どちらも食塩0g）', [
+    lbFood('白ワイン')?.per100g.kcal, lbFood('赤ワイン')?.per100g.kcal,
+    lbFood('白ワイン')?.per100g.saltG, lbFood('赤ワイン')?.per100g.saltG,
+  ], [75, 68, 0, 0])
+  eq('LB-4 「白ぶどう酒」は日本酒(16001)ではなく白ワイン', lbId('白ぶどう酒'), '16010')
+  eq('LB-4 ワインビネガーは今までどおり果実酢(17017)。ワインに寄らない', [
+    lbId('ワインビネガー'), lbId('白ワインビネガー'), lbId('赤ワインビネガー'),
+  ], ['17017', '17017', '17017'])
+  // 素の「ワイン」は赤と白のどちらか名前だけでは決まらないので、当てない（便KX「みそ汁の素」と同じ筋）
+  eq('LB-4 素の「ワイン」はどちらにも寄せない', lbFood('ワイン'), null)
+  eq('LB-4 「酒」「料理酒」は今までどおり清酒', [lbId('酒'), lbId('料理酒')], ['16001', '16001'])
+}

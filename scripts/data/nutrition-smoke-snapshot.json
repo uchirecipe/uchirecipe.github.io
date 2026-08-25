@@ -1242,14 +1242,14 @@
   "starter:豆腐グラタン": {
     "servings": 2,
     "perServing": {
-      "kcal": 262,
-      "proteinG": 21.4,
-      "fatG": 16.3,
+      "kcal": 271,
+      "proteinG": 22,
+      "fatG": 16.9,
       "carbG": 13.9,
-      "saltG": 1.5,
+      "saltG": 1.3,
       "fiberG": 5.4,
       "ironMg": 4.1,
-      "calciumMg": 379
+      "calciumMg": 389
     },
     "excluded": []
   },

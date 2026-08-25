@@ -456,6 +456,18 @@ console.log(`1人分の常識レンジ検査: ${PER_SERVING_LIMITS.length}項目
 }
 
 // ---------- 3. スナップショット照合 ----------
+//
+// 【スナップショットを更新したときは、ここに「なぜ動いたか」を1行残すこと】
+// scripts/data/nutrition-smoke-snapshot.json は --update で丸ごと作り直されるため、
+// ファイルの中にコメントを書いても消える。理由の置き場所はこのコメントと、
+// scripts/tests/nutrition.mjs の再発防止ケース（動いた数字そのものをピン留めする）。
+//
+// ・2026-08-26 便LB（**オーナー裁定**「ゴーダチーズで」）: 「ピザ用チーズ」の当たり先を
+//   プロセスチーズ(13040・313kcal・食塩2.8g/100g)から八訂のゴーダ(13036・356kcal・食塩2.0g/100g)へ
+//   変えた。動いたのは**豆腐グラタン1品だけ**（同梱109品でピザ用チーズを使うのはこの品のみ。
+//   40g・2人分＝1人あたり20g）。1人分: 262→271kcal ／ たんぱく質21.4→22.0g ／ 脂質16.3→16.9g ／
+//   食塩相当量1.5→1.3g ／ カルシウム379→389mg（炭水化物・食物繊維・鉄は変わらず）。
+//   ピン留めは scripts/tests/nutrition.mjs の LB-1〜LB-3。
 const updateMode = process.argv.includes('--update')
 if (updateMode) {
   await writeFile(SNAPSHOT_PATH, JSON.stringify(snapshot, null, 2) + '\n')

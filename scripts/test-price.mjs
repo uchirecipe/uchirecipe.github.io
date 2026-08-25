@@ -86,7 +86,10 @@ for (const [name, count] of nameCounts) {
 // 205→206件（2026-08-25 便KY: ワインビネガー。成分表には八訂17017「果実酢 ぶどう酢」があるのに
 //   価格マスタに項目が無く、便KXが前方一致の誤爆「ワインビネガー→赤ワイン600円/1L」を塞いだ結果
 //   「価格が分からない材料」になっていた。家庭用500mlでそろえた実売4件の根拠は priceDefaults.ts）
-const PRICE_DEFAULTS_COUNT = 206
+// 206→207件（2026-08-26 便LB: 白ワイン。価格マスタにも成分表にも項目が無く、栄養も価格も
+//   「分からない」のままだった。値は赤ワインと同じ600円/1L（同じ店・同じ銘柄で赤と白が同額。
+//   実売3件と、赤と同額にした理由は priceDefaults.ts の行のコメント）
+const PRICE_DEFAULTS_COUNT = 207
 check(
   PRICE_DEFAULTS.length === PRICE_DEFAULTS_COUNT,
   `PRICE_DEFAULTSの件数が想定と違う: 実際=${PRICE_DEFAULTS.length}件 / 想定=${PRICE_DEFAULTS_COUNT}件。` +
