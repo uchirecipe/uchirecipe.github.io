@@ -2877,7 +2877,17 @@ eq('normalizeIngredientNameForPrice 前後空白除去', normalizeIngredientName
 // ==========================================================================================
 {
   const jmRoot = path.join(path.dirname(fileURLToPath(scriptFileUrl)), '..')
-  const jmSrc = readFileSync(path.join(jmRoot, 'scripts/e2e-smoke.mjs'), 'utf-8').split('\n')
+  // 2026-08-26 便LC（docs/74 第2手）: e2e は 1ファイルから「入口 + scripts/e2e/ の節のファイル」へ
+  // 分かれた。見張る対象は**e2e 全体**なので、入口と scripts/e2e/ の中身を全部見る
+  // （節のファイルが増えても、ここを直さなくても対象に入る）。
+  const jmFiles = [
+    path.join(jmRoot, 'scripts/e2e-smoke.mjs'),
+    ...readdirSync(path.join(jmRoot, 'scripts/e2e'))
+      .filter((f) => f.endsWith('.mjs'))
+      .sort()
+      .map((f) => path.join(jmRoot, 'scripts/e2e', f)),
+  ]
+  const jmSrc = jmFiles.flatMap((f) => readFileSync(f, 'utf-8').split('\n'))
 
   /** ja.ts に出てくる文言（値）を全部集める */
   const jmValues = new Set()
@@ -3049,11 +3059,6 @@ eq('normalizeIngredientNameForPrice 前後空白除去', normalizeIngredientName
         'exposeFunction',
         'waitForFunction',
       ])
-      const jmAst = jmAcorn.parse(jmSrc.join('\n'), {
-        ecmaVersion: 'latest',
-        sourceType: 'module',
-        locations: true,
-      })
       const jmWalkAst = (node, fn) => {
         if (!node || typeof node.type !== 'string') return
         fn(node)
@@ -3065,37 +3070,49 @@ eq('normalizeIngredientNameForPrice 前後空白除去', normalizeIngredientName
           } else if (v && typeof v.type === 'string') jmWalkAst(v, fn)
         }
       }
-      const jmBrowserRanges = []
-      jmWalkAst(jmAst, (n) => {
-        if (n.type !== 'CallExpression') return
-        const c = n.callee
-        const name =
-          c && c.type === 'MemberExpression' && c.property && c.property.type === 'Identifier'
-            ? c.property.name
-            : null
-        if (!name || !JM_BROWSER_FNS.has(name)) return
-        const arg = n.arguments[0]
-        if (!arg) return
-        if (arg.type === 'ArrowFunctionExpression' || arg.type === 'FunctionExpression')
-          jmBrowserRanges.push({ s: arg.start, e: arg.end, fn: name, line: n.loc.start.line })
-      })
+      // 2026-08-26 便LC: e2e が複数のファイルに分かれたので、**1本につないでではなく
+      // ファイルごとに**構文解析する（つなぐと、別のファイルの同じ名前の宣言がぶつかって
+      // 解析そのものが落ちる。位置(start/end)もファイルごとの数え方なので混ぜられない）。
+      let jmBrowserCount = 0
+      const jmLeaked = []
+      for (const jmFile of jmFiles) {
+        const jmAst = jmAcorn.parse(readFileSync(jmFile, 'utf-8'), {
+          ecmaVersion: 'latest',
+          sourceType: 'module',
+          locations: true,
+        })
+        const jmBrowserRanges = []
+        jmWalkAst(jmAst, (n) => {
+          if (n.type !== 'CallExpression') return
+          const c = n.callee
+          const name =
+            c && c.type === 'MemberExpression' && c.property && c.property.type === 'Identifier'
+              ? c.property.name
+              : null
+          if (!name || !JM_BROWSER_FNS.has(name)) return
+          const arg = n.arguments[0]
+          if (!arg) return
+          if (arg.type === 'ArrowFunctionExpression' || arg.type === 'FunctionExpression')
+            jmBrowserRanges.push({ s: arg.start, e: arg.end, fn: name, line: n.loc.start.line })
+        })
+        jmBrowserCount += jmBrowserRanges.length
+        jmWalkAst(jmAst, (n) => {
+          if (n.type !== 'MemberExpression') return
+          let root = n
+          while (root.object && root.object.type === 'MemberExpression') root = root.object
+          if (!root.object || root.object.type !== 'Identifier' || root.object.name !== 'ja') return
+          const r = jmBrowserRanges.find((x) => n.start >= x.s && n.end <= x.e)
+          if (r)
+            jmLeaked.push(
+              `${path.basename(jmFile)}:${n.loc.start.line}行目の ja.*** が ${r.fn}(${r.line}行目) の中にある（文言は引数で渡すこと）`,
+            )
+        })
+      }
       eq(
         'JM-4 前提: ブラウザ側で走る関数を見つけられている（0個なら見張りが壊れている）',
-        jmBrowserRanges.length > 100,
+        jmBrowserCount > 100,
         true,
       )
-      const jmLeaked = []
-      jmWalkAst(jmAst, (n) => {
-        if (n.type !== 'MemberExpression') return
-        let root = n
-        while (root.object && root.object.type === 'MemberExpression') root = root.object
-        if (!root.object || root.object.type !== 'Identifier' || root.object.name !== 'ja') return
-        const r = jmBrowserRanges.find((x) => n.start >= x.s && n.end <= x.e)
-        if (r)
-          jmLeaked.push(
-            `${n.loc.start.line}行目の ja.*** が ${r.fn}(${r.line}行目) の中にある（文言は引数で渡すこと）`,
-          )
-      })
       eq('JM-4 ja.ts の文言が、ブラウザ側で走る関数の中に入り込んでいない', [...new Set(jmLeaked)], [])
     }
   }

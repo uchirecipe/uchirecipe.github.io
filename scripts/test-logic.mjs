@@ -29,6 +29,7 @@ await import('./tests/nutrition.mjs')         // 栄養
 await import('./tests/price-cost.mjs')        // 価格と原価
 await import('./tests/url-import.mjs')        // URLからの取り込み
 await import('./tests/ui-source-guards.mjs')  // 画面のソースを読む見張り
+await import('./tests/e2e-tools.mjs')         // e2eの道具そのものの検査(時計を合わせる道具)
 
 // ---------- 結果 ----------
 const { reportAndExit } = await import('./tests/_harness.mjs')
