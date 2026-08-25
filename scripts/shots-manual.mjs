@@ -863,9 +863,9 @@ try {
     await toggleEl.evaluate((el) => window.scrollBy(0, el.getBoundingClientRect().top - 60))
     await wait(page, 400)
     // 2026-08-02 便CW-7で並置UI→説明文1行になったので、8項目・「ごはんを含めて計算する」・
-    // 「1日分のめやすは〜」の1行までが入る高さに広げる(説明している範囲を途中で切らない)。
+    // 「1日分の目安は〜」の1行までが入る高さに広げる(説明している範囲を途中で切らない)。
     // 2026-08-09 便EU: チェックの見出しが「1食につきごはん1杯（150g）を足して計算する」に
-    // なって2行に折り返したぶん、466pxでは「1日分のめやすは〜」が途中で切れていた
+    // なって2行に折り返したぶん、466pxでは「1日分の目安は〜」が途中で切れていた
     await cropRect(page, 'plan-week-nutrition-open', { x: 0, y: 50, width: VIEW.width, height: 508 })
     await toggleEl.click()
     await wait(page, 600)

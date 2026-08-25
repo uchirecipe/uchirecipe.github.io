@@ -1114,7 +1114,7 @@ export default function RecipeDetailPage() {
           )}
         </section>
 
-        {/* 栄養価のめやす（M6-1）: 公開前はティーザー、公開後は未解錠ゲート/実表示(③)。
+        {/* 栄養価の目安（M6-1）: 公開前はティーザー、公開後は未解錠ゲート/実表示(③)。
             key={id}: レシピを移ったら作り直す。1回だけのお試し表示(2026-08-08 便DZ)を
             開いたまま別のレシピへ移ると、そのレシピでも8項目が出たままになるため */}
         <NutritionTeaser key={id} isPro={!!settings?.proCode} recipe={recipe} servings={servings} />
