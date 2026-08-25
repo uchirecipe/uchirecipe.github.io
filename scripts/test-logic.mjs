@@ -27322,10 +27322,13 @@ Aみりん 大さじ1
       .map(([key]) => key),
     [],
   )
+  // 2026-08-25 便KU: 7日分のカードの下にあった4つを「栄養と食費」「買い物メモ」の2節に
+  // まとめたので、節は3つ→5つになった（オーナー原文「買い物メモ、栄養と食費、
+  // それぞれでまとめて表示する（ページ頭の設定のように）」）
   eq(
-    'IV-1 節はちょうど3つ（表示のしかた・献立を提案・テンプレート）',
+    'IV-1 節はちょうど5つ（表示のしかた・献立を提案・テンプレート・栄養と食費・買い物メモ）',
     Object.keys(WEEK_GROUP_DEFAULT_OPEN).sort(),
-    ['auto', 'display', 'template'],
+    ['auto', 'display', 'nutritionCost', 'shopping', 'template'],
   )
 
   // --- IV-2: 編集モードは1日ずつ ---
@@ -27437,7 +27440,9 @@ Aみりん 大さじ1
     ['編集／完了の切り替え', 'data-testid="week-day-edit"'],
     ['日の鍵', 'data-testid="day-lock"'],
     ['食事の鍵', 'data-testid="slot-lock"'],
-    ['レシピを見る', 'data-testid="slot-open-recipe"'],
+    // 2026-08-25 便KU: 「レシピを見る」はカードそのものが担うようになり、
+    // この段のボタンは「レシピを変更」（差し替え）になった
+    ['レシピを変更', 'data-testid="slot-change-recipe"'],
     ['引き直し（サイコロ）', 'aria-label={ja.mealPlan.suggestAria}'],
     ['外す（×）', 'ja.mealPlan.removeExtraRow'],
     ['食数を変える', 'ja.mealPlan.servingsEditAria'],
@@ -32147,6 +32152,246 @@ import { safetyNotesFor, stepSafetyNotes, wholeRecipeSafetyNotes } from '../src/
   eq('KP-10 成分表の版番号は9以上', NUTRITION_DB_VERSION_FOR_KP >= 9, true)
 }
 
+
+// ==========================================================================================
+// 便KU: 2026-08-25 オーナー実機（献立の「月」「週」と買い物メモ）
+//
+//  KU-1 レシピ詳細の「戻る」が、買い物メモから開いたときだけ帰り道を知らなかった
+//       （オーナー原文「材料→窓のレシピ→レシピ詳細→戻る→買い物メモの窓まで戻して表示」）
+//  KU-2 月タブの日の窓の「作った記録」のカードだけ、出所を持たずに詳細へ移っていた
+//       （オーナー原文「窓の記録のレシピからレシピ詳細→戻る→レシピ一覧に戻ってしまうので、
+//         直近の画面に戻して。」）
+//  KU-3 「作った記録を見る」の位置と高さ
+//       （オーナー原文「窓の「作った記録を見る」を右に寄せて」
+//         「作った記録のレシピと「作った記録を見る」の縦幅が同じくらいなので、レシピ数が多いと
+//          それだけ無駄に縦長になる。〜どっちについているのかわかりづらい」）
+//  KU-4 週の編集画面のレシピカードだけ、押してもレシピ詳細に行かなかった
+//       （オーナー原文「編集画面、ここだけレシピカードをタップでレシピ詳細に行かない。〜
+//         「レシピを見る」→「レシピを変更」」）
+//  KU-5 朝昼夕の境目が読めない（地色の差が実測1.04:1・ダーク1.05:1しかない）
+//  KU-6 7日分のカードの下の4つを、上の設定と同じ作法で2つの囲みにまとめる
+//
+// ここは「渡し忘れ」「掴み方」を静的に見張る側。実画面での位置・高さ・コントラストは
+// scripts/e2e-smoke.mjs（KU…節）と実測（報告に数字）が受け持つ。
+// ==========================================================================================
+{
+  const appRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
+  const kuPlanSrc = readFileSync(path.join(appRoot, 'src/pages/MealPlanPage.tsx'), 'utf-8')
+  const kuShopSrc = readFileSync(path.join(appRoot, 'src/pages/ShoppingPage.tsx'), 'utf-8')
+  const kuDetailSrc = readFileSync(path.join(appRoot, 'src/pages/RecipeDetailPage.tsx'), 'utf-8')
+  const kuCss = readFileSync(path.join(appRoot, 'src/index.css'), 'utf-8')
+  const {
+    serializeShoppingReturn: kuSer,
+    parseShoppingReturn: kuParse,
+    SHOPPING_RETURN_KEY: kuKey,
+  } = await import('../src/logic/navMemory.ts')
+  const { WEEK_GROUP_DEFAULT_OPEN: kuGroups } = await import('../src/logic/mealPlan.ts')
+
+  // ---- KU-1: 買い物メモの帰り道（純ロジック） ----
+  eq('KU-1 覚えた居場所をそのまま読み戻せる', kuParse(kuSer({
+    tab: 'memo', kind: 'memo', name: 'にんじん', scrollY: 812.4,
+  })), { tab: 'memo', kind: 'memo', name: 'にんじん', scrollY: 812 })
+  eq('KU-1 下書きの窓も同じ形で覚えられる', kuParse(kuSer({
+    tab: 'memo', kind: 'draft', name: '豚こま肉', scrollY: 0,
+  })), { tab: 'memo', kind: 'draft', name: '豚こま肉', scrollY: 0 })
+  eq('KU-1 覚えていない（null）ときは何もしない', kuParse(null), null)
+  eq('KU-1 壊れた文字列は無視する', kuParse('{'), null)
+  eq('KU-1 知らないタブは無視する（別の画面を勝手に開かない）', kuParse('{"tab":"x","kind":"memo","name":"a","scrollY":0}'), null)
+  eq('KU-1 知らない出所は無視する', kuParse('{"tab":"memo","kind":"x","name":"a","scrollY":0}'), null)
+  eq('KU-1 食材の名前が空なら窓を開かない', kuParse('{"tab":"memo","kind":"memo","name":"","scrollY":0}'), null)
+  eq('KU-1 縦位置が負の値なら無視する', kuParse('{"tab":"memo","kind":"memo","name":"a","scrollY":-1}'), null)
+  eq('KU-1 覚え先の鍵は他の画面と衝突しない名前', kuKey, 'shopping:return')
+  // 覚えたものを読む側（レシピ詳細の「戻る」）が、買い物メモを出所として知っていること。
+  // ここが抜けていたのが今回のバグ＝帰り道を覚えても必ずレシピ一覧へ行っていた
+  eq(
+    'KU-1 レシピ詳細の「戻る」が買い物メモを出所として知っている',
+    /BACK_TO_ORIGIN_FROM\s*=\s*\[[^\]]*'shopping'/.test(kuDetailSrc),
+    true,
+  )
+  eq(
+    'KU-1 買い物メモの窓のレシピカードが、出所と帰り道の両方を渡している',
+    /RecipeCard[\s\S]{0,700}?linkState=\{SHOPPING_RETURN_LINK_STATE\}[\s\S]{0,200}?onNavigate=\{rememberSourcePopupReturn\}/.test(
+      kuShopSrc,
+    ),
+    true,
+  )
+  eq(
+    'KU-1 覚える縦位置は、窓で固定される前の値を読む（窓が開いていると window.scrollY は0）',
+    kuShopSrc.includes('scrollY: lockedScrollY()'),
+    true,
+  )
+  eq(
+    'KU-1 窓を開き直すのは買い物メモが端末から届いてから（禁じ手⑤）',
+    /if \(recipes == null\) return[\s\S]{0,400}?if \(shoppingItems == null\) return/.test(kuShopSrc),
+    true,
+  )
+
+  // ---- KU-2: 月タブの日の窓の「作った記録」からの帰り道 ----
+  // 同じ窓の中の「レシピを見る」（slot-open-recipe → 便KUで slot-change-recipe に役割が移った）
+  // とまったく同じ帰り道に乗っていること。**渡し忘れ**が今回のバグそのものなので、
+  // 「CookedLogCard に linkState と onNavigate が両方付いている」を見る
+  const kuMonthLogCard = (() => {
+    const at = kuPlanSrc.indexOf('dayModalLogs.map(')
+    if (at < 0) return ''
+    return kuPlanSrc.slice(at, at + 2200)
+  })()
+  eq('KU-2 前提: 月タブの日の窓の記録カードを掴めた', kuMonthLogCard.includes('<CookedLogCard'), true)
+  eq(
+    'KU-2 月タブの日の窓の記録カードが、レシピ詳細へ出所を渡している',
+    kuMonthLogCard.includes('linkState={logDetailLinkState}'),
+    true,
+  )
+  eq(
+    'KU-2 その帰り道は「月・縦位置・開いていた日の窓」を覚えるほうを通る',
+    kuMonthLogCard.includes('onNavigate={rememberLogDetailReturn}'),
+    true,
+  )
+  eq(
+    'KU-2 覚える中身に「開いていた日の窓」が入っている（窓ごと開き直せる）',
+    /rememberMonthReturn[\s\S]{0,400}?openDate: dayModalDate/.test(kuPlanSrc),
+    true,
+  )
+
+  // ---- KU-3: 「作った記録を見る」の位置と高さ ----
+  const kuOpenDetailTag = (() => {
+    const at = kuPlanSrc.indexOf('data-testid="cooked-log-open-detail"')
+    if (at < 0) return ''
+    const start = kuPlanSrc.lastIndexOf('<', at)
+    const end = kuPlanSrc.indexOf('>', at)
+    return start < 0 || end < 0 ? '' : kuPlanSrc.slice(start, end + 1)
+  })()
+  eq('KU-3 前提: 「作った記録を見る」に検査用の目印がある', kuOpenDetailTag !== '', true)
+  eq(
+    'KU-3 「作った記録を見る」の行は右端に寄せる（左に48px空けて置かない）',
+    /justify-end/.test(
+      kuPlanSrc.slice(
+        Math.max(0, kuPlanSrc.indexOf('data-testid="cooked-log-open-detail"') - 600),
+        kuPlanSrc.indexOf('data-testid="cooked-log-open-detail"'),
+      ),
+    ),
+    true,
+  )
+  eq(
+    'KU-3 高さは持たせず、当たり判定だけ44px（器 .tap-target）＝カードと同じ縦幅にしない',
+    kuOpenDetailTag.includes('tap-target') && !/min-h-11/.test(kuOpenDetailTag),
+    true,
+  )
+  eq(
+    'KU-3 記録どうしの間（12px）は、1件の中（2px）より広い＝どの記録の入口かが距離で読める',
+    kuPlanSrc.includes('<ul className="mt-1 space-y-3">') &&
+      /className="mt-0\.5 flex flex-wrap items-center justify-end gap-3"/.test(kuPlanSrc),
+    true,
+  )
+
+  // ---- KU-4: 編集モードのカードもレシピ詳細へ ----
+  const kuEditCard = (() => {
+    const at = kuPlanSrc.indexOf('thumbTestId="row-thumb"')
+    if (at < 0) return ''
+    const start = kuPlanSrc.lastIndexOf('<RecipeCard', at)
+    return start < 0 ? '' : kuPlanSrc.slice(start, at)
+  })()
+  eq('KU-4 前提: 編集モードの1品カードを掴めた', kuEditCard !== '', true)
+  eq(
+    'KU-4 編集モードでもカードの押下はレシピ詳細（他のレシピカードと同じ行き先）',
+    kuEditCard.includes('linkState={logDetailLinkState}') &&
+      kuEditCard.includes('onNavigate={rememberLogDetailReturn}'),
+    true,
+  )
+  eq(
+    'KU-4 カードの押下に差し替えを割り当てていない（同じ押しどころに2つの役割を持たせない）',
+    !kuEditCard.includes('onSelect='),
+    true,
+  )
+  eq(
+    'KU-4 差し替えは名前の付いたボタンが持つ（道を消していない）',
+    kuPlanSrc.includes('data-testid="slot-change-recipe"') &&
+      kuPlanSrc.includes('{ja.mealPlan.changeRecipe}'),
+    true,
+  )
+  eq(
+    'KU-4 その名前は「レシピを変更」（オーナー指示の字義どおり・規約B）',
+    ja.mealPlan.changeRecipe,
+    'レシピを変更',
+  )
+  eq(
+    'KU-4 「レシピを見る」の文言は編集モードから消えている（カードがその役割を持つため）',
+    !Object.prototype.hasOwnProperty.call(ja.mealPlan, 'openRecipe'),
+    true,
+  )
+  eq(
+    'KU-4 鍵の掛かった食事では差し替えを押せなくする（読むことは止めない）',
+    /data-testid="slot-change-recipe"[\s\S]{0,300}?disabled=\{locked\}/.test(kuPlanSrc),
+    true,
+  )
+
+  // ---- KU-5: 朝昼夕の境目 ----
+  // 地色の差（実測 ライト1.04:1・ダーク1.05:1）に見分けを頼るのをやめ、境目を線で引く。
+  // 使う線は便JEが「3:1を5テーマとも超える」ことを測って作った --border-card
+  eq(
+    'KU-5 食事の枠の囲みは、面との差が3:1を超える線（--border-card）を使う',
+    !/borderColor: slotLocked \? 'var\(--accent\)' : 'var\(--border\)'/.test(kuPlanSrc) &&
+      (kuPlanSrc.match(/borderColor: slotLocked \? 'var\(--accent\)' : 'var\(--border-card\)'/g) ?? [])
+        .length === 2,
+    true,
+  )
+  eq(
+    'KU-5 その線の色はトークンの混色のまま＝5テーマとも自動で追従する',
+    /--border-card:\s*color-mix\(in oklab, var\(--text\) 50%, var\(--border\)\)/.test(kuCss),
+    true,
+  )
+  eq(
+    'KU-5 食事どうしの間（16px）は、1品と1品の間（16px）以上に取る＝距離でも切れ目が読める',
+    (kuPlanSrc.match(/space-y-\[var\(--space-md\)\]>?/g) ?? []).length >= 2,
+    true,
+  )
+  eq(
+    'KU-5 通常表示と編集モードで見分け方を変えない（同じ線・同じ地色）',
+    (kuPlanSrc.match(/borderLeftColor: SLOT_TONE\[slot\]\.bar/g) ?? []).length === 2,
+    true,
+  )
+
+  // ---- KU-6: 7日分の下を2つの囲みにまとめる ----
+  eq(
+    'KU-6 増えた節の既定は上の3つと同じ「畳んだ状態」',
+    [kuGroups.nutritionCost, kuGroups.shopping],
+    [false, false],
+  )
+  eq(
+    'KU-6 2つの節はページ頭の設定と同じ1枚の面（.setup-panel）に入る',
+    /className="setup-panel[^"]*">[\s\S]{0,900}?'nutritionCost'/.test(kuPlanSrc) &&
+      /'shopping',[\s\S]{0,1400}?<\/section>\n\n      <\/div>/.test(kuPlanSrc),
+    true,
+  )
+  eq(
+    'KU-6 節の見出しは上の3つとまったく同じ部品から作る（見出しを2通り作らない）',
+    kuPlanSrc.includes("renderWeekGroupHeader(\n          'nutritionCost'") ||
+      /renderWeekGroupHeader\([\s\S]{0,40}'nutritionCost'/.test(kuPlanSrc),
+    true,
+  )
+  eq(
+    'KU-6 「買い物メモを作る」は折りたたみの外＝畳んでも押すものが画面から消えない',
+    // 範囲えらび（renderShopRange＝中身ごと Collapse）を閉じたあとにボタンが並ぶ形かを見る
+    /\{renderShopRange\(\)\}\s*<button\s+type="button"\s+onClick=\{goShopping\}/.test(kuPlanSrc) &&
+      /<Collapse open=\{weekGroupOpen\.shopping\}>/.test(kuPlanSrc),
+    true,
+  )
+  eq(
+    'KU-6 いま何を対象にしているかは畳んでいても読める（要約が見出しの横に出る）',
+    /renderShopRangeSummary\(\)/.test(kuPlanSrc) &&
+      kuPlanSrc.includes('data-testid="shop-range-summary"'),
+    true,
+  )
+  eq(
+    'KU-6 概算食費に入れ子の折りたたみを作らない（開くのに2回押させない）',
+    !kuPlanSrc.includes('weekCostOpen'),
+    true,
+  )
+  eq(
+    'KU-6 節の名前は画面に出ている呼び名にそろえる',
+    [ja.mealPlan.weekGroupShoppingTitle, ja.mealPlan.weekGroupNutritionCostTitle],
+    ['買い物メモ', '栄養と食費'],
+  )
+}
 
 // ---------- 結果 ----------
 console.log(`合格: ${passed}件 / 失敗: ${failures.length}件`)

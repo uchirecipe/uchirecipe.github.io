@@ -412,3 +412,67 @@ export function parseViewReturn(raw: string | null | undefined): ViewReturnPoint
     typeof openDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(openDate) ? openDate : undefined
   return { anchor, scrollY: Math.round(scrollY), ...(validOpenDate ? { openDate: validOpenDate } : {}) }
 }
+
+// ---------- ④ 買い物メモの「食材の窓」へ帰るための居場所 ----------
+
+/**
+ * 買い物メモで開いていた「食材の窓」（食材名を押すと出る、全文と出所のレシピの小窓）と、
+ * そのときの縦位置（2026-08-25 便KU・オーナー原文
+ * 「材料→窓のレシピ→レシピ詳細→戻る→買い物メモの窓まで戻して表示」）。
+ *
+ * 直す前は、窓の中のレシピを押してレシピ詳細へ移ると、詳細の「戻る」が必ずレシピ一覧へ行き、
+ * 買い物メモにも窓にも帰れなかった（RecipeDetailPage の backFallback が出所を知らないため）。
+ * 献立の月タブが「日の窓」ごと開き直す仕組み（ViewReturnPoint の openDate）と同じ考え方で、
+ * **どのタブの・どの食材の窓だったか**を覚えておく。
+ *
+ * 覚えるのは食材の名前だけ（窓の中身は帰ってから作り直す）＝離れているあいだに
+ * 買い物メモが変わっていても、古い中身をそのまま出すことがない。
+ * その食材がもう無ければ窓は開かない（画面だけ戻る）。
+ */
+export interface ShoppingReturnPoint {
+  /** 'pantry'（食材の在庫）/ 'memo'（買い物メモ）のどちらのタブを見ていたか */
+  tab: 'pantry' | 'memo'
+  /** 窓の出所。'draft'＝下書きの行 / 'memo'＝確定した買い物メモの行 */
+  kind: 'draft' | 'memo'
+  /** 窓を開いた食材の名前 */
+  name: string
+  scrollY: number
+}
+
+/** 買い物メモが居場所を覚えるキー */
+export const SHOPPING_RETURN_KEY = 'shopping:return'
+
+export function serializeShoppingReturn(point: ShoppingReturnPoint): string {
+  return JSON.stringify({
+    tab: point.tab,
+    kind: point.kind,
+    name: point.name,
+    scrollY: Math.max(0, Math.round(point.scrollY)),
+  })
+}
+
+/**
+ * 覚えた居場所を読み出す。壊れた値・別の形の値は null にして無視する
+ * （復元できないときは「何もしない」＝買い物メモを普通に開くのが正しい振る舞い）。
+ */
+export function parseShoppingReturn(raw: string | null | undefined): ShoppingReturnPoint | null {
+  if (!raw) return null
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    return null
+  }
+  if (typeof parsed !== 'object' || parsed === null) return null
+  const { tab, kind, name, scrollY } = parsed as {
+    tab?: unknown
+    kind?: unknown
+    name?: unknown
+    scrollY?: unknown
+  }
+  if (tab !== 'pantry' && tab !== 'memo') return null
+  if (kind !== 'draft' && kind !== 'memo') return null
+  if (typeof name !== 'string' || name === '') return null
+  if (typeof scrollY !== 'number' || !Number.isFinite(scrollY) || scrollY < 0) return null
+  return { tab, kind, name, scrollY: Math.round(scrollY) }
+}

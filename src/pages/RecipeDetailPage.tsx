@@ -126,7 +126,11 @@ export default function RecipeDetailPage() {
   // (スクロール位置の復元はCookNaviPage側が持つ)
   // 2026-08-09 便EQ: 'mealPlan' を追加。作った記録の小窓からレシピ詳細・記録の編集へ来たとき、
   // 献立の日タブ・月タブへも同じ仕組みで帰せるようにした（週は従来の 'mealPlanWeek' のまま）
-  const BACK_TO_ORIGIN_FROM = ['todayList', 'mealPlan', 'mealPlanWeek', 'cookNavi']
+  // 2026-08-25 便KU: 'shopping' を追加（オーナー原文「材料→窓のレシピ→レシピ詳細→戻る→
+  // 買い物メモの窓まで戻して表示」）。買い物メモの食材の窓に並ぶレシピから詳細を開くと、
+  // 「戻る」がレシピ一覧へ行き、買い物メモにも窓にも帰れなかった
+  // （開いていた窓の復元は ShoppingPage 側が logic/navMemory.ts の ShoppingReturnPoint で持つ）
+  const BACK_TO_ORIGIN_FROM = ['todayList', 'mealPlan', 'mealPlanWeek', 'cookNavi', 'shopping']
   const backFallback =
     backState?.from && BACK_TO_ORIGIN_FROM.includes(backState.from) && backState.fromPath
       ? backState.fromPath

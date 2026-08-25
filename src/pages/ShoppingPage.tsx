@@ -47,13 +47,34 @@ import RecipeCard from '../components/RecipeCard'
 import Toast from '../components/Toast'
 import { useConfirm } from '../components/ConfirmProvider'
 import { useOverlayDismiss } from '../components/useOverlayDismiss'
-import { useScrollLock } from '../components/useScrollLock'
+import { lockedScrollY, useScrollLock } from '../components/useScrollLock'
 import { settingsLinkWithBack } from '../logic/backLink'
+import {
+  SHOPPING_RETURN_KEY,
+  WEEK_RETURN_PARAM,
+  forgetRecipesTabPath,
+  parseShoppingReturn,
+  readSessionItem,
+  removeSessionItem,
+  serializeShoppingReturn,
+  writeSessionItem,
+  type ShoppingReturnPoint,
+} from '../logic/navMemory'
 import { ja } from '../i18n/ja'
 
 type CandidateRow = ShoppingCandidate & { checked: boolean }
 
 type ShoppingTab = 'pantry' | 'memo'
+
+/**
+ * 買い物メモの「食材の窓」からレシピ詳細を開くときに持ち回る出所（2026-08-25 便KU）。
+ * 詳細画面の「戻る」は、献立の週・月と同じ例外としてここへ帰る（RecipeDetailPage）。
+ * `restore=1` が付いているときだけ、買い物メモは覚えたタブ・食材の窓・縦位置を戻す。
+ */
+const SHOPPING_RETURN_LINK_STATE = {
+  from: 'shopping',
+  fromPath: `/shopping?${WEEK_RETURN_PARAM}=1`,
+} as const
 
 /**
  * 買い物メモの下書きの保存先（2026-07-29 便CC/C2）。
@@ -265,6 +286,27 @@ export default function ShoppingPage() {
   ) => {
     setNamePopup({ name: item.name, kind, ...resolveShoppingSources(item, recipeById) })
   }
+  /**
+   * 食材の窓の中のレシピからレシピ詳細へ移る直前に、帰り道を覚える（2026-08-25 便KU・
+   * オーナー原文「材料→窓のレシピ→レシピ詳細→戻る→買い物メモの窓まで戻して表示」）。
+   * 覚えるのは「どのタブの・どの食材の窓か」と縦位置だけ（窓の中身は帰ってから作り直す）。
+   * 窓は閉じない＝離れる時点の画面をそのまま覚えておき、帰ってきたら同じ形に開き直す。
+   */
+  const rememberSourcePopupReturn = () => {
+    if (!namePopup) return
+    writeSessionItem(
+      SHOPPING_RETURN_KEY,
+      serializeShoppingReturn({
+        tab: activeTab,
+        kind: namePopup.kind,
+        name: namePopup.name,
+        // 窓が開いているあいだ後ろの画面は固定してある（useScrollLock）ので、
+        // window.scrollY ではなく固定する前に控えた位置を読む必要がある。
+        // body に当てている top（-位置px）がその値そのものなので、そこから戻す
+        scrollY: lockedScrollY(),
+      }),
+    )
+  }
 
   // 献立プランナーの「この週の買い物リストを作る」から来た場合（?recipeIds=1x2,3）は
   // ピッカーを介さず自動で候補を作る。
@@ -452,6 +494,67 @@ export default function ShoppingPage() {
         : { groups: memoGroups, checked: [] as ShoppingItem[] },
     [checkedAtBottom, memoGroups],
   )
+
+  /**
+   * レシピ詳細から帰ってきたときに開き直す「食材の窓」（2026-08-25 便KU）。
+   * `?restore=1` が付いているときだけ入り、**買い物メモが端末から届いてから**開いて空にする
+   * （届く前に開くと、出所のレシピが1件も無い窓が出る＝直後にアプリ自身が作り直すことになる）。
+   */
+  const [pendingSourcePopup, setPendingSourcePopup] = useState<ShoppingReturnPoint | null>(null)
+  const shoppingRestoreRef = useRef(false)
+  useEffect(() => {
+    if (shoppingRestoreRef.current) return
+    shoppingRestoreRef.current = true
+    if (searchParams.get(WEEK_RETURN_PARAM) !== '1') return
+    const point = parseShoppingReturn(readSessionItem(SHOPPING_RETURN_KEY))
+    removeSessionItem(SHOPPING_RETURN_KEY)
+    // 「戻る」を押した時点でその詳細は見終わっているので、「レシピ」タブが覚えている
+    // 行き先も捨てる＝次にレシピタブを押すと一覧が開く（献立タブと同じ後始末）
+    forgetRecipesTabPath()
+    if (point) {
+      setActiveTab(point.tab)
+      setPendingSourcePopup(point)
+    }
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev)
+        next.delete(WEEK_RETURN_PARAM)
+        return next
+      },
+      { replace: true },
+    )
+    // 画面に着いた直後の1回だけ（shoppingRestoreRef）。消した ?restore= をもう一度読ませない
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams, setSearchParams])
+  useEffect(() => {
+    if (!pendingSourcePopup) return
+    // 出所のレシピ名を出すのに recipes が要る。買い物メモの行は shoppingItems が要る。
+    // どちらも liveQuery で後から届くので、届くまでは何もしない（禁じ手⑤）
+    if (recipes == null) return
+    const point = pendingSourcePopup
+    if (point.kind === 'memo') {
+      if (shoppingItems == null) return
+      const item = memoItems.find((i) => i.name === point.name)
+      setPendingSourcePopup(null)
+      // 離れているあいだに消された食材は、窓を開かずに画面だけ戻す
+      if (!item) return
+      window.scrollTo(0, point.scrollY)
+      openSourcePopup('memo', {
+        name: item.name,
+        sources: item.fromRecipes,
+        recipeIds: item.fromRecipeIds,
+        manualAdded: item.manualAdded,
+      })
+      return
+    }
+    const row = candidates?.find((c) => c.name === point.name)
+    setPendingSourcePopup(null)
+    if (!row) return
+    window.scrollTo(0, point.scrollY)
+    openSourcePopup('draft', row)
+    // openSourcePopup は毎描画で作り直される関数なので依存に入れない（入れると開いた直後に開き直す）
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingSourcePopup, recipes, shoppingItems, memoItems, candidates])
 
   // 買い物完了(2026-07-23 #7: 下部インラインパネル→作った!と同じ中央モーダルに変更)
   const [completeOpen, setCompleteOpen] = useState(false)
@@ -1019,14 +1122,21 @@ export default function ShoppingPage() {
                           // 設定「食べられない食材」の警告（2026-08-19 便IE）。ここに並ぶのは
                           // これから作る品なので、献立の枠と同じように警告を出す
                           ngIngredients={settings?.ngIngredients ?? []}
-                          onNavigate={() => setNamePopup(null)}
+                          // 2026-08-25 便KU: 戻ってきたときに、この窓ごと同じ場所へ帰す。
+                          // 窓は閉じない（閉じると「何を見ていたか」が画面から消える）
+                          linkState={SHOPPING_RETURN_LINK_STATE}
+                          onNavigate={rememberSourcePopupReturn}
+                          // 検査用の目印（2026-08-25 便KU）。この窓から「レシピ詳細へ移って
+                          // 戻る」道を機械で見張る
+                          testId="shopping-source-recipe"
                           meta={source.amount || undefined}
                         />
                       ) : (
                         // レシピが端末から消えている行（カードにする絵も押す先も無い）
                         <Link
                           to={`/recipes/${source.recipeId}`}
-                          onClick={() => setNamePopup(null)}
+                          state={SHOPPING_RETURN_LINK_STATE}
+                          onClick={rememberSourcePopupReturn}
                           className="flex items-center gap-2 rounded-sm border border-edge bg-app px-[var(--space-sm)] py-3"
                         >
                           <span className="min-w-0 flex-1 break-words text-sm font-bold text-accent-ink underline decoration-dotted underline-offset-4">

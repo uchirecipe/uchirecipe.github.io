@@ -108,6 +108,18 @@ export function useScrollLock(open: boolean): void {
   }, [open])
 }
 
+/**
+ * 窓が開いているあいだの「後ろの画面の縦位置」（2026-08-25 便KU）。
+ *
+ * 固定中の body は `position: fixed` なので `window.scrollY` は 0 を返す。
+ * 窓の中から別の画面へ移るときに「戻ってきたら同じ場所へ」を覚えるには、
+ * **固定する前に控えた位置**が要る。固定していないときは今の位置をそのまま返すので、
+ * 呼び出し側は窓の有無で書き分けなくてよい。
+ */
+export function lockedScrollY(): number {
+  return savedState ? savedState.scrollY : window.scrollY
+}
+
 /** いま何枚の窓が後ろの画面を止めているか（検証用） */
 export function scrollLockDepth(): number {
   return lockCount

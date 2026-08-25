@@ -419,6 +419,15 @@ export const WEEK_GROUP_DEFAULT_OPEN = {
   display: false,
   auto: false,
   template: false,
+  /**
+   * 7日分のカードの下にある2つ（2026-08-25 便KU・オーナー原文
+   * 「買い物メモ、栄養と食費、それぞれでまとめて表示する（ページ頭の設定のように）」）。
+   * 上の3つと同じ作法＝**畳んだ状態から始める**。
+   * ただし「買い物メモを作る」ボタンは折りたたみの外に置いてあるので、
+   * 畳んでいても押すものは画面から消えない（「まとめて献立を入力」と同じ考え方）。
+   */
+  nutritionCost: false,
+  shopping: false,
 } as const
 
 /**
