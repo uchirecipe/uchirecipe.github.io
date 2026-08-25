@@ -11266,7 +11266,13 @@ try {
       // (2026-07-29 便CD/MP-06: 実際に立てた品数で出し分ける。0品なら0品と言う)
       check(
         'MEALPLAN-08 手動枠を残した旨のトーストが出る',
-        await mp8Page.getByText('すでに決まっている', { exact: false }).first().isVisible(),
+        // 2026-08-25: 画面の日本語を書き写していた（禁じ手②）ため、便KTが
+        // 「◯食分」→「◯品」に言い直した時点で掴めなくなった。ja.ts の雛形の
+        // **差し込み口より前**だけを見る＝数字が変わっても文言を直しても追従する
+        await mp8Page
+          .getByText(ja.mealPlan.fillWeekKeptManual.split('{')[0], { exact: false })
+          .first()
+          .isVisible(),
       )
 
       // 2回目のタップでも手動枠は保護され続ける(自動枠だけ再抽選される)
@@ -13250,9 +13256,13 @@ try {
         hhDetailAfter.servings === 4,
         JSON.stringify(hhDetailAfter),
       )
+      // 2026-08-25 便KS・③（オーナー原文「レシピ詳細の材料下段「登録：◯人分」がここに
+      // 書いてあると、材料の原価などがその人数分であるかのように見える。削除。知りたかったら
+      // 編集で確認できるし。」）: **併記は無くなった**。ここは「出ないこと」を見張る側に回す
+      // ＝黙って検査を消さず、オーナーの裁定を守る形にして残す
       check(
-        'MEALPLAN-HOUSE レシピ詳細に元の登録人数(登録: 2人分)が併記される',
-        hhDetailAfter.registered === '2',
+        'MEALPLAN-HOUSE レシピ詳細に「登録: ◯人分」を併記しない（2026-08-25 オーナー指示）',
+        hhDetailAfter.registered === undefined,
         JSON.stringify(hhDetailAfter),
       )
       // 栄養の「1人分」(折りたたんだ1行のkcal)は、開いた人数が何人分でも動かないこと
@@ -14347,8 +14357,15 @@ try {
       await tpPage.waitForTimeout(900)
       check(
         'MEALPLAN-A1B2(規約F) 確認文に「何品が入るか」と「何が消えないか」が両方ある',
-        tpConfirmMsg.includes('テンプレート「定番セット」から') &&
-          /まだ決まっていない\d+食分に入れます/.test(tpConfirmMsg) &&
+        // 2026-08-25: 「まだ決まっていない◯食分に入れます」を書き写していた（禁じ手②）。
+        // 便KTが**枠と品の単位の衝突**を直して「まだ決まっていない食事に入れます」にした。
+        // ja.ts の雛形から組み立てる＝文言を直しても数字が変わっても追従する
+        tpConfirmMsg.includes(
+          ja.mealPlan.templateApplyConfirmTitle
+            .replace('{name}', '定番セット')
+            .replace('{n}', '3'),
+        ) &&
+          tpConfirmMsg.includes(ja.mealPlan.templateApplyConfirm.split('{')[0]) &&
           tpConfirmMsg.includes('消えません'),
         `confirm=${tpConfirmMsg}`,
       )
@@ -29753,8 +29770,10 @@ try {
       check(
         'EL-05 段取りの一覧に戻したことと理由を画面に出す',
         (await elPage.locator('[data-testid="cook-session-lost"]').count()) === 1 &&
-          ((await elPage.textContent('body')) ?? '').includes(
-            '調理中だった手順が、組み直した段取りに見つかりませんでした。',
+          // 2026-08-25: 画面の日本語を書き写していた（禁じ手②）。便KTが
+          // 「調理中だった手順」→「調理中モードで開いていた手順」に言い直した
+          stripZwspText((await elPage.textContent('body')) ?? '').includes(
+            stripZwspText(ja.cookNavi.sessionLost),
           ),
       )
     } finally {
