@@ -980,11 +980,14 @@ const iconKeyExpected = {
   const mitsuba = PRICE_DEFAULTS.filter((d) => d.name === '三つ葉' || d.name === 'みつば')
   eq('三つ葉/みつばはPRICE_DEFAULTSに1件だけ(二重登録の解消)', mitsuba.length, 1)
   eq('統合先の名前はみつば', mitsuba[0]?.name, 'みつば')
-  eq('統合先の価格は100円(docs/49の出典側)', mitsuba[0]?.pricePerUnit, 100)
+  // 2026-08-26 便LF: みつばを100→155円/1束にしたので期待値もそろえた。
+  // この節が見張っているのは「三つ葉とみつばが1行に寄っていること」で、値そのものではない
+  // （155円の根拠は src/data/priceDefaults.ts のみつばの行のコメント）
+  eq('統合先の価格は155円(docs/49のときは100円。2026-08-26 便LFが実勢に合わせた)', mitsuba[0]?.pricePerUnit, 155)
   eq('統合先の単位は1束', mitsuba[0]?.unit, '1束')
   const idx = buildPriceIndex(PRICE_DEFAULTS.map((d) => ({ ...d, isDefault: true })))
-  eq('材料「三つ葉(または刻みのり)」が価格解決する(旧表記のエイリアス)', matchPriceEntry('三つ葉(または刻みのり)', idx)?.pricePerUnit, 100)
-  eq('材料「みつば(または小ねぎ)」が価格解決する', matchPriceEntry('みつば(または小ねぎ)', idx)?.pricePerUnit, 100)
+  eq('材料「三つ葉(または刻みのり)」が価格解決する(旧表記のエイリアス)', matchPriceEntry('三つ葉(または刻みのり)', idx)?.pricePerUnit, 155)
+  eq('材料「みつば(または小ねぎ)」が価格解決する', matchPriceEntry('みつば(または小ねぎ)', idx)?.pricePerUnit, 155)
   eq('三つ葉とみつばは同じ価格エントリに解決する', matchPriceEntry('三つ葉', idx)?.pricePerUnit, matchPriceEntry('みつば', idx)?.pricePerUnit)
 }
 
