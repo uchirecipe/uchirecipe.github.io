@@ -5,7 +5,7 @@
   },
   "day-suggest": {
     "w": 780,
-    "h": 1148
+    "h": 956
   },
   "nav-tabs": {
     "w": 780,
@@ -25,7 +25,7 @@
   },
   "ingredient-rows": {
     "w": 780,
-    "h": 332
+    "h": 244
   },
   "bulk-input": {
     "w": 780,
@@ -37,7 +37,7 @@
   },
   "paste": {
     "w": 780,
-    "h": 788
+    "h": 748
   },
   "import-gaps": {
     "w": 780,
@@ -77,7 +77,7 @@
   },
   "plan-month": {
     "w": 780,
-    "h": 1172
+    "h": 1170
   },
   "plan-month-photo": {
     "w": 780,
@@ -141,7 +141,7 @@
   },
   "cooknavi-session-others": {
     "w": 780,
-    "h": 284
+    "h": 224
   },
   "backup-export": {
     "w": 780,

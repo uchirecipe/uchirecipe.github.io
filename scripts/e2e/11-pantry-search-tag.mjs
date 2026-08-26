@@ -484,7 +484,7 @@ import './_shared.mjs'
       const lgToastShown = Date.now()
       const lgHistoryLink = ehPage.locator('[data-testid="toast-link"]')
       check(
-        `LG-04 記録のトーストに「${ja.cookNavi.markAllCookedHistory}」が出る`,
+        `LG-04 記録のトーストに「${ja.common.cookedHistoryLink}」が出る`,
         (await lgHistoryLink.count()) === 1,
         stripZwspText(await ehPage.textContent('body')).slice(0, 200),
       )

@@ -659,11 +659,19 @@ try {
     { top: 64, padBottom: 12 },
   )
 
-  // 材料の行(名前・分量・単位の3欄)
-  await cropRange(page, 'ingredient-rows', names.first(), page.getByPlaceholder(/材料メモ/).first(), {
-    top: 120,
-    padBottom: 12,
-  })
+  // 材料の行(名前・分量・単位の3欄と、その下の「メモを追加」まで)
+  //
+  // 2026-08-26 便LJ: 下端を「材料メモの欄」から「メモを追加」のボタンへ変えた。
+  // 便LG（同日）で**メモの欄は「メモを追加」を押すまで出なくなった**ので、
+  // 欄を掴もうとして毎回撮れなくなっていた（撮れなかったぶんは古い絵が残る）。
+  // 行の下端がボタンの行に変わっただけなので、写す範囲は今までと同じ「材料1行ぶん」
+  await cropRange(
+    page,
+    'ingredient-rows',
+    names.first(),
+    page.locator('[data-testid="ingredient-memo-add"]').first(),
+    { top: 120, padBottom: 12 },
+  )
 
   // 「まとめて入力」: 見出し「まとめて入力」から「材料に追加」まで、パネルを丸ごと切る
   const bulkPanel = page.getByPlaceholder(/まとめて入力|豚こま/).first().locator('xpath=../..')

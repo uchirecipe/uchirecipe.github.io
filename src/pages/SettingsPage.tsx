@@ -100,7 +100,7 @@ import {
 import { detachedPhotoBytes } from '../logic/detachedLogs'
 import { db } from '../db/db'
 import { isLaunchedFromHomeScreen } from '../logic/standalone'
-// 取り込みのあとの説明を出し直す（2026-08-25 便KO・②。押した瞬間に二度と出せない形にしない）
+// レシピ自動取り込みのあとの説明を出し直す（2026-08-25 便KO・②。押した瞬間に二度と出せない形にしない）
 import {
   forgetImportFieldNoticeSeen,
   isImportFieldNoticeSeen,
@@ -465,7 +465,7 @@ export default function SettingsPage() {
   // 設定画面を離れるときも、鳴らしっぱなしにしない
   useEffect(() => () => stopPreviewRef.current?.(), [])
   /**
-   * 取り込みのあとの説明を出すか（2026-08-25 便KO・②）。
+   * レシピ自動取り込みのあとの説明を出すか（2026-08-25 便KO・②）。
    * 記録は localStorage なので Dexie の設定のように勝手には変わらない＝画面側で持つ。
    * 一度出すと自動で切れる（初回のみ）ので、入れ直すとまた次の取り込みで出る。
    */
@@ -1839,7 +1839,7 @@ export default function SettingsPage() {
             </label>
           </section>
 
-          {/* 取り込みのあとの説明（2026-08-25 便KO・②）。オーナー原文「毎回表示されると邪魔なので、
+          {/* レシピ自動取り込みのあとの説明（2026-08-25 便KO・②）。オーナー原文「毎回表示されると邪魔なので、
               初回のみにして、今後表示しないを押したら消せるくらいがいい」。消したあとに戻す場所が
               ここ＝押した瞬間に二度と出せない形にしない。レシピのデータには何も書き込まない */}
           <section className={sectionCls}>

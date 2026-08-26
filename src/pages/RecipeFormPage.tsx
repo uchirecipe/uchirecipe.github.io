@@ -916,6 +916,24 @@ function RecipeFormInner() {
   const [pendingDraft, setPendingDraft] = useState<FormDraft | null>(() => takePendingDraft(draftKey))
   // 「変更なし」とみなす基準のスナップショット(新規=空フォーム、編集=読み込んだレシピ)
   const baselineRef = useRef<string | null>(null)
+  /**
+   * 写真の「変更なし」の基準（2026-08-26 便LJ・②。便LGの申し送りを実測で確かめた不具合）。
+   *
+   * 直す前は、写真を選び直しただけで画面を離れると**引き止めも下書きも出ないまま消えていた**
+   * （実測: 写真の差し替え・写真を消す・見える範囲の変更の3つとも引き止めが出なかった。
+   *  料理名・アイコン・「写真ではなくアイコンを出す」設定は出ていた）。
+   * 変更の有無を「下書きに保存する形（FormDraft）をJSON化した文字列」だけで決めており、
+   * 写真(Blob)は大きすぎて下書きに入れられないため、その文字列に写真が入らなかった。
+   *
+   * **写真は比較の文字列に混ぜず、ここで別に持つ。**
+   * 見るのは「同じ入れ物（Blob）を指しているか」だけ＝写真の中身は1バイトも読まない。
+   * データURLにして文字列へ混ぜると、1文字打つたびに数十万文字を作り直すことになる
+   * （比較の文字列は入力のたびに作り直される）。
+   * 同じ写真をもう一度選び直したときは「変更あり」に倒れるが、出るのは引き止めだけで
+   * データは失われない＝安全側に倒れる。
+   * 見える範囲（photoFocus）は数値2つなので、そのまま値で見比べる。
+   */
+  const photoBaselineRef = useRef<{ photo?: Blob; focus?: PhotoFocus }>({})
   // 下書きを復元した場合、あとから届く既存レシピの読み込みで上書きしない(写真だけ引き継ぐ)
   const draftRestoredRef = useRef(false)
 
@@ -994,6 +1012,9 @@ function RecipeFormInner() {
       suitableFor: recipe.suitableFor ?? [],
       dishType: recipe.dishType,
     } satisfies FormDraft)
+    // 写真の基準も、保存済みのレシピの姿にそろえる（2026-08-26 便LJ・②）。
+    // 下書きを先に復元していても基準は保存済みの内容＝下の分岐と同じ考え方
+    photoBaselineRef.current = { photo: recipe.photo, focus: recipe.photoFocus }
     if (draftRestoredRef.current) {
       // 下書きを先に復元済み: フォームは下書きの内容を優先し、
       // 下書きに含まれない写真だけ既存レシピから引き継ぐ。
@@ -1079,6 +1100,8 @@ function RecipeFormInner() {
   // 読み込み中は空フォームと同じ内容なので「変更なし」の判定は変わらない
   useEffect(() => {
     baselineRef.current = currentSerialized
+    // 新規登録は写真も空が基準（2026-08-26 便LJ・②）。編集はレシピが届いた時点で上書きされる
+    photoBaselineRef.current = { photo, focus: photoFocus }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -1093,7 +1116,28 @@ function RecipeFormInner() {
   // ブラウザを閉じる・再読み込みするとき、未保存の入力があれば標準の確認を出す。
   // 復元バナーの表示中も対象にする(以前はバナー中だけ離脱警告も無効だった。C-01)
   const dirtyRef = useRef(false)
-  dirtyRef.current = baselineRef.current !== null && currentSerialized !== baselineRef.current
+  /**
+   * 写真だけが変わっているか（2026-08-26 便LJ・②）。入れ物（Blob）が同じものを指しているか
+   * どうかと、見える範囲の値だけを見る＝写真の中身は読まない。
+   */
+  const photoDirty = (() => {
+    if (photo !== photoBaselineRef.current.photo) return true
+    // 見える範囲は「保存されるときの形」で見比べる（ど真ん中は保存されない＝undefined になる）。
+    // そうしないと、真ん中に置き直しただけで「変更あり」になる
+    const nextFocus = toStoredPhotoFocus(photoFocus)
+    const baseFocus = toStoredPhotoFocus(photoBaselineRef.current.focus)
+    return nextFocus?.x !== baseFocus?.x || nextFocus?.y !== baseFocus?.y
+  })()
+  dirtyRef.current =
+    baselineRef.current !== null && (currentSerialized !== baselineRef.current || photoDirty)
+  /**
+   * 引き止めの窓に、写真の一行を足すか（2026-08-26 便LJ・②）。
+   * 引き止めの本文は「書きかけは端末に残る」と言い切っているが、**写真だけは残せない**
+   * （下書きはJSONなのでBlobを入れられない）。写真が変わっているときにその一行を足さないと、
+   * 窓の文がその場で嘘になる。
+   */
+  const photoDirtyRef = useRef(false)
+  photoDirtyRef.current = photoDirty
   useEffect(() => {
     const handler = (e: BeforeUnloadEvent) => {
       if (!dirtyRef.current) return
@@ -1124,7 +1168,9 @@ function RecipeFormInner() {
       if (!dirtyRef.current) return true
       return await confirm({
         title: ja.form.leaveUnsavedTitle,
-        body: ja.form.leaveUnsaved,
+        body: photoDirtyRef.current
+          ? `${ja.form.leaveUnsaved}\n${ja.form.leaveUnsavedPhotoNote}`
+          : ja.form.leaveUnsaved,
         confirmLabel: ja.form.leaveUnsavedOk,
         cancelLabel: ja.form.leaveUnsavedStay,
       })
@@ -1142,7 +1188,10 @@ function RecipeFormInner() {
   const restoreDraft = async () => {
     const d = pendingDraft
     if (!d) return
-    // バナーを無視して書き続けた内容がある場合は、無警告で置き換えない(規約F・C-01)
+    // バナーを無視して書き続けた内容がある場合は、無警告で置き換えない(規約F・C-01)。
+    // ここは**写真を見ない**（2026-08-26 便LJ・②）。下書きを復元しても写真には触らないので、
+    // 写真だけを選び直した人に「書きかけの内容に置き換えます」と聞くと、置き換わらないものの
+    // 確認を取ることになる。写真が消えないかを見張るのは離脱の引き止めのほう（dirtyRef）
     if (baselineRef.current !== null && currentSerialized !== baselineRef.current) {
       const ok = await confirm({
         title: ja.form.draftRestoreConfirmTitle,
@@ -2141,6 +2190,7 @@ function RecipeFormInner() {
     })
     setPhoto(loadedRecipe.photo)
     setPhotoFocus(loadedRecipe.photoFocus)
+    photoBaselineRef.current = { photo: loadedRecipe.photo, focus: loadedRecipe.photoFocus }
   }
 
   // 「基本レシピを入れ直す」(reloadStarterRecipes/buildUpdatedStarterRecipe)と同じ対応表を使う:
@@ -2176,6 +2226,7 @@ function RecipeFormInner() {
     })
     setPhoto(loadedRecipe.photo)
     setPhotoFocus(loadedRecipe.photoFocus)
+    photoBaselineRef.current = { photo: loadedRecipe.photo, focus: loadedRecipe.photoFocus }
   }
 
   const performReset = () => {
@@ -2233,7 +2284,7 @@ function RecipeFormInner() {
    *  ④ 1品に複数の料理が入っていそうなら知らせる（知らせるだけ・機械では分けない）
    *  ① 入らなかった項目だけを、登録画面と同じ選ぶ並びで出す（押さなくても保存できる）
    *  ② 入らない項目があることの説明は、この端末での初回だけ。「今後表示しない」で消せて、
-   *     設定の「取り込みのあとの説明」で戻せる
+   *     設定の「レシピ自動取り込みのあとの説明」で戻せる
    */
   const importFollowUp =
     importMultiDish === undefined && importGapFields.length === 0 ? null : (

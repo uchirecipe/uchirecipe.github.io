@@ -2454,7 +2454,7 @@ export default function CookNaviPage() {
         actionLabel={toastUndo ? ja.common.undo : undefined}
         onAction={toastUndo}
         /* 記録を付けた直後だけ、内容を足しに行ける場所を添える（2026-08-26 便LG） */
-        linkLabel={historyToastActive ? ja.cookNavi.markAllCookedHistory : undefined}
+        linkLabel={historyToastActive ? ja.common.cookedHistoryLink : undefined}
         onLink={historyToastActive ? () => navigate('/history') : undefined}
       />
     </div>

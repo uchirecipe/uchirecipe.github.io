@@ -2081,6 +2081,17 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
   }
   const [message, setMessage] = useState('')
   /**
+   * 「作った記録の一覧へ」をトーストに出すかどうかの控え（2026-08-26 便LJ・オーナー原文
+   * 「レシピ詳細以外からの「作った！」は内容の入力が省略されています。記録した後に出る
+   * トーストに、「作った記録の一覧にいく」選択が欲しいです。」）。
+   *
+   * 献立の「作った！」は、何人分・ひとこと・写真を聞かずに記録を付ける（聞くのはレシピ詳細だけ）。
+   * 足したくなったときの行き先が画面のどこにも無く、タブを渡り歩くしかなかった。
+   * 出したトーストの文言そのものを持って見比べる＝別の操作でトーストが差し替わったら
+   * 行き先も一緒に消える（「元に戻す」とまったく同じ作法。並行調理ナビも同じ形）。
+   */
+  const [historyToast, setHistoryToast] = useState('')
+  /**
    * 他の画面から「結果を伝えたうえで献立へ戻す」ときのトースト（2026-08-11 便FP）。
    * レシピ一覧でまとめて今日の献立に入れて戻ってきたときに、何品どこへ入ったかを出す。
    * 一度出したら履歴から消す＝ブラウザの戻る/進むで同じ知らせが再び出ないようにする
@@ -2605,6 +2616,8 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
     const toast = fillRecordText(ja.mealPlan.pastRecordAddedToast, date, recipe.title)
     setMessage(toast)
     setUndoRecord({ recipeId, date, title: recipe.title, message: toast })
+    // 内容を足しに行ける場所を添える（2026-08-26 便LJ）
+    setHistoryToast(toast)
   }
 
   /**
@@ -3097,6 +3110,8 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
       // 2026-07-16 UI総点検A-4: 行が消えるだけの無言完了だったのでトーストで明示
       setMessage(ja.mealPlan.todayCookedToast)
       setUndoCooked({ items: [undoItem], message: ja.mealPlan.todayCookedToast })
+      // 内容を足しに行ける場所を添える（2026-08-26 便LJ）
+      setHistoryToast(ja.mealPlan.todayCookedToast)
     })()
   }
 
@@ -3152,6 +3167,8 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
     const toast = ja.mealPlan.todayMarkAllCookedToast.replace('{n}', String(recorded.length))
     setMessage(toast)
     setUndoCooked({ items: recorded, message: toast })
+    // 内容を足しに行ける場所を添える（2026-08-26 便LJ）
+    setHistoryToast(toast)
   }
 
   /**
@@ -4357,6 +4374,22 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
     if (viewMode === 'week') rememberWeekReturn()
     else if (viewMode === 'month') rememberMonthReturn()
     else rememberDayReturn()
+  }
+
+  /**
+   * 記録を付けた直後のトーストから「作った記録の一覧へ」を出すか（2026-08-26 便LJ）。
+   * 出した文言そのものを見比べる＝別の操作でトーストが差し替わったら行き先も消える。
+   */
+  const historyToastActive = historyToast !== '' && historyToast === message
+  /**
+   * その行き先（2026-08-26 便LJ）。画面の中の「作った記録の一覧」リンクとまったく同じ道を通る
+   * ＝いま開いているタブと縦位置を覚えてから移り、一覧の「戻る」で同じ場所へ帰ってくる
+   * （日タブ・週タブ・月タブでそれぞれ ?back= が違う。HistoryPage の backTargetOf が受ける）。
+   */
+  const openHistoryFromToast = () => {
+    rememberLogDetailReturn()
+    const back = viewMode === 'week' ? 'week' : viewMode === 'month' ? 'month' : 'day'
+    navigate(`/history?back=${back}`)
   }
 
   /**
@@ -5975,6 +6008,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
           setUndoAssign(null)
           setUndoRecord(null)
           setUndoRecordDelete(null)
+          setHistoryToast('')
         }}
         actionLabel={
           undoCookedActive ||
@@ -6004,6 +6038,10 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                         ? () => void runUndoRecordDelete()
                         : undefined
         }
+        /* 記録を付けた直後だけ、内容を足しに行ける場所を添える（2026-08-26 便LJ・
+           並行調理ナビの「まとめて作った！」と同じ形） */
+        linkLabel={historyToastActive ? ja.common.cookedHistoryLink : undefined}
+        onLink={historyToastActive ? openHistoryFromToast : undefined}
       />
 
       {viewMode === 'day' && (

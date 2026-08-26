@@ -2355,3 +2355,56 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs'
   )
 }
 
+
+// ---------- LJ-1: 「未保存の変更」の判定に、写真と見える範囲が入っている ----------
+//
+// 2026-08-26 便LJ・②（便LGの申し送りを実測で確かめた不具合）。
+//
+// 直す前の実測（レシピの編集を開いて1つだけ変え、上の「戻る」を押したときに引き止めが出るか）:
+//   写真を差し替える            … 出ない（下書きも書かれない）
+//   写真を消す                  … 出ない
+//   見える範囲を変える          … 出ない
+//   写真ではなくアイコンを出す設定 … 出る
+//   アイコンを選ぶ              … 出る
+//   料理名を変える（対照）      … 出る
+// ＝**写真を選んだだけで画面を離れると、引き止めも下書きも無いまま消えていた。**
+//
+// 原因は、変更の有無を「下書きに保存する形（FormDraft）をJSON化した文字列」の比較だけで
+// 決めていたこと。写真(Blob)は大きすぎて下書きに入れられないので、この文字列に写真が入らない。
+//
+// 直し方は「写真を比較の文字列に入れる」ではなく、**写真だけ別に、入れ物（Blob）が
+// 同じものかどうかで見る**（photoBaselineRef）。理由:
+//   ・データURLにして文字列へ混ぜると、1文字打つたびに数十万文字を作り直すことになる
+//   ・入れ物が同じかどうかは1回の比較で済み、写真の中身は1バイトも読まない
+//   ・同じ写真をもう一度選び直したときは「変更あり」に倒れるが、出るのは引き止めだけで
+//     データは失われない（安全側に倒れる）
+//
+// ここで見張るのは「判定に写真と見える範囲が入っていること」。画面の実際の動きは
+// e2e の LJPHOTO-01 が受け持つ。
+{
+  const ljRoot = path.join(path.dirname(fileURLToPath(scriptFileUrl)), '..')
+  const ljForm = readFileSync(path.join(ljRoot, 'src/pages/RecipeFormPage.tsx'), 'utf-8')
+  // 「未保存の変更」を組み立てている行（dirtyRef.current = …）を丸ごと取り出す
+  const ljDirty = ljForm.match(/dirtyRef\.current =\s*\n?[^\n]*(\n\s+[^\n]*)*?(?=\n\s*(?:useEffect|\/\*\*|\/\/|const|}))/)
+  eq('LJ-1 「未保存の変更」を決めている行を読めている（0件ならこの見張りが壊れている）', ljDirty != null, true)
+  const ljDirtyText = ljDirty?.[0] ?? ''
+  eq(
+    'LJ-1 「未保存の変更」の判定に写真が入っている',
+    /photoDirty|photoBaselineRef/.test(ljDirtyText),
+    true,
+    ljDirtyText.slice(0, 200),
+  )
+  // 写真そのものと見える範囲の両方を、基準と見比べていること
+  eq(
+    'LJ-1 写真の基準（写真そのものと見える範囲）を控えている',
+    /photoBaselineRef[\s\S]{0,400}?photo[\s\S]{0,200}?focus/.test(ljForm),
+    true,
+  )
+  // 写真をデータURL・base64にして比較の文字列へ混ぜ戻していない（1文字ごとの作り直しが重くなる）
+  eq(
+    'LJ-1 写真を比較の文字列（currentSerialized）へ混ぜていない',
+    /const currentSerialized = useMemo\([\s\S]*?\n {2}\)/.test(ljForm) &&
+      !/const currentSerialized = useMemo\(([\s\S]*?)\n {2}\)/.exec(ljForm)?.[1].includes('photo'),
+    true,
+  )
+}
