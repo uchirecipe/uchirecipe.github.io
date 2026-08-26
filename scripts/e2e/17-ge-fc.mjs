@@ -613,8 +613,11 @@ import './_shared.mjs'
       check(
         // 2026-08-24 司令部: 便KEで「単位が噛み合わないときの満額フォールバック」をやめたので
         // 178→128円。按分が効いていること（按分前の212円ではない）を測る役目はそのまま
-        'EY-01 冷やし茶碗蒸しの1食あたりが生しいたけの按分後の金額になる(按分前212円→128円)',
-        eyChawanmushi.includes(ja.detail.pricePerServing.replace('{n}', '128')),
+        // 2026-08-26 便LF: 生しいたけ100→245円/6枚・干ししいたけ400→700円/30g（並のグレードで
+        // 測り直した実勢。根拠は src/data/priceDefaults.ts の各行）。**この節が見張っているのは
+        // 按分が効いていること**で、金額そのものではない
+        'EY-01 冷やし茶碗蒸しの1食あたりが生しいたけの按分後の金額になる(便LFの前は128円→164円)',
+        eyChawanmushi.includes(ja.detail.pricePerServing.replace('{n}', '164')),
         eyChawanmushi.includes('約212円') ? '按分前の212円のまま' : '',
       )
       // 原価ビューで材料行そのものの金額も見る(1食あたり=全量33円÷2人分)
@@ -626,8 +629,11 @@ import './_shared.mjs'
       // 計算されていない。人数の増減で数値が変わらない」＝同じ行の中で分量と金額が別の人数を
       // 指していた）。2人分表示なので 17円×2人分＝約33円が正しい
       check(
-        'EY-01 材料行「生しいたけ」の原価が、出ている分量ぶん(2人分)の約33円',
-        (eyRow ?? '').includes('約33円'),
+        // 2026-08-26 便LF: 生しいたけを100→245円/6枚にしたので33→82円。
+        // **1パック(6枚)まるごとの245円が乗っていないこと**が、この判定の役目。
+        // 金額のほかに「1パック満額でないこと」も見て、次に価格が動いても役目が残る形にした
+        'EY-01 材料行「生しいたけ」の原価が、出ている分量ぶん(2人分＝2枚)の約82円',
+        (eyRow ?? '').includes('約82円') && !(eyRow ?? '').includes('約245円'),
         String(eyRow),
       )
 
@@ -644,8 +650,9 @@ import './_shared.mjs'
       check(
         // 2026-08-24 司令部: 便KEで 327→127円（いちご「6個」が販売単位のマスタに噛み合わず、
         // 1パックまるごとの金額が乗っていた分が抜けた）
-        'EY-01 フルーツヨーグルトバークの1食あたり(按分前395円→127円)',
-        eyBark.includes(ja.detail.pricePerServing.replace('{n}', '127')),
+        // 2026-08-26 便LF: プレーンヨーグルト50→60円/100gほかの調べ直しで127→137円
+        'EY-01 フルーツヨーグルトバークの1食あたり(按分前395円→便LFの前は127円→137円)',
+        eyBark.includes(ja.detail.pricePerServing.replace('{n}', '137')),
         eyBark.includes('約395円') ? '修正前の395円のまま' : '',
       )
       // 「食材と価格」の単位表記も新しい内容量になっていること
@@ -1163,16 +1170,19 @@ import './_shared.mjs'
       const faFreshQty = await faPage.getByLabel('生しいたけの数量', { exact: true }).inputValue()
       const faFreshUnit = await faPage.getByLabel('生しいたけの単位', { exact: true }).inputValue()
       check(
-        'FA-1 「生しいたけ」は100円/6枚(オーナー指定どおり生しいたけ側の値段に寄せた)',
-        faFreshYen === '100' && faFreshQty === '6' && faFreshUnit === '枚',
+        // 2026-08-26 便LF: 並のグレードで測り直して100→245円/6枚。
+        // 便FAが決めたのは「生の項目を1つに寄せること」で、値段そのものはあとから実勢に合わせてよい
+        'FA-1 「生しいたけ」は1項目で245円/6枚(便FAで名寄せ・2026-08-26 便LFで実勢に合わせた)',
+        faFreshYen === '245' && faFreshQty === '6' && faFreshUnit === '枚',
         `${faFreshYen}円 / ${faFreshQty}${faFreshUnit}`,
       )
       const faDryYen = await faPage.getByLabel('干ししいたけの価格（円）', { exact: true }).inputValue()
       const faDryQty = await faPage.getByLabel('干ししいたけの数量', { exact: true }).inputValue()
       const faDryUnit = await faPage.getByLabel('干ししいたけの単位', { exact: true }).inputValue()
       check(
-        'FA-1 「干ししいたけ」が別項目として並ぶ(400円/30g・生とは価格帯が違う)',
-        faDryYen === '400' && faDryQty === '30' && faDryUnit === 'g',
+        // 2026-08-26 便LF: 並のグレードで測り直して400→700円/30g
+        'FA-1 「干ししいたけ」が別項目として並ぶ(700円/30g・生とは価格帯が違う)',
+        faDryYen === '700' && faDryQty === '30' && faDryUnit === 'g',
         `${faDryYen}円 / ${faDryQty}${faDryUnit}`,
       )
       check(
@@ -1195,8 +1205,9 @@ import './_shared.mjs'
       await faPage.waitForTimeout(800)
       const faNabe = (await faPage.textContent('body')) ?? ''
       check(
-        'FA-1 寄せ鍋の1食あたりが生しいたけの単価での按分になる(名寄せ前226円→217円)',
-        faNabe.includes(ja.detail.pricePerServing.replace('{n}', '217')),
+        // 2026-08-26 便LF: 生しいたけほかの調べ直しで217→315円
+        'FA-1 寄せ鍋の1食あたりが生しいたけの単価での按分になる(名寄せ前226円→便LFの前は217円→315円)',
+        faNabe.includes(ja.detail.pricePerServing.replace('{n}', '315')),
         faNabe.includes('約226円') ? '名寄せ前の226円のまま' : '',
       )
       await faPage.getByRole('button', { name: ja.detail.priceViewShow }).click()
@@ -1204,8 +1215,10 @@ import './_shared.mjs'
       const faNabeRow = await faPage.locator('li', { hasText: 'しいたけ' }).first().textContent()
       check(
         // 2026-08-22 便JG: 上のEY-01と同じ理由で、行の金額は「出ている分量ぶん」になった
-        'FA-1 材料行「しいたけ」の原価が、出ている分量ぶん(4人分)の約67円',
-        (faNabeRow ?? '').includes('約67円'),
+        // 2026-08-26 便LF: 生しいたけを100→245円/6枚にしたので67→163円。
+        // **1パック(6枚)まるごとの245円が乗っていないこと**が、この判定の役目
+        'FA-1 材料行「しいたけ」の原価が、出ている分量ぶん(4人分＝4枚)の約163円',
+        (faNabeRow ?? '').includes('約163円') && !(faNabeRow ?? '').includes('約245円'),
         String(faNabeRow),
       )
     } finally {
@@ -1255,6 +1268,26 @@ import './_shared.mjs'
         })
         idb.close()
       })
+      // 2026-08-26 便LF: **移行の前に「生しいたけ」の値を控えておく。**
+      // ここは「移行が金額を動かさないこと」を見る節なので、金額をベタ書きせず**前後の関係**で見る。
+      // （この行は最初の投入で作られるので、いくらで入っているかは目安価格を直すたびに変わる。
+      //   便LFが100→245円にしたとき、ベタ書きの100円で落ちて気づいた）
+      const fa2Before = await fa2Page.evaluate(async () => {
+        const req = indexedDB.open('uchi-recipe')
+        const idb = await new Promise((resolve, reject) => {
+          req.onsuccess = () => resolve(req.result)
+          req.onerror = () => reject(req.error)
+        })
+        const rows = await new Promise((resolve, reject) => {
+          const tx = idb.transaction('prices', 'readonly')
+          const all = tx.objectStore('prices').getAll()
+          all.onsuccess = () => resolve(all.result)
+          all.onerror = () => reject(all.error)
+        })
+        idb.close()
+        const r = rows.find((x) => x.name === '生しいたけ')
+        return r ? { unit: r.unit, price: r.pricePerUnit } : null
+      })
       await fa2Page.reload({ waitUntil: 'networkidle' })
       await fa2Page.waitForTimeout(2000)
       const fa2Rows = await fa2Page.evaluate(async () => {
@@ -1288,13 +1321,18 @@ import './_shared.mjs'
         JSON.stringify(fa2Rows.plain),
       )
       check(
-        'FA-1b 残る「生しいたけ」は100円/6枚のまま(移行で金額を動かさない)',
-        fa2Rows.fresh?.price === 100 && fa2Rows.fresh?.unit === '6枚',
-        JSON.stringify(fa2Rows.fresh),
+        'FA-1b 残る「生しいたけ」は移行の前と1円も変わらない(移行で金額を動かさない)',
+        fa2Before != null &&
+          fa2Rows.fresh?.price === fa2Before.price &&
+          fa2Rows.fresh?.unit === fa2Before.unit,
+        `前=${JSON.stringify(fa2Before)} 後=${JSON.stringify(fa2Rows.fresh)}`,
       )
       check(
-        'FA-1b 新項目「干ししいたけ」が既存端末にも追加される',
-        fa2Rows.dry?.price === 400 && fa2Rows.dry?.unit === '30g',
+        // 2026-08-26 便LF: **新しく作られる行は、そのときの目安価格を取るのが正しい**
+        // （まだ持っていない食材が増えるだけで、持っている行の金額を書き換えてはいない）。
+        // 便LFで干ししいたけを400→700円/30gにしたので、ここも700円になる
+        'FA-1b 新項目「干ししいたけ」が既存端末にも追加される(いまの目安価格700円/30gで入る)',
+        fa2Rows.dry?.price === 700 && fa2Rows.dry?.unit === '30g',
         JSON.stringify(fa2Rows.dry),
       )
       check(
@@ -1595,8 +1633,12 @@ import './_shared.mjs'
         fb2.alias,
       )
       check(
-        'FB-2 目安価格は400円/30gのまま(呼び名だけを変えた)',
-        fb2.price.replace(/\s/g, '') === '400円/30g',
+        // 2026-08-26 便LF: このページはいまの価格マスタを映すので、便LFが干ししいたけを
+        // 400→700円/30gにしたぶんだけ動く。**便FBが見張っていた「呼び名を変えただけでは
+        // 金額が動かないこと」は、移行の側（FB-1c）で見ている**——そちらは 400円のまま緑。
+        // ここは「ページとマスタが食い違っていないこと」を見る場所
+        'FB-2 目安価格はいまのマスタと同じ700円/30g(便FBの呼び名の統一では動かしていない)',
+        fb2.price.replace(/\s/g, '') === '700円/30g',
         fb2.price,
       )
       check(

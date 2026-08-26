@@ -155,13 +155,24 @@ export function nameMergesToApply(
       } else {
         const target = defaultByName.get(toKey)
         if (!target) continue // 統合先がPRICE_DEFAULTSに無い＝設定ミス。何もしない（安全側）
+        // 【2026-08-26 便LF・不具合の修正】書き換えるのは**名前だけ**。金額と単位はその行が
+        // 持っている値のまま運ぶ。
+        // ここは以前 target（＝いまのPRICE_DEFAULTS）の価格・単位を入れていた。
+        // 呼び名を統一するだけの移行なのに、**版番号を上げたときに目安価格まで黙って
+        // 新しい値に変わってしまう**——2026-08-22 に決めた「新しい目安価格は、利用者が
+        // 『最新の目安価格に更新する』を押したときだけ届く」という設計と食い違う。
+        // 便LFが目安価格を42件動かすまでは、旧既定と今の既定が同じ値だったので表に出ていなかった
+        // （e2e FB-1c「金額は1円も動かさない」・FB-2「目安価格は400円/30gのまま(呼び名だけを変えた)」
+        //  が、この食い違いを見張っていた節）。
+        // 名前が変わった行も、そのあと「最新の目安価格に更新する」を押せば新しい値になる
+        // （planPriceRefresh は名前で突き合わせるので、畳んだ後の名前で対象に入る）。
         plans.push({
           kind: 'rename',
           id: entry.id,
           name: entry.name,
           toName: target.name,
-          pricePerUnit: target.pricePerUnit,
-          unit: target.unit,
+          pricePerUnit: entry.pricePerUnit,
+          unit: entry.unit,
         })
         presentNames.add(toKey)
       }

@@ -1726,7 +1726,8 @@ eq('normalizeIngredientNameForPrice 前後空白除去', normalizeIngredientName
       nameMergesToApply([v6Old], merges, PRICE_DEFAULTS),
       // 2026-08-26 便LF: 書き換え先の値は「いまのPRICE_DEFAULTS」から取る作りなので、
       // 生しいたけを100→280円にしたぶん、ここも280円になる（FBの干ししいたけと同じ）
-      [{ kind: 'rename', id: 1, name: 'しいたけ', toName: '生しいたけ', pricePerUnit: 245, unit: '6枚' }],
+      // 2026-08-26 便LF: 名前だけを書き換え、金額はその行が持っていた150円のまま運ぶ
+      [{ kind: 'rename', id: 1, name: 'しいたけ', toName: '生しいたけ', pricePerUnit: 150, unit: '6枚' }],
     )
     eq(
       'nameMergesToApply 新規インストール(生しいたけだけ)は何もしない',
@@ -1783,23 +1784,24 @@ eq('normalizeIngredientNameForPrice 前後空白除去', normalizeIngredientName
           id: 3,
           name: '乾燥しいたけ',
           toName: '干ししいたけ',
-          pricePerUnit: 700,
+          pricePerUnit: 400,
           unit: '30g',
         },
       ],
     )
-    // 2026-08-26 便LF: 期待値を400→700円にそろえた。**書き換え先の値は「いまのPRICE_DEFAULTS」から
-    // 取る**作り（db/prices.ts の nameMergesToApply が defaultByName から引く）なので、
-    // 目安価格を直せばここも一緒に動くのが正しい。旧題は「1円も動かない」だったが、
-    // それは当時の目安が旧値と同じ400円だったから成り立っていただけで、
-    // **この節が見張っているのは「呼び名の統一が、目安のままの行だけを対象にすること」**のほう
+    // 【2026-08-26 便LF・いったん700円に書き換えたのを元に戻した】
+    // 第2弾で「書き換え先の値はいまのPRICE_DEFAULTSから取る作りなので、目安価格を直せば
+    // ここも一緒に動くのが正しい」と書いたが、**それが間違いだった**。
+    // 呼び名を統一するだけの移行で目安価格まで動くのは、2026-08-22 に決めた
+    // 「新しい目安価格は利用者が『最新の目安価格に更新する』を押したときだけ届く」設計と食い違う。
+    // db/prices.ts の nameMergesToApply を直し、**名前だけを書き換えて金額は運ぶ**ようにした。
     eq(
-      'FB nameMergesToApply 版7の端末: 畳んだ行は、いまの目安価格(700円/30g)になる',
+      'FB nameMergesToApply 版7の端末: 畳んでも価格・単位は1円も動かない(400円/30gのまま)',
       nameMergesToApply([v7Dry], merges, PRICE_DEFAULTS).map((p) => ({
         yen: p.pricePerUnit,
         unit: p.unit,
       })),
-      [{ yen: 700, unit: '30g' }],
+      [{ yen: 400, unit: '30g' }],
     )
     eq(
       'FB nameMergesToApply 自分で価格を入れた「乾燥しいたけ」の行は触らない(自分の値が残る)',
@@ -4524,4 +4526,51 @@ eq('normalizeIngredientNameForPrice 前後空白除去', normalizeIngredientName
   eq('LF-33 サバみそ煮缶は260円/1缶のまま（実勢311円＝+19%）', lf13('サバみそ煮缶'), [260, '1缶'])
   eq('LF-33 スパゲッティは45円/100gのまま（東急ストアに同じ規格が無く単一ソース。実勢も45円）', lf13('スパゲッティ'), [45, '100g'])
   eq('LF-33 コーン缶は140円/1缶のまま（410gと180gで「1缶」の意味が違う）', lf13('コーン缶'), [140, '1缶'])
+}
+
+// ---------- 便LF 第14弾（2026-08-26）: 呼び名を移す移行が、金額まで書き換えていた不具合 ----------
+// 【何が起きていたか】db/prices.ts の nameMergesToApply は、統合先の行が無いときに
+// 畳む側の行を「統合先の名前」へ書き換える（その食材の行を1つも持たない状態にしないため）。
+// このとき**価格・単位まで「いまの PRICE_DEFAULTS」の値を入れていた**ので、
+// 版番号を上げるだけで、利用者が何も押していないのに目安価格が新しい値に変わっていた。
+// 2026-08-22 に決めた「**新しい目安価格は、利用者が『最新の目安価格に更新する』を押したときだけ届く**」
+// という設計と食い違う。便LFが目安価格を42件動かすまで、旧既定と今の既定が同じ値だったので
+// 表に出ていなかった（e2e の FB-1c「金額は1円も動かさない」がこれを見張っていた）。
+// 【直し方】書き換えるのは名前だけにして、金額と単位はその行が持っている値のまま運ぶ。
+// そのあと利用者が「最新の目安価格に更新する」を押せば新しい値になる（planPriceRefresh は
+// 名前で突き合わせるので、畳んだ後の名前で対象に入る）。
+{
+  const { nameMergesToApply: lf14Merges } = await import('../../src/db/prices.ts')
+  const lf14Row = (name, price, unit) => ({ id: 1, name, pricePerUnit: price, unit, isDefault: true })
+  const lf14Cur = (name) => PRICE_DEFAULTS.find((d) => d.name === name)
+
+  // --- LF-34: 統合先が無い端末では、名前だけが変わって金額は運ばれる ---
+  {
+    const plan = lf14Merges(
+      [lf14Row('乾燥しいたけ', 400, '30g')],
+      PRICE_DEFAULT_MERGES_FOR_JG,
+      PRICE_DEFAULTS,
+    )
+    eq('LF-34 名前は「干ししいたけ」へ書き換わる', plan.map((p) => [p.kind, p.toName]), [['rename', '干ししいたけ']])
+    eq('LF-34 金額と単位は、その行が持っていた400円/30gのまま運ばれる', plan.map((p) => [p.pricePerUnit, p.unit]), [[400, '30g']])
+    // **いまの目安価格（700円）になっていないこと**が、この検査の本体
+    eq('LF-34 いまの目安価格に黙って書き換わっていない', plan[0].pricePerUnit !== lf14Cur('干ししいたけ').pricePerUnit, true)
+  }
+  {
+    const plan = lf14Merges([lf14Row('しいたけ', 150, '6枚')], PRICE_DEFAULT_MERGES_FOR_JG, PRICE_DEFAULTS)
+    eq('LF-34 「しいたけ」→「生しいたけ」も金額は150円のまま運ばれる', plan.map((p) => [p.toName, p.pricePerUnit, p.unit]), [['生しいたけ', 150, '6枚']])
+    eq('LF-34 いまの目安価格(245円)に黙って書き換わっていない', plan[0].pricePerUnit !== lf14Cur('生しいたけ').pricePerUnit, true)
+  }
+
+  // --- LF-35: 運ばれた行は、そのあと「最新の目安価格に更新する」で新しい値になる ---
+  // 「勝手には変わらないが、押せば届く」の両方がそろってはじめて設計どおり
+  {
+    const renamed = {
+      id: 1, name: '干ししいたけ', pricePerUnit: 400, unit: '30g',
+      isDefault: true, defaultPricePerUnit: 400, defaultUnit: '30g',
+    }
+    const plan = planPriceRefresh([renamed], PRICE_DEFAULTS)
+    eq('LF-35 畳んだ後の行は「最新の目安価格に更新する」の対象になる', plan.targets.map((t) => t.name), ['干ししいたけ'])
+    eq('LF-35 押せばいまの目安価格になる', plan.targets.map((t) => [t.fromPricePerUnit, t.toPricePerUnit]), [[400, lf14Cur('干ししいたけ').pricePerUnit]])
+  }
 }
