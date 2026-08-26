@@ -32,8 +32,11 @@ import './_shared.mjs'
   await page.waitForTimeout(800)
   const priceDetailBefore = await page.textContent('body')
   check(
-    'PRICE-01 マスタ初期値(玉ねぎ1個50円)が価格未入力の詳細の概算食費に反映される',
-    priceDetailBefore.includes('約50円'),
+    // 2026-08-26 便LF: 玉ねぎの目安価格を50→77円/1個にした（オーナー裁定「ORIGINAL_30 のピン留めを
+    // 外して並の実勢へ」。根拠は src/data/priceDefaults.ts の玉ねぎの行のコメント）。
+    // この節が見張っているのは「マスタの目安価格が詳細の概算食費に出ること」で、値そのものではない
+    'PRICE-01 マスタ初期値(玉ねぎ1個77円。便LFの前は50円)が価格未入力の詳細の概算食費に反映される',
+    priceDetailBefore.includes('約77円'),
   )
   check(
     'PRICE-01 詳細画面の概算食費欄にはマスタ由来の注記が出ない' +
@@ -45,15 +48,15 @@ import './_shared.mjs'
       '(2026-07-14 オーナー実機フィードバック「材料のメモ欄に目安価格が表示されている」の解消で機能削除)',
     !priceDetailBefore.includes('（目安50円）'),
   )
-  // 修正3a: 概算食費(合計)に加えて「1食あたり」も表示される。既定servings=2なので50÷2=25円
+  // 修正3a: 概算食費(合計)に加えて「1食あたり」も表示される。既定servings=2なので77÷2=39円
   check(
-    'PRICE-01(修正3a) 「1食あたり」の概算食費も表示される(既定人数2人・50÷2=約25円)',
-    priceDetailBefore.includes('1食あたり 約25円'),
+    'PRICE-01(修正3a) 「1食あたり」の概算食費も表示される(既定人数2人・77÷2=約39円)',
+    priceDetailBefore.includes('1食あたり 約39円'),
   )
   // 2026-07-28 便BY/COST-03: 何人分を1食に分けた額なのかを常時添える
   check(
-    'PRICE-01(便KN) 概算食費が「1食あたり 約25円」と出る',
-    priceDetailBefore.includes(ja.detail.pricePerServing.replace('{n}', '25')),
+    'PRICE-01(便KN) 概算食費が「1食あたり 約39円」と出る',
+    priceDetailBefore.includes(ja.detail.pricePerServing.replace('{n}', '39')),
   )
 
   // 設定から「食材と価格」を開き、初期値30件の投入と目安の注意書きを確認する。
@@ -96,9 +99,9 @@ import './_shared.mjs'
     (await onionPriceInput.inputValue()) === '999',
   )
 
-  // 修正2a: 手入力で既定値(50円)に戻すと「デフォルトに戻す」ボタンも消えることを確認する。
-  // 以前は編集フラグが一方通行だったため、値を既定値に戻してもボタンが残るバグがあった
-  await onionPriceInput.fill('50')
+  // 修正2a: 手入力で既定値(2026-08-26 便LFで50→77円)に戻すと「デフォルトに戻す」ボタンも
+  // 消えることを確認する。以前は編集フラグが一方通行だったため、値を既定値に戻してもボタンが残るバグがあった
+  await onionPriceInput.fill('77')
   await onionPriceInput.press('Enter')
   await page.waitForTimeout(400)
   check(
@@ -215,11 +218,11 @@ import './_shared.mjs'
     !onionRowTextAfterReset.includes('デフォルトに戻す'),
   )
   check(
-    'INLINE-01 「デフォルトに戻す」で価格が50円に戻る',
-    (await onionRowAgain.getByLabel('玉ねぎの価格（円）').inputValue()) === '50',
+    'INLINE-01 「デフォルトに戻す」で価格が77円に戻る(便LFの前は50円)',
+    (await onionRowAgain.getByLabel('玉ねぎの価格（円）').inputValue()) === '77',
   )
 
-  // デフォルトに戻した後は、詳細の概算食費も50円(1食あたり25円)に戻ることを確認する。
+  // デフォルトに戻した後は、詳細の概算食費も77円(1食あたり39円)に戻ることを確認する。
   // 材料行ごとの目安価格由来の注記は2026-07-14に機能ごと削除したため、ここでは確認しない
   await page.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
   await page.waitForTimeout(500)
@@ -227,8 +230,8 @@ import './_shared.mjs'
   await page.waitForTimeout(500)
   const priceDetailAfterReset = await page.textContent('body')
   check(
-    'INLINE-01 「デフォルトに戻す」後は詳細の概算食費も50円に戻る',
-    priceDetailAfterReset.includes('約50円'),
+    'INLINE-01 「デフォルトに戻す」後は詳細の概算食費も77円に戻る',
+    priceDetailAfterReset.includes('約77円'),
   )
   check(
     'PRICE-01(修正3b) 材料行ごとの注記はデフォルト復元後も表示しない',

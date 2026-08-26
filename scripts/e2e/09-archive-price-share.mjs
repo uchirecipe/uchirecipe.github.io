@@ -1419,9 +1419,10 @@ import './_shared.mjs'
       check(
         // 2026-08-22 便JG: 材料行の金額は「1食あたり(登録人数で割った固定値)」から
         // 「いま画面に出ている分量ぶん」へ変えた。肉じゃがは登録2人分で既定表示も2人分なので、
-        // 玉ねぎ1個ぶんの50円がそのまま出る(旧: 50円÷2人分=約25円)
-        'PRICEVIEW-01 「原価を見る」ON: 玉ねぎの行が「約50円」になる(いま出ている分量=1個ぶん)',
-        (await onionRow.textContent())?.includes('約50円') ?? false,
+        // 玉ねぎ1個ぶんの金額がそのまま出る(旧: ÷2人分)
+        // 2026-08-26 便LF: 玉ねぎの目安価格を50→77円/1個にした（オーナー裁定）
+        'PRICEVIEW-01 「原価を見る」ON: 玉ねぎの行が「約77円」になる(いま出ている分量=1個ぶん。便LFの前は50円)',
+        (await onionRow.textContent())?.includes('約77円') ?? false,
       )
       check(
         'PRICEVIEW-01 「原価を見る」ON: マスタ不一致の材料(水)は「価格なし」になる(登録導線「＋登録」は出ない=非インタラクティブ)',
@@ -1452,8 +1453,8 @@ import './_shared.mjs'
         editText ?? '',
       )
       check(
-        'PRICEVIEW-01 「原価を編集」ON: 玉ねぎの行に登録単位と価格のチップ(50円/1個)が出る',
-        (editText ?? '').includes('50円/1個'),
+        'PRICEVIEW-01 「原価を編集」ON: 玉ねぎの行に登録単位と価格のチップ(77円/1個)が出る',
+        (editText ?? '').includes('77円/1個'),
       )
       check(
         'PRICEVIEW-01 「原価を編集」ON: マスタ不一致の材料(水)は「価格なし＋登録」になる',
@@ -1464,7 +1465,7 @@ import './_shared.mjs'
         (editText ?? '').includes(ja.detail.priceEditNote),
       )
 
-      // (a) チップ→編集→行・上部メタ・原価を見る側が同時に変化。玉ねぎ(50円/1個)を70円/1個に変更する
+      // (a) チップ→編集→行・上部メタ・原価を見る側が同時に変化。玉ねぎ(77円/1個)を97円/1個に変更する
       const topMetaBefore = await pvPage.textContent('body')
       const topTotalBeforeMatch = (topMetaBefore ?? '').match(/約([\d,]+)円/)
       const topPerServingBeforeMatch = (topMetaBefore ?? '').match(/1食あたり 約([\d,]+)円/)
@@ -1481,17 +1482,18 @@ import './_shared.mjs'
         (await priceEditDialog.textContent())?.includes('玉ねぎ') ?? false,
       )
       check(
-        'PRICEVIEW-01(a) 編集モーダルに現在の価格(50)が入っている',
-        (await priceEditDialog.getByLabel(ja.priceMaster.priceLabel).inputValue()) === '50',
+        'PRICEVIEW-01(a) 編集モーダルに現在の価格(77)が入っている',
+        (await priceEditDialog.getByLabel(ja.priceMaster.priceLabel).inputValue()) === '77',
       )
-      await priceEditDialog.getByLabel(ja.priceMaster.priceLabel).fill('70')
+      // 97円にすると差は+20円で、下の「差分どおり増える」の見方を変えずに済む
+      await priceEditDialog.getByLabel(ja.priceMaster.priceLabel).fill('97')
       await priceEditDialog.getByRole('button', { name: '保存する' }).click()
       await pvPage.waitForTimeout(400)
       check('PRICEVIEW-01(a) 保存後は編集モーダルが閉じる', (await pvPage.getByRole('dialog').count()) === 0)
       check(
-        'PRICEVIEW-01(a) 保存後、玉ねぎの行のチップが70円/1個に変わる',
-        ((await onionRow.textContent())?.includes('70円/1個') ?? false) &&
-          !((await onionRow.textContent())?.includes('50円/1個') ?? false),
+        'PRICEVIEW-01(a) 保存後、玉ねぎの行のチップが97円/1個に変わる',
+        ((await onionRow.textContent())?.includes('97円/1個') ?? false) &&
+          !((await onionRow.textContent())?.includes('77円/1個') ?? false),
       )
 
       const topMetaAfter = await pvPage.textContent('body')
@@ -1500,7 +1502,7 @@ import './_shared.mjs'
       const topTotalAfter = Number((topTotalAfterMatch?.[1] ?? '0').replace(/,/g, ''))
       const topPerServingAfter = Number((topPerServingAfterMatch?.[1] ?? '0').replace(/,/g, ''))
       check(
-        'PRICEVIEW-01(a) 価格編集で上部メタ合計が差分どおり増える(50→70円は+20)',
+        'PRICEVIEW-01(a) 価格編集で上部メタ合計が差分どおり増える(77→97円は+20)',
         topTotalAfter - topTotalBefore === 20,
         `before=${topTotalBefore} after=${topTotalAfter}`,
       )
@@ -1511,7 +1513,7 @@ import './_shared.mjs'
       )
 
       // 「原価を編集」をもう一度押して(子トグルでedit→view)「原価を見る」表示に戻ると、
-      // 編集した70円がそのまま按分原価(70÷2人分=約35円)に反映される
+      // 編集した97円がそのまま按分原価(97÷2人分=約49円)に反映される
       await editButton.click()
       await pvPage.waitForTimeout(300)
       check(
@@ -1520,8 +1522,8 @@ import './_shared.mjs'
           (await editButton.getAttribute('aria-pressed')) === 'false',
       )
       check(
-        'PRICEVIEW-01(a) 「原価を見る」表示に戻ると、玉ねぎの金額が編集後の価格で再計算される(1個ぶん=約70円)',
-        (await onionRow.textContent())?.includes('約70円') ?? false,
+        'PRICEVIEW-01(a) 「原価を見る」表示に戻ると、玉ねぎの金額が編集後の価格で再計算される(1個ぶん=約97円)',
+        (await onionRow.textContent())?.includes('約97円') ?? false,
       )
 
       // (b) 価格なし→登録→チップ化。「水」に価格が無い状態から「原価を編集」の「＋登録」で新規登録する
@@ -1623,16 +1625,18 @@ import './_shared.mjs'
       await jgPage.waitForTimeout(300)
       const jgTotal2 = await readTotalYen()
       check(
-        'JGCOST-01 既定(登録どおりの2人分)は玉ねぎ1個ぶんの50円',
-        (await jgOnionRow.textContent())?.includes('約50円') ?? false,
+        // 2026-08-26 便LF: 玉ねぎの目安価格を50→77円/1個にした（オーナー裁定「ORIGINAL_30 の
+        // ピン留めを外して並の実勢へ」。根拠は src/data/priceDefaults.ts の玉ねぎの行のコメント）
+        'JGCOST-01 既定(登録どおりの2人分)は玉ねぎ1個ぶんの77円',
+        (await jgOnionRow.textContent())?.includes('約77円') ?? false,
         await jgOnionRow.textContent(),
       )
       await jgUp.click()
       await jgPage.waitForTimeout(300)
       const jgTotal3 = await readTotalYen()
       check(
-        'JGCOST-01 3人分にすると玉ねぎの行が1.5倍(約75円)になる',
-        (await jgOnionRow.textContent())?.includes('約75円') ?? false,
+        'JGCOST-01 3人分にすると玉ねぎの行が1.5倍(約116円)になる',
+        (await jgOnionRow.textContent())?.includes('約116円') ?? false,
         await jgOnionRow.textContent(),
       )
       check(
@@ -1644,8 +1648,8 @@ import './_shared.mjs'
       await jgDown.click()
       await jgPage.waitForTimeout(300)
       check(
-        'JGCOST-01 1人分にすると玉ねぎの行が半分(約25円)になる',
-        (await jgOnionRow.textContent())?.includes('約25円') ?? false,
+        'JGCOST-01 1人分にすると玉ねぎの行が半分(約39円)になる',
+        (await jgOnionRow.textContent())?.includes('約39円') ?? false,
         await jgOnionRow.textContent(),
       )
       // 登録どおりの2人分に戻してから、印の検査へ進む
