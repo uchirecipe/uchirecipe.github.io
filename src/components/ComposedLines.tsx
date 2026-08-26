@@ -85,13 +85,18 @@ type Props = {
   fallback: ReactNode
   /** 材料名(手順のみ)。渡すと text ランに控えめな下線を付ける。メモは undefined=下線なし */
   ingredientNames?: readonly string[]
+  /**
+   * 詰め込みで組む（2026-08-26 便LG）。読点優先の改行をやめて行数を最小にする。
+   * 画面に収まらないことを呼び出し側が実測したときだけ true にする（logic/lineCompose の packed）
+   */
+  packed?: boolean
 }
 
 /**
  * アトム列を測って composeLines で行に割り、各行を <span className="block"> として描く。
  * DOM 計測(幅監視・フォント確定後の再計測)を担う描画の共通土台。純ロジックは logic/lineCompose。
  */
-export default function ComposedLines({ builtAtoms, fallback, ingredientNames }: Props) {
+export default function ComposedLines({ builtAtoms, fallback, ingredientNames, packed }: Props) {
   const nodeById = useMemo(() => {
     const m = new Map<string, ReactNode>()
     for (const a of builtAtoms) if (a.kind === 'atom') m.set(a.id, a.node)
@@ -165,12 +170,12 @@ export default function ComposedLines({ builtAtoms, fallback, ingredientNames }:
               width: boxRefs.current.get(a.id)?.getBoundingClientRect().width ?? measure(a.text),
             },
       )
-      setLines(composeLines(composeAtoms, width, measure, { eps: 1, hangingPunct }))
+      setLines(composeLines(composeAtoms, width, measure, { eps: 1, hangingPunct, packed }))
     } catch {
       setLines(null) // 測定不能・例外時は従来 ZWSP 描画のまま(フォールバック)
     }
     // version を依存に入れて幅変化・フォント確定で再計測する
-  }, [enabled, builtAtoms, ingredientNames, version])
+  }, [enabled, builtAtoms, ingredientNames, packed, version])
 
   if (!enabled) return <>{fallback}</>
 

@@ -35,9 +35,16 @@ type Props = {
   onOpenTerm?: OpenTerm
   /** 手順の本文と用語の既出集合を共有したいとき(同一手順内は1回だけタップ可能にする)に渡す */
   seen?: Set<string>
+  /**
+   * 詰め込みで組む（2026-08-26 便LG・オーナー原文「文字数が多くてスクロールしないといけない
+   * ばあい、改行位置をずらして画面に収まるようにしてください。」）。
+   * 調理中モードが「この手順は枠に収まらない」と実測したときだけ true になる。
+   * 手順の本文と同じ物差しで詰め直す＝本文だけ詰まってメモは元のまま、にならない
+   */
+  packed?: boolean
 }
 
-export function MemoText({ text, className, onOpenTerm, seen }: Props) {
+export function MemoText({ text, className, onOpenTerm, seen, packed }: Props) {
   const lines = text.split('\n')
   // 呼び出しごとに1つの集合を使い回し、この関数内(=このmemo1つ分)で用語の既出判定を揃える
   // この実行内で新規作成するコピー(propsのSetは書き換えない=StrictMode二重実行対策)
@@ -46,8 +53,16 @@ export function MemoText({ text, className, onOpenTerm, seen }: Props) {
     // 各文を手順本文と同じ行組みエンジンで組む(2026-07-22 p12/memo-compose)。ただしメモ用の
     // 軽量版 ComposedMemoSentence を使う=用語タップ箱のみで、タイマー化・材料下線はしない。
     // 用語の既出(seen)判定・その更新は従来(TermText 時)と同一なので、タップ可否は1件も変わらない。
-    if (!onOpenTerm) return <ComposedMemoSentence key={key} text={s} />
-    const node = <ComposedMemoSentence key={key} text={s} seen={localSeen} onOpenTerm={onOpenTerm} />
+    if (!onOpenTerm) return <ComposedMemoSentence key={key} text={s} packed={packed} />
+    const node = (
+      <ComposedMemoSentence
+        key={key}
+        text={s}
+        seen={localSeen}
+        onOpenTerm={onOpenTerm}
+        packed={packed}
+      />
+    )
     // 次の文のために、この文に含まれる用語を既出へ(splitByTermsは純粋化済みのため自前で更新)
     for (const m of findTermMatches(s)) localSeen.add(m.term.term)
     return node

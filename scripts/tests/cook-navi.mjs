@@ -3894,6 +3894,8 @@ import { existsSync, readFileSync } from 'node:fs'
     suitableFor: [],
     dishType: undefined,
     effortLevel: 'normal',
+    // 2026-08-26 便LG: 印から作れる組の数（0＝印が無い／すでに組が付いている）
+    seasoningGroupsFromMarks: 0,
   }
   eq('KO-1 取り込んだ直後（何も入っていない）は5項目とも足りない', missingImportFields(koEmpty), [
     'genre',
@@ -3931,7 +3933,29 @@ import { existsSync, readFileSync } from 'node:fs'
     }),
     [],
   )
-  eq('KO-1 出す順は画面の並びと同じ', [...IMPORT_FIELD_KEYS], ['genre', 'season', 'suitableFor', 'dishType', 'effort'])
+  // 2026-08-26 便LG・オーナー原文「自動で登録できない項目に計量一緒にできる設定は含みますか」で
+  // 合わせ調味料の組（seasoningGroup）を足した。**材料の話なので最後**（献立の絞り込みに使う
+  // 5つと混ぜて読ませない）
+  eq('KO-1 出す順は画面の並びと同じ', [...IMPORT_FIELD_KEYS], [
+    'genre',
+    'season',
+    'suitableFor',
+    'dishType',
+    'effort',
+    'seasoningGroup',
+  ])
+  // ---- LG-1: 合わせ調味料の組は「印から実際に作れるとき」だけ並びに出す ----
+  //   押しても何も起きないボタンを画面に置かないため（2026-08-26 便LG）
+  eq(
+    'LG-1 印から組が作れないレシピでは、合わせ調味料の組を出さない',
+    missingImportFields({ ...koEmpty, seasoningGroupsFromMarks: 0 }).includes('seasoningGroup'),
+    false,
+  )
+  eq(
+    'LG-1 印から組が作れるレシピでは出す',
+    missingImportFields({ ...koEmpty, seasoningGroupsFromMarks: 1 }).includes('seasoningGroup'),
+    true,
+  )
 
   // ---- KO-2: ジャンルはタグ1つ（絞り込みが読むのと同じ形） ----
   eq('KO-2 ジャンルはタグから読む', recipeGenreTag(['作り置き', '洋食']), '洋食')
@@ -3967,9 +3991,9 @@ import { existsSync, readFileSync } from 'node:fs'
     true,
   )
   eq(
-    'KO-3 5項目の見出しの文言がそろっている',
+    'KO-3 見出しの文言が項目の数だけそろっている',
     IMPORT_FIELD_KEYS.map((key) => typeof ja.form.importGapField?.[key] === 'string' && ja.form.importGapField[key].length > 0),
-    [true, true, true, true, true],
+    IMPORT_FIELD_KEYS.map(() => true),
   )
 
   // ---- KO-4: 説明は初回のみ・消せる・戻せる ----
@@ -4313,3 +4337,85 @@ import { existsSync, readFileSync } from 'node:fs'
 }
 
 
+
+// ============================================================================
+// LG-01: 並行調理ナビ（2026-08-26 便LG・オーナーの書き溜め）
+// ============================================================================
+{
+  const lgRoot = path.join(path.dirname(fileURLToPath(scriptFileUrl)), '..')
+  const lgNavi = readFileSync(path.join(lgRoot, 'src/pages/CookNaviPage.tsx'), 'utf-8')
+
+  // ---- 説明文を短くする ----
+  // オーナー原文「「今日の献立から〜提案します。」→「今日の献立から選んだ2〜3品で
+  //   「1本の段取り」を提案します。」短く。」
+  eq(
+    'LG-01 ナビの説明は「今日の献立から選んだ2〜3品で〜」の1文',
+    ja.cookNavi.intro,
+    '今日の献立から選んだ2〜3品で「1本の段取り」を提案します。',
+  )
+  eq('LG-01 説明は30字まで（短くする指示）', ja.cookNavi.intro.length <= 30, true)
+
+  // ---- 「1品ずつ作ると〜◯分の短縮」は画面から消す ----
+  // オーナー原文「削除。4分とかだと個人の裁量で直ぐに覆るし、目安でさえこれしか変わらないんだと
+  //   思ってしまう。ない方がいい。」
+  eq(
+    'LG-01 比較の文言（totalCompare / totalGain）は ja.ts から消えている',
+    ['totalCompare', 'totalGain'].filter((key) => key in ja.cookNavi),
+    [],
+  )
+  eq('LG-01 画面もその行を描いていない', lgNavi.includes('navi-total-compare'), false)
+  eq(
+    'LG-01 全体の目安は残す（消しすぎていない）',
+    [typeof ja.cookNavi.totalEstimate, lgNavi.includes('navi-total-estimate')],
+    ['string', true],
+  )
+
+  // ---- 短縮の分数を出す計算は残す ----
+  //   buildCookPlan の gainPercent は「並行で組むか、1品ずつの順番に落とすか」の分かれ目に
+  //   使っている。画面から消えたからと落とすと、段取りの組み方そのものが変わる
+  {
+    const lgRecipes = [
+      {
+        id: 9101,
+        title: 'LG煮もの',
+        servings: 2,
+        steps: [
+          { text: '大根を切る。', minutes: 3 },
+          { text: 'ふたをして弱火で20分煮る。', minutes: 20 },
+          { text: '器に盛る。', minutes: 1 },
+        ],
+        ingredients: [{ name: '大根', amount: '1/4', unit: '本' }],
+        tags: [],
+        effortLevel: 'normal',
+      },
+      {
+        id: 9102,
+        title: 'LGあえもの',
+        servings: 2,
+        steps: [
+          { text: 'ほうれん草をゆでる。', minutes: 3 },
+          { text: 'しょうゆとごまであえる。', minutes: 2 },
+        ],
+        ingredients: [{ name: 'ほうれん草', amount: '1', unit: '束' }],
+        tags: [],
+        effortLevel: 'normal',
+      },
+    ]
+    const lgPlan = buildCookPlan(lgRecipes)
+    eq(
+      'LG-01 1品ずつ作ったときの合計（sequentialMinutes）は今までどおり数えている',
+      lgPlan.sequentialMinutes > 0,
+      true,
+    )
+    eq(
+      'LG-01 縮む割合（gainPercent）も数えている＝段取りの組み方の分かれ目に使う',
+      typeof lgPlan.gainPercent === 'number' && lgPlan.gainPercent >= 0,
+      true,
+    )
+    eq(
+      'LG-01 1品ずつの合計は、並行の合計より短くならない',
+      lgPlan.sequentialMinutes >= lgPlan.parallelMinutes,
+      true,
+    )
+  }
+}

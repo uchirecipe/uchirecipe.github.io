@@ -475,6 +475,53 @@ import './_shared.mjs'
         ehLogCounts.length === 3 && ehLogCounts.every(([, n]) => n === 1),
         JSON.stringify(ehLogCounts),
       )
+
+      // --- LG-04（2026-08-26 便LG）: 記録の直後に「作った記録の一覧へ」を出す ---
+      //   オーナー原文「レシピ詳細以外からの「作った！」は内容の入力が省略されています。
+      //   記録した後に出るトーストに、「作った記録の一覧にいく」選択が欲しいです。」
+      //   まとめて作った！は何人分・ひとこと・写真を聞かずに記録するので、足しに行ける場所を添える
+      currentCheck = 'LG-04'
+      const lgToastShown = Date.now()
+      const lgHistoryLink = ehPage.locator('[data-testid="toast-link"]')
+      check(
+        `LG-04 記録のトーストに「${ja.cookNavi.markAllCookedHistory}」が出る`,
+        (await lgHistoryLink.count()) === 1,
+        stripZwspText(await ehPage.textContent('body')).slice(0, 200),
+      )
+      check(
+        'LG-04 「元に戻す」も同時に出る（どちらも押せる）',
+        (await ehPage.locator('[data-testid="toast-action"]').count()) === 1,
+      )
+      // 2つ並んでも押す大きさが 44px を割らない（390px幅の実測）
+      const lgToastBtns = await ehPage.evaluate(() =>
+        ['toast-action', 'toast-link'].map((id) => {
+          const el = document.querySelector(`[data-testid="${id}"]`)
+          if (!el) return null
+          const r = el.getBoundingClientRect()
+          return { id, w: Math.round(r.width), h: Math.round(r.height), right: Math.round(r.right) }
+        }),
+      )
+      check(
+        'LG-04 2つ並んでも、どちらも高さ44px以上で画面からはみ出さない',
+        lgToastBtns.every((b) => b && b.h >= 44 && b.right <= 390),
+        JSON.stringify(lgToastBtns),
+      )
+      // 規約: 6秒で消えるトーストを、消えたあとに読んでいた失敗例がある。
+      // **消える前に押せる長さか**を測る（押せるまでの実測時間を判定に出す）
+      await lgHistoryLink.click()
+      const lgPressedMs = Date.now() - lgToastShown
+      await ehPage.waitForTimeout(800)
+      check(
+        `LG-04 トーストが消える前に押せる（押すまで${lgPressedMs}ms・自動で消えるのは6000ms）`,
+        lgPressedMs < 6000,
+        `${lgPressedMs}ms`,
+      )
+      check(
+        'LG-04 押すと「作った記録の一覧」へ移る',
+        ehPage.url().includes('#/history') &&
+          stripZwspText(await ehPage.textContent('body')).includes(ja.history.title),
+        ehPage.url(),
+      )
       void ehAccept
     } finally {
       await ehBrowser.close()

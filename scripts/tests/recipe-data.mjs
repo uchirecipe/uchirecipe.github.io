@@ -3376,3 +3376,161 @@ for (const [title, expected] of futureIconCases) {
   eq('KG-2 同梱109品との一致は96品以上', starterDefs.length - mismatched.length >= 96, true)
 }
 
+
+// ============================================================================
+// LG-03: レシピ登録画面（2026-08-26 便LG・オーナーの書き溜め）
+// ============================================================================
+{
+  const lgRoot = path.join(path.dirname(fileURLToPath(scriptFileUrl)), '..')
+  const lgForm = readFileSync(path.join(lgRoot, 'src/pages/RecipeFormPage.tsx'), 'utf-8')
+  const lgToast = readFileSync(path.join(lgRoot, 'src/components/Toast.tsx'), 'utf-8')
+
+  // ---- (c) 手順・材料の削除は、確認の窓をやめて「元に戻す」つきのトーストにする ----
+  // オーナー原文「手順の削除をするたびに「この行を消します」の確認が出るのはテンポが悪い。
+  //   削除しました（元に戻す）トーストでちょうどいい。」
+  eq(
+    'LG-03 1行削除の確認の文言は ja.ts から消えている',
+    ['confirmRemoveRow', 'confirmRemoveRowOk'].filter((key) => key in ja.form),
+    [],
+  )
+  eq(
+    'LG-03 画面も1行削除で確認の窓を出していない',
+    lgForm.includes('confirmRemoveRow()'),
+    false,
+  )
+  eq('LG-03 代わりに出すトーストの文言がある', typeof ja.form.rowRemovedToast, 'string')
+  eq(
+    'LG-03 材料と手順のどちらの削除でも同じトーストを出す（同じ操作を2通りにしない）',
+    (lgForm.match(/showRemovedToast\(\{[\s\S]{0,200}ja\.form\.rowRemovedToast/g) ?? []).length,
+    2,
+  )
+  eq(
+    'LG-03 消す前の並びをまるごと控えて戻す（1行でもまとめてでも同じ戻し方）',
+    [lgForm.includes('undoRemovedRows'), lgForm.includes('actionLabel={undoRemoveActive')],
+    [true, true],
+  )
+
+  // ---- (d) 材料の「選んで削除」 ----
+  // オーナー原文「手順もそのまま一緒に選べるように見えるので、他は押せなくして
+  //   グレーアウトみたいに選択できないことがわかる見た目にして。」
+  eq(
+    'LG-03 材料を選んでいる間は、手順の枠ごと薄くして触れなくする',
+    /inert=\{ingredientOrganizing \|\| undefined\}/.test(lgForm) &&
+      /ingredientOrganizing \? 'pointer-events-none opacity-40' : ''/.test(lgForm),
+    true,
+  )
+  // オーナー原文「「選んだ材料◯件を削除」を押したら削除しました（元に戻す）旨のトースト出して。
+  //   黙って消える。消えたのかも心配になる。」
+  eq(
+    'LG-03 まとめて削除のトーストの文言がある（件数入り）',
+    typeof ja.form.ingredientOrganizeRemovedToast === 'string' &&
+      ja.form.ingredientOrganizeRemovedToast.includes('{n}'),
+    true,
+  )
+  eq(
+    'LG-03 まとめて削除の確認から「元に戻せません」は落ちている（戻せるようになったため）',
+    [ja.form.ingredientOrganizeConfirm, ja.form.ingredientOrganizeConfirmAll].some((t) =>
+      t.includes('元に戻せません'),
+    ),
+    false,
+  )
+  eq(
+    'LG-03 「残るもの」は今までどおり書いてある（規約F）',
+    [
+      ja.form.ingredientOrganizeConfirm.includes('残ります'),
+      ja.form.ingredientOrganizeConfirmAll.includes('残ります'),
+    ],
+    [true, true],
+  )
+  // オーナー原文「「完了」を押したら黙って選択が外れる。消せたのかもと思う。」
+  eq(
+    'LG-03 「完了」の知らせは、消していないことを言い切る',
+    typeof ja.form.ingredientOrganizeDoneToast === 'string' &&
+      ja.form.ingredientOrganizeDoneToast.includes('削除していません'),
+    true,
+  )
+  eq(
+    'LG-03 「完了」の知らせは、選んでいたときだけ出す（何も選ばずに押したら黙る）',
+    /const hadSelection = selectedIngredientIndexes\.length > 0/.test(lgForm) &&
+      /if \(leaving && hadSelection\)/.test(lgForm),
+    true,
+  )
+
+  // ---- (e) メモは「メモを追加」で開く ----
+  // オーナー原文「材料メモ、手順メモは、「メモを追加」押下で初めて出る（自動などで既に入力が
+  //   ある場合には開いておく）ようにして。材料が多いとスクロールが長くなるので。」
+  eq('LG-03 「メモを追加」の文言がある', ja.form.addMemo, 'メモを追加')
+  eq(
+    'LG-03 すでに文字が入っている行は開く（取り込みで入ったメモが隠れない）',
+    /const ingredientMemoOpen = \(index: number\) =>\s*\n\s*\(ingredients\[index\]\?\.memo \?\? ''\) !== '' \|\| openIngredientMemos\.includes\(index\)/.test(
+      lgForm,
+    ),
+    true,
+  )
+  eq(
+    'LG-03 手順も同じ決め方（片方だけ違う開き方にしない）',
+    /const stepMemoOpen = \(index: number\) =>\s*\n\s*\(steps\[index\]\?\.memo \?\? ''\) !== '' \|\| openStepMemos\.includes\(index\)/.test(
+      lgForm,
+    ),
+    true,
+  )
+  // オーナー原文「手順は時間の入力欄を短くすれば入るはず。」
+  eq(
+    'LG-03 手順の分の入力欄は、余りを全部取る書き方をやめている',
+    lgForm.includes('className="w-[4.5rem] shrink-0 rounded-sm border border-edge bg-app px-2 py-2'),
+    true,
+  )
+
+  // ---- (f) 「見える範囲を調整」は画像の直下 ----
+  // オーナー原文「画像の「見える範囲を調整」は、画像の直ぐ下にして。」
+  eq(
+    'LG-03 「見える範囲を調整」は、カメラ・アルバム・アイコンの3つより前に出す',
+    lgForm.indexOf('data-testid="photo-focus-open-form"') <
+      lgForm.indexOf('{ja.form.photoTake}'),
+    true,
+  )
+
+  // ---- (g)(h) 「前回保存した内容に戻す」の窓を作り直す ----
+  // オーナー原文「「保存を押すまで保存済みのレシピは変わりません」が「変わらないもの」に
+  //   書いてあるのはどういう意味？」
+  eq(
+    'LG-03 「変わらないもの」に画面の話とDBの話を混ぜていない',
+    ja.form.resetConfirmKeptStarter.includes('保存'),
+    false,
+  )
+  eq(
+    'LG-03 DBの話は補足として別に持つ',
+    typeof ja.form.resetConfirmSaveNote === 'string' &&
+      ja.form.resetConfirmSaveNote.includes('保存する'),
+    true,
+  )
+  eq(
+    'LG-03 古い「戻るもの」「変わらないもの: 料理名と写真。保存を押すまで〜」は消えている',
+    ['resetConfirmBack', 'resetConfirmBackLabel', 'resetConfirmKept'].filter((k) => k in ja.form),
+    [],
+  )
+  eq(
+    'LG-03 自作レシピでは「変わらないもの」を並べ立てない（規約Fの例外・ボタン名が言い切っている）',
+    /resetVariant === 'own'\s*\n\s*\? undefined\s*\n\s*: \[\{ label: ja\.form\.resetConfirmKeptLabel/.test(
+      lgForm,
+    ),
+    true,
+  )
+  eq(
+    'LG-03 料理名と写真も前回保存した内容へ戻す（applyResetTarget＋resetToOwn）',
+    [
+      lgForm.includes('setTitle(target.title)'),
+      /const resetToOwn = \(\) => \{[\s\S]{0,2000}setPhoto\(loadedRecipe\.photo\)[\s\S]{0,120}setPhotoFocus\(loadedRecipe\.photoFocus\)/.test(
+        lgForm,
+      ),
+    ],
+    [true, true],
+  )
+
+  // ---- トーストは操作を2つまで置ける（元に戻す＋行き先） ----
+  eq(
+    'LG-03 トーストは操作を2つ置ける（2つ並ぶときはボタンを次の行へ回す）',
+    [lgToast.includes('linkLabel'), lgToast.includes('const stacked = hasAction && hasLink')],
+    [true, true],
+  )
+}

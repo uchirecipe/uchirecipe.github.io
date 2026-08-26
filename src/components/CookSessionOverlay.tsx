@@ -17,6 +17,7 @@ import {
   Play,
   Timer as TimerIcon,
   ALargeSmall,
+  Info,
 } from 'lucide-react'
 import Collapse from './Collapse'
 import StepBadge from './StepBadge'
@@ -53,6 +54,7 @@ import VoiceHint from './VoiceHint'
 import SpeechReadingHint from './SpeechReadingHint'
 import CookTextSizeModal from './CookTextSizeModal'
 import CookStepPeekModal from './CookStepPeekModal'
+import CookRecipeNotesModal from './CookRecipeNotesModal'
 import { cookFontSize, resolveCookFontScale } from '../logic/cookFontScale'
 import { useSettings, updateSettings } from '../db/settings'
 import {
@@ -392,6 +394,69 @@ export default function CookSessionOverlay({
   useEffect(() => {
     setPeekRecipeId(null)
   }, [index])
+
+  /**
+   * 手順の枠がはみ出したら、本文の改行位置を詰め直す（2026-08-26 便LG・オーナー原文
+   * 「文字数が多くてスクロールしないといけないばあい、改行位置をずらして画面に収まるように
+   * してください。」）。
+   *
+   * 既定の行組みは**読点優先**で、「残り幅には入らないが、新しい行になら丸ごと入る句」を
+   * 詰め込まずに改行する。読みやすい代わりに行数が増えるので、手順文が長い品では
+   * この枠がはみ出してスクロールが要る。**はみ出したときだけ**詰め込みに切り替える
+   * ＝収まっている手順の見え方は1文字も変わらない。
+   *
+   * 高さは行組みが決まってから確定するので、値ではなく **ResizeObserver で見張る**
+   * （行組みは ComposedLines が自分の状態として持っていて、この画面は再描画されない）。
+   * 切り替えは片道で、手順が変わったら元に戻す。どこまで詰めても収まらない手順は
+   * 詰めたまま今までどおりスクロールする＝**本文は1文字も隠さない**（台所で読む文なので、
+   * 収めるために省くほうが危ない）。
+   */
+  const stepBoxRef = useRef<HTMLDivElement>(null)
+  const [packStepText, setPackStepText] = useState(false)
+  /**
+   * レシピのメモの窓（2026-08-26 便LG・オーナー原文「レシピのメモがスクロール付きの細い
+   * スペースにあるが、スクロールするよりはタップで窓出した方が読みやすい。」）。
+   * 手順が変わったら閉じる（前の手順のメモが開いたまま残ると読み違える）
+   */
+  const [recipeNotesOpen, setRecipeNotesOpen] = useState(false)
+  useEffect(() => {
+    setRecipeNotesOpen(false)
+  }, [index])
+  /**
+   * 開いている「他のレシピの次の手順」の枠（2026-08-26 便LG・オーナー原文
+   * 「もう一度タップの他に、エリア外をタップでも元の大きさに戻るようにして。」）。
+   * この枠の外を押したら閉じる＝もう一度タップと同じところへ戻る
+   */
+  const peekRowRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    setPackStepText(false)
+  }, [index, fontScale])
+  useEffect(() => {
+    const box = stepBoxRef.current
+    if (!box) return
+    const check = () => {
+      if (box.scrollHeight > box.clientHeight + 1) setPackStepText(true)
+    }
+    const ro = new ResizeObserver(check)
+    ro.observe(box)
+    for (const child of Array.from(box.children)) ro.observe(child)
+    check()
+    return () => ro.disconnect()
+  }, [index, fontScale, packStepText])
+
+  // エリア外を押したら、開いていた全文を閉じる（2026-08-26 便LG）。
+  // 掴むのは押し始め（pointerdown）の捕捉段階で、開いている枠の中なら何もしない
+  // ＝枠の中のボタン（「この手順を先にする」）や、もう一度のタップは今までどおり動く
+  useEffect(() => {
+    if (peekRecipeId == null) return
+    const onDown = (e: PointerEvent) => {
+      const el = peekRowRef.current
+      if (el && e.target instanceof Node && el.contains(e.target)) return
+      setPeekRecipeId(null)
+    }
+    document.addEventListener('pointerdown', onDown, true)
+    return () => document.removeEventListener('pointerdown', onDown, true)
+  }, [peekRecipeId])
 
   // カーソルを動かす前に読み上げを止める（前の手順を読みながら次に進まない）
   const move = (next: CookCursor | undefined) => {
@@ -1005,6 +1070,8 @@ export default function CookSessionOverlay({
           ＝手順本文（下で明示）・その手順の注意書き・その手順で使う材料。
           番号のバッジ・待ちブロックの但し書き・ボタンは各自の大きさを持つので動かない */}
       <div
+        ref={stepBoxRef}
+        data-testid="cook-session-step-box"
         className="flex flex-1 flex-col items-center justify-center-safe gap-[var(--space-md)] overflow-x-hidden overflow-y-auto overscroll-contain px-[var(--space-lg)] pb-[var(--space-md)] pt-[var(--space-sm)] text-center"
         style={{ fontSize: cookFontSize(1, fontScale) }}
         onTouchStart={onTouchStart}
@@ -1048,6 +1115,7 @@ export default function CookSessionOverlay({
             ingredientNames={ingredientNames}
             onOpenTerm={openTerm}
             onStartTimer={(_t, seconds) => onStartTimer(item, seconds)}
+            packed={packStepText}
           />
         </p>
 
@@ -1058,18 +1126,31 @@ export default function CookSessionOverlay({
             押すものなので最後に置く */}
         {item.memo && (
           <div data-testid="cook-session-memo" className="w-full">
-            <MemoText text={item.memo} className="w-full text-ink-muted" />
+            {/* 枠に収まらないときは、注意書きも本文と同じ物差しで詰め直す（2026-08-26 便LG。
+                本文だけ詰めても、長い注意書きが残っていればスクロールは消えない） */}
+            <MemoText text={item.memo} className="w-full text-ink-muted" packed={packStepText} />
           </div>
         )}
 
         {/* レシピ本体のメモ（2026-08-11 便FM）。段取りの一覧と同じ位置（本文→手順の注意書き→
-            ここ→材料→待ちブロック）に置く。いまやる1手順を大きく出す設計を崩さないよう、
-            出すのは**この手順に割り当てた行だけ**で、長いときはこの枠の中だけを送る */}
-        <NaviRecipeNotes
-          notes={currentRecipeNotes}
-          testId="cook-session-recipe-memo"
-          className="max-h-[24vh] w-full overflow-x-hidden overflow-y-auto overscroll-contain"
-        />
+            ここ→材料→待ちブロック）に置く。出すのは**この手順に割り当てた行だけ**。
+
+            2026-08-26 便LG・オーナー原文「レシピのメモがスクロール付きの細いスペースにあるが、
+            スクロールするよりはタップで窓出した方が読みやすい。手順ないには「レシピのメモ」だけ
+            表示。」: ここに置いていた高さ24vh（390×844で約202px）のスクロール欄をやめ、
+            手順の中は見出し1行の入口だけにして、中身は窓（CookRecipeNotesModal）で読む */}
+        {currentRecipeNotes.length > 0 && (
+          <button
+            type="button"
+            data-testid="cook-session-recipe-memo"
+            aria-label={ja.cookNavi.recipeNotesOpenAria}
+            onClick={() => setRecipeNotesOpen(true)}
+            className="tap-target flex min-h-[var(--tap-min)] w-full items-center justify-center gap-1 rounded-sm border border-edge px-2 text-xs font-bold text-accent-ink"
+          >
+            <Info size={14} aria-hidden />
+            {ja.cookNavi.recipeNotesTitle}
+          </button>
+        )}
 
         {/* この手順で使う材料と分量（3品ぶんの材料が混ざるのを防ぐ。色はその料理の色） */}
         {ingredients.length > 0 && (
@@ -1229,10 +1310,9 @@ export default function CookSessionOverlay({
           data-testid="cook-session-others"
           className="border-t border-edge bg-surface px-[var(--space-md)] py-1"
         >
-          <p className="flex flex-wrap items-baseline gap-x-2 text-[10px] text-ink-muted">
-            <span className="font-bold">{ja.cookNavi.sessionOthersTitle}</span>
-            <span data-testid="cook-session-others-hint">{ja.cookNavi.sessionOthersHint}</span>
-          </p>
+          {/* 2026-08-26 便LG・オーナー原文「「タップすると全文が出ます〜」削除。触ればわかること。」。
+              見出しの横に置いていた案内（sessionOthersHint）は消した */}
+          <p className="text-[10px] font-bold text-ink-muted">{ja.cookNavi.sessionOthersTitle}</p>
           {others.map(({ recipeId, item: next }) => {
             const recipe = recipeById.get(recipeId)
             const otherColor = naviRecipeColor(recipe?.colorIndex ?? 0)
@@ -1243,6 +1323,8 @@ export default function CookSessionOverlay({
               // 色の線はこの枠に1本だけ引く＝レシピ名の横から、開いた全文の下端まで続く
               <div
                 key={recipeId}
+                // 開いている枠だけ掴んでおく＝この外を押したら閉じる（2026-08-26 便LG）
+                ref={open ? peekRowRef : undefined}
                 className="border-l-4 pl-1.5"
                 style={{ borderLeftColor: otherColor }}
               >
@@ -1519,6 +1601,14 @@ export default function CookSessionOverlay({
         currentNumber={index + 1}
         total={total}
         onClose={closeTimerPeek}
+      />
+      {/* レシピのメモの窓（2026-08-26 便LG）。手順カードの入口を押したときだけ開く */}
+      <CookRecipeNotesModal
+        open={recipeNotesOpen}
+        notes={currentRecipeNotes}
+        recipeTitle={recipeById.get(item.recipeId)?.title ?? ''}
+        color={color}
+        onClose={() => setRecipeNotesOpen(false)}
       />
     </div>
   )

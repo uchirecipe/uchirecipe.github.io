@@ -27,8 +27,23 @@ import type { MealGenre } from './mealPlan'
 import { DEFAULT_EFFORT_LEVEL } from './effort'
 import { hasSeenNotice, markNoticeSeen, forgetNoticeSeen } from './noticeSeen'
 
-/** 取り込みでは入らない項目（並びは画面に出す順） */
-export type ImportFieldKey = 'genre' | 'season' | 'suitableFor' | 'dishType' | 'effort'
+/**
+ * 取り込みでは入らない項目（並びは画面に出す順）。
+ *
+ * 2026-08-26 便LG・オーナー原文「自動で登録できない項目に計量一緒にできる設定は含みますか」:
+ * 含んでいなかったので `seasoningGroup`（合わせ調味料の組）を足した。
+ * **ほかの5つと性質が違う**（ジャンルのようにボタンで1つ選ぶものではなく、材料の組み分け）ので、
+ * 画面での出し方も違う＝選ぶ並びではなく「印から組を作る」ボタン1つにする
+ * （src/pages/RecipeFormPage.tsx の importFollowUp）。
+ * 組は最後に置く（材料の話なので、献立の絞り込みに使う5つと混ぜて読ませない）。
+ */
+export type ImportFieldKey =
+  | 'genre'
+  | 'season'
+  | 'suitableFor'
+  | 'dishType'
+  | 'effort'
+  | 'seasoningGroup'
 
 export const IMPORT_FIELD_KEYS: readonly ImportFieldKey[] = [
   'genre',
@@ -36,6 +51,7 @@ export const IMPORT_FIELD_KEYS: readonly ImportFieldKey[] = [
   'suitableFor',
   'dishType',
   'effort',
+  'seasoningGroup',
 ]
 
 /** いま登録画面に入っている値のうち、この判定に要るものだけ */
@@ -46,6 +62,12 @@ export interface ImportFieldValues {
   /** 料理名からの自動提案を当てたあとの値（提案できたなら「入った」扱いにする） */
   dishType: DishType | undefined
   effortLevel: EffortLevel
+  /**
+   * 印（●・☆・A など）から作れる合わせ調味料の組の数（2026-08-26 便LG）。
+   * すでに組が付いているとき・印が無いときは 0＝押しても何も起きないボタンを出さない。
+   * 数え方は logic/seasoningRegroup.ts の countSeasoningGroupsFromMarks
+   */
+  seasoningGroupsFromMarks: number
 }
 
 /** レシピに付いているジャンル（タグの「和食」「洋食」「中華」。無ければ undefined） */
@@ -70,6 +92,10 @@ export function missingImportFields(values: ImportFieldValues): ImportFieldKey[]
   // 手間レベルは「選ばなければ普通」なので、普通のままなら人が選んでいない
   // （logic/effort.ts が同じ理由でカードのバッジを出していない）
   if (values.effortLevel === DEFAULT_EFFORT_LEVEL) missing.push('effort')
+  // 合わせ調味料の組は、**印から実際に作れるときだけ**出す（2026-08-26 便LG）。
+  // 印が無いレシピに「組が入っていません」とだけ言っても、1タップでできることが無い
+  //（そのときの作り方は取り込み結果の案内 ja.form.importSeasoningGuide が持っている）
+  if (values.seasoningGroupsFromMarks > 0) missing.push('seasoningGroup')
   return missing
 }
 

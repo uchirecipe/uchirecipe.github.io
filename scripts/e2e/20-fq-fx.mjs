@@ -1549,8 +1549,8 @@ import './_shared.mjs'
           // 「単品で約34分」。言い方に寄りかからないよう「約◯分」で取る
           minutes: Number((el.textContent ?? '').match(/約\s*(\d+)\s*分/)?.[1] ?? 0),
         }))
-        const compare = document.querySelector('[data-testid="navi-total-compare"]')?.textContent ?? ''
-        return { perRecipe, legend, sequential: Number(compare.replace(/\u200B/g, '').match(/1品ずつ作ると約(\d+)分/)?.[1] ?? 0) }
+        // 2026-08-26 便LG: 「1品ずつ作ると約◯分」は画面から消したので、比較の元は取らない
+        return { perRecipe, legend }
       })
       const fuTitles = { [fuIds[0]]: 'FUみそマヨ焼き', [fuIds[1]]: 'FUみそ汁', [fuIds[2]]: 'FUごま和え' }
       const fuMismatch = fuIds
@@ -1564,11 +1564,12 @@ import './_shared.mjs'
         fuMinutes.legend.length === 3 && fuMismatch.length === 0,
         JSON.stringify({ 不一致: fuMismatch, 画面: fuMinutes.perRecipe, 見出し: fuMinutes.legend }),
       )
+      // 2026-08-26 便LG・オーナー指示で「1品ずつ作ると約◯分」を画面から消した。
+      // 「品ごとの目安の足し算＝sequentialMinutes」は scripts/tests/cook-navi.mjs 側で見張る。
+      // ここでは**画面から消えたまま**であることを見る
       check(
-        'FU-01 「1品ずつ作ると約◯分」は品ごとの目安の足し算になっている',
-        fuMinutes.sequential > 0 &&
-          fuMinutes.sequential === fuMinutes.legend.reduce((sum, l) => sum + l.minutes, 0),
-        JSON.stringify({ 合計: fuMinutes.sequential, 内訳: fuMinutes.legend.map((l) => l.minutes) }),
+        'LG-01 段取りの画面に「1品ずつ作ると約◯分」が戻っていない',
+        (await fuPage.locator('[data-testid="navi-total-compare"]').count()) === 0,
       )
       check(
         'FU-01 みそマヨ焼き（待ち10・3・2・待ち15・4）の目安は34分（空白の3分が乗らない）',

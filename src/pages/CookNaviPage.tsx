@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Link, useLocation, useSearchParams } from 'react-router-dom'
+import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { useLiveQuery } from 'dexie-react-hooks'
 import {
   Lock,
@@ -880,7 +880,13 @@ export default function CookNaviPage() {
   }
 
   // 記録したあとのトースト（「元に戻す」つき）
+  const navigate = useNavigate()
   const [toast, setToast] = useState('')
+  /**
+   * 「作った記録の一覧へ」を添えたトーストの文言（2026-08-26 便LG）。
+   * いま出ているトーストと一致するときだけ行き先を出す＝別の知らせに差し替わったら消える
+   */
+  const [historyToast, setHistoryToast] = useState('')
   const [undoCooked, setUndoCooked] = useState<{ recipeId: number }[] | null>(null)
   /** いま出ているトーストが「並べ替えを1回戻す」ためのものか（2026-08-25 便KM） */
   const [undoPull, setUndoPull] = useState(false)
@@ -1714,7 +1720,12 @@ export default function CookNaviPage() {
     setPulls([])
     setDroppedNotice('')
     setUndoCooked(recordedIds.map((recipeId) => ({ recipeId })))
-    setToast(ja.cookNavi.markAllCookedToast.replace('{n}', String(recordedIds.length)))
+    const cookedMessage = ja.cookNavi.markAllCookedToast.replace('{n}', String(recordedIds.length))
+    // 記録の一覧への行き先は、このトーストのときだけ出す（2026-08-26 便LG）。
+    // 出したトーストの文言まで一緒に持つ＝別の操作でトーストが差し替わったら行き先も消える
+    // （レシピ詳細の「元に戻す」と同じ作法）
+    setHistoryToast(cookedMessage)
+    setToast(cookedMessage)
     return true
   }
 
@@ -1770,6 +1781,16 @@ export default function CookNaviPage() {
    * どちらも無ければ undefined＝トーストはボタンの無い普通の知らせになる。
    * 並べ替えのほうは**直前の1回ぶんだけ**を戻す（undoLastPull）＝押しすぎても全部は捨てない。
    */
+  /**
+   * トーストから「作った記録の一覧へ」を出すか（2026-08-26 便LG・オーナー原文
+   * 「レシピ詳細以外からの「作った！」は内容の入力が省略されています。記録した後に出る
+   * トーストに、「作った記録の一覧にいく」選択が欲しいです。」）。
+   *
+   * ナビの「まとめて作った！」は、何人分・ひとこと・写真を聞かずに記録を付ける。
+   * 足したくなったときの行き先が画面のどこにも無く、タブを渡り歩くしかなかった。
+   * **記録を付けたときのトーストのときだけ**出す＝出した文言そのものを持って見比べる
+   */
+  const historyToastActive = historyToast !== '' && historyToast === toast
   const toastUndo = undoCooked
     ? () => void runUndoCooked()
     : /* 戻す相手（並べ替え）が1件も残っていなければボタンを出さない。
@@ -2069,29 +2090,11 @@ export default function CookNaviPage() {
                       >
                         {ja.cookNavi.totalEstimate.replace('{n}', String(timeline.totalMinutes))}
                       </p>
-                      {/* 同じ物差しでの比べ方（2026-08-09 便ES・オーナー指摘B）。
-                          レシピ欄の「調理時間」とは数え方が違うので、ナビ自身が数えた
-                          「1品ずつ作った場合」と並べて、何分縮んだのかを読めるようにする */}
-                      {timeline.sequentialMinutes > timeline.totalMinutes && (
-                        <p
-                          data-testid="navi-total-compare"
-                          className={`ja-phrase mt-1 text-sm ${estimateStale ? 'text-ink-muted' : ''}`}
-                        >
-                          {ja.cookNavi.totalCompare
-                            .replace('{s}', String(timeline.sequentialMinutes))
-                            .replace('{p}', String(timeline.totalMinutes))}
-                          <span
-                            className={`ml-1 font-bold ${
-                              estimateStale ? 'text-ink-muted' : 'text-accent-ink'
-                            }`}
-                          >
-                            {ja.cookNavi.totalGain.replace(
-                              '{n}',
-                              String(timeline.sequentialMinutes - timeline.totalMinutes),
-                            )}
-                          </span>
-                        </p>
-                      )}
+                      {/* 2026-08-26 便LG・オーナー原文「「1品ずつ作ると〜◯分の短縮」→削除。
+                          4分とかだと個人の裁量で直ぐに覆るし、目安でさえこれしか変わらないんだと
+                          思ってしまう。ない方がいい。」。便ES が置いていた比較の1行は消した。
+                          縮む分数の計算（buildCookPlan の gainPercent）は段取りの組み方を
+                          決めるのに使っているので残してある。見張りは e2e の LG-01 */}
                       {/* 数字と同じ枠の中に印を置く（2026-08-14 便GL・利用者テスト
                           「数字が載っているカードには何の印もない。上へスクロールしたら
                           私は17分後だと信じます」）。便GJ は手順リストの直前に書いていた */}
@@ -2444,11 +2447,15 @@ export default function CookNaviPage() {
           setToast('')
           setUndoCooked(null)
           setUndoPull(false)
+          setHistoryToast('')
         }}
         /* 「元に戻す」はアプリ共通の言い方（ja.common.undo）で、記録の取り消しと
            並べ替えの取り消しの両方がここに乗る（2026-08-25 便KM） */
         actionLabel={toastUndo ? ja.common.undo : undefined}
         onAction={toastUndo}
+        /* 記録を付けた直後だけ、内容を足しに行ける場所を添える（2026-08-26 便LG） */
+        linkLabel={historyToastActive ? ja.cookNavi.markAllCookedHistory : undefined}
+        onLink={historyToastActive ? () => navigate('/history') : undefined}
       />
     </div>
   )

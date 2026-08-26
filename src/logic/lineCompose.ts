@@ -47,6 +47,19 @@ export type ComposeOptions = {
    * 呼び出し側(ComposedStepText)が CSS.supports で false を渡し、従来どおりはみ出し防止側に倒す。
    */
   hangingPunct?: boolean
+  /**
+   * 詰め込み（2026-08-26 便LG・オーナー原文「文字数が多くてスクロールしないといけないばあい、
+   * 改行位置をずらして画面に収まるようにしてください。」）。
+   *
+   * 既定（false）の組み方は**読点優先**で、「残り幅には入らないが新しい行になら丸ごと入る句」を
+   * 詰め込まずに改行する。読みやすい代わりに行数が増え、手順文が長い品では調理中モードの
+   * 手順の枠がはみ出してスクロールが要る。true にすると、その改行の遠慮をやめて文節ごとに
+   * 詰められるだけ詰める＝**同じ文が同じ幅で何行に収まるかの下限**になる。
+   *
+   * 切る位置は今までどおり文節の切れ目だけ（wrapJaPhrases のユニット）なので、
+   * 語の途中で切れることはない。**画面に収まらないときだけ**呼び出し側が渡す。
+   */
+  packed?: boolean
 }
 
 type Piece =
@@ -602,6 +615,48 @@ function fillLongClause(
 }
 
 /**
+ * 詰め込みの組み方（2026-08-26 便LG）。句（読点・句点の切れ目）を単位にした
+ * 「詰め込まずに改行する」遠慮をやめ、文節ユニットを順に詰められるだけ詰める。
+ *
+ * 既定の組み方（composeLines の本体）はそのまま残してあり、こちらは**画面に収まらないときだけ**
+ * 使う別経路。既定の経路には1行も手を入れていない＝収まっている手順の見え方は変わらない。
+ *
+ * 守るもの: ①改行できるのは文節の切れ目だけ（clauseUnits が作るユニットを割らない）
+ * ②`\n` の強制改行は今までどおり効く ③箱（タイマー・用語）は割らない。
+ * やめるもの: 読点優先の改行と、「を」バンチの強制改行（どちらも行数を増やす向きの規則）。
+ */
+function composePacked(
+  clauses: Clause[],
+  maxWidth: number,
+  measure: MeasureText,
+  eps: number,
+  corrText: (t: string) => number,
+): LinePiece[][] {
+  const lines: LinePiece[][] = [[]]
+  let cur = 0
+  const lastLine = () => lines[lines.length - 1]
+  for (const clause of clauses) {
+    const units = clauseUnits(clause, measure)
+    if (units.length === 0) continue
+    if (clause.hardBreakBefore && lastLine().length > 0) {
+      lines.push([])
+      cur = 0
+    }
+    for (const u of units) {
+      const corr = corrText(unitText(u))
+      if (lastLine().length > 0 && cur + u.width - corr > maxWidth + eps) {
+        lines.push([])
+        cur = 0
+      }
+      for (const part of u.parts) lastLine().push(part)
+      cur += u.width
+    }
+  }
+  if (lines.length > 1 && lastLine().length === 0) lines.pop()
+  return lines
+}
+
+/**
  * アトム列を最大幅 maxWidth に収まる行の列へ組む。measure はテキストの実幅を返す。
  * 戻り値は行ごとの LinePiece 列。DOM 非依存・純関数。
  */
@@ -621,6 +676,20 @@ export function composeLines(
     if (!hang || t.length === 0) return 0
     const c = t[t.length - 1]
     return c === '、' || c === '。' ? measure(c) : 0
+  }
+
+  /**
+   * 詰め込み（2026-08-26 便LG）。画面に収まらないときだけ呼び出し側が渡す。
+   *
+   * **両方組んで、行数の少ないほうを採る**。詰め込みは「その場で入るだけ入れる」ので、
+   * たいていは行が減るが、常に減るとは限らない（幅が狭いと、既定側の
+   * 「句を丸ごと次の行へ送る」ほうが結果的に少ない行に収まる並びがある。実測で1件出た）。
+   * 同数なら**既定の組み方を残す**＝読みやすさの承認済みの見え方を、得も無いのに崩さない。
+   */
+  if (opts.packed) {
+    const packedLines = composePacked(clauses, maxWidth, measure, eps, corrText)
+    const plainLines = composeLines(atoms, maxWidth, measure, { ...opts, packed: false })
+    return packedLines.length < plainLines.length ? packedLines : plainLines
   }
 
   const lines: LinePiece[][] = [[]]

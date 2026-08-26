@@ -21,6 +21,11 @@ import {
   stripPastedMarkup,
 } from '../../src/logic/urlImportRows.ts'
 import { ja } from '../../src/i18n/ja.ts'
+// 2026-08-26 便LG: 印から合わせ調味料の組を作り直す（速記入力・手入力・取り込みの共通の道）
+import {
+  regroupIngredientRowsByMark,
+  countSeasoningGroupsFromMarks,
+} from '../../src/logic/seasoningRegroup.ts'
 
 // ---------- parseRecipeText(理想フォーマット+ゆらぎのコーパス) ----------
 const ideal = `肉じゃが
@@ -1816,3 +1821,140 @@ import { safetyNotesFor, stepSafetyNotes, wholeRecipeSafetyNotes } from '../../s
   eq('KG-5 「調理時間」が入った1行を組み立てられる', ja.urlImport.notImported.replace('{items}', ja.urlImport.itemCookMinutes).includes('調理時間'), true)
 }
 
+
+// ============================================================================
+// LG-04: 印から合わせ調味料の組を作る（2026-08-26 便LG・オーナー原文「ビビンバ」）
+//
+//   「調味料の頭の印を削除するようにしたが、手順に『●の調味料を合わせておく』とあり、
+//    合わせ調味料の設定は自動で出来ていないので、これではただ目印が消えただけになっている。」
+//
+//   実測: 貼り付け取り込みとURL取り込みは印から組を作れていた。組にならず印だけ残るのは
+//   **その2つを通らない道**（材料の速記入力・手で入れた並び・取り込み元が見出しで組を
+//   持っていた回）で、あとから印で作り直す道が画面のどこにも無かった。
+//   ここでは作り直しの規則（logic/seasoningRegroup.ts）を固定する。
+// ============================================================================
+{
+  const lgRow = (name, memo = '', group = undefined) => ({ name, amount: '', unit: '', memo, group })
+  const lgGroups = (rows) => rows.map((r) => (r.group != null ? `${r.name}#${r.group}` : r.name))
+  const lgCount = (rows) =>
+    new Set(rows.map((r) => r.group).filter((g) => g != null)).size
+
+  // ---- ビビンバ型: ●が4件 → 1組 ----
+  {
+    const rows = [
+      lgRow('ご飯'),
+      lgRow('牛ひき肉'),
+      lgRow('しょうゆ', '●'),
+      lgRow('砂糖', '●'),
+      lgRow('コチュジャン', '●'),
+      lgRow('おろしにんにく', '●'),
+      lgRow('ごま油'),
+    ]
+    eq('LG-04 押す前は「印から組を作る」が出る（1組作れる）', countSeasoningGroupsFromMarks(rows), 1)
+    const after = regroupIngredientRowsByMark(rows)
+    eq(
+      'LG-04 ビビンバ型: ●の4件が同じ組になる',
+      lgGroups(after),
+      ['ご飯', '牛ひき肉', 'しょうゆ#1', '砂糖#1', 'コチュジャン#1', 'おろしにんにく#1', 'ごま油'],
+    )
+    eq('LG-04 印はメモに残る（書いてあった事実を消さない）', after[2].memo, '●')
+    eq(
+      'LG-04 もう一度押しても何も変わらない（組があるときは手を出さない）',
+      lgGroups(regroupIngredientRowsByMark(after)),
+      lgGroups(after),
+    )
+    eq('LG-04 作ったあとは入口が出ない', countSeasoningGroupsFromMarks(after), 0)
+  }
+
+  // ---- 印が2種類なら2組 ----
+  {
+    const rows = [lgRow('みそ', '☆'), lgRow('みりん', '☆'), lgRow('ごま', '◎'), lgRow('砂糖', '◎')]
+    eq('LG-04 印が2種類あれば2組になる', lgGroups(regroupIngredientRowsByMark(rows)), [
+      'みそ#1',
+      'みりん#1',
+      'ごま#2',
+      '砂糖#2',
+    ])
+  }
+
+  // ---- 誤って組にしないもの ----
+  {
+    eq(
+      'LG-04 同じ印が1件しか無ければ組にしない',
+      lgCount(regroupIngredientRowsByMark([lgRow('しょうゆ', '●'), lgRow('砂糖'), lgRow('酒')])),
+      0,
+    )
+    const decorative = [lgRow('豚肉', '●'), lgRow('キャベツ', '●'), lgRow('しょうゆ', '●')]
+    eq(
+      'LG-04 全部の材料に同じ印＝行頭の飾りなので組にしない',
+      lgCount(regroupIngredientRowsByMark(decorative)),
+      0,
+    )
+    eq(
+      'LG-04 組にしなかった行のメモは1文字も変えない（人が書いた印を消さない）',
+      regroupIngredientRowsByMark(decorative).map((r) => r.memo),
+      ['●', '●', '●'],
+    )
+    eq(
+      'LG-04 「A5ランクの牛肉」「EVオリーブ油」を英字の印と読み違えない',
+      lgCount(
+        regroupIngredientRowsByMark([
+          lgRow('A5ランクの牛肉'),
+          lgRow('EVオリーブ油'),
+          lgRow('しょうゆ'),
+        ]),
+      ),
+      0,
+    )
+    eq(
+      'LG-04 すでに組が付いている並びは塗り替えない',
+      lgGroups(regroupIngredientRowsByMark([lgRow('みそ', '☆'), lgRow('みりん', '☆', 3)])),
+      ['みそ', 'みりん#3'],
+    )
+  }
+
+  // ---- 同梱109品への誤爆が無いこと ----
+  {
+    let lgMisfire = 0
+    let lgChanged = 0
+    for (const def of starterDefs) {
+      const asIs = def.ingredients.map((i) => lgRow(i.name, i.memo ?? '', i.seasoningGroup))
+      if (JSON.stringify(asIs) !== JSON.stringify(regroupIngredientRowsByMark(asIs))) lgChanged++
+      const noGroup = def.ingredients.map((i) => lgRow(i.name, i.memo ?? ''))
+      if (countSeasoningGroupsFromMarks(noGroup) > 0) lgMisfire++
+    }
+    eq('LG-04 同梱109品を作り直しにかけても中身が変わらない', lgChanged, 0)
+    eq('LG-04 同梱109品では「印から組を作る」が出ない（印を使っていないため）', lgMisfire, 0)
+  }
+
+  // ---- 貼り付け取り込みと同じ組になること（同じレシピが道によって違う組にならない） ----
+  {
+    const lgPaste = `ビビンバ
+材料（2人分）
+ご飯 2杯分
+牛ひき肉 150g
+●しょうゆ 大さじ1
+●砂糖 大さじ1/2
+●コチュジャン 大さじ1
+●おろしにんにく 小さじ1/2
+ごま油 大さじ1
+
+作り方
+1 ●の調味料を合わせておく。
+2 フライパンにごま油を熱し、牛ひき肉を炒め、●を加えて炒める。`
+    const parsed = parseRecipeText(lgPaste)
+    const pasteGroups = new Set(
+      parsed.ingredients.map((r) => r.group).filter((g) => g != null),
+    ).size
+    const byHand = regroupIngredientRowsByMark(
+      parsed.ingredients.map((r) => lgRow(r.name, r.memo ?? '')),
+    )
+    eq('LG-04 貼り付け取り込みは今までどおり1組にする', pasteGroups, 1)
+    eq('LG-04 手で並べたときも同じ組の数になる', lgCount(byHand), pasteGroups)
+    eq(
+      'LG-04 手順文の印（●）は消さない＝材料の組と読み合わせられる',
+      parsed.steps.some((text) => text.includes('●')),
+      true,
+    )
+  }
+}
