@@ -2176,7 +2176,8 @@ import { existsSync, readFileSync } from 'node:fs'
   // 品ごとの内訳を出して「合計＝この積み上げ」が読めるようにした
   eq(
     'FN-SOLO 品ごとに「1品だけなら約◯分」を持つ',
-    par.recipes.every((r) => typeof r.soloMinutes === 'number' && r.soloMinutes > 0),
+    // 便LK: 品が0件でも every は true になるので、「1品以上あって、そのすべてが持つ」で見る
+    par.recipes.length > 0 && par.recipes.every((r) => typeof r.soloMinutes === 'number' && r.soloMinutes > 0),
     true,
   )
   eq(

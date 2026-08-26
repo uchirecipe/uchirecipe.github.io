@@ -1292,7 +1292,11 @@ eq('端数は丸める', formatMinutesSecondsLabel(60.4), '1分')
   )
   eq(
     'FI-PULL 引き寄せたあとも、その品の残りは「完成」扱いにならない',
-    nextStepsByRecipe(fiSaidPink.list, fiSaidPink.cursor, fiIds).every((row) => row.item != null),
+    // 便LK: 行が0件でも every は true になる（次の手順が1つも出なくなった退行が緑で通る）
+    (() => {
+      const rows = nextStepsByRecipe(fiSaidPink.list, fiSaidPink.cursor, fiIds)
+      return rows.length > 0 && rows.every((row) => row.item != null)
+    })(),
     true,
   )
   // 各品の中の順番は絶対に入れ替わらない（先に切ってから煮る、が崩れない）
@@ -1438,7 +1442,9 @@ eq('端数は丸める', formatMinutesSecondsLabel(60.4), '1分')
 
   eq(
     'FI-BACK 引き寄せたあとも「次へ→戻って」で元の手順に帰る',
-    fiSaidGreen.list.every((_, i) => {
+    // 便LK: 手順が1つ以下だと下の every は中身を1回も見ずに true になる
+    fiSaidGreen.list.length > 1 &&
+      fiSaidGreen.list.every((_, i) => {
       if (i >= fiSaidGreen.list.length - 1) return true
       const at = { recipeId: fiSaidGreen.list[i].recipeId, stepIndex: fiSaidGreen.list[i].stepIndex }
       return JSON.stringify(backCursor(fiSaidGreen.list, advanceCursor(fiSaidGreen.list, at))) ===

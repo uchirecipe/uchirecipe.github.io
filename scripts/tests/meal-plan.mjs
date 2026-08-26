@@ -1881,7 +1881,12 @@ eq('rangeDayCount: 月をまたぐ計算も正しい', rangeDayCount('2026-06-28
     applyFriday.ops.map((o) => `${o.date}:${o.recipeId}`),
     ['2026-08-07:30', '2026-08-14:30', '2026-08-21:30', '2026-08-28:30'],
   )
-  eq('B-2: 月曜のぶん(2品)は入らない=選んだ曜日だけ', applyFriday.ops.every((o) => o.recipeId === 30), true)
+  // 便LK: 入れた献立が0件でも every は true になるので、1件以上あることも同じ条件で見る
+  eq(
+    'B-2: 月曜のぶん(2品)は入らない=選んだ曜日だけ',
+    applyFriday.ops.length > 0 && applyFriday.ops.every((o) => o.recipeId === 30),
+    true,
+  )
   const applyNoDow = planTemplateFill({
     items,
     dates: augustDates,
@@ -2955,7 +2960,12 @@ eq('rangeDayCount: 月をまたぐ計算も正しい', rangeDayCount('2026-06-28
       // 未来の1日目にだけ献立を入れる＝「献立あり/なし」で開閉が分かれることを見る
       const withPlan = new Set([future[0]])
       const folded = planDefaultFoldedDates({ dates, today, datesWithPlan: withPlan })
-      eq(`ID-7 ${name}: 過ぎた日はすべて畳む`, past.every((d) => folded.includes(d)), true)
+      // 便LK: 過ぎた日が0日だと every は中身を見ずに true になる
+      eq(
+        `ID-7 ${name}: 過ぎた日はすべて畳む`,
+        past.length > 0 && past.every((d) => folded.includes(d)),
+        true,
+      )
       eq(`ID-7 ${name}: 献立のある未来の日は開く`, folded.includes(future[0]), false)
       eq(`ID-7 ${name}: 献立の無い未来の日は畳む`, folded.includes(future[1]), true)
       eq(`ID-7 ${name}: 今日は献立が無くても開く`, folded.includes(today), false)

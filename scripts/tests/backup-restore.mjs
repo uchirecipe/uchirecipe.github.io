@@ -832,7 +832,9 @@ import { readFileSync } from 'node:fs'
   const archTargets = collectArchiveTargets(archRecipes, archCutoff)
   eq(
     'ARCH 境目ちょうどの記録は書き出さない(残す)',
-    archTargets.every((t) => t.log.date < '2026-07-02'),
+    // 便LK: 対象が0件でも every は true になる（何も書き出さなくなった退行が緑で通る）ので、
+    // 「1件以上あって、そのすべてが境目より前」を1つの条件にする
+    archTargets.length > 0 && archTargets.every((t) => t.log.date < '2026-07-02'),
     true,
   )
   eq('ARCH 対象件数', countArchiveTargets(archTargets).logs, 4)

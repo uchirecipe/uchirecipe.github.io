@@ -897,7 +897,9 @@ const iconKeyExpected = {
   // カタログ全品も、描く直前の関数を通して必ず絵のある種別になる
   eq(
     '便GU アイコン: カタログ全品が絵のある種別に解決する',
-    iconEntries.every(({ recipe }) => iconKeyOrder.includes(resolveIconKey(recipe))),
+    // 便LK: カタログを読めず0件になっても every は true になる（読めていないのに緑）
+    iconEntries.length > 0 &&
+      iconEntries.every(({ recipe }) => iconKeyOrder.includes(resolveIconKey(recipe))),
     true,
   )
 }
