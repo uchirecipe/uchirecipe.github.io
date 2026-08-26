@@ -1281,7 +1281,15 @@ eq('normalizeIngredientNameForPrice 前後空白除去', normalizeIngredientName
     // 2026-08-25 便KX「白みそを実測の帯の中へ」で35,826→35,814円(-12円)。動いたのは白みそ大さじ3を使う
     // 西京焼き2品(鮭の西京みそ漬け・さわらの西京焼き)の各1行だけで、45円→39円。
     // 便KXの前方一致の直しでは1円も動いていない(同梱109品の材料は全部、成分表で身元が分かる)
-    eq('同梱109品の概算食費の合計(便KX後。便KE後は35,826円/便JI後は37,951円/便JG後は37,934円/便BY修正前は48,377円)', grand, 35814)
+    // 2026-08-26 便LF「価格マスタの調べ直し（第1弾: 乾物・海藻・乳製品・鶏）」で35,814→37,015円(+1,201円)。
+    // ヤオコーネットスーパーと東急ストアネットスーパーの税込・家庭用の袋で測り直したところ、
+    // **乾物と海藻がそろって実勢の1/3〜1/9で入っていた**（乾燥わかめ/カットわかめ 15→270円/10g・
+    // 乾燥芽ひじき 25→220円/10g・昆布 400→1,200円/100g・塩昆布 30→75円/10g・
+    // 切り干し大根 130→460円/50g・高野豆腐 150→220円/5枚・しらたき 80→200円/1袋・
+    // ピザ用チーズ 300→530円/200g・生クリーム 300→500円/200ml・鶏ささみ 40→65円/1本）。
+    // 上がったのは12品で、いちばん大きいのは「ひじきの煮物」50→196円/1食（乾燥芽ひじき15g）。
+    // 1件ずつの店名・商品名・容量・税込・調べた日は src/data/priceDefaults.ts の各行のコメント。
+    eq('同梱109品の概算食費の合計(便LF後。便KX後は35,814円/便KE後は35,826円/便JI後は37,951円/便JG後は37,934円/便BY修正前は48,377円)', grand, 37015)
     const nabe = starterDefs.find((d) => d.title === '寄せ鍋')
     eq(
       '寄せ鍋 1食あたり(便EY後226円→便FAのしいたけ名寄せで217円)',
@@ -1925,7 +1933,10 @@ eq('normalizeIngredientNameForPrice 前後空白除去', normalizeIngredientName
 
   // (3) 抜き取り3品の値がマスタと一字一句一致する(桁の丸め・列の並びの取り違えを検知)
   const dec1 = (v) => (Math.round(v * 10) / 10).toFixed(1)
-  for (const label of ['玉ねぎ', '鶏もも肉', 'しょうゆ']) {
+  // 2026-08-26 便LF: 抜き取りに「昆布」を足した。それまでの3品はどれも便LFで値を直していない品で、
+  // **目安価格を直したのにページを再生成し忘れても、この検査は素通りしていた**（(2)は名前が
+  // 出ているかしか見ていない）。値を直した品を1つ入れておくと、次に値を直した便が気づける
+  for (const label of ['玉ねぎ', '鶏もも肉', 'しょうゆ', '昆布']) {
     const food = NUTRITION_DATA.foods.find((f) => f.label === label)
     const master = PRICE_DEFAULTS.find((p) => priceKey(p.name) === priceKey(label))
     const cells = cellsOf(foodRows.find((r) => nameOf(r) === label) ?? '')
@@ -2118,7 +2129,12 @@ eq('normalizeIngredientNameForPrice 前後空白除去', normalizeIngredientName
   for (const [name, pricePerUnit, unit] of [
     ['卵黄', 8, '1個分'],
     ['卵白', 17, '1個分'],
-    ['生クリーム', 300, '200ml'],
+    // 2026-08-26 便LF: 300→500円/200ml。乳脂肪35%の生クリームを200ml換算でそろえた実売の中央値。
+    // ヤオコーのネットスーパーは生クリームを扱っていないため、実売は東急ストアの3件
+    // （タカナシ特選35% 200ml 462円／明治おいしい生クリーム 200ml 516円／
+    //   タカナシ北海道純生35% 100ml 279円＝558円/200ml。中央516円）。調べた日 2026-08-26。
+    // 帯・調べた日・なぜ変えたかは src/data/priceDefaults.ts の行のコメントに書いてある
+    ['生クリーム', 500, '200ml'],
     ['赤ワイン', 600, '1L'],
     ['ローリエ', 5, '1枚'],
     ['えんどう豆', 250, '200g'],
@@ -3737,4 +3753,178 @@ eq('normalizeIngredientNameForPrice 前後空白除去', normalizeIngredientName
   eq('LB-7 大さじ2(30ml)は18円', lbYen('白ワイン', '2', '大さじ'), 18)
   eq('LB-7 赤ワイン100mlも同じ60円（赤と白で数字が食い違わない）', lbYen('赤ワイン', '100', 'ml'), 60)
   eq('LB-7 白ワインビネガー大さじ2は、ワインビネガーの値段で30円', lbYen('白ワインビネガー', '2', '大さじ'), 30)
+}
+
+
+// ---------- 便LF（2026-08-26）: 価格マスタの調べ直し 第1弾（乾物・海藻・乳製品・鶏） ----------
+// 司令部が決めた物差し（2026-08-26）に沿って測り直した。使った店は2つだけ:
+//   ・ヤオコーネットスーパー https://ns.yaoko-net.com/products?category=<番号>（税込表示）
+//   ・東急ストアネットスーパー https://ns.tokyu-bell.jp/shop/c/c<コード>/（「参考税込」の表示を使う）
+// 代表値の出し方: その食材そのものの商品（味付け・惣菜・ふりかけは入れない）を2店ぶん並べ、
+//   ①総務省 小売物価統計の基本銘柄（kouri-202608.xlsx）が産地や容量を決めている品目はその定義に合うものだけ
+//   ②「大容量」「徳用」「業務用」と明記されたもの、等級が上と明記されたもの（一等品など）、
+//     銘柄鶏・地鶏・料理店の銘柄は入れない
+//   ③3件以上なら中央値、2件なら平均、1件しか無ければ**動かさない**
+// 1件ずつの店名・商品名・容量・税込・調べた日は src/data/priceDefaults.ts の各行のコメントに書いてある。
+//
+// 【ピン留め（scripts/test-price.mjs の ORIGINAL_30）に当たって動かせなかったもの】
+//   同じ物差しで測った実勢だけを書き残す（値は変えていない。外すかどうかは司令部が決める）:
+//   ・鶏もも肉 130円/100g → 実勢の中央値 171円/100g（ブロイラーの正肉7件）
+//   ・牛乳 200円/1L → 実勢の中央値 311円/1L（紙パック1,000mLの成分無調整10件）
+//   ・卵 25円/1個 → 実勢の中央値 35円/1個（10個入りパック7件）
+//   ・鶏むね肉 90円/100g → 実勢の中央値 106円/100g（差は+18%で、ほかの4件より小さい）
+{
+  const lfEntry = (name) => {
+    const e = PRICE_DEFAULTS.find((d) => d.name === name)
+    return e ? [e.pricePerUnit, e.unit] : null
+  }
+  const lfIndex = buildPriceIndex(PRICE_DEFAULTS.map((d) => ({ ...d, isDefault: true })))
+  const lfYen = (name, amount, unit) => estimateIngredientYen({ name, amount, unit }, lfIndex)?.yen ?? null
+  const lfPerServing = (title) => {
+    const def = starterDefs.find((d) => d.title === title)
+    return def ? Math.round(estimateRecipeCost(def.ingredients, lfIndex).total / def.servings) : null
+  }
+
+  // --- LF-1: 直した行そのもの（値と単位）。根拠は priceDefaults.ts の同じ行のコメント ---
+  for (const [name, pricePerUnit, unit] of [
+    ['乾燥わかめ', 270, '10g'],
+    ['カットわかめ', 270, '10g'],
+    ['乾燥芽ひじき', 220, '10g'],
+    ['昆布', 1200, '100g'],
+    ['塩昆布', 75, '10g'],
+    ['切り干し大根', 460, '50g'],
+    ['高野豆腐', 220, '5枚'],
+    ['しらたき', 200, '1袋'],
+    ['ピザ用チーズ', 530, '200g'],
+    ['生クリーム', 500, '200ml'],
+    ['鶏ささみ', 65, '1本'],
+  ]) {
+    eq(`LF-1 「${name}」の目安価格が ${pricePerUnit}円/${unit}`, lfEntry(name), [pricePerUnit, unit])
+  }
+  // 乾燥わかめとカットわかめは同じ食品の書き方ちがい。**値がずれると、同じ材料なのに
+  // 書き方で原価が変わる**ので、2行そろって同じ値であることを見る
+  eq('LF-1 乾燥わかめとカットわかめは同じ値', lfEntry('乾燥わかめ'), lfEntry('カットわかめ'))
+
+  // --- LF-2: 調べ直したうえで動かさなかったもの（「実測とずれている」と言って動かさないための留め） ---
+  // 鶏手羽先: 使える実売が1件だけ（ヤオコー「国産香味どり手羽先」250g 264.6円 ＝106円/100g）。
+  // 1本＝35gで37円になり、いまの40円との差は3円。物差しの「1件しか取れなかったものは動かさない」に従う
+  eq('LF-2 鶏手羽先は単一ソースなので40円/1本のまま', lfEntry('鶏手羽先'), [40, '1本'])
+  // ピン留めされている4件は、実勢を書き残したうえで**値を動かしていない**
+  eq('LF-2 鶏もも肉はピン留めのまま', lfEntry('鶏もも肉'), [130, '100g'])
+  eq('LF-2 鶏むね肉はピン留めのまま', lfEntry('鶏むね肉'), [90, '100g'])
+  eq('LF-2 牛乳はピン留めのまま', lfEntry('牛乳'), [200, '1L'])
+  eq('LF-2 卵はピン留めのまま', lfEntry('卵'), [25, '1個'])
+
+  // --- LF-3: 実際の分量で按分できる（単位を変えていないので、今までどおり数字が出る） ---
+  eq('LF-3 乾燥わかめ2gは54円', lfYen('乾燥わかめ', '2', 'g'), 54)
+  eq('LF-3 乾燥芽ひじき15gは330円', lfYen('乾燥芽ひじき', '15', 'g'), 330)
+  eq('LF-3 昆布10gは120円', lfYen('昆布', '10', 'g'), 120)
+  eq('LF-3 高野豆腐3枚は132円', lfYen('高野豆腐', '3', '枚'), 132)
+  eq('LF-3 鶏ささみ2本は130円', lfYen('鶏ささみ', '2', '本'), 130)
+  eq('LF-3 しらたき1袋は200円', lfYen('しらたき', '1', '袋'), 200)
+
+  // --- LF-4: 同梱109品で動いた品の1食あたり（動いたのは12品だけ） ---
+  for (const [title, before, after] of [
+    ['ひじきの煮物', 50, 196],
+    ['きゅうりとわかめの酢の物', 58, 122],
+    ['切り干し大根のハリハリ漬け', 67, 166],
+    ['しらたきのチャプチェ風', 194, 254],
+    ['だしのとり方', 70, 110],
+    ['豆腐とわかめの味噌汁', 28, 53],
+    ['キャベツの塩昆布あえ', 83, 106],
+    ['高野豆腐の含め煮', 72, 93],
+    ['豆腐グラタン', 158, 181],
+    ['鶏ささみの梅しそレンジ蒸し', 146, 196],
+    ['ささみとブロッコリーのごま和え', 134, 167],
+  ]) {
+    eq(`LF-4 「${title}」の1食あたりが${before}→${after}円`, lfPerServing(title), after)
+  }
+  // 動いていない品の代表（乾物・海藻・鶏ささみを使っていない品は1円も動かない）
+  eq('LF-4 「寄せ鍋」は動いていない', lfPerServing('寄せ鍋'), 217)
+
+  // --- LF-5: 「最新の目安価格に更新する」で利用者に届く（自分で直した行は守られる） ---
+  // ここが通らないと、直した値は**新しく入れた端末にしか届かない**（版番号を上げるだけでは
+  // 既存の行は入れ替わらない＝priceDefaults.ts 冒頭に書いてある限界）。
+  {
+    const lfOldRows = [
+      // 投入時の目安のままの行（＝入れ替わってほしい）
+      { id: 1, name: '乾燥芽ひじき', pricePerUnit: 25, unit: '10g', isDefault: true, defaultPricePerUnit: 25, defaultUnit: '10g' },
+      { id: 2, name: '昆布', pricePerUnit: 400, unit: '100g', isDefault: true, defaultPricePerUnit: 400, defaultUnit: '100g' },
+      // 自分で価格を直した行（＝1円も触られてほしくない）
+      { id: 3, name: '切り干し大根', pricePerUnit: 150, unit: '50g', isDefault: false, defaultPricePerUnit: 130, defaultUnit: '50g' },
+      // 自分で追加した食材（既定に同じ名前が無い）
+      { id: 4, name: 'うちの手作りだし', pricePerUnit: 300, unit: '1L' },
+    ]
+    const lfPlan = planPriceRefresh(lfOldRows, PRICE_DEFAULTS)
+    eq('LF-5 入れ替わるのは目安のままの2行だけ', lfPlan.targets.map((t) => t.name).sort(), ['乾燥芽ひじき', '昆布'])
+    eq(
+      'LF-5 乾燥芽ひじきは25→220円になる',
+      lfPlan.targets.filter((t) => t.name === '乾燥芽ひじき').map((t) => [t.fromPricePerUnit, t.toPricePerUnit]),
+      [[25, 220]],
+    )
+    eq(
+      'LF-5 昆布は400→1,200円になる',
+      lfPlan.targets.filter((t) => t.name === '昆布').map((t) => [t.fromPricePerUnit, t.toPricePerUnit]),
+      [[400, 1200]],
+    )
+    eq('LF-5 自分で直した行・自分で足した食材は触らない', lfPlan.keptByUser, 2)
+    // すでに新しい値になっている端末では、同じ行がもう対象にならない（押しても何も起きない）
+    const lfNewRows = [
+      { id: 1, name: '乾燥芽ひじき', pricePerUnit: 220, unit: '10g', isDefault: true, defaultPricePerUnit: 220, defaultUnit: '10g' },
+    ]
+    eq('LF-5 もう新しい値の行は対象にならない', planPriceRefresh(lfNewRows, PRICE_DEFAULTS).targets.length, 0)
+    eq('LF-5 もう新しい値の行は「すでに今の目安価格」に数えられる', planPriceRefresh(lfNewRows, PRICE_DEFAULTS).alreadyCurrent, 1)
+  }
+
+  // --- LF-6: 根拠のコメントが無い項目を増やさない見張り（司令部の指示・2026-08-26） ---
+  // 目安価格は「どこの店の・どの商品を・いつ調べたか」が行のすぐ上に書いてあってはじめて、
+  // 次の便が測り直せる。**根拠が書けないものは動かさない**（物差し §3）の裏返しで、
+  // 根拠を書かないまま行を足す・値を直すことを塞ぐ。
+  // いま根拠のコメントが無いのは下の119件で、これは2026-08-26より前から入っていた行。
+  // **この一覧を増やさないこと。**行のすぐ上に根拠を書いたら、その名前をこの一覧から消す
+  // （増えても減っても赤になるので、直したら一緒にここも直す）。
+  {
+    const lfRoot = path.join(path.dirname(fileURLToPath(scriptFileUrl)), '..')
+    const lfSrc = readFileSync(path.join(lfRoot, 'src/data/priceDefaults.ts'), 'utf-8')
+    const lfBody = lfSrc.slice(lfSrc.indexOf('export const PRICE_DEFAULTS: PriceDefaultItem[] = ['))
+    const lfWithoutSource = []
+    let lfHasComment = false
+    for (const rawLine of lfBody.split('\n')) {
+      const line = rawLine.trim()
+      const item = line.match(/^\{ name: '(.+?)', pricePerUnit: (\d+), unit: '(.+?)' \},$/)
+      if (item) {
+        if (!lfHasComment) lfWithoutSource.push(item[1])
+        lfHasComment = false
+        continue
+      }
+      if (line.startsWith('//')) lfHasComment = true
+      else if (line !== '') lfHasComment = false
+    }
+    const LF_NO_SOURCE_KNOWN = [
+  'にんじん', 'じゃがいも', 'キャベツ', '白菜', '大根', 'もやし', 'きゅうり', 'トマト',
+  'ピーマン', 'なす', 'ねぎ', 'ほうれん草', 'しめじ', 'えのき', '鶏むね肉', '豚バラ肉',
+  '豚こま切れ肉', '牛こま切れ肉', '合いびき肉', 'さば', '牛乳', '豆腐', 'こんにゃく', 'にら',
+  'ブロッコリー', 'れんこん', '赤唐辛子', 'しょうが', 'パセリ', 'さつまいも', 'さんま', 'すだち',
+  'みょうが', '大葉', '刻みねぎ', '長ねぎ', '豚ひき肉', '豚バラ薄切り', '豚ロース薄切り', '鶏ひき肉',
+  '生鮭', 'ちくわ', 'ベーコン', 'ウインナー', 'むきえび', 'サバ水煮缶', '油揚げ', '生おから',
+  '錦糸卵', '絹ごし豆腐', '蒸し大豆', 'スパゲッティ', '春雨', '冷凍うどん', '食パン', 'パン粉',
+  'オートミール', 'カットわかめ', 'ごま油', 'オリーブオイル', '揚げ油', '酒', 'みりん', '酢',
+  'だし汁', '水またはだし汁', '中濃ソース', 'ケチャップ', 'マヨネーズ', 'ポン酢', 'めんつゆ', 'カレールー',
+  'シチュールー', '鶏がらスープの素', 'おろしにんにく', '塩', '塩こしょう', 'こしょう', '七味唐辛子', '砂糖',
+  '甜麺醤', '豆板醤', '粉山椒', 'ラー油', '紅しょうが', '刻みのり', 'かつお節', '白ごま',
+  '白すりごま', 'すりごま', '黒いりごま', 'いりごま', '白練りごま', 'カットトマト缶', 'みかん缶', 'メープルシロップ',
+  '黒みつ', 'アーモンドエッセンス', 'さわら', '生だら', 'レタス', 'ゴーヤ', '長芋', '万能ねぎ',
+  'まいたけ', 'エリンギ', '梅干し', 'プレーンヨーグルト', '豆乳', 'そうめん', 'グラノーラ', 'こしあん',
+  'キウイ', 'はちみつ', 'オイスターソース', 'コチュジャン', 'カレー粉', '乾燥ハーブ', '卵白',
+    ]
+    eq(
+      'LF-6 根拠のコメントが無い目安価格を増やしていない（増えても減っても赤。直したら一覧から消す）',
+      lfWithoutSource,
+      LF_NO_SOURCE_KNOWN,
+    )
+    eq('LF-6 一覧に同じ名前を2回書いていない', new Set(LF_NO_SOURCE_KNOWN).size, LF_NO_SOURCE_KNOWN.length)
+    // 行の総数と突き合わせる（正規表現が読み落としていたら、ここで気づける）
+    const lfParsedCount = (lfBody.match(/^\s*\{ name: '.+?', pricePerUnit: \d+, unit: '.+?' \},$/gm) ?? []).length
+    eq('LF-6 見張りが価格マスタの全行を読めている', lfParsedCount, PRICE_DEFAULTS.length)
+  }
 }
