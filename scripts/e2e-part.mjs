@@ -146,7 +146,14 @@ writeFileSync(OUT, [...head, ...body, ...tail].join('\n'))
 
 let run
 try {
-  run = spawnSync('npx', ['tsx', OUT], { stdio: ['ignore', 'pipe', 'inherit'], encoding: 'utf-8' })
+  // 2026-08-26: 入口の末尾に「判定の件数が前より少なければ落とす」見張りを足した。
+  // **節だけ走らせるこの道具では必ず少なくなる**ので、そこだけ外す目印を渡す
+  // （見張りの狙いは『フルe2eが途中で実行中断していないか』なので、部分実行には効かせない）。
+  run = spawnSync('npx', ['tsx', OUT], {
+    stdio: ['ignore', 'pipe', 'inherit'],
+    encoding: 'utf-8',
+    env: { ...process.env, E2E_PART: '1' },
+  })
 } finally {
   rmSync(OUT, { force: true })
 }

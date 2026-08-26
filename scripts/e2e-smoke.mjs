@@ -510,7 +510,7 @@ for (const e of errors) console.log(`  ${e}`)
  * 増えた側は赤にしない（検査を足すたびに止まると、足すのが億劫になる）。
  * 減ったときだけ落とし、**直したら `scripts/data/e2e-total-known.json` の数字を上げる**。
  */
-{
+if (!process.env.E2E_PART) {
   const knownPath = path.join(appRoot, 'scripts/data/e2e-total-known.json')
   const known = JSON.parse(readFileSync(knownPath, 'utf-8'))
   const floor = known['最低件数']

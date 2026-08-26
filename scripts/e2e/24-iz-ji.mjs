@@ -1178,12 +1178,21 @@ import './_shared.mjs'
             const P = eval(probeSrc)
             const cell = document.querySelector('button[data-date]')
             const panels = titles.map((t) => P.panelOf(P.byText(t)))
+            // 2026-08-26 便LH（オーナー原文「『期間で絞る』ボタンはカレンダー下へ」）:
+            // 「期間で絞る」は設定の面から出てカレンダーの下へ移った。**同じ面に居ないのが正しい。**
+            // 見張る中身を「2つが同じ面か」から「①設定の面が1枚であること
+            // ②その面にカレンダーが入っていないこと ③期間で絞るがカレンダーより下にあること」へ移す
+            const rangeEl = P.byText(titles[1])
             return {
               cardToken: parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--radius-card')),
               cellRadius: P.radius(cell),
-              panelSame: panels[0] != null && panels.every((p) => p === panels[0]),
+              settingsPanelFound: panels[0] != null,
               panelFound: panels.map((p) => p != null),
               panelHasCalendar: panels[0] != null && cell != null ? panels[0].contains(cell) : null,
+              rangeBelowCalendar:
+                rangeEl != null && cell != null
+                  ? rangeEl.getBoundingClientRect().top > cell.getBoundingClientRect().bottom
+                  : null,
             }
           },
           { probeSrc: jlnProbe, titles: [ja.mealPlan.monthCellModeLabel, ja.mealPlan.rangeCostToggle] },
@@ -1194,9 +1203,14 @@ import './_shared.mjs'
           `トークン=${jlnMonth.cardToken} マス=${jlnMonth.cellRadius}`,
         )
         check(
-          'JEPART-03 月の設定も1枚の面にまとまっている',
-          jlnMonth.panelSame,
+          'JEPART-03 月の設定は1枚の面にまとまっている',
+          jlnMonth.settingsPanelFound,
           `見つかった面=${JSON.stringify(jlnMonth.panelFound)}`,
+        )
+        check(
+          'JEPART-03 「期間で絞る」はカレンダーより下にある（2026-08-26 オーナー指示）',
+          jlnMonth.rangeBelowCalendar === true,
+          `カレンダーより下=${jlnMonth.rangeBelowCalendar}`,
         )
         check(
           'JEPART-03 その面にカレンダーは入っていない（面が終わるところが境目）',
