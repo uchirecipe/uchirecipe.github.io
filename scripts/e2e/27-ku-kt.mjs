@@ -252,8 +252,10 @@ import './_shared.mjs'
       await kuPage.waitForTimeout(1500)
       await openAllWeekDays(kuPage)
       await kuPage.waitForTimeout(600)
+      // 2026-08-26 便LH: 「栄養と食費」は「栄養」「食費」の2節に割れた（買い物メモは別の面）
       const kuGroupNames = [
-        ja.mealPlan.weekGroupNutritionCostTitle,
+        ja.mealPlan.weekGroupNutritionTitle,
+        ja.mealPlan.weekGroupCostTitle,
         ja.mealPlan.weekGroupShoppingTitle,
       ]
       for (const name of kuGroupNames) {
@@ -278,7 +280,7 @@ import './_shared.mjs'
         'KUGROUP-05 畳んでいるあいだ、概算食費の見出しと金額は出さない',
         !stripZwspText(await kuPage.textContent('body')).includes(ja.mealPlan.weekCostTitle),
       )
-      await openWeekGroup(kuPage, ja.mealPlan.weekGroupNutritionCostTitle)
+      await openWeekGroup(kuPage, ja.mealPlan.weekGroupNutritionTitle)
       await kuPage.waitForTimeout(700)
       check(
         'KUGROUP-05 節を1回開くと、週まとめの栄養がその場に出る（入れ子の折りたたみを作らない）',

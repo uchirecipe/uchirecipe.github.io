@@ -457,7 +457,14 @@ function PlanSheetView({ sheet }: { sheet: PlanSheet }) {
    */
   const row = (key: string, label: string, role: string, body: ReactNode, note = false) => (
     <div key={key} className={`sheet-row mt-0.5 flex gap-2 pl-2 ${note ? 'text-xs' : 'text-sm'}`}>
-      <span className="sheet-row-label w-16 shrink-0 pt-[3px] text-[10px] leading-tight text-ink-muted">
+      {/* 2026-08-26 便LH（オーナー原文「朝食昼食夕食の文字は太字に。」）:
+          食事のラベルだけ太字にする。同じ列に出る「この日のメモ」は太字にしない
+          （note=true の行）＝どの行が食事の区切りかが、字の太さだけで拾える */}
+      <span
+        className={`sheet-row-label w-16 shrink-0 pt-[3px] text-[10px] leading-tight text-ink-muted ${
+          note ? '' : 'sheet-slot-label font-bold'
+        }`}
+      >
         {label}
       </span>
       <span className="sheet-role w-8 shrink-0 pt-[3px] text-[10px] leading-tight text-ink-muted">
@@ -483,9 +490,6 @@ function PlanSheetView({ sheet }: { sheet: PlanSheet }) {
                   dish.title,
                 ),
               ),
-            )}
-            {day.cookedTitles.map((title, i) =>
-              row(`cooked-${i}`, i === 0 ? ja.mealPlan.pastCookedTitle : '', '', title),
             )}
             {day.note && row('note', ja.mealPlan.dayNoteLabel, '', day.note, true)}
           </li>

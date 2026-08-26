@@ -2023,6 +2023,7 @@ const NUTRITION_DB_VERSION_FOR_KP = NUTRITION_DATA_FOR_KP.dbVersion
        ja.mealPlan.fillMonthKeptManual, ja.mealPlan.fillMonthNoRoom,
        ja.mealPlan.fillMonthConfirm, ja.mealPlan.fillMonthConfirmTitle,
        ja.mealPlan.templateApplyConfirm, ja.mealPlan.templateApplyConfirmTitle,
+       ja.mealPlan.fillMonthRangeConfirmTitle,
        ja.mealPlan.templateApplyNoRoom].filter((t) => t.includes('食分')),
       [],
     )
@@ -2056,7 +2057,8 @@ const NUTRITION_DB_VERSION_FOR_KP = NUTRITION_DATA_FOR_KP.dbVersion
       'KT-6 画面が品で数える関数を使っている（枠の数をそのまま出していない）',
       [
         /const preserved = preservedItemCount\(plan, entries \?\? \[\]\)/.test(ktRead('src/pages/MealPlanPage.tsx')),
-        /const preserved = preservedItemCount\(plan, monthEntries \?\? \[\]\)/.test(ktRead('src/pages/MealPlanPage.tsx')),
+        // 2026-08-26 便LH: 月タブの対象が「表示している月 or 選んだ期間」になったので monthTargetEntries
+        /const preserved = preservedItemCount\(plan, monthTargetEntries\)/.test(ktRead('src/pages/MealPlanPage.tsx')),
         ktRead('src/pages/MealPlanPage.tsx').includes('plan.keptItemCount'),
       ],
       [true, true, true],

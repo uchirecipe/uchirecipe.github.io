@@ -600,8 +600,8 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs'
     ['週タブ・まとめて献立を入力の説明', ja.mealPlan.fillModeReplaceAllHint],
     ['月タブ・献立をまとめて提案', ja.mealPlan.fillMonthConfirm],
     ['月タブ・献立をまとめて提案（残る献立が無いとき）', ja.mealPlan.fillMonthConfirmNoKept],
+    // 2026-08-26 便LH: 残る献立の有無で文を分けるのをやめ、1つにまとめた
     ['テンプレートを入れる', ja.mealPlan.templateApplyConfirm],
-    ['テンプレートを入れる（残る献立が無いとき）', ja.mealPlan.templateApplyConfirmNoKept],
   ]
   for (const [where, text] of planOnlyTexts) {
     eq(
@@ -1794,6 +1794,12 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs'
     'ja.mealPlan.templateSave': '「まとめてやテンプレートのような初心者が使わないような機能はしまっておく」（便IVのオーナーの訂正）',
     'ja.mealPlan.templateApplyWeek': '同上',
     'ja.mealPlan.copyPickTitle': '同上（過去の献立をコピー。テンプレートと同じ節にある）',
+    // 2026-08-26 便LH（オーナー原文「献立関連のボタンがバラバラに配置してあるように見えるので、
+    // １グループにまとめて。折りたたみの見える部分は「献立をまとめて提案」のみ。」）:
+    // 月タブのテンプレートも、週タブと同じ「しまっておく」側へ入った。
+    // 畳んでいても押せるのは「献立をまとめて提案」だけ、というオーナーの名指しどおりの形
+    'ja.mealPlan.templateApplyMonth': '月タブの献立の節も「見える部分は献立をまとめて提案のみ」（便LHのオーナー指示）',
+    'ja.mealPlan.templateApplyRange': '同上（期間で絞っているときの同じボタン）',
     // 「まとめて献立を入力」の実行ボタンは折りたたみの外＝節の見出しの横にある
     // （2026-08-20 便II・③ → 2026-08-22 便IVで見出しの横へ。オーナー原文
     //  「「まとめて献立てを入力」ボタンは「献立を提案」の横にして、１列におさめて。」）。

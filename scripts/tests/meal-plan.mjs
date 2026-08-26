@@ -1895,7 +1895,9 @@ eq('rangeDayCount: 月をまたぐ計算も正しい', rangeDayCount('2026-06-28
 
 // ---------- 献立表(A-4 印刷／画像化)・2026-07-29 便CB-2・docs/59 ----------
 // 紙(印刷HTML)・画面・画像(Canvas)の3つが同じこの結果を読む＝内容がずれないことをここで固定する。
-// 何を載せるかの規則はアプリの他の画面と同じ: 過ぎた日=作った記録・今日から先=登録した献立(＋日付メモ)
+// 2026-08-26 便LH（オーナー原文「献立表の内容は、すべて予定（朝昼夕の表示）。作った記録にしない。
+// 記録になっている過去のデータも、予定と同じフォーマットで表示したい。」）:
+// 載せるのは**登録した献立だけ**になった。過ぎた日も今日から先と同じ食事の行で出す（＋日付メモ）
 {
   const { buildPlanSheet, planSheetLines, formatSheetDayLabel } = await import(
     '../../src/logic/planSheet.ts'
@@ -1904,28 +1906,31 @@ eq('rangeDayCount: 月をまたぐ計算も正しい', rangeDayCount('2026-06-28
   const sheet = buildPlanSheet({
     title: '7/28〜7/30の献立',
     dates: ['2026-07-28', '2026-07-29', '2026-07-30'],
-    today: '2026-07-29',
     visibleSlots: ['breakfast', 'dinner'],
     // 2026-08-02 オーナー指示で既定は「登録のない日を省く」。この一式は3日とも中身があるので
     // 省いても日数は変わらない(省く挙動そのものは下の専用ケースで固定する)
     entries: [
-      { date: '2026-07-28', slot: 'dinner', role: 'main', recipeId: 30 }, // 過去日の未達成予定
+      { date: '2026-07-28', slot: 'dinner', role: 'main', recipeId: 30 }, // 過ぎた日の献立
       { date: '2026-07-29', slot: 'dinner', role: 'side', recipeId: 20 },
       { date: '2026-07-29', slot: 'dinner', role: 'main', recipeId: 10 },
       { date: '2026-07-30', slot: 'lunch', role: 'main', recipeId: 10 }, // 表示していない食事
     ],
     titleOf: (id) => titles[id],
     notes: new Map([['2026-07-30', '外食']]),
-    cookedTitlesByDate: new Map([['2026-07-28', ['カレー']]]),
   })
   eq('献立表: 日付見出しは「7/29（水）」の形', formatSheetDayLabel('2026-07-29'), '7/29（水）')
   eq(
-    '献立表: 過ぎた日は予定を載せず、作った記録だけを載せる(画面の扱いと同じ)',
-    [sheet.days[0].slots.length, sheet.days[0].cookedTitles],
-    [0, ['カレー']],
+    '献立表(便LH): 過ぎた日も今日から先と同じ「食事の行」で載せる(作った記録の形にしない)',
+    sheet.days[0].slots.map((s) => [s.slot, s.label, s.dishes.map((d) => `${d.role}:${d.title}`)]),
+    [['dinner', '夕食', ['main:カレー']]],
   )
   eq(
-    '献立表: 今日以降は登録した献立を主菜→副菜の順に載せる',
+    '献立表(便LH): 作った記録は献立表に載せない(1日分の形にも残っていない)',
+    'cookedTitles' in sheet.days[0],
+    false,
+  )
+  eq(
+    '献立表: 登録した献立を主菜→副菜の順に載せる',
     sheet.days[1].slots.map((s) => [s.slot, s.dishes.map((d) => `${d.role}:${d.title}`)]),
     [['dinner', ['main:肉じゃが', 'side:きんぴらごぼう']]],
   )
@@ -1936,29 +1941,25 @@ eq('rangeDayCount: 月をまたぐ計算も正しい', rangeDayCount('2026-06-28
     buildPlanSheet({
       title: 'x',
       dates: ['2026-07-30'],
-      today: '2026-07-29',
       visibleSlots: ['dinner'],
       entries: [{ date: '2026-07-30', slot: 'dinner', role: 'main', recipeId: 999 }],
       titleOf: () => undefined,
       notes: new Map(),
-      cookedTitlesByDate: new Map(),
       // 孤児行そのものが載らないことを見たいので、空の日を省く既定は切って日を残す
       includeEmptyDays: true,
     }).days[0].slots.length,
     0,
   )
-  eq('献立表: 献立も記録もメモも無ければ白紙と分かる(呼び出し側が案内を出す)', sheet.isEmpty, false)
+  eq('献立表: 献立もメモも無ければ白紙と分かる(呼び出し側が案内を出す)', sheet.isEmpty, false)
   eq(
     '献立表: 空の期間は isEmpty=true',
     buildPlanSheet({
       title: 'x',
       dates: ['2026-07-30'],
-      today: '2026-07-29',
       visibleSlots: ['dinner'],
       entries: [],
       titleOf: () => undefined,
       notes: new Map(),
-      cookedTitlesByDate: new Map(),
     }).isEmpty,
     true,
   )
@@ -1970,7 +1971,7 @@ eq('rangeDayCount: 月をまたぐ計算も正しい', rangeDayCount('2026-06-28
     lines.map((l) => `${l.kind}:${l.label ?? ''}:${l.role ?? ''}:${l.text}`),
     [
       'day:::7/28（火）',
-      'dish:作った記録::カレー',
+      'dish:夕食:主菜:カレー',
       'day:::7/29（水）',
       'dish:夕食:主菜:肉じゃが',
       'dish::副菜:きんぴらごぼう',
@@ -1986,12 +1987,10 @@ eq('rangeDayCount: 月をまたぐ計算も正しい', rangeDayCount('2026-06-28
     const sparseArgs = {
       title: 'x',
       dates: ['2026-07-28', '2026-07-29', '2026-07-30'],
-      today: '2026-07-28',
       visibleSlots: ['dinner'],
       entries: [{ date: '2026-07-29', slot: 'dinner', role: 'main', recipeId: 10 }],
       titleOf: (id) => titles[id],
       notes: new Map(),
-      cookedTitlesByDate: new Map(),
     }
     eq(
       '献立表: 既定では登録のない日を載せない(2026-08-02)',
@@ -2031,7 +2030,6 @@ eq('rangeDayCount: 月をまたぐ計算も正しい', rangeDayCount('2026-06-28
     const longSheet = buildPlanSheet({
       title: 'x',
       dates: ['2026-07-30'],
-      today: '2026-07-29',
       visibleSlots: ['dinner'],
       entries: [
         { date: '2026-07-30', slot: 'dinner', role: 'main', recipeId: 1 },
@@ -2045,7 +2043,6 @@ eq('rangeDayCount: 月をまたぐ計算も正しい', rangeDayCount('2026-06-28
           3: '白菜とにんじんの中華とろみ煮',
         })[id],
       notes: new Map(),
-      cookedTitlesByDate: new Map(),
     })
     // 2026-08-02: 料理を1品1行にしたので、1行に載るのは料理名1つだけになった。
     // 便CH/C6の趣旨（画像だけ料理名が「…」で欠けるのを防ぐ）は、いちばん長い料理名が

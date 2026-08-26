@@ -476,7 +476,7 @@ import './_shared.mjs'
     }
   }
 
-  // --- MEALPLAN-07: 献立タブ・月タブ「期間の食費と栄養」
+  // --- MEALPLAN-07: 献立タブ・月タブ「期間で絞る」
   // (2026-07-17 便AB → 2026-07-28 便CAでオーナー確定仕様に改訂)。
   //
   // 【旧テストを書き換えた理由】便CAでオーナー確定の仕様変更が2点入り、旧テストが固定していた
@@ -643,12 +643,27 @@ import './_shared.mjs'
 
       // 日セルは data-date で掴む(予定プレビュー・数字が入っても壊れない)
       const rcDay = (date) => rcPage.locator(`button[data-date="${date}"]`)
-      // 2026-08-19 便HV・⑦: ボタン名は「期間で絞る」(結果カードの見出しは「期間の食費と栄養」のまま)
+      // 2026-08-19 便HV・⑦: ボタン名は「期間で絞る」（2026-08-26 便LHでカレンダーの下へ移った）
       const rcModeBtn = rcPage.getByRole('button', { name: ja.mealPlan.rangeCostToggle, exact: true })
       // 便DRで期間カードも月タブと同じ体裁(食費の表＋折りたたみ)になったため、
       // 本文全体ではなくカード/表を掴んで読む(同じ画面に月の食費の表があり、文言が重なるため)
       const rcCard = rcPage.locator('[data-testid="range-result-card"]')
       const rcTable = rcPage.locator('[data-testid="range-cost-table"]')
+      /* 2026-08-26 便LH（オーナー原文「１ヶ月分の内容が、そのまま絞った期間の内容に書き変わるのが
+         ベスト。」）: 期間を選んでも**別のカードは増えず**、月の食費・栄養のカードの中身が
+         そのまま期間のものに入れ替わる。カードは既定で畳んであるので、中身を読む前に開く。
+         掴むのは data-testid（見出しの文字は月・期間で入れ替わるので書き写さない・禁じ手②④） */
+      const rcOpenCard = async (testId) => {
+        const btn = rcPage.locator(`[data-testid="${testId}"]`)
+        if ((await btn.count()) === 0) return
+        if ((await btn.first().getAttribute('aria-expanded')) === 'true') return
+        await btn.first().click()
+        await rcPage.waitForTimeout(350)
+      }
+      const rcOpenCards = async () => {
+        await rcOpenCard('month-cost-toggle')
+        await rcOpenCard('month-nutrition-toggle')
+      }
       const rcNextMonthBtn = rcPage.getByRole('button', { name: ja.mealPlan.nextMonth, exact: true })
       const rcPrevMonthBtn = rcPage.getByRole('button', { name: ja.mealPlan.prevMonth, exact: true })
 
@@ -680,9 +695,17 @@ import './_shared.mjs'
         'MEALPLAN-07 終了日タップ後も日モーダルは開かない',
         (await rcPage.locator('[role="dialog"]').count()) === 0,
       )
+      await rcOpenCards()
       const rcFutureText = (await rcPage.textContent('body')) ?? ''
-      check('MEALPLAN-07 結果カードの見出しが出る', rcFutureText.includes('期間の食費と栄養'))
-      check('MEALPLAN-07 結果カードに日数(6日間)が出る', rcFutureText.includes('6日間'))
+      check(
+        // 2026-08-26 便LH: 「期間の食費と栄養」のカードは廃止し、月の2枚の中身が入れ替わる形にした。
+        // 選んだ期間はカレンダーの下の1行が名乗る
+        'MEALPLAN-07(便LH) 月の食費・栄養のカードが「選んだ期間の」に入れ替わる',
+        rcFutureText.includes(ja.mealPlan.rangeCostCardTitle) &&
+          rcFutureText.includes(ja.mealPlan.rangeNutritionCardTitle),
+        `本文=${rcFutureText.slice(0, 60)}`,
+      )
+      check('MEALPLAN-07 選んだ期間の1行に日数(6日間)が出る', rcFutureText.includes('6日間'))
       check(
         'MEALPLAN-07(便CA③) 未来だけの期間は「登録した献立で計算」と明示する',
         rcFutureText.includes(ja.mealPlan.rangeBasisPlanOnly),
@@ -779,6 +802,7 @@ import './_shared.mjs'
       await rcPage.waitForTimeout(200)
       await rcDay(`${rcNextPrefix}-03`).click()
       await rcPage.waitForTimeout(300)
+      await rcOpenCards()
       const rcSwappedText = (await rcPage.textContent('body')) ?? ''
       check(
         'MEALPLAN-07 終了日<開始日タップでも自動で入れ替わり同じ範囲になる(6日間)',
@@ -804,6 +828,7 @@ import './_shared.mjs'
       await rcPage.waitForTimeout(200)
       await rcDay(`${rcPrevPrefix}-10`).click()
       await rcPage.waitForTimeout(300)
+      await rcOpenCards()
       const rcPastText = (await rcPage.textContent('body')) ?? ''
       check(
         // 2026-08-22 司令部: 文言を**書き写していた**ため、月の期間カードから「過ぎた日なので、」を
@@ -855,6 +880,7 @@ import './_shared.mjs'
       await rcPage.waitForTimeout(200)
       await rcDay(`${rcPrevPrefix}-22`).click()
       await rcPage.waitForTimeout(300)
+      await rcOpenCards()
       check(
         'MEALPLAN-07(便CA) 記録も予定も無い期間は空案内を出す',
         ((await rcPage.textContent('body')) ?? '').includes(
@@ -873,6 +899,7 @@ import './_shared.mjs'
         await rcPage.waitForTimeout(200)
         await rcDay(`${rcCurPrefix}-${String(rcCurLastDay).padStart(2, '0')}`).click()
         await rcPage.waitForTimeout(300)
+        await rcOpenCards()
         const rcMixedText = (await rcPage.textContent('body')) ?? ''
         check(
           'MEALPLAN-07(便CA③) 混在期間は「◯/◯〜◯/◯は作った記録、◯/◯〜◯/◯は登録した献立で計算しています」と区別して出す',
@@ -1166,6 +1193,20 @@ import './_shared.mjs'
       await eaPage.waitForTimeout(600)
       const eaCard = eaPage.locator('[data-testid="range-result-card"]')
       check('RANGE-EA(便EA-2b) 日付欄だけで期間の結果カードが出る', await eaCard.isVisible())
+      /* 2026-08-26 便LH: 期間を選ぶと、月の食費・栄養のカードの中身がそのまま入れ替わる
+         （別のカードは増えない）。カードは既定で畳んであるので、中身を読む前に開く */
+      const eaOpenCard = async (testId) => {
+        const btn = eaPage.locator(`[data-testid="${testId}"]`)
+        if ((await btn.count()) === 0) return
+        if ((await btn.first().getAttribute('aria-expanded')) === 'true') return
+        await btn.first().click()
+        await eaPage.waitForTimeout(350)
+      }
+      const eaOpenCards = async () => {
+        await eaOpenCard('month-cost-toggle')
+        await eaOpenCard('month-nutrition-toggle')
+      }
+      await eaOpenCards()
       const eaTodayCardText = (await eaCard.textContent()) ?? ''
       check(
         'RANGE-EA(便EA-3) 今日の「作った記録」1品と、まだ作っていない献立1品を分けて数える',
@@ -1175,10 +1216,12 @@ import './_shared.mjs'
         `カード=${eaTodayCardText.match(/.{0,20}1食分ずつ足して算出した数値です/)?.[0]}`,
       )
       check(
+        // 2026-08-26 便LH: 数え方の1行は、数字より先に読めるようカレンダーの下（選んだ期間の1行の
+        // すぐ下）へ移した。カードの中ではなく画面全体から読む
         'RANGE-EA(便EA-3) 基準行が「今日は、作った記録があるものは記録…」と言う',
-        eaTodayCardText.includes(
-          '今日は、作った記録があるものは記録、まだのものは登録した献立で計算しています',
-        ),
+        ((await eaPage.textContent('body')) ?? '')
+          .replaceAll('\u200b', '')
+          .includes(ja.mealPlan.rangeBasisToday),
       )
 
       // ---------- EA-2a: 選んだ期間の文字が大きい ----------
@@ -1199,6 +1242,7 @@ import './_shared.mjs'
       // ---------- EA-2b: 月をまたぐ期間も計算する ----------
       await eaStartInput.fill(eaLastMonth)
       await eaPage.waitForTimeout(800)
+      await eaOpenCards()
       const eaCrossText = (await eaCard.textContent()) ?? ''
       check(
         'RANGE-EA(便EA-2b) 月をまたぐ期間でも、表示中の月の外の「作った記録」を数える(記録2品)',
@@ -1694,7 +1738,7 @@ import './_shared.mjs'
           ),
       )
       check(
-        'SHOPRANGE-EA(既定) ボタン名は従来どおり「表示している週の買い物メモを作る」',
+        'SHOPRANGE-EA(既定) 絞っていないときのボタン名は「買い物メモを作る」(便LH)',
         await srPage.getByRole('button', { name: ja.mealPlan.goToShopping }).isVisible(),
       )
       const srCountDraft = () => srPage.locator('textarea').count()
@@ -1868,8 +1912,8 @@ import './_shared.mjs'
       )
       // 未設定のときの概算食費(合計金額)と注記を控える
       const hhOpenCost = async () => {
-        // 2026-08-25 便KU: 概算食費は「栄養と食費」の節の中（節を開けば金額まで出る）
-        await openWeekGroup(hhPage, ja.mealPlan.weekGroupNutritionCostTitle)
+        // 2026-08-25 便KU: 概算食費は節の中（節を開けば金額まで出る。名前は便LHで「食費」）
+        await openWeekGroup(hhPage, ja.mealPlan.weekGroupCostTitle)
         await hhPage.waitForTimeout(500)
         const text = (await hhPage.textContent('body')) ?? ''
         return {

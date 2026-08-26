@@ -342,9 +342,9 @@ import './_shared.mjs'
       await mpPage.getByText('肉じゃが', { exact: true }).first().click()
       await mpPage.waitForTimeout(400)
       // 2026-07-24 便BH-3・タスク4: 概算食費は小さな折りたたみ(既定閉)になった。
-      // 2026-08-25 便KU: その折りたたみは「栄養と食費」の節に一本化された（入れ子にしない）。
-      // 開いて初めて見出し・金額・リンクが出る
-      await openWeekGroup(mpPage, ja.mealPlan.weekGroupNutritionCostTitle)
+      // 2026-08-25 便KU: その折りたたみは節に一本化された（入れ子にしない）。
+      // 2026-08-26 便LH: 節は「栄養」「食費」に割れたので、金額は「食費」の節を開いて読む
+      await openWeekGroup(mpPage, ja.mealPlan.weekGroupCostTitle)
       await mpPage.waitForTimeout(500)
       const mpAssignedText = await mpPage.textContent('body')
       check('MEALPLAN-01(Fix3) 割り当てると概算食費セクションが出る', mpAssignedText.includes(ja.mealPlan.weekCostTitle))
@@ -685,9 +685,9 @@ import './_shared.mjs'
         'NUTRI-DAY-01(docs/60 §7 未決#3) 野菜量は無料でも1行に出る',
         /野菜約[\d,]+g/.test(nbFilledText),
       )
-      // 2026-08-25 便KU: 週まとめの栄養は「栄養と食費」の節の中（既定は畳んである）。
+      // 2026-08-25 便KU: 週まとめの栄養は節の中（既定は畳んである）。2026-08-26 便LHで節は「栄養」。
       // **節を開いてから**読む＝上の nbFilledText（節を開く前の画面）では出ていない
-      await openWeekGroup(nbPage, ja.mealPlan.weekGroupNutritionCostTitle)
+      await openWeekGroup(nbPage, ja.mealPlan.weekGroupNutritionTitle)
       await nbPage.waitForTimeout(600)
       check(
         'NUTRI-WEEK-01 週まとめに「表示している週の献立の栄養（1人分の概算）」が出る',
@@ -790,8 +790,8 @@ import './_shared.mjs'
       )
 
       // 週まとめを展開: 目安は日数で掛けず、1日分の基準を説明文1行で書く(便CW-7)
-      // 2026-08-25 便KU: 週まとめの栄養は「栄養と食費」の節の中（既定は畳んである）
-      await openWeekGroup(nbPage, ja.mealPlan.weekGroupNutritionCostTitle)
+      // 2026-08-25 便KU: 週まとめの栄養は節の中（既定は畳んである。節の名前は便LHで「栄養」）
+      await openWeekGroup(nbPage, ja.mealPlan.weekGroupNutritionTitle)
       await nbPage.waitForTimeout(500)
       await nbPage.getByRole('button', { name: ja.nutritionBalance.weekToggleExpand }).click()
       await nbPage.waitForTimeout(400)
@@ -855,7 +855,7 @@ import './_shared.mjs'
       await nbPage.getByRole('button', { name: ja.mealPlan.viewWeek, exact: true }).click()
       await openAllWeekDays(nbPage) // 便ID・⑦: 畳む既定になったので、カードの中を触る前に開く
       await nbPage.waitForTimeout(400)
-      await openWeekGroup(nbPage, ja.mealPlan.weekGroupNutritionCostTitle) // 便KU
+      await openWeekGroup(nbPage, ja.mealPlan.weekGroupNutritionTitle) // 便KU→便LH
       await nbPage.waitForTimeout(500)
       await nbPage.getByRole('button', { name: ja.nutritionBalance.weekToggleExpand }).click()
       await nbPage.waitForTimeout(400)
@@ -864,8 +864,8 @@ import './_shared.mjs'
         await nbPage.locator('[data-testid="include-rice"]').first().isChecked(),
       )
       // 食費にも同じ選択が効き、何を足した金額なのかを必ず書く
-      // （2026-08-25 便KU: 概算食費は「栄養と食費」の節の中）
-      await openWeekGroup(nbPage, ja.mealPlan.weekGroupNutritionCostTitle)
+      // （2026-08-25 便KU: 概算食費は節の中。2026-08-26 便LHで「食費」の節に分かれた）
+      await openWeekGroup(nbPage, ja.mealPlan.weekGroupCostTitle)
       await nbPage.waitForTimeout(500)
       check(
         'NUTRI-DAY-01(便CW-10) 週の概算食費に「ごはん◯杯分を含めた金額です」を添える',

@@ -3365,11 +3365,13 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs'
   )
   // 2026-08-25 便KU: 7日分のカードの下にあった4つを「栄養と食費」「買い物メモ」の2節に
   // まとめたので、節は3つ→5つになった（オーナー原文「買い物メモ、栄養と食費、
-  // それぞれでまとめて表示する（ページ頭の設定のように）」）
+  // それぞれでまとめて表示する（ページ頭の設定のように）」）。
+  // 2026-08-26 便LH: その「栄養と食費」を栄養／食費に割ったので6つ（オーナー原文
+  // 「栄養、食費で列を分けて、それぞれ折りたたみ状態で数値を１列表示。の２つで１グループ。」）
   eq(
-    'IV-1 節はちょうど5つ（表示のしかた・献立を提案・テンプレート・栄養と食費・買い物メモ）',
+    'IV-1 節はちょうど6つ（表示のしかた・献立を提案・テンプレート・栄養・食費・買い物メモ）',
     Object.keys(WEEK_GROUP_DEFAULT_OPEN).sort(),
-    ['auto', 'display', 'nutritionCost', 'shopping', 'template'],
+    ['auto', 'cost', 'display', 'nutrition', 'shopping', 'template'],
   )
 
   // --- IV-2: 編集モードは1日ずつ ---
@@ -4042,22 +4044,38 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs'
     true,
   )
 
-  // ---- KU-6: 7日分の下を2つの囲みにまとめる ----
+  // ---- KU-6 → LH-1: 7日分の下は「栄養／食費」の1グループ＋別の面の「買い物メモ」 ----
+  // 2026-08-26 便LH（オーナー原文「栄養、食費で列を分けて、それぞれ折りたたみ状態で
+  // 数値を１列表示。の２つで１グループ。買い物めもはくっつけない。」）。
+  // 便KUは3つとも1枚の面に入れていたので、①栄養と食費が1つの折りたたみに同居 ②買い物メモが
+  // 同じ面の中、の2点でオーナーの求めと食い違っていた
   eq(
-    'KU-6 増えた節の既定は上の3つと同じ「畳んだ状態」',
-    [kuGroups.nutritionCost, kuGroups.shopping],
-    [false, false],
+    'LH-1 増えた節の既定は上の3つと同じ「畳んだ状態」',
+    [kuGroups.nutrition, kuGroups.cost, kuGroups.shopping],
+    [false, false, false],
   )
   eq(
-    'KU-6 2つの節はページ頭の設定と同じ1枚の面（.setup-panel）に入る',
-    /className="setup-panel[^"]*">[\s\S]{0,900}?'nutritionCost'/.test(kuPlanSrc) &&
-      /'shopping',[\s\S]{0,1400}?<\/section>\n\n      <\/div>/.test(kuPlanSrc),
+    'LH-1 栄養と食費は別々の折りたたみで、同じ1枚の面（.setup-panel）に入る',
+    /className="setup-panel[^"]*">[\s\S]{0,1400}?'nutrition',[\s\S]{0,3000}?'cost',/.test(kuPlanSrc),
     true,
   )
   eq(
-    'KU-6 節の見出しは上の3つとまったく同じ部品から作る（見出しを2通り作らない）',
-    kuPlanSrc.includes("renderWeekGroupHeader(\n          'nutritionCost'") ||
-      /renderWeekGroupHeader\([\s\S]{0,40}'nutritionCost'/.test(kuPlanSrc),
+    'LH-1 買い物メモは「栄養と食費」の面にくっつけない（別の面に立てる）',
+    // 食費の節が終わって面を閉じたあと、新しい .setup-panel が開いてから買い物メモの節が来る形
+    /'cost',[\s\S]{0,6000}?<\/div>\s*\)\}[\s\S]{0,600}?className="setup-panel[^"]*">[\s\S]{0,600}?'shopping',/.test(
+      kuPlanSrc,
+    ),
+    true,
+  )
+  eq(
+    'LH-1 節の見出しは上の3つとまったく同じ部品から作る（見出しを2通り作らない）',
+    /renderWeekGroupHeader\([\s\S]{0,40}'nutrition',/.test(kuPlanSrc) &&
+      /renderWeekGroupHeader\([\s\S]{0,40}'cost',/.test(kuPlanSrc),
+    true,
+  )
+  eq(
+    'LH-1 畳んだ状態でも数値が1つだけ読める（栄養＝エネルギー／食費＝合計）',
+    /'week-nutrition-folded'/.test(kuPlanSrc) && /'week-cost-folded'/.test(kuPlanSrc),
     true,
   )
   eq(
@@ -4079,9 +4097,27 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs'
     true,
   )
   eq(
-    'KU-6 節の名前は画面に出ている呼び名にそろえる',
-    [ja.mealPlan.weekGroupShoppingTitle, ja.mealPlan.weekGroupNutritionCostTitle],
-    ['買い物メモ', '栄養と食費'],
+    'LH-1 節の名前は画面に出ている呼び名にそろえる',
+    [
+      ja.mealPlan.weekGroupShoppingTitle,
+      ja.mealPlan.weekGroupNutritionTitle,
+      ja.mealPlan.weekGroupCostTitle,
+    ],
+    ['買い物メモ', '栄養', '食費'],
+  )
+  eq(
+    'LH-1 「栄養と食費」を1つにまとめていた頃の文言が残っていない',
+    'weekGroupNutritionCostTitle' in ja.mealPlan,
+    false,
+  )
+  // ---- LH-2: 買い物メモのボタンは目的だけを言う ----
+  // オーナー原文「「表示している週の買い物メモを作る」→「買い物メモを作る」
+  //             詳細は折りたたみの中にあるのでこれで十分。短くして一目で目的がわかる方がいい。」
+  eq('LH-2 買い物メモのボタン名', ja.mealPlan.goToShopping, '買い物メモを作る')
+  eq(
+    'LH-2 範囲を絞ったときだけ「選んだ範囲の」と言い分ける（絞っていないときは名乗らない）',
+    [ja.mealPlan.goToShoppingPicked, ja.mealPlan.goToShopping.includes('週')],
+    ['選んだ範囲の買い物メモを作る', false],
   )
 }
 

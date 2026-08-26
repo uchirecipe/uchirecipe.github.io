@@ -1402,44 +1402,45 @@ import './_shared.mjs'
       await wuPage.keyboard.press('Escape')
       await wuPage.waitForTimeout(400)
 
-      // DP-8: まとめ3つ(栄養価・概算食費・献立表)は7日分と区切り線+広い間隔で分かれ、面を塗らない
+      // DP-8: 7日分の下のまとめは、区切り線+広い間隔で7日分と分かれ、曜日カード(面+影)と
+      // 見た目を分ける。2026-08-26 便LH: まとめは「栄養／食費」の面と「買い物メモ」の面の2枚に
+      // なった（献立表は月タブへ移した）。掴む目印は開閉ボタンの data-testid にする
+      // ＝見出しの文字にも並び順にも依らない（禁じ手②④）。
       // 文言は ja.ts から読むが、evaluate の中は**ブラウザ側**で走るので引数で渡す
       // （中に ja.xxx と書くと ja is not defined になり、そこで実行が中断する）
-      const wuSummary = await wuPage.evaluate((costTitle) => {
-        const wrap = [...document.querySelectorAll('div')].find(
-          (d) =>
-            d.className.includes('border-t') &&
-            d.className.includes('space-lg') &&
-            (d.textContent ?? '').includes('献立表'),
-        )
-        if (!wrap) return null
-        const costSec = [...wrap.querySelectorAll('section')].find((s) =>
-          (s.textContent ?? '').includes(costTitle),
-        )
-        const sheetSec = [...wrap.querySelectorAll('section')].find((s) =>
-          (s.textContent ?? '').includes('献立表'),
-        )
+      const wuSummary = await wuPage.evaluate(() => {
+        const toggle = document.querySelector('[data-testid="week-cost-toggle"]')
+        const panel = toggle?.closest('.setup-panel') ?? null
+        const wrap = panel?.parentElement ?? null
+        const shopPanel = document
+          .querySelector('[data-testid="shop-range-toggle"]')
+          ?.closest('.setup-panel')
         return {
-          wrapCls: wrap.className,
-          costCls: costSec?.className ?? '',
-          sheetCls: sheetSec?.className ?? '',
+          wrapCls: wrap?.className ?? '',
+          panelCls: panel?.className ?? '',
+          costSecCls: toggle?.closest('section')?.className ?? '',
+          samePanelAsShop: panel != null && panel === shopPanel,
+          hasNutrition: !!document.querySelector('[data-testid="week-nutrition-toggle"]'),
         }
-      }, ja.mealPlan.weekCostTitle)
+      })
       check(
-        'WEEKUI-01(便DP-8) まとめ3つは7日分の下に区切り線+広い間隔で分かれている',
+        'WEEKUI-01(便DP-8) まとめは7日分の下に区切り線+広い間隔で分かれている',
         !!wuSummary &&
           wuSummary.wrapCls.includes('border-t') &&
           wuSummary.wrapCls.includes('mt-[var(--space-lg)]'),
         `wrap=${wuSummary?.wrapCls}`,
       )
       check(
-        'WEEKUI-01(便DP-8) まとめの折りたたみは面を塗らない(曜日カード=面と区別。影は2026-08-22 便JEで外した)',
+        'WEEKUI-01(便DP-8→便LH) まとめの節そのものは面を塗らない(囲みの面は .setup-panel が受け持つ)',
         !!wuSummary &&
-          !wuSummary.costCls.includes('bg-surface') &&
-          !wuSummary.costCls.includes('shadow-sm') &&
-          !wuSummary.sheetCls.includes('bg-surface') &&
-          !wuSummary.sheetCls.includes('shadow-sm'),
-        `cost=${wuSummary?.costCls} / sheet=${wuSummary?.sheetCls}`,
+          !wuSummary.costSecCls.includes('bg-surface') &&
+          !wuSummary.costSecCls.includes('shadow-sm'),
+        `cost=${wuSummary?.costSecCls}`,
+      )
+      check(
+        'WEEKUI-01(便LH) 栄養と食費は同じ面、買い物メモは別の面（オーナー「買い物めもはくっつけない」）',
+        !!wuSummary && wuSummary.hasNutrition && wuSummary.samePanelAsShop === false,
+        JSON.stringify(wuSummary),
       )
     } finally {
       await wuBrowser.close()
