@@ -1040,9 +1040,26 @@ import './_shared.mjs'
             (await groupNameInputs.nth(1).inputValue()) === '水' &&
             (await groupNameInputs.nth(2).inputValue()) === 'しょうゆ',
         )
+        // 2026-08-26 便LG: 材料メモは「メモを追加」を押すまで出さない形になった
+        // （**中身がある行は開いたまま**）。それまでは全行にメモ欄が出ていたので
+        // `groupMemoInputs.nth(1)` で「2行目のメモ」を掴めたが、いまは**中身のある行の欄しか無い**ので
+        // nth(1) は存在せず、`inputValue()` が30秒待って**フルe2eごと実行中断**していた（禁じ手④）。
+        // 行の並び順に頼らず、**その材料の行の中**で掴む形にする
+        const memoOfIngredient = async (name) => {
+          const row = uiPage
+            .locator('[data-testid="ingredient-row"]')
+            .filter({ has: uiPage.locator(`input[value="${name}"]`) })
+            .first()
+          const memo = row.locator(`input[placeholder="${ja.form.ingredientMemoPlaceholder}"]`)
+          return (await memo.count()) ? await memo.first().inputValue() : null
+        }
         check(
           'URLIMPORT-11 グループ記号Aは材料名から外れてメモに残る(名前照合を壊さない・C08)',
-          (await groupMemoInputs.nth(1).inputValue()) === 'A',
+          (await memoOfIngredient('水')) === 'A',
+        )
+        check(
+          'URLIMPORT-11 メモが空の行では「メモを追加」の裏に隠れている(2026-08-26 便LG)',
+          (await memoOfIngredient('じゃがいも')) === null,
         )
         const stepTextareas = uiPage.locator('textarea[placeholder="例: じゃがいもを一口大に切る"]')
         check(
