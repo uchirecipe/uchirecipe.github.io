@@ -1800,6 +1800,9 @@ import './_shared.mjs'
       // オーナー指示で削除した。**消したものが戻っていないこと**と、
       // **消しても「栄養から組む」自体は効いたままであること**(枠に purpose が残るのは上で確認済み)を見る
       await p2Page.getByRole('button', { name: '月', exact: true }).click()
+      await p2Page.waitForTimeout(600)
+      // 2026-08-26 便LH: 「栄養から組む」の入口は「献立の入れかた」の折りたたみの中へ移った
+      await openMonthPlanGroup(p2Page)
       await p2Page.waitForTimeout(800)
       const p2NutritionCard = p2Page.getByRole('button', { name: /月の栄養（1人分）/ })
       if (await p2NutritionCard.count()) {

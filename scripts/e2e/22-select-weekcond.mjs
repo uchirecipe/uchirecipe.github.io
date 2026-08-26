@@ -1520,6 +1520,10 @@ import './_shared.mjs'
       await wmPage.waitForTimeout(1800)
       await wmPage.getByRole('button', { name: '月', exact: true }).first().click()
       await wmPage.waitForTimeout(1200)
+      // 2026-08-26 便LH: 月タブの献立まわりは「献立の入れかた」の折りたたみに入り、
+      // 畳んだときに見えるのは「献立をまとめて提案」だけになった（オーナー指示）。
+      // 開かずに掴むと30秒待って**フルe2eごと実行中断**する
+      await openMonthPlanGroup(wmPage)
 
       const wmConditions = wmPage.locator('[data-testid="plan-conditions-open"]')
       check(

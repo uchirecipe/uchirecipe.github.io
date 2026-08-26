@@ -646,3 +646,23 @@ Object.assign(globalThis, {
   selectWeekLayout, setConfirmAnswer, startPreviewServer, stepAppliance, stripZwspText, webkit,
   zlib,
 })
+
+/**
+ * 月タブの「献立の入れかた」の折りたたみを開く（2026-08-26 便LH）。
+ *
+ * オーナー原文「献立関連のボタンがバラバラに配置してあるように見えるので、1グループにまとめて。
+ * **折りたたみの見える部分は「献立をまとめて提案」のみ**」に沿って、
+ * 「現在の条件」「テンプレート」は畳んだ中に入った。**畳んだままだと掴めず30秒待って
+ * 実行中断する**（2026-08-26 に WEEKCOND-02 と PURPOSE-02 で実発。フルe2eが3,451件で止まった）。
+ * すでに開いていれば押さない＝押す回数を決め打ちしない（禁じ手③）。
+ */
+export const openMonthPlanGroup = async (page) => {
+  const opener = page.getByRole('button', {
+    name: ja.mealPlan.weekGroupToggleOpenAria.replace('{group}', ja.mealPlan.monthPlanGroupTitle),
+  })
+  if ((await opener.count()) > 0) {
+    await opener.first().click()
+    await page.waitForTimeout(350)
+  }
+}
+globalThis.openMonthPlanGroup = openMonthPlanGroup
