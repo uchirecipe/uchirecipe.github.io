@@ -2450,6 +2450,10 @@ import './_shared.mjs'
   // にんにく「少々」に1玉60円、ねぎ「大1」に1本100円が乗り、2人分で1食410円と出ていた
   // （厚揚げは食材価格マスタに1件も無く「価格なし」だった）。
   // 直したあと: 厚揚げ1枚60円＋醤油6円＋酒8円＝74円、1食37円。
+  // 2026-08-26 便LF: しょうゆを400→278円/1L（全国銘柄の並）にしたので醤油大匙1が6→4円になり、
+  // 合計72円・1食36円になった。**この節が見張っているのは「1本まるごとの値段が乗らないこと」**で、
+  // 値そのものではない（直す前は1食410円だった）。278円の根拠は src/data/priceDefaults.ts の
+  // しょうゆの行のコメント
   // にんにく「少々」とねぎ「大さじ1」は量が決まらないので金額に入れず「価格が分からない材料」に数える
   {
     currentCheck = 'KECOST-01'
@@ -2467,8 +2471,8 @@ import './_shared.mjs'
     const keCostText = stripZwspText(await page.textContent('body'))
     const perServing = (n) => ja.detail.pricePerServing.replace('{s}', '2').replace('{n}', String(n))
     check(
-      'KECOST-01 「大匙」を大さじとして読み、1食37円になる',
-      keCostText.includes(perServing(37)),
+      'KECOST-01 「大匙」を大さじとして読み、1食36円になる（便LFの前は37円）',
+      keCostText.includes(perServing(36)),
       keCostText.slice(0, 400),
     )
     check(
