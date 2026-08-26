@@ -3649,16 +3649,44 @@ eq('rangeDayCount: 月をまたぐ計算も正しい', rangeDayCount('2026-06-28
         [],
       )
     }
-    // 書き出したあとの説明は「見出しの語＋短い本文」の形にする（目につく語だけで話が分かる）
+    // 書き出したあとの説明は「見出しの語＋短い本文」の形にする（目につく語だけで話が分かる）。
+    // 2026-08-26 オーナー指示（書き溜め0826）「『端末が軽くなるのは』削除。『ファイルの場所』に
+    // 内容だけ箇条書きで移動」で、見出しの語は2つ（ファイルの場所／そのあとのバックアップ）になり、
+    // 「ファイルの場所」の本文は箇条書き（archiveWhereSavedLines）になった
     const LABELLED = [
-      ['ファイルの場所', ja.settings.archiveWhereSavedLabel, ja.settings.archiveWhereSaved],
-      ['端末が軽くなる条件', ja.settings.archiveSpaceLabel, ja.settings.archiveSpaceNote],
+      ['ファイルの場所', ja.settings.archiveWhereSavedLabel, lines(ja.settings.archiveWhereSavedLines).join('')],
       ['そのあとのバックアップ', ja.settings.archiveBackupLabel, ja.settings.archiveBackupNote],
     ]
     for (const [name, label, text] of LABELLED) {
       eq(`IJ-3 ${name}に見出しの語がある`, typeof label === 'string' && label.length > 0 && len(label) <= 12, true)
-      eq(`IJ-3 ${name}の本文が長くなっていない（60字以内）`, len(text) > 0 && len(text) <= 60, true)
+      eq(`IJ-3 ${name}の本文がある`, len(text) > 0, true)
     }
+    // 箇条書きにした「ファイルの場所」は、1行ずつが短いこと（塊に戻さない）
+    eq(
+      'IJ-3 ファイルの場所が箇条書きに分かれている',
+      Array.isArray(ja.settings.archiveWhereSavedLines) && ja.settings.archiveWhereSavedLines.length >= 2,
+      true,
+    )
+    eq(
+      'IJ-3 ファイルの場所の1行が長くなっていない（60字以内）',
+      lines(ja.settings.archiveWhereSavedLines).filter((t) => len(t) > 60),
+      [],
+    )
+    eq(
+      'IJ-3 「端末が軽くなるのは」の見出しの語は残っていない',
+      ['archiveSpaceLabel', 'archiveSpaceNote'].filter((k) => k in ja.settings),
+      [],
+    )
+    // 見出しを消しても、端末が軽くなる条件（外へ移す＋端末の記録を消す）は落としていない
+    {
+      const where = lines(ja.settings.archiveWhereSavedLines).join('\n')
+      eq(
+        'IJ-3 端末が軽くなる条件（外へ移す・端末の記録を消す）が残っている',
+        [/端末の外へ移/.test(where), /端末の記録を消/.test(where)],
+        [true, true],
+      )
+    }
+    eq('IJ-3 そのあとのバックアップの本文が長くなっていない（60字以内）', len(ja.settings.archiveBackupNote) <= 60, true)
 
     // (b) 知らないと事故になる事実が、**アプリの中から**消えていないこと。
     // 言い回しは規約Hで変わり続けるので、事実の核になる語だけを見る。

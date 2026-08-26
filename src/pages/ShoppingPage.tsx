@@ -1043,9 +1043,10 @@ export default function ShoppingPage() {
                 </button>
               </div>
               {/* 後回しの導線(2026-07-29 便CC/C7)。レジ前でその場の判断を強いない。
-                  2026-08-08 オーナー実機フィードバック「あとにする＝キャンセルだから処理を
-                  しないということ？」: 押したとき何が起きるか(＝買い物メモも在庫も変わらない)と、
-                  あとで反映する手順を、押すボタンの名前で書き分ける */}
+                  2026-08-26 オーナー指示(書き溜め0826)「ボタンの名前で意味がわかるため、
+                  説明文２つも削除」: ボタンの下に出していた説明の2行を ja.ts ごと外した。
+                  押しても買い物メモも在庫も書き換えないので、消えるものを並べる必要が無い
+                  (押したあとは completeLaterToast が結果を言う) */}
               <button
                 type="button"
                 onClick={completeLater}
@@ -1053,16 +1054,6 @@ export default function ShoppingPage() {
               >
                 {ja.shopping.completeLater}
               </button>
-              <ul className="space-y-1 text-xs text-ink-muted">
-                {ja.shopping.completeLaterLines.map((line) => (
-                  <li key={line} className="flex gap-1.5">
-                    <span aria-hidden>・</span>
-                    <span className="min-w-0">
-                      {line.replace(/\{n\}/g, String(checkedItems.length))}
-                    </span>
-                  </li>
-                ))}
-              </ul>
             </div>
           </div>
         </div>

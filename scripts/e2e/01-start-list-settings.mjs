@@ -1721,15 +1721,39 @@ import './_shared.mjs'
   }
 
   // --- BANNER-01(2026-07-17設定ゼロベース裁定#1): バックアップ状態バナー。目次チップの下・
-  // 全節共通の常設バナー。未実施は「まだバックアップしていません」、「書き出しへ」はどこからでも
-  // バックアップ節の①書き出しカードへスクロールする(1本スクロール化でタブ切り替えは廃止。
-  // ボタン文言は2026-07-30 便CJ/C7で「今すぐ保存」から改名: 押しても保存はせずスクロールするだけ) ---
+  // 全節共通の常設バナー。「書き出しへ」はどこからでもバックアップ節の①書き出しカードへ
+  // スクロールする(1本スクロール化でタブ切り替えは廃止。ボタン文言は2026-07-30 便CJ/C7で
+  // 「今すぐ保存」から改名: 押しても保存はせずスクロールするだけ)。
+  // 2026-08-26 便LI: 一度もバックアップしていない状態は**警告ではなく「すすめ」**にした
+  // （オーナー原文「いきなり『まだ〜』と出てきても、まだも何も何も説明受けてないけど？」）。
+  // 警告色になっていないことも実DOMで見る ---
   currentCheck = 'BANNER-01'
   await page.evaluate(() => window.scrollTo(0, 0))
   await page.waitForTimeout(200)
   check(
-    'BANNER-01 全節共通のバックアップ状態バナーが見える(未実施表示)',
-    stripZwspText(await page.textContent('body')).includes(ja.settings.backupNever),
+    'BANNER-01 全節共通のバックアップ状態バナーが見える(未実施は「すすめ」)',
+    stripZwspText(await page.textContent('body')).includes(ja.settings.bannerBackupNotYet),
+  )
+  check(
+    'BANNER-01(便LI) 一度も書き出していない人を責める文言が出ていない',
+    !stripZwspText(await page.textContent('body')).includes('まだバックアップしていません'),
+  )
+  {
+    const bannerWarnCls = await page.evaluate((text) => {
+      const btn = Array.from(document.querySelectorAll('button')).find(
+        (b) => (b.textContent ?? '').replace(/\u200B/g, '').trim() === text,
+      )
+      return btn ? `${btn.className} ${btn.parentElement?.className ?? ''}` : null
+    }, ja.settings.bannerBackupNotYet)
+    check(
+      'BANNER-01(便LI) 未実施のバナーは警告色になっていない',
+      bannerWarnCls !== null && !bannerWarnCls.includes('warning'),
+      `class=${bannerWarnCls}`,
+    )
+  }
+  check(
+    'BANNER-01(便LI) 書き出しカードにも「最初のバックアップ」のすすめが出ている',
+    stripZwspText(await page.textContent('body')).includes(ja.settings.backupNotYet),
   )
   await page.getByRole('button', { name: ja.settings.bannerSaveNow, exact: true }).click()
   await waitScrollSettled()

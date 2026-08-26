@@ -243,7 +243,9 @@ import './_shared.mjs'
         (fwSteps[2] ?? '').includes('②を済ませると出るボタンです'),
         fwSteps[2] ?? '',
       )
-      // 疑問④「どこに保存されているのか」
+      // 疑問④「どこに保存されているのか」。
+      // 2026-08-26 便LI（オーナー指示「『端末が軽くなるのは』削除。『ファイルの場所』に内容だけ
+      // 箇条書きで移動」）で、見出しの語は「ファイルの場所」1つになり、本文は箇条書きになった
       const fwWhere = (
         (await fwPage.locator('[data-testid="archive-where-saved"]').innerText().catch(() => '')) ?? ''
       ).replace(/\u200B/g, '')
@@ -258,13 +260,14 @@ import './_shared.mjs'
         'FW-03 日本語のおかしかった旧文（空き容量が戻ります）を出していない',
         !fwArchiveText.includes('空き容量が戻ります'),
       )
-      const fwSpace = (
-        (await fwPage.locator('[data-testid="archive-space-note"]').innerText().catch(() => '')) ?? ''
-      ).replace(/\u200B/g, '')
       check(
         'FW-03 端末が軽くなる条件を「端末の外へ移してから消す」と書いている',
-        fwSpace.includes('端末の外へ移し') && fwSpace.includes('端末の記録を消したとき'),
-        fwSpace,
+        fwWhere.includes('端末の外へ移し') && fwWhere.includes('端末の記録を消す'),
+        fwWhere,
+      )
+      check(
+        'FW-03(便LI) 「端末が軽くなるのは」の見出しの語は出していない',
+        !fwArchiveText.includes('端末が軽くなるのは'),
       )
       const fwArchiveParas = await fwParagraphs('#archive-section')
       const fwArchiveLong = (fwArchiveParas ?? []).filter((t) => t.length > FW_PARAGRAPH_MAX)
