@@ -13,6 +13,7 @@ import { ja } from '../../src/i18n/ja.ts'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
+import { createRequire } from 'node:module'
 
 // ---------- 便CY: 配色トークンの取りこぼし防止(2026-08-02 オーナー確定の面別アクセント) ----------
 // 色は src/index.css と public/about 配下7ファイルが「同じ値を別々に書き写している」構造で、
@@ -2407,4 +2408,230 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs'
       !/const currentSerialized = useMemo\(([\s\S]*?)\n {2}\)/.exec(ljForm)?.[1].includes('photo'),
     true,
   )
+}
+
+// ---------- 便LK: 「中身が無くても通ってしまう検査」を増やさない見張り（LK-1〜LK-4） ----------
+//
+// なぜ要るか（2026-08-25〜26 の実測）: 素通りで合格していた検査が2件見つかった
+// （KU-3＝読む先を間違えてファイル全体を見ていた ／ MEALPLAN-A5＝6秒で消えるトーストを
+// 消えたあとに読んでいた）。どちらも**偶然**見つかったもので、同じ形が他に何件あるかは
+// 誰も知らなかった。2026-08-27 便LK が 1万件を機械で走査し、標本を1件ずつ壊して実測した
+// ところ、次の2つが「壊しても緑のまま」と確定した:
+//
+//   ①e2e の「その要素が出ていない」（count() === 0）は、**目印(data-testid)を書き間違えても
+//     必ず緑**になる。実測: LG-03a・EG-01・JHSAFE-01・KFSALT-01・ES-01・EL-06・JNPAST-04 の
+//     7節で目印を存在しない名前に変えたところ、**7節すべてが緑のまま**だった。
+//   ②`.every(...)` は受け手が空だと中身を1回も見ずに true になる。実測: npm test 側の38件を
+//     空配列に差し替えたところ**33件が緑のまま**で、うち7件は受け手が本当に空になりうる形だった
+//     （その7件は同じ便で直し、直したあと再度空にして全部が赤になることを確かめてある）。
+//
+// ここで見張るのは「**残りが増えていないこと**」。一覧は scripts/data/e2e-vacuous-known.json。
+// 他の見張り（e2e-ja-copy-known.json / ja-meyasu-known.json）と同じ作法で、
+// **増えたら赤・直したら一覧から消す（減っても赤にして一覧の更新を促す）**。
+//
+// **LK-4 はこの見張り自身が素通りしないことを毎回その場で確かめる**（便KVと同じ形）。
+// 走査が壊れて0件になったら「違反なし＝緑」に倒れてしまうので、架空の1件を必ず見つける
+// ことを実行のたびに測る。
+{
+  const lkRoot = path.join(path.dirname(fileURLToPath(scriptFileUrl)), '..')
+  const lkRequire = createRequire(scriptFileUrl)
+  let lkAcorn = null
+  try {
+    lkAcorn = lkRequire('acorn')
+  } catch {
+    lkAcorn = null
+  }
+  eq('LK 前提: 構文解析の道具(acorn)を読める（読めないと見張りが素通りする）', lkAcorn !== null, true)
+
+  const lkKnown = JSON.parse(
+    readFileSync(path.join(lkRoot, 'scripts/data/e2e-vacuous-known.json'), 'utf-8'),
+  )
+
+  /** 木を隅々まで歩く（acorn-walk は入っていないので自前。JM-4 と同じ形） */
+  const lkWalk = (node, fn) => {
+    if (!node || typeof node.type !== 'string') return
+    fn(node)
+    for (const k of Object.keys(node)) {
+      if (k === 'type' || k === 'start' || k === 'end' || k === 'loc') continue
+      const v = node[k]
+      if (Array.isArray(v)) {
+        for (const c of v) if (c && typeof c.type === 'string') lkWalk(c, fn)
+      } else if (v && typeof v.type === 'string') lkWalk(v, fn)
+    }
+  }
+  const lkParse = (code) =>
+    lkAcorn.parse(code, { ecmaVersion: 'latest', sourceType: 'module', locations: true })
+
+  /**
+   * ①「その要素が出ていない」検査が見ている data-testid を集める。
+   * `check(ラベル, (await …locator('[data-testid="X"]').count()) === 0)` の X を拾う。
+   */
+  const lkCollectAbsenceTestIds = (code, where) => {
+    const found = []
+    lkWalk(lkParse(code), (n) => {
+      if (n.type !== 'CallExpression') return
+      if (n.callee.type !== 'Identifier' || n.callee.name !== 'check') return
+      const cond = n.arguments[1]
+      if (!cond) return
+      lkWalk(cond, (m) => {
+        if (m.type !== 'BinaryExpression' || (m.operator !== '===' && m.operator !== '==')) return
+        const zeroSide =
+          m.right.type === 'Literal' && m.right.value === 0
+            ? m.left
+            : m.left.type === 'Literal' && m.left.value === 0
+              ? m.right
+              : null
+        if (!zeroSide) return
+        const text = code.slice(zeroSide.start, zeroSide.end)
+        if (!/\.count\(\)/.test(text)) return
+        for (const hit of text.matchAll(/data-testid[\^$*~|]?="([^"]+)"|getByTestId\(\s*'([^']+)'/g)) {
+          found.push({ id: hit[1] ?? hit[2], at: `${where}:${n.loc.start.line}行目` })
+        }
+      })
+    })
+    return found
+  }
+
+  /**
+   * ②「空の並びでも通る every」を数える。
+   * 受け手が固定の並び（`[…]` / `Array.from`）でなく、同じ判定式で長さも見ていないものだけ。
+   */
+  const lkCountBareEvery = (code) => {
+    let count = 0
+    lkWalk(lkParse(code), (n) => {
+      if (n.type !== 'CallExpression') return
+      if (n.callee.type !== 'Identifier' || (n.callee.name !== 'eq' && n.callee.name !== 'neq'))
+        return
+      for (const cond of [n.arguments[1], n.arguments[2]].filter(Boolean)) {
+        const condText = code.slice(cond.start, cond.end)
+        lkWalk(cond, (m) => {
+          if (m.type !== 'CallExpression') return
+          const prop =
+            m.callee.type === 'MemberExpression' && m.callee.property.type === 'Identifier'
+              ? m.callee.property.name
+              : null
+          if (prop !== 'every') return
+          const recv = code.slice(m.callee.object.start, m.callee.object.end).trim()
+          const fixedLength = recv.startsWith('[') || /Array\.from/.test(recv)
+          if (!fixedLength && !/\.length/.test(condText)) count++
+        })
+      }
+    })
+    return count
+  }
+
+  if (lkAcorn) {
+    // ---- LK-4: 見張り自身が素通りしないことを、その場で確かめる（0件で緑に倒れないか） ----
+    // 架空の検査を1件ずつ食わせて、走査が**必ず拾うこと**を測る。
+    // ここが緑のまま拾えなくなったら、上の2つの数え上げは「違反なし」に化ける。
+    const lkFakeAbsence = `
+      check('架空', (await p.locator('[data-testid="lk-fake-testid"]').count()) === 0)
+      check('架空2', (await p.getByTestId('lk-fake-two').count()) === 0)
+    `
+    eq(
+      'LK-4 見張り自身の確かめ: 架空の「出ていないこと」検査から目印を拾える',
+      lkCollectAbsenceTestIds(lkFakeAbsence, '架空').map((x) => x.id),
+      ['lk-fake-testid', 'lk-fake-two'],
+    )
+    eq(
+      'LK-4 見張り自身の確かめ: 架空の「空でも通る every」を1件と数える',
+      lkCountBareEvery(`eq('架空', rows.every((r) => r.ok), true)`),
+      1,
+    )
+    // 逆に、**直した形は数えない**（直しても件数が減らないなら見張りが役に立たない）
+    eq(
+      'LK-4 見張り自身の確かめ: 長さを見ている every は数えない',
+      lkCountBareEvery(`eq('架空', rows.length > 0 && rows.every((r) => r.ok), true)`),
+      0,
+    )
+    eq(
+      'LK-4 見張り自身の確かめ: 受け手が固定の並びの every も数えない',
+      lkCountBareEvery(`eq('架空', [1, 2].every((r) => r > 0), true)`),
+      0,
+    )
+
+    // ---- LK-1: 「出ていないこと」の検査が見ている目印が、画面のソースに実在すること ----
+    //
+    // 目印が src のどこにも無いと、その検査は**何が起きても必ず緑**になる（改名の取り残し・
+    // 書き間違いが「合格」の顔をして残る）。意図して機能を消したものだけを一覧に残す。
+    const lkSrcText = (() => {
+      const chunks = []
+      const rd = (dir) => {
+        for (const entry of readdirSync(dir, { withFileTypes: true })) {
+          const p = path.join(dir, entry.name)
+          if (entry.isDirectory()) rd(p)
+          else if (/\.(tsx?|css)$/.test(entry.name)) chunks.push(readFileSync(p, 'utf-8'))
+        }
+      }
+      rd(path.join(lkRoot, 'src'))
+      return chunks.join('\n')
+    })()
+    eq('LK-1 前提: 画面のソースを読めている（0文字なら見張りが壊れている）', lkSrcText.length > 100000, true)
+
+    const lkE2eDir = path.join(lkRoot, 'scripts/e2e')
+    const lkAbsence = []
+    for (const file of readdirSync(lkE2eDir).filter((f) => f.endsWith('.mjs'))) {
+      lkAbsence.push(
+        ...lkCollectAbsenceTestIds(readFileSync(path.join(lkE2eDir, file), 'utf-8'), file),
+      )
+    }
+    // 走査そのものが動いていること（e2e の作りが変わって0件になったら気づけるように）
+    eq(
+      'LK-1 前提: e2e の「出ていないこと」検査を拾えている（0件なら見張りが壊れている）',
+      lkAbsence.length > 40,
+      true,
+    )
+
+    const lkKnownAbsent = lkKnown['画面に無い目印を見ている「出ていないこと」の検査'] ?? {}
+    const lkMissing = new Map()
+    for (const { id, at } of lkAbsence) {
+      if (lkSrcText.includes(id)) continue
+      if (!lkMissing.has(id)) lkMissing.set(id, [])
+      lkMissing.get(id).push(at)
+    }
+    const lkGrew = [...lkMissing]
+      .filter(([id]) => !(id in lkKnownAbsent))
+      .map(
+        ([id, at]) =>
+          `目印「${id}」は src のどこにも無いので、この検査は何があっても緑になる（${at.join(' / ')}）。` +
+          '改名の取り残しなら検査のほうを直し、意図して機能を消したのなら scripts/data/e2e-vacuous-known.json に理由を書いて足すこと',
+      )
+    const lkShrank = Object.keys(lkKnownAbsent)
+      .filter((id) => id !== 'これは何' && !lkMissing.has(id))
+      .map(
+        (id) =>
+          `目印「${id}」はもう「画面に無い」ではなくなった（機能が戻ったか検査を直したか）。scripts/data/e2e-vacuous-known.json から消してください`,
+      )
+    eq('LK-1 画面に無い目印を見ている「出ていないこと」の検査が増えていない', lkGrew, [])
+    eq('LK-1 その一覧に、もう当てはまらないものが残っていない', lkShrank, [])
+
+    // ---- LK-2: 「空の並びでも通る every」が増えていないこと ----
+    const lkTestsDir = path.join(lkRoot, 'scripts/tests')
+    let lkEveryNow = 0
+    for (const file of readdirSync(lkTestsDir).filter((f) => f.endsWith('.mjs'))) {
+      lkEveryNow += lkCountBareEvery(readFileSync(path.join(lkTestsDir, file), 'utf-8'))
+    }
+    const lkEveryKnown = lkKnown['空の並びでも通る every の残り']['件数']
+    eq(
+      `LK-2 空の並びでも通る every が増えていない（一覧の${lkEveryKnown}件を超えていない）`,
+      lkEveryNow <= lkEveryKnown ? [] : [`${lkEveryKnown}→${lkEveryNow}件に増えた。新しい検査は「長さも同じ条件で見る」形（例: rows.length > 0 && rows.every(…)）にすること`],
+      [],
+    )
+    eq(
+      'LK-2 直したぶんは一覧の件数も下げる（下げないと次の1件が隠れる）',
+      lkEveryNow >= lkEveryKnown
+        ? []
+        : [`${lkEveryKnown}→${lkEveryNow}件に減った。scripts/data/e2e-vacuous-known.json の「件数」を ${lkEveryNow} に直してください`],
+      [],
+    )
+
+    // ---- LK-3: 素通りの見つけ方そのものを書き残しておく（次の便が同じ走査をやり直せるように） ----
+    // 走査の型と、実測でどれが当たりだったかは CLAUDE.md ではなくこの見張りの頭のコメントにある。
+    // ここでは「一覧のファイルが在ること」だけを見る（消えたら上の突き合わせが全部素通りするため）。
+    eq(
+      'LK-3 素通りの残りの一覧（scripts/data/e2e-vacuous-known.json）が在る',
+      existsSync(path.join(lkRoot, 'scripts/data/e2e-vacuous-known.json')),
+      true,
+    )
+  }
 }
