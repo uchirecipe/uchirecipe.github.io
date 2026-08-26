@@ -1030,9 +1030,32 @@ import './_shared.mjs'
       await tpPage.waitForTimeout(400)
       await tpPage.getByRole('button', { name: ja.mealPlan.nextMonth }).click()
       await tpPage.waitForTimeout(500)
-      await tpPage.getByRole('button', { name: 'テンプレートを適用' }).click()
+      /* 2026-08-26 便LH（オーナー原文「献立関連のボタンがバラバラに配置してあるように見えるので、
+         １グループにまとめて。折りたたみの見える部分は「献立をまとめて提案」のみ。」）:
+         月タブのテンプレートは折りたたみの中へ入った。開いてから押す。
+         入る先が名前から読めるように、ボタン名も「テンプレートをこの月に入れる」になった */
+      check(
+        'MEALPLAN-A1B2(便LH) 畳んでいるあいだ、月の献立の節に出るのは「献立をまとめて提案」だけ',
+        (await tpPage.locator('[data-testid="month-fill-run"]').isVisible()) &&
+          (await tpPage.locator('[data-testid="month-template-apply"]').count()) === 0,
+      )
+      await tpPage.locator('[data-testid="month-plan-group-toggle"]').click()
       await tpPage.waitForTimeout(400)
-      const tpApplyModal = tpPage.getByRole('dialog', { name: 'テンプレートを適用' })
+      check(
+        'MEALPLAN-A1B2(便LH) 開くと、月のテンプレートのボタンが入る先を名乗って出る',
+        (await tpPage.locator('[data-testid="month-template-apply"]').innerText()).includes(
+          ja.mealPlan.templateApplyMonth,
+        ),
+      )
+      check(
+        'MEALPLAN-A1B2(便LH) テンプレートを作れる場所（「週」の画面）も同じ節に書いてある',
+        stripZwspText(await tpPage.textContent('body')).includes(
+          stripZwspText(ja.mealPlan.templateMonthNote),
+        ),
+      )
+      await tpPage.locator('[data-testid="month-template-apply"]').click()
+      await tpPage.waitForTimeout(400)
+      const tpApplyModal = tpPage.getByRole('dialog', { name: ja.mealPlan.templateApply })
       check('MEALPLAN-A1B2(B-2) テンプレートを適用する窓が開く', (await tpApplyModal.count()) === 1)
       check(
         'MEALPLAN-A1B2(B-2) 既定では全曜日が選ばれている(1週間まるごと＝A-1)',
@@ -1111,9 +1134,12 @@ import './_shared.mjs'
   }
 
   // --- MEALPLAN-A4: 献立表の印刷／画像化(2026-07-29 便CB-2・docs/59 A-4)。
-  // 週・月の献立を1枚に整形し、①ブラウザ印刷(画面のUIは紙に出さず献立表だけを出す)
+  // 献立を1枚に整形し、①ブラウザ印刷(画面のUIは紙に出さず献立表だけを出す)
   // ②画像保存(既存のレシピ画像カードと同じCanvas機構)の両方が動くことを確認する。
-  // 日付メモ(A-2)も一緒に載ること・過ぎた日の予定は載せない(画面と同じ規則)ことも見る ---
+  // 日付メモ(A-2)も一緒に載ることも見る。
+  // 2026-08-26 便LH: 置き場所は**月タブの1か所だけ**になった（オーナー原文「献立表は、月と週に
+  // あるが、片方におきたい（月がいいかも）。月なら期間で絞るがそのまま使える。」）。
+  // 載せる中身も「登録した献立」だけ（過ぎた日も同じ食事の行で出す） ---
   currentCheck = 'MEALPLAN-A4'
   {
     const psBrowser = await chromium.launch()
@@ -1181,13 +1207,24 @@ import './_shared.mjs'
       await psPage.reload({ waitUntil: 'networkidle' })
       await psPage.waitForTimeout(900)
 
-      // 週タブ: 献立表を開く（既定は閉じている＝画面を占領しない）
-      await psPage.getByRole('button', { name: ja.mealPlan.viewWeek, exact: true }).click()
-      await openAllWeekDays(psPage) // 便ID・⑦: 畳む既定になったので、カードの中を触る前に開く
-      await psPage.waitForTimeout(400)
+      // 月タブ: 献立表を開く（既定は閉じている＝画面を占領しない）
+      await psPage.getByRole('button', { name: ja.mealPlan.viewMonth, exact: true }).click()
+      await psPage.waitForTimeout(600)
       check(
         'MEALPLAN-A4 献立表は既定で畳まれている(画面を占領しない)',
         (await psPage.locator('.plan-sheet-preview').count()) === 0,
+      )
+      check(
+        'MEALPLAN-A4(便LH) 週タブには献立表を置かない(片方だけにする)',
+        await (async () => {
+          await psPage.getByRole('button', { name: ja.mealPlan.viewWeek, exact: true }).click()
+          await psPage.waitForTimeout(600)
+          const gone =
+            (await psPage.getByRole('button', { name: ja.mealPlan.planSheetTitle, exact: true }).count()) === 0
+          await psPage.getByRole('button', { name: ja.mealPlan.viewMonth, exact: true }).click()
+          await psPage.waitForTimeout(600)
+          return gone
+        })(),
       )
       await psPage.getByRole('button', { name: ja.mealPlan.planSheetTitle, exact: true }).click()
       await psPage.waitForTimeout(400)
@@ -1197,7 +1234,7 @@ import './_shared.mjs'
       )
       const psSheetText = (await psPage.locator('.plan-sheet-preview').textContent()) ?? ''
       check(
-        'MEALPLAN-A4 週の献立表に日付・主菜・副菜が1枚に整形されて載る',
+        'MEALPLAN-A4 献立表に日付・主菜・副菜が1枚に整形されて載る',
         psSheetText.includes(psLabel) &&
           psSheetText.includes('肉じゃが') &&
           psSheetText.includes('ほうれん草のおひたし'),
@@ -1208,8 +1245,18 @@ import './_shared.mjs'
         psSheetText.includes('実家に行く'),
       )
       check(
-        'MEALPLAN-A4 何を載せた表なのか(過ぎた日=記録・今日から先=予定)を紙の上でも明記する',
-        psSheetText.includes('過ぎた日は作った記録、今日から先は登録した献立'),
+        // 2026-08-26 便LH: 載せるのは登録した献立だけになったので、紙の上の名乗りも変わった。
+        // 文言は ja.ts から読む（書き写さない・禁じ手②）
+        'MEALPLAN-A4(便LH) 何を載せた表なのかを紙の上でも明記する',
+        stripZwspText(psSheetText).includes(stripZwspText(ja.mealPlan.planSheetBasisNote)),
+        `note=${ja.mealPlan.planSheetBasisNote}`,
+      )
+      check(
+        'MEALPLAN-A4(便LH) 食事のラベル(朝食・昼食・夕食)は太字にする',
+        await psPage.evaluate(() => {
+          const el = document.querySelector('.plan-sheet-preview .sheet-slot-label')
+          return el ? Number(getComputedStyle(el).fontWeight) >= 700 : false
+        }),
       )
       check(
         'MEALPLAN-A4 出どころが分かるようアプリ名とURLを入れる',
@@ -1226,10 +1273,12 @@ import './_shared.mjs'
       )
       await psPage.locator('[data-testid="plan-sheet-include-empty"]').check()
       await psPage.waitForTimeout(300)
+      // 月の日数は月ごとに違うので数を決め打ちしない（禁じ手③）
+      const psMonthDays = new Date(psNow.getFullYear(), psNow.getMonth() + 1, 0).getDate()
       check(
-        'MEALPLAN-A4(2026-08-02) 「登録のない日も載せる」で週7日ぶんが戻る(可逆)',
-        (await psDayCount()) === 7,
-        `days=${await psDayCount()}`,
+        'MEALPLAN-A4(2026-08-02) 「登録のない日も載せる」でその月の全日が戻る(可逆)',
+        (await psDayCount()) === psMonthDays,
+        `days=${await psDayCount()} 期待=${psMonthDays}`,
       )
       await psPage.locator('[data-testid="plan-sheet-include-empty"]').uncheck()
       await psPage.waitForTimeout(300)
@@ -1374,13 +1423,11 @@ import './_shared.mjs'
         stripZwspText(await psPage.textContent('body')).includes(ja.mealPlan.planSheetImageDone),
       )
 
-      // 月タブでも同じ機構で1枚にまとまる(見出しはその月)
-      await psPage.getByRole('button', { name: '月', exact: true }).click()
-      await psPage.waitForTimeout(600)
+      // 見出しはその月（期間で絞っているときは期間の見出しに変わる＝下の LHSHEET-01 で見る）
       const psMonthHeading = `${psNow.getFullYear()}年${psNow.getMonth() + 1}月の献立`
       const psMonthSheet = (await psPage.locator('.plan-sheet-preview').textContent()) ?? ''
       check(
-        'MEALPLAN-A4 月タブでも同じ献立表が出る(見出しはその月)',
+        'MEALPLAN-A4 月タブの献立表の見出しはその月',
         psMonthSheet.includes(psMonthHeading) && psMonthSheet.includes('肉じゃが'),
         `heading=${psMonthHeading} sheet=${psMonthSheet.slice(0, 120)}`,
       )

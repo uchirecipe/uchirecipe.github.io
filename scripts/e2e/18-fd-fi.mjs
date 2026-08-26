@@ -1035,7 +1035,6 @@ import './_shared.mjs'
           const h2s = secs.map((s) => s.querySelector('h2')?.textContent.trim() ?? '')
           const otherSec = secs.find((s) => s.querySelector('.plain-list'))
           const regSec = secs.find((s) => s.querySelector('.free-limit'))
-          const planSec = secs.find((s) => (s.querySelector('h2')?.textContent ?? '') === '献立を提案')
           const limit = document.querySelector('.free-limit')
           const surface = getComputedStyle(otherSec).backgroundColor
           const bubbles = [...document.querySelectorAll('.pains li')].map((li) =>
@@ -1059,8 +1058,9 @@ import './_shared.mjs'
             otherStartersIsLast: otherSec.lastElementChild?.classList.contains('starters') === true,
             otherStartersTiny: otherSec.querySelector('.starters .tiny')?.textContent.trim() ?? '',
             otherSecH: Math.round(otherSec.getBoundingClientRect().height),
-            // 献立表は献立の節へ移した
-            planHasSheet: (planSec.textContent ?? '').includes('1週間の献立表を印刷・画像で保存'),
+            // 便FG: 献立表は「レシピでできること」の節から出した。
+            // 2026-08-26 便LH: 献立表そのものが月タブ(Pro版)だけになったので、置き場所はPro版の節
+            proHasSheet: (document.body.textContent ?? '').includes('献立表の印刷・画像保存'),
             otherHasSheet: (otherSec.textContent ?? '').includes('献立表'),
             // ⑥ 30品の1文
             limitText: limit?.textContent.trim() ?? '',
@@ -1145,9 +1145,11 @@ import './_shared.mjs'
             fg.otherStartersTiny,
           )
           check(
-            'FG-LP 「レシピでできること」でない献立表は、献立の節へ移してある',
-            fg.planHasSheet && fg.otherHasSheet === false,
-            `献立の節=${fg.planHasSheet} その他の節に残存=${fg.otherHasSheet}`,
+            // 2026-08-26 便LH: 献立表は月タブだけになった＝Pro版の説明に書く。
+            // 便FGの趣旨（「レシピでできること」の節には置かない）はそのまま見張る
+            'FG-LP 献立表は「レシピでできること」の節に無く、Pro版の説明に書いてある',
+            fg.proHasSheet && fg.otherHasSheet === false,
+            `Pro版の節=${fg.proHasSheet} その他の節に残存=${fg.otherHasSheet}`,
           )
           check(
             'FG-LP 無料30品の1文が登録節のいちばん下にあり、ページで1箇所だけ',

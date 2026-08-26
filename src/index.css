@@ -529,6 +529,12 @@
     color: #555 !important;
   }
 
+  /* 食事のラベル(朝食・昼食・夕食)だけは紙でも太字にする(2026-08-26 便LH・オーナー指示)。
+     すぐ上の一括指定が font-weight を 400 に倒すので、そのあとに置いて上書きする */
+  .plan-sheet-print .sheet-slot-label {
+    font-weight: 700 !important;
+  }
+
   .plan-sheet-print .sheet-basis {
     font-size: 8pt !important;
     color: #555 !important;

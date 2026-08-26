@@ -41,6 +41,7 @@ function MonthCardHeader({
   onToggle,
   figure,
   figureTestId,
+  toggleTestId,
 }: {
   title: string
   open: boolean
@@ -48,11 +49,17 @@ function MonthCardHeader({
   /** 畳んでいるときだけ見出しの横に出す数値（開いているときは表・パネルが出すので渡さない） */
   figure?: string
   figureTestId?: string
+  /**
+   * 検査用の目印（開閉ボタンに付く）。見出しの文字は月・期間で入れ替わるので、
+   * 掴む側が文言に依らないようにするため（2026-08-26 便LH）
+   */
+  toggleTestId?: string
 }) {
   return (
     <h2>
       <button
         type="button"
+        data-testid={toggleTestId}
         onClick={onToggle}
         aria-expanded={open}
         className="flex min-h-11 w-full items-center gap-2 text-left font-bold"

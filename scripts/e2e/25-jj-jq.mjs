@@ -1593,9 +1593,9 @@ import './_shared.mjs'
       await jpgPage.getByRole('button', { name: ja.mealPlan.viewWeek, exact: true }).first().click()
       await jpgPage.waitForTimeout(1600)
 
-      // 2026-08-25 便KU: 週まとめの栄養は「栄養と食費」の節の中へ入った。
+      // 2026-08-25 便KU: 週まとめの栄養は節の中へ入った（節の名前は2026-08-26 便LHで「栄養」）。
       // この節を測るのは**週まとめの折りたたみ**なので、外側の節は先に開いておく
-      await openWeekGroup(jpgPage, ja.mealPlan.weekGroupNutritionCostTitle)
+      await openWeekGroup(jpgPage, ja.mealPlan.weekGroupNutritionTitle)
       await jpgPage.waitForTimeout(600)
       const jpgGap = jpgPage.locator('[data-testid="nutrition-gap-dish"]')
       // ① 畳んでいるあいだは名前を出さない

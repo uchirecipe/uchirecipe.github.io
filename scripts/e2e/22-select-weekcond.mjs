@@ -1159,10 +1159,17 @@ import './_shared.mjs'
         (await hvPage.getByRole('button', { name: ja.mealPlan.fillMonth, exact: true }).count()) === 1,
       )
       check(
-        'HV-01(⑪) どこに入るかの説明はボタンのそばに残っている',
-        ((await hvPage.textContent('body')) ?? '')
-          .replaceAll('​', '')
-          .includes(ja.mealPlan.fillMonthHint),
+        // 2026-08-26 便LH: 説明の1行は折りたたみの中へ入った（オーナー原文「献立関連のボタンが
+        // バラバラに配置してあるように見えるので、１グループにまとめて。折りたたみの
+        // 見える部分は「献立をまとめて提案」のみ。」）。開いてから読む
+        'HV-01(⑪→便LH) どこに入るかの説明は、節を開けばボタンのそばに出る',
+        await (async () => {
+          await hvPage.locator('[data-testid="month-plan-group-toggle"]').click()
+          await hvPage.waitForTimeout(400)
+          return ((await hvPage.textContent('body')) ?? '')
+            .replaceAll('​', '')
+            .includes(ja.mealPlan.fillMonthHint)
+        })(),
       )
       await hvContext.close()
 

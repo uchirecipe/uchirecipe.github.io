@@ -950,8 +950,9 @@ try {
   // 2026-08-25 便KU: 週の概算食費と栄養は「栄養と食費」の節の中へ移り、**既定は畳んである**
   // （オーナー原文「買い物メモ、栄養と食費、それぞれでまとめて表示する」）。先に節を開かないと
   // 行そのものが画面に無い。e2e の openWeekGroup と同じ押し方にそろえる
+  // 2026-08-26 便LH: その節は「栄養」「食費」に割れたので、金額は「食費」の節を開く
   const nutritionCostOpener = page.getByRole('button', {
-    name: `${ja.mealPlan.weekGroupNutritionCostTitle}を開く`,
+    name: `${ja.mealPlan.weekGroupCostTitle}を開く`,
   })
   if (await nutritionCostOpener.count()) {
     await nutritionCostOpener.first().click()

@@ -420,13 +420,20 @@ export const WEEK_GROUP_DEFAULT_OPEN = {
   auto: false,
   template: false,
   /**
-   * 7日分のカードの下にある2つ（2026-08-25 便KU・オーナー原文
+   * 7日分のカードの下にある3つ（2026-08-25 便KU・オーナー原文
    * 「買い物メモ、栄養と食費、それぞれでまとめて表示する（ページ頭の設定のように）」）。
    * 上の3つと同じ作法＝**畳んだ状態から始める**。
    * ただし「買い物メモを作る」ボタンは折りたたみの外に置いてあるので、
    * 畳んでいても押すものは画面から消えない（「まとめて献立を入力」と同じ考え方）。
+   *
+   * 2026-08-26 便LH（オーナー原文「栄養、食費で列を分けて、それぞれ折りたたみ状態で
+   * 数値を１列表示。の２つで１グループ。買い物めもはくっつけない。」）:
+   * 便KUが1つにしていた nutritionCost を **nutrition と cost に割った**。
+   * 畳んでいるあいだは、それぞれの見出しの横に数値が1行だけ出る（月タブの2枚と同じ形）。
+   * 買い物メモは同じ面に入れず、別の面に置く。
    */
-  nutritionCost: false,
+  nutrition: false,
+  cost: false,
   shopping: false,
 } as const
 
@@ -615,6 +622,23 @@ export function monthLeadingBlanks(reference: Date): number {
  */
 export function normalizeDateRange(a: string, b: string): [string, string] {
   return a <= b ? [a, b] : [b, a]
+}
+
+/**
+ * 開始日〜終了日(両端を含む)の日付をYYYY-MM-DDの配列で返す（2026-08-26 便LH）。
+ * 月タブの「期間で絞る」で選んだ期間を、月の全日(monthDates)と同じ形で扱うために使う
+ * ＝献立をまとめて提案・テンプレート・献立表が、月と期間で同じ道を通る。
+ * 月をまたぐ期間もそのまま並べる（日付の足し算はDateに任せるので、月末・うるう年でずれない）
+ */
+export function rangeDates(start: string, end: string): string[] {
+  const out: string[] = []
+  const cursor = new Date(`${start}T00:00:00`)
+  const last = new Date(`${end}T00:00:00`)
+  while (cursor.getTime() <= last.getTime()) {
+    out.push(toDateString(cursor))
+    cursor.setDate(cursor.getDate() + 1)
+  }
+  return out
 }
 
 /**

@@ -1104,8 +1104,8 @@ import './_shared.mjs'
       await enPage.locator('[data-testid="day-lock"]').first().click()
       await enPage.waitForTimeout(700)
 
-      // 2026-08-25 便KU: 週まとめの栄養は「栄養と食費」の節の中（既定は畳んである）
-      await openWeekGroup(enPage, ja.mealPlan.weekGroupNutritionCostTitle)
+      // 2026-08-25 便KU: 週まとめの栄養は節の中（既定は畳んである。節の名前は便LHで「栄養」）
+      await openWeekGroup(enPage, ja.mealPlan.weekGroupNutritionTitle)
       await enPage.waitForTimeout(600)
       // 文言は ja.ts から読むが、evaluate の中はブラウザ側なので引数で渡す（便JM）
       const enPanel = await enPage.evaluate((weekToggleAria) => {

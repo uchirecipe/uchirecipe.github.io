@@ -1,17 +1,24 @@
-import { dowIndex, isPastDate, MEAL_SLOTS } from './mealPlan'
+import { dowIndex, MEAL_SLOTS } from './mealPlan'
 import { ja } from '../i18n/ja'
 import { MEAL_ROLES, type MealPlanEntry, type MealRole, type MealSlot } from '../db/types'
 
 /**
  * 献立表（2026-07-29 便CB-2・docs/59 A-4）の組み立て。
- * 週または月の献立を「1枚に整形」した中身を作る純ロジックで、
+ * 献立を「1枚に整形」した中身を作る純ロジックで、
  *  ・画面と印刷（@media print で出すHTML）
  *  ・画像保存（logic/planSheetImage.ts のCanvas描画）
  * の両方が同じこの結果を見る＝紙と画像で内容がずれないようにするのがこのモジュールの役割。
  *
- * 何を載せるかの規則は、アプリの他の画面とそろえる（過ぎた日は「作った記録」・今日から先は
- * 「登録した献立」）。過ぎた日の未達成の予定を紙に出さないのは、週タブ・月タブと同じ扱い
- * （便BS・タスク2）で、印刷物だけ違う顔になるのを避けるため。日付メモ（A-2）も一緒に載せる。
+ * **載せるのは「登録した献立」だけ**（2026-08-26 便LH・オーナー原文
+ * 「献立表の内容は、すべて予定（朝昼夕の表示）。作った記録にしない。記録になっている
+ *   過去のデータも、予定と同じフォーマットで表示したい。」）。
+ * 直す前は、過ぎた日だけ「作った記録」の料理名を別の形で載せていたので、1枚の紙の中に
+ * 「朝食／昼食／夕食」の行と「作った記録」の行が混ざり、配る相手には2種類の表に見えていた。
+ * 過ぎた日も同じ食事の行で出す＝日付が過去か未来かで形が変わらない。日付メモ（A-2）は今までどおり。
+ *
+ * 失うもの: 過ぎた日に「献立に入れずに作った料理」（レシピ詳細の「作った！」など、献立の枠と
+ * 結び付いていない記録）は、この紙からは読めなくなる。作った記録そのものは消えず、
+ * 「作った記録の一覧」・月カレンダーの写真とチェック・日の窓で今までどおり読める。
  */
 
 /** 献立表の1品（主菜/副菜と料理名） */
@@ -34,11 +41,8 @@ export interface PlanSheetDay {
   date: string
   /** 「7/29（水）」 */
   label: string
-  isPast: boolean
-  /** 今日以降の日の「登録した献立」（品が1つも無い食事は行ごと出さない） */
+  /** その日の「登録した献立」（品が1つも無い食事は行ごと出さない）。過ぎた日も同じ形で入る */
   slots: PlanSheetSlotRow[]
-  /** 過ぎた日の「作った記録」の料理名 */
-  cookedTitles: string[]
   /** 日付メモ（A-2）。無ければundefined */
   note?: string
 }
@@ -55,10 +59,8 @@ export interface PlanSheet {
 /** 献立表に載せる1日分を組み立てる（日付順は渡された dates のまま） */
 export function buildPlanSheet(options: {
   title: string
-  /** 対象の日付（週＝7日・月＝その月の全日） */
+  /** 対象の日付（月＝その月の全日／「期間で絞る」で選んでいるときはその期間） */
   dates: string[]
-  /** YYYY-MM-DD（今日） */
-  today: string
   /** 表示中の食事（画面に出している食事だけを紙にも出す＝画面と同じ内容にする） */
   visibleSlots: MealSlot[]
   entries: Pick<MealPlanEntry, 'date' | 'slot' | 'role' | 'recipeId'>[]
@@ -71,8 +73,6 @@ export function buildPlanSheet(options: {
   titleOf: (recipeId: number) => string | undefined
   /** 日付→日付メモの本文 */
   notes: Map<string, string>
-  /** 日付→その日の「作った記録」の料理名 */
-  cookedTitlesByDate: Map<string, string[]>
   /**
    * 献立も記録もメモも無い日を載せるか（2026-08-02 オーナー指示。既定＝載せない）。
    *
@@ -82,17 +82,7 @@ export function buildPlanSheet(options: {
    */
   includeEmptyDays?: boolean
 }): PlanSheet {
-  const {
-    title,
-    dates,
-    today,
-    visibleSlots,
-    entries,
-    titleOf,
-    notes,
-    cookedTitlesByDate,
-    includeEmptyDays = false,
-  } = options
+  const { title, dates, visibleSlots, entries, titleOf, notes, includeEmptyDays = false } = options
   const byDateSlot = new Map<string, Pick<MealPlanEntry, 'date' | 'slot' | 'role' | 'recipeId'>[]>()
   for (const e of entries) {
     const key = `${e.date}|${e.slot}`
@@ -105,25 +95,17 @@ export function buildPlanSheet(options: {
   const slotOrder = MEAL_SLOTS.filter((s) => visibleSlots.includes(s))
 
   const days: PlanSheetDay[] = dates.map((date) => {
-    const isPast = isPastDate(date, today)
     const slots: PlanSheetSlotRow[] = []
-    if (!isPast) {
-      for (const slot of slotOrder) {
-        const dishes = (byDateSlot.get(`${date}|${slot}`) ?? [])
-          .map((e) => ({ role: (e.role ?? 'main') as MealRole, title: titleOf(e.recipeId) }))
-          .filter((d): d is PlanSheetDish => d.title !== undefined)
-          .sort((a, b) => roleRank(a.role) - roleRank(b.role))
-        if (dishes.length > 0) slots.push({ slot, label: ja.mealPlan.slot[slot], dishes })
-      }
+    // 過ぎた日も今日から先の日とまったく同じ組み立て（便LH）。
+    // 献立の行はDBに残っているので、過ぎた日を分岐から外すだけで同じ形の表になる
+    for (const slot of slotOrder) {
+      const dishes = (byDateSlot.get(`${date}|${slot}`) ?? [])
+        .map((e) => ({ role: (e.role ?? 'main') as MealRole, title: titleOf(e.recipeId) }))
+        .filter((d): d is PlanSheetDish => d.title !== undefined)
+        .sort((a, b) => roleRank(a.role) - roleRank(b.role))
+      if (dishes.length > 0) slots.push({ slot, label: ja.mealPlan.slot[slot], dishes })
     }
-    return {
-      date,
-      label: formatSheetDayLabel(date),
-      isPast,
-      slots,
-      cookedTitles: isPast ? (cookedTitlesByDate.get(date) ?? []) : [],
-      note: notes.get(date),
-    }
+    return { date, label: formatSheetDayLabel(date), slots, note: notes.get(date) }
   })
 
   const isEmpty = days.every(isPlanSheetDayEmpty)
@@ -132,9 +114,9 @@ export function buildPlanSheet(options: {
   return { title, days: includeEmptyDays ? days : days.filter((d) => !isPlanSheetDayEmpty(d)), isEmpty }
 }
 
-/** その日に載せるものが何も無い（献立も作った記録も日付メモも無い）か */
+/** その日に載せるものが何も無い（献立も日付メモも無い）か */
 export function isPlanSheetDayEmpty(day: PlanSheetDay): boolean {
-  return day.slots.length === 0 && day.cookedTitles.length === 0 && !day.note
+  return day.slots.length === 0 && !day.note
 }
 
 /** YYYY-MM-DD を「7/29（水）」の形にする（献立表の日付見出し） */
@@ -149,7 +131,7 @@ export interface PlanSheetLine {
   /** 'day'=日付見出し / 'dish'=その日の中身 / 'note'=日付メモ・記録の但し書き */
   kind: 'day' | 'dish' | 'note'
   /**
-   * 行頭に小さく置くラベル（「夕食」「作った記録」「この日のメモ」）。日付見出しには無い。
+   * 行頭に小さく置くラベル（「夕食」「この日のメモ」）。日付見出しには無い。
    * 同じ食事の2品目以降は空文字（ラベルの列は空けたまま、料理名の位置をそろえる）。
    *
    * 2026-08-02 オーナー指示: ラベルが料理名と同じ大きさで横並びになっていて読みにくかったため、
@@ -187,13 +169,6 @@ export function planSheetLines(sheet: PlanSheet): PlanSheetLine[] {
         })
       })
     }
-    day.cookedTitles.forEach((title, i) => {
-      lines.push({
-        kind: 'dish',
-        label: i === 0 ? ja.mealPlan.pastCookedTitle : '',
-        text: title,
-      })
-    })
     if (day.note) lines.push({ kind: 'note', label: ja.mealPlan.dayNoteLabel, text: day.note })
   }
   return lines

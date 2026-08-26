@@ -33,6 +33,12 @@ const BODY_INDENT = 32
  * 「主菜」2文字（48px）に、それぞれ余白を足した値。
  */
 const LABEL_FONT = '24px system-ui, sans-serif'
+/**
+ * 食事のラベル（朝食・昼食・夕食）だけ太字にする（2026-08-26 便LH・オーナー原文
+ * 「朝食昼食夕食の文字は太字に。」）。画面・印刷（.sheet-row-label の font-bold）と同じ扱いで、
+ * 「この日のメモ」は太字にしない＝紙・画面・画像のどれでも同じ見分け方になる。
+ */
+const LABEL_FONT_BOLD = 'bold 24px system-ui, sans-serif'
 const LABEL_COLUMN = 156
 const ROLE_COLUMN = 68
 /**
@@ -132,9 +138,10 @@ export async function generatePlanSheetImage(sheet: PlanSheet): Promise<Blob> {
     } else {
       // 行頭ラベル（食事＋役割）は小さく薄く、本文とは別の2列に描く（2026-08-02 オーナー指示）。
       // 折り返さずに1行で置く＝いちばん長い「この日のメモ」がちょうど収まる列幅にしてある
-      ctx.font = LABEL_FONT
+      ctx.font = line.kind === 'dish' ? LABEL_FONT_BOLD : LABEL_FONT
       ctx.fillStyle = muted
       if (line.label) ctx.fillText(line.label, PAD + BODY_INDENT, y)
+      ctx.font = LABEL_FONT
       if (line.role) ctx.fillText(line.role, PAD + BODY_INDENT + LABEL_COLUMN, y)
       ctx.font = fontOf(line.kind)
       ctx.fillStyle = line.kind === 'note' ? muted : ink
