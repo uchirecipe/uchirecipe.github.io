@@ -2471,34 +2471,28 @@ export function buildStarterReloadConfirm(impact: StarterReloadImpact): ConfirmC
           : ''),
     })
   }
-  bullets.push({
-    label: t.starterReloadConfirmBackLabel,
-    text: (impact.removed > 0 ? t.starterReloadConfirmKept : t.starterReloadConfirm).replace(
-      '{k}',
-      String(impact.kept),
-    ),
-  })
   if (impact.added > 0) {
     bullets.push({
       label: t.starterReloadConfirmAddedLabel,
       text: t.starterReloadConfirmAdded.replace('{a}', String(impact.added)),
     })
   }
-  bullets.push({
-    label: t.starterReloadConfirmStaysLabel,
-    // 消える品に「作った記録」が付いているときだけ、その記録が残ることとどこで読めるかを足す
-    // （2026-08-16 便GZ。記録が0件のときに書くと、無いものを残ると言うことになる）
-    text:
-      t.starterReloadConfirmStays +
-      (impact.removedCookedLogs > 0
-        ? t.starterReloadConfirmStaysLogs
-            .replace('{c}', String(impact.removedCookedLogs))
-            .replace('{p}', String(impact.removedCookedPhotos))
-        : ''),
-  })
+  // 何が残るか（規約F）。2026-08-26 オーナー指示で「残るもの」の見出しをやめ、窓の下の1行にした。
+  // 消える品に「作った記録」が付いているときだけ、その記録が残ることとどこで読めるかを足す
+  // （2026-08-16 便GZ。記録が0件のときに書くと、無いものを残ると言うことになる）
+  const stays =
+    t.starterReloadConfirmStays +
+    (impact.removedCookedLogs > 0
+      ? t.starterReloadConfirmStaysLogs
+          .replace('{c}', String(impact.removedCookedLogs))
+          .replace('{p}', String(impact.removedCookedPhotos))
+      : '')
   return {
     title: t.starterReloadConfirmTitle,
-    bullets,
+    // 「この操作が何をするか」を言い切る1行（旧「戻るもの」の項目。2026-08-26 オーナー指示）
+    body: t.starterReloadConfirm,
+    bullets: bullets.length > 0 ? bullets : undefined,
+    notes: [stays],
     confirmLabel: t.starterReloadConfirmOk,
   }
 }

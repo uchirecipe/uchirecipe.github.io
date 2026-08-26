@@ -387,10 +387,16 @@ import './_shared.mjs'
       await eePage.waitForTimeout(400)
       const eeDialog = eePage.getByRole('dialog', { name: ja.shopping.completeConfirmTitle })
       const eeDialogText = (await eeDialog.innerText()) ?? ''
+      // 2026-08-26 便LI（オーナー指示・書き溜め0826）: 「「反映せず完了」を押すと〜」は削除した
+      // （ボタンの名前で意味が分かる＝規約Fの例外）。在庫に入るほうの結果だけを行で書く
       check(
-        'EE-01(③) 確認は「反映する」「反映せず完了」それぞれの結果を別々の行で書く',
-        eeDialogText.includes('「反映する」を押すと') &&
-          eeDialogText.includes('「反映せず完了」を押すと'),
+        'EE-01(③) 確認は「反映する」を押したときの結果を行で書く',
+        eeDialogText.includes('「反映する」を押すと'),
+        `本文=${eeDialogText.slice(0, 200)}`,
+      )
+      check(
+        'EE-01(③・便LI) 「反映せず完了」の説明は並べ立てない',
+        !eeDialogText.includes('「反映せず完了」を押すと'),
         `本文=${eeDialogText.slice(0, 200)}`,
       )
       check(
@@ -398,11 +404,18 @@ import './_shared.mjs'
         /チェック済みの1件は買い物メモから消えます/.test(eeDialogText) &&
           /未チェックの\d+件は買い物メモに残ります/.test(eeDialogText),
       )
+      // 2026-08-26 便LI（オーナー指示・書き溜め0826「ボタンの名前で意味がわかるため、
+      // 説明文２つも削除」）: 「あとにする」の下の説明2行は出さない。押しても何も書き換えない
+      // ことは、下の実挙動の検査がそのまま見張る
       check(
-        'EE-01(④) 「あとにする」で何が起きるかと、あとで反映する手順が書いてある',
-        eeDialogText.includes('「あとにする」を押すと、買い物メモも食材の在庫も変わりません') &&
-          eeDialogText.includes('「買い物完了」を押して「反映する」を選びます'),
+        'EE-01(④・便LI) 「あとにする」の下に説明文を出していない',
+        !eeDialogText.includes('「あとにする」を押すと') &&
+          !eeDialogText.includes('「買い物完了」を押して「反映する」を選びます'),
         `本文=${eeDialogText.slice(-200)}`,
+      )
+      check(
+        'EE-01(④・便LI) ボタン「あとにする」自体は残っている',
+        (await eePage.getByRole('button', { name: ja.shopping.completeLater, exact: true }).count()) === 1,
       )
       // 実挙動: 「あとにする」は買い物メモも在庫も書き換えない
       const eePantryBefore = await eePage.evaluate(async () => {

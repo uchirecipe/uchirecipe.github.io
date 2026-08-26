@@ -1,6 +1,7 @@
 // 買い物メモと在庫（候補・売り場・チェック・在庫の名寄せ）
 // scripts/test-logic.mjs から読み込まれる。判定器(eq/neq)と合否の集計は ./_harness.mjs にある。
 // 新しい検査はこのファイルの末尾に足す（節ごとにファイルが分かれているので、別の便とぶつからない）。
+import { readFileSync } from 'node:fs'
 import { eq, neq } from './_harness.mjs'
 import { toPantryKey } from '../../src/logic/kana.ts'
 import {
@@ -604,12 +605,17 @@ import { ja } from '../../src/i18n/ja.ts'
   )
 }
 
-// ---------- EE-3/EE-4 買い物完了の確認文(2026-08-08 オーナー実機フィードバック) ----------
-// ③「『買い物終了』後の文章が読みづらい」→内容ごとに改行。
-// ④「あとにする＝キャンセルだから処理をしないということ？」→実装(何も書き換えない)を
-//   そのまま書き、あとで反映する手順を押すボタンの名前で示す
+// ---------- EE-3/EE-4 買い物完了の確認文(2026-08-08 → 2026-08-26 オーナー指示で短縮) --------
+// 2026-08-08 ③「『買い物終了』後の文章が読みづらい」→内容ごとに改行。
+//
+// 2026-08-26 オーナー指示(書き溜め0826):
+//   ・確認文「「反映せず完了」を押すと〜」→削除。ボタンの名前で意味がわかるため。
+//   ・「あとにする」…ボタンの名前で意味がわかるため、説明文２つも削除。
+// **規約Fは満たしたまま**にする＝どちらのボタンでも消える件数({n})と残る件数({m})は書く。
+// 落としたのは「反映せず完了」を押したときの結果だけで、これはボタンの名前が言い切っている
+// （2026-08-25 差し戻しDで足した規約Fの例外と同じ形）。
 {
-  eq('EE-3 買い物完了の確認は4行に分かれている', ja.shopping.completeConfirmLines.length, 4)
+  eq('EE-3 買い物完了の確認は3行に分かれている', ja.shopping.completeConfirmLines.length, 3)
   // 規約F: 何が消えて何が残るかを件数つきで両方書く
   eq(
     'EE-3 消える件数({n})と残る件数({m})を両方書いている',
@@ -619,32 +625,35 @@ import { ja } from '../../src/i18n/ja.ts'
     ],
     [true, true],
   )
-  // 2つのボタンが何をするかを、どちらも名前で書いている
-  for (const label of [ja.shopping.completeYes, ja.shopping.completeNo]) {
-    eq(
-      `EE-3 確認文が「${label}」を押したときの結果を書いている`,
-      ja.shopping.completeConfirmLines.some((l) => l.includes(`「${label}」を押すと`)),
-      true,
-    )
-  }
+  // 在庫に入るほうは、押すボタンの名前で結果を書く（ここは名前だけでは読み取れない）
   eq(
-    'EE-4 「あとにする」を押すと何も変わらないと書いている',
-    ja.shopping.completeLaterLines[0].includes(`「${ja.shopping.completeLater}」を押すと`) &&
-      ja.shopping.completeLaterLines[0].includes('変わりません'),
+    `EE-3 確認文が「${ja.shopping.completeYes}」を押したときの結果を書いている`,
+    ja.shopping.completeConfirmLines.some((l) => l.includes(`「${ja.shopping.completeYes}」を押すと`)),
     true,
   )
+  // 2026-08-26: 「反映せず完了」の説明は書き戻さない（ボタンの名前が言い切っている）
   eq(
-    'EE-4 あとで反映する手順を、押すボタンの名前で書いている',
-    ja.shopping.completeLaterLines.some(
-      (l) => l.includes(`「${ja.shopping.complete}」`) && l.includes(`「${ja.shopping.completeYes}」`),
-    ),
-    true,
-  )
-  eq(
-    'EE-4 手順の説明に指示語が入っていない',
-    ja.shopping.completeLaterLines.some((l) => /ここ|これ|それ|そこ|あちら/.test(l)),
+    `EE-3 「${ja.shopping.completeNo}」を押したときの説明を並べ立てていない`,
+    ja.shopping.completeConfirmLines.some((l) => l.includes(`「${ja.shopping.completeNo}」を押すと`)),
     false,
   )
+  // どちらを押しても消える／残る、は1行で言い切る（ボタンごとに書き分けない）
+  eq(
+    'EE-3 消える件数はボタンを問わない1行で書いている',
+    ja.shopping.completeConfirmLines.some((l) => l.includes('どちらを押しても')),
+    true,
+  )
+  // 2026-08-26: 「あとにする」の説明2行は ja.ts ごと消えている（画面にも出さない）
+  eq('EE-4 「あとにする」の説明文を ja.ts に残していない', 'completeLaterLines' in ja.shopping, false)
+  eq(
+    'EE-4 画面側でも「あとにする」の説明を書き写していない',
+    readFileSync(new URL('../../src/pages/ShoppingPage.tsx', import.meta.url), 'utf-8').includes(
+      'completeLaterLines',
+    ),
+    false,
+  )
+  // 押したあとに何が起きたかは、これまでどおりトーストが言う（黙って閉じない）
+  eq('EE-4 押したあとの結果はトーストで言う', ja.shopping.completeLaterToast, '買い物メモはそのままにしました')
 }
 
 // ---------- selectPantryDowngrades(2026-07-23 オーナー実機FB #11「作った!」の在庫反映) ----------

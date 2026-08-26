@@ -4102,8 +4102,16 @@ import { existsSync, readFileSync } from 'node:fs'
       ['ja.settings.importGapNoticeTitle', ja.settings.importGapNoticeTitle],
       ['ja.settings.importGapNoticeDescription', ja.settings.importGapNoticeDescription],
       ['ja.settings.importGapNoticeShow', ja.settings.importGapNoticeShow],
-      ['ja.settings.importGapNoticeOnce', ja.settings.importGapNoticeOnce],
     ]
+    // 2026-08-26 オーナー指示（書き溜め0826）「『一度出すと〜』削除」。
+    // スイッチの名前（「取り込みのあとに説明を出す」）と、上の説明文で足りるので消した。
+    // 書き戻したら赤くなるようにしておく
+    eq('KO-6 「一度出すと自動で切れます」の1行は残っていない', 'importGapNoticeOnce' in ja.settings, false)
+    eq(
+      'KO-6 設定の見出しが、どの取り込みの話かを名乗っている',
+      ja.settings.importGapNoticeTitle,
+      'レシピ自動取り込みのあとの説明',
+    )
     eq(
       'KO-6 足した文言がすべて書かれている',
       koTexts.filter(([, text]) => typeof text !== 'string' || text.length === 0).map(([name]) => name),

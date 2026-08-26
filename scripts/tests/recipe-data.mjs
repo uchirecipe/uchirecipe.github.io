@@ -572,10 +572,17 @@ eq(
     const noneText = confirmContentText(buildStarterReloadConfirm(noneImpact))
     eq('STARTER-RELOAD 料理名を変えていなければ消える品は0件', noneImpact.removed, 0)
     eq('STARTER-RELOAD 消える品が0件のときは削除の話を書かない', /削除|消え/.test(noneText), false)
+    // 2026-08-26 オーナー指示（書き溜め0826）で「戻るもの: 基本レシピ{k}品の材料・手順・メモ」を
+    // やめ、何をする操作かを言い切る1文（窓の本文）にした
     eq(
-      'STARTER-RELOAD 消える品が0件でも、書き替えが元に戻ることは書く',
-      noneText.includes(ja.settings.starterReloadConfirm.replace('{k}', String(noneImpact.kept))),
+      'STARTER-RELOAD 消える品が0件でも、内容が元に戻ることは書く',
+      noneText.includes(ja.settings.starterReloadConfirm),
       true,
+    )
+    eq(
+      'STARTER-RELOAD 「戻るもの」の見出しの語を並べていない',
+      /戻るもの/.test(noneText),
+      false,
     )
     eq('STARTER-RELOAD 消える品が0件でも、何が残るかは書く', noneText.includes(ja.settings.starterReloadConfirmStays), true)
     eq('STARTER-RELOAD 件数の差し込み跡が残っていない', /\{[a-z]\}/.test(`${text}${noneText}`), false)

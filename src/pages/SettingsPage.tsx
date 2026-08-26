@@ -1129,12 +1129,17 @@ export default function SettingsPage() {
     setMessage(ja.settings.aisleOrderResetDone)
   }
 
-  // バックアップ状態バナー(2026-07-17設定ゼロベース裁定#1)。30日超(または未実施)で警告色にする
+  // バックアップ状態バナー(2026-07-17設定ゼロベース裁定#1)。30日超で警告色にする。
+  // 2026-08-26 オーナー指示(書き溜め0826): **一度もバックアップしていない人は警告にしない**。
+  // 従来は未実施(=lastBackupAtが無い)も警告色で「まだバックアップしていません」と出ていたため、
+  // 設定を初めて開いた瞬間から、説明を1つも読んでいない人を責める形になっていた。
+  // 未実施は「何ができるか」を言う文(bannerBackupNotYet)にし、色も普通のままにする。
+  // 一度でも書き出した人が31日以上空けたときは、これまでどおり警告色。
   const backupDaysAgo = daysSinceBackup(settings.lastBackupAt)
-  const backupBannerWarning = backupDaysAgo === null || backupDaysAgo > 30
+  const backupBannerWarning = backupDaysAgo !== null && backupDaysAgo > 30
   const backupBannerText =
     backupDaysAgo === null
-      ? ja.settings.backupNever
+      ? ja.settings.bannerBackupNotYet
       : backupDaysAgo === 0
         ? ja.settings.bannerLastBackupToday
         : ja.settings.bannerLastBackupDaysAgo.replace('{n}', String(backupDaysAgo))
@@ -1866,7 +1871,6 @@ export default function SettingsPage() {
                 />
               </button>
             </label>
-            <p className="mt-1 text-xs text-ink-muted">{ja.settings.importGapNoticeOnce}</p>
           </section>
 
           {/* レシピセットの読み込み */}
@@ -1957,7 +1961,7 @@ export default function SettingsPage() {
             <p className="mt-[var(--space-sm)] text-sm font-bold text-ink-muted">
               {settings.lastBackupAt
                 ? ja.settings.backupLastDate.replace('{date}', formatDate(settings.lastBackupAt))
-                : ja.settings.backupNever}
+                : ja.settings.backupNotYet}
             </p>
             {showCookedPhotoLimitBanner && (
               <p className="mt-[var(--space-sm)] rounded-sm bg-app px-3 py-2 text-sm text-ink-muted">
@@ -2404,19 +2408,21 @@ export default function SettingsPage() {
             <div className="mt-[var(--space-md)] rounded-sm border border-edge bg-app px-3 py-2">
               <p className="text-sm font-bold">{ja.settings.archiveAfterTitle}</p>
               <dl data-testid="archive-after" className="mt-1 space-y-1 text-xs">
-                <div>
+                {/* 2026-08-26 オーナー指示(書き溜め0826)「『端末が軽くなるのは』削除。
+                    『ファイルの場所』に内容だけ箇条書きで移動」。見出しの語を2つ並べるのをやめ、
+                    「ファイルの場所」1つの箇条書きにまとめた(端末が軽くなる条件は3行目に残る) */}
+                {/* 1行ずつ <dd> に分ける（1つの <dd> にまとめると、読む量を測る見張りから
+                    「1かたまりの長文」に見えてしまう。<dl> は1つの <dt> に <dd> を複数置ける） */}
+                <div data-testid="archive-where-saved">
                   <dt className="font-bold text-accent-ink">
                     {ja.settings.archiveWhereSavedLabel}
                   </dt>
-                  <dd data-testid="archive-where-saved" className="text-ink-muted">
-                    {ja.settings.archiveWhereSaved}
-                  </dd>
-                </div>
-                <div>
-                  <dt className="font-bold text-accent-ink">{ja.settings.archiveSpaceLabel}</dt>
-                  <dd data-testid="archive-space-note" className="text-ink-muted">
-                    {ja.settings.archiveSpaceNote}
-                  </dd>
+                  {ja.settings.archiveWhereSavedLines.map((line) => (
+                    <dd key={line} className="flex gap-1.5 text-ink-muted">
+                      <span aria-hidden>・</span>
+                      <span className="min-w-0">{line}</span>
+                    </dd>
+                  ))}
                 </div>
                 <div>
                   <dt className="font-bold text-accent-ink">{ja.settings.archiveBackupLabel}</dt>

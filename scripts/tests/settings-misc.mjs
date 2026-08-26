@@ -1323,3 +1323,180 @@ eq('紫キャベツは紫カテゴリ(キャベツの野菜カテゴリより優
 // JP-1〜JP-3: 2026-08-23 便JP（オーナー実機の3件）
 // ==========================================================================================
 
+
+// ==========================================================================================
+// LI-1〜LI-6: 2026-08-26 便LI（オーナーの書き溜め0826・買い物メモ／設定／バックアップ／
+//             アーカイブ／アプリの更新の文言）
+//
+// ここで見張るのは「直した言い回し」ではなく、**直した理由が壊れていないこと**:
+//  LI-1 一度もバックアップしていない人に、いきなり警告を出さない（初回は「すすめ」）
+//  LI-2 「基本レシピを入れ直す」の確認は、見出しの語を並べずに1文＋残るものの1行
+//  LI-3 機種変更の注意に、上書きで消えるときの逃げ道（「今のデータに追加」）が書いてある
+//  LI-4 ブラウザの設定の注意が「何を消すとき」を言っている（主語の欠けを戻さない）
+//  LI-5 アーカイブの「アプリに戻す」が、書き出しと削除は別の操作だと先に言っている
+//  LI-6 「自動で更新します」が実装（registerType: 'autoUpdate'）と食い違っていない
+// ==========================================================================================
+{
+  const liRoot = path.join(path.dirname(fileURLToPath(scriptFileUrl)), '..')
+  const liRead = (rel) => readFileSync(path.join(liRoot, rel), 'utf-8')
+
+  // ---- LI-1: 初回は警告にしない ----------------------------------------------------------
+  // オーナー原文「いきなり『まだ〜』と出てきても、まだも何も何も説明受けてないけど？、と
+  // 思ってしまう。初回のみ、バックアップのすすめと説明にすべきでは？」
+  {
+    eq('LI-1 「まだバックアップしていません」は残っていない', 'backupNever' in ja.settings, false)
+    const liNotYet = [ja.settings.bannerBackupNotYet, ja.settings.backupNotYet]
+    eq(
+      'LI-1 未実施のときの文言が2か所（バナー・書き出しカード）そろっている',
+      liNotYet.filter((t) => typeof t !== 'string' || t.length === 0),
+      [],
+    )
+    eq(
+      'LI-1 未実施の文言が「まだ〜していません」と責める形になっていない',
+      liNotYet.filter((t) => /まだ/.test(t)),
+      [],
+    )
+    // バナーは1行に収まる場所なので、短さも見る（長いと truncate で読めない）
+    eq(
+      'LI-1 バナーの文言が1行に収まる長さ（20字以内）',
+      ja.settings.bannerBackupNotYet.replace(/​/g, '').length <= 20,
+      true,
+    )
+    // 画面側: 未実施（日数が null）を警告色の条件から外している
+    const liSettingsSrc = liRead('src/pages/SettingsPage.tsx')
+    eq(
+      'LI-1 未実施を警告色の条件に入れていない',
+      /const backupBannerWarning = backupDaysAgo !== null && backupDaysAgo > 30/.test(liSettingsSrc),
+      true,
+    )
+    // 2回目以降（一度は書き出した人がしばらく空けたとき）は、これまでどおり警告のまま
+    eq(
+      'LI-1 日数が出るときの文言は今までどおり残っている',
+      [ja.settings.bannerLastBackupToday, ja.settings.bannerLastBackupDaysAgo].filter(
+        (t) => typeof t !== 'string' || t.length === 0,
+      ),
+      [],
+    )
+  }
+
+  // ---- LI-2: 「基本レシピを入れ直す」の確認 ------------------------------------------------
+  // オーナー原文「『戻るもの〜』→『基本レシピの内容を初期設置に戻します』。『残るもの』削除。
+  // 『お気に入り〜』は残す。」
+  // 規約Fの例外（2026-08-25 差し戻しD）に当たるのは**残る側の「自分で登録したレシピ」**だけ。
+  // 消える側（料理名を変えた品が削除される）はボタンの名前から読み取れないので、そのまま残す。
+  {
+    eq(
+      'LI-2 「戻るもの」「残るもの」の見出しの語は残っていない',
+      ['starterReloadConfirmBackLabel', 'starterReloadConfirmKept', 'starterReloadConfirmStaysLabel'].filter(
+        (k) => k in ja.settings,
+      ),
+      [],
+    )
+    eq(
+      'LI-2 何をする操作かを1文で言い切っている',
+      ja.settings.starterReloadConfirm,
+      '基本レシピの内容を初期設定に戻します',
+    )
+    eq(
+      'LI-2 残るものは、名前から読み取れないものだけ（お気に入り・作った記録・写真）',
+      ja.settings.starterReloadConfirmStays,
+      'お気に入り・作った記録・写真は残ります',
+    )
+    // 消える側は落とさない（ボタンの名前「基本レシピを入れ直す」からは読み取れない）
+    eq(
+      'LI-2 消える側（料理名が一致しない品）は件数つきで残っている',
+      ja.settings.starterReloadConfirmRemoved.includes('{d}') &&
+        ja.settings.starterReloadConfirmRemovedLabel === '消えるもの',
+      true,
+    )
+  }
+
+  // ---- LI-3: 機種変更の逃げ道 --------------------------------------------------------------
+  // オーナー原文「『新しい端末で先に登録したレシピは消えます』→『〜がある場合は「今のデータに
+  // 追加」をしてください』ではないの？内容的に間違い？」
+  // 内容は正しい（③＝上書きなので実際に消える）。足りていなかったのは逃げ道のほう。
+  {
+    const liMove = (Array.isArray(ja.settings.moveGuideNotes) ? ja.settings.moveGuideNotes : []).join('\n')
+    eq('LI-3 上書きで消えることは書いたまま', /上書き/.test(liMove) && /消えます/.test(liMove), true)
+    eq(
+      'LI-3 逃げ道（「今のデータに追加」を押す）が書いてある',
+      liMove.includes(`「${ja.settings.backupImportMerge}」`),
+      true,
+    )
+    eq(
+      'LI-3 逃げ道の行が、上書きのボタン名と並べて書いてある',
+      liMove.includes(`「${ja.settings.backupImportReplace}」`),
+      true,
+    )
+    // 逃げ道が本当（logic/backup.ts の merge は今のデータを消さない）ことを、実装の説明で裏取りする
+    eq(
+      'LI-3 「今のデータに追加」は今のデータを消さない（実装の建て付け）',
+      ja.settings.backupImportMergeKept.includes('1件も消えず'),
+      true,
+    )
+  }
+
+  // ---- LI-4: 「何を消すとき」の主語 --------------------------------------------------------
+  // オーナー原文「『ブラウザの設定で消すときは〜』→何を消すとき？」
+  {
+    const liWarn = Array.isArray(ja.settings.refreshAppCacheClearWarnings)
+      ? ja.settings.refreshAppCacheClearWarnings
+      : []
+    const liTarget = liWarn.find((t) => t.includes('キャッシュされた画像とファイル')) ?? ''
+    eq('LI-4 「キャッシュされた画像とファイル」だけにする案内がある', liTarget.length > 0, true)
+    eq('LI-4 何を消すのか（消す項目）を言っている', /消す項目/.test(liTarget), true)
+    eq('LI-4 主語の抜けた「消すときは」に戻っていない', /設定で消すときは/.test(liTarget), false)
+  }
+
+  // ---- LI-5: アーカイブの「アプリに戻す」 --------------------------------------------------
+  // オーナー原文「アーカイブしたあとで本体のデータを消すから二重にならないのでは？」
+  // 事実: 書き出す（archiveExportButton）と端末から消す（archiveDeleteButton）は別のボタン。
+  // 書き出しただけでは端末に残るので、二重になるのは正しい。理由を消さずに書き換える。
+  {
+    const liRows = Array.isArray(ja.settings.archiveFileRows) ? ja.settings.archiveFileRows : []
+    const liBack = liRows.find((r) => r?.name === 'アプリに戻す')?.body ?? ''
+    eq('LI-5 「アプリに戻す」の行がある', liBack.length > 0, true)
+    eq('LI-5 戻せない理由（二重になる）を消していない', /二重/.test(liBack), true)
+    eq('LI-5 「書き出しても端末の記録は消えない」が理由より先に読める', /書き出しても端末の記録は消えない/.test(liBack), true)
+    eq('LI-5 見出しは「読みかた」ではなく「について」', ja.settings.archiveFileTitle, 'アーカイブファイルについて')
+    // 「一覧として読みます」→「一覧表示します」を2か所そろえる（同じことを2通りで言わない）
+    eq(
+      'LI-5 一覧の言い方を2か所でそろえている',
+      [
+        liRows.some((r) => (r?.body ?? '').includes('一覧表示します')),
+        ja.settings.archiveDeleteConfirmViewNote.includes('一覧表示します'),
+      ],
+      [true, true],
+    )
+    eq(
+      'LI-5 「一覧として読みます」は残っていない',
+      [...liRows.map((r) => r?.body ?? ''), ja.settings.archiveDeleteConfirmViewNote].filter((t) =>
+        t.includes('一覧として読みます'),
+      ),
+      [],
+    )
+  }
+
+  // ---- LI-6: 「自動で更新します」が実装と合っている ----------------------------------------
+  // 書いてあることが本当か: vite.config.ts が registerType: 'autoUpdate'（skipWaiting +
+  // clientsClaim）なので、次に開き直したときには必ず新しい版になる。
+  // ここが 'prompt' 等に変わったら、この文言は嘘になるので落とす。
+  {
+    eq(
+      'LI-6 更新の説明が「開き直したときに自動で更新する」と書いている',
+      /開き直したときに自動で更新します/.test(ja.settings.appUpdateAutoNote),
+      true,
+    )
+    eq(
+      'LI-6 その説明の根拠（registerType: \'autoUpdate\'）が実装に残っている',
+      /registerType:\s*'autoUpdate'/.test(liRead('vite.config.ts')),
+      true,
+    )
+    eq(
+      'LI-6 表示の乱れの行き先は「困ったとき」の修復のまま',
+      ja.settings.appUpdateVsRefreshNote.includes(`「${ja.settings.refreshAppTitle}」`) &&
+        ja.settings.appUpdateVsRefreshNote.includes(`「${ja.settings.refreshAppButton}」`),
+      true,
+    )
+  }
+}
