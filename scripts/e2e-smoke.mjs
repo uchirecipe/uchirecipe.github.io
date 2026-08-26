@@ -498,4 +498,34 @@ console.log(`\n対象: ${BASE}`)
 for (const r of results) console.log(`${r.pass ? 'OK ' : 'NG '} ${r.label}${r.detail ? ` — ${r.detail}` : ''}`)
 console.log(`\n合格: ${results.length - failed.length}/${results.length}件 / console・pageerror: ${errors.length}件`)
 for (const e of errors) console.log(`  ${e}`)
+
+/**
+ * **走った件数が前より少なければ落とす**（2026-08-26 新設）。
+ *
+ * 節の途中で30秒待ちの実行中断が起きると、**以降が丸ごと走らないまま**
+ * 「合格◯件」という**緑の顔**で終わる。2026-08-26 の1日で**3回**起きた
+ * （1,488件・3,451件・3,664件で中断。通常4,222件）。**どれも司令部が件数を目で見て気づいた**もので、
+ * 見落とせばそのまま本番へ出ていた。目に頼らず機械で拾う。
+ *
+ * 増えた側は赤にしない（検査を足すたびに止まると、足すのが億劫になる）。
+ * 減ったときだけ落とし、**直したら `scripts/data/e2e-total-known.json` の数字を上げる**。
+ */
+{
+  const knownPath = path.join(appRoot, 'scripts/data/e2e-total-known.json')
+  const known = JSON.parse(readFileSync(knownPath, 'utf-8'))
+  const floor = known['最低件数']
+  if (results.length < floor) {
+    console.log(
+      `\nNG  判定の件数が前より少ない（${results.length}件 < ${floor}件）。` +
+        '途中で実行中断していないか、上の NG を見てください',
+    )
+    process.exit(1)
+  }
+  if (results.length > floor) {
+    console.log(
+      `（判定が ${floor}件 → ${results.length}件 に増えました。` +
+        'scripts/data/e2e-total-known.json の「最低件数」を上げてください）',
+    )
+  }
+}
 process.exit(failed.length > 0 || errors.length > 0 ? 1 : 0)

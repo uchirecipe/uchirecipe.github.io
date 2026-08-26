@@ -1535,7 +1535,12 @@ import './_shared.mjs'
         await tab.click()
         await iyPage.waitForTimeout(900)
       }
-      await openWeekGroup(iyPage, ja.mealPlan.weekGroupAutoTitle)
+      // 2026-08-26 便LH: 月タブの「現在の条件」は「献立の入れかた」の折りたたみへ移った
+      // （オーナー指示「折りたたみの見える部分は『献立をまとめて提案』のみ」）。
+      // 週と月で開く相手が違うので、タブで開き分ける。
+      // 週のまま掴むと30秒待って**フルe2eごと実行中断**する（2026-08-26 実発）
+      if (tabName === '月') await openMonthPlanGroup(iyPage)
+      else await openWeekGroup(iyPage, ja.mealPlan.weekGroupAutoTitle)
       if ((await iyPage.locator('[data-testid="plan-conditions-modal"]').count()) === 0) {
         await iyPage.locator('[data-testid="plan-conditions-open"]').click()
         await iyPage.waitForTimeout(600)
@@ -1687,6 +1692,9 @@ import './_shared.mjs'
       // ===== ⑤ 月タブでも同じ窓・同じ状態（条件を共有している） =====
       await iyPage.getByRole('button', { name: '月', exact: true }).click()
       await iyPage.waitForTimeout(1200)
+      // 2026-08-26 便LH: 月タブの「現在の条件」は「献立の入れかた」の折りたたみの中。
+      // ここは iyOpenConditions を通らない**2つ目の入口**で、直し忘れると同じ中断が続く
+      await openMonthPlanGroup(iyPage)
       if ((await iyPage.locator('[data-testid="plan-conditions-modal"]').count()) === 0) {
         await iyPage.locator('[data-testid="plan-conditions-open"]').first().click()
         await iyPage.waitForTimeout(600)
