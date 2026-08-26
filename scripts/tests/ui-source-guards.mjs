@@ -1869,10 +1869,12 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs'
      *   行の横に「先にする」を常設すると、まさにその2つの意味が1行に並ぶ。
      *   押し間違えると調理中の段取りが別の品へ移って番号が振り直されるので、
      *   濡れた手で触る画面では取り返しがつきにくい。
-     *   代わりに、**開けば先にできること**を、常に見えている案内の行に書いた
-     *   （ja.cookNavi.sessionOthersHint）＝入口の存在は畳んだままでも分かる。
+     *   2026-08-26 便LG・オーナー原文「「タップすると全文が出ます〜」削除。触ればわかること。」で、
+     *   常設していた案内（ja.cookNavi.sessionOthersHint）そのものを消した。行を押せば全文と
+     *   一緒にこのボタンが出るので、先に予告はしない
+     *   ＝**畳んだままでは触れないことは今までどおり認める**。
      */
-    'ja.cookNavi.sessionPeekMove': '調理中の押し間違いを避けるため、開いた中に残す（案内は常設の行に出す）',
+    'ja.cookNavi.sessionPeekMove': '調理中の押し間違いを避けるため、開いた中に残す',
     // --- 栄養 ---
     'ja.nutritionBalance.notesToggle': '注記と出典の開閉。読むものであって操作ではない',
     'ja.nutrition.gateLink': 'Pro版の案内リンク。設定の「Pro」から同じ場所へ行ける',

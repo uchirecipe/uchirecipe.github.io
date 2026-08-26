@@ -165,14 +165,25 @@ import './_shared.mjs'
         (await titleInput.inputValue()) === 'テスト改名',
       )
       check(
-        'FORMRESET-01a 確認には、戻るものと変わらないものが両方書いてある（規約F）',
-        await frPage.evaluate(() => {
-          const t = (document.querySelector('[data-testid="confirm"]')?.textContent ?? '').replaceAll(
-            '\u200b',
-            '',
-          )
-          return t.includes('戻るもの') && t.includes('変わらないもの')
-        }),
+        'FORMRESET-01a 確認には、残るものと、保存済みは変わらないことが書いてある（規約F）',
+        // 2026-08-26 便LG・オーナー原文「「保存を押すまで保存済みのレシピは変わりません」が
+        // 「変わらないもの」に書いてあるのはどういう意味？」で窓を作り直した。
+        // 基本レシピの「デフォルトに戻す」は、名前から読み取れない**残るもの**（料理名と写真）
+        // だけを書き、DBの話（保存を押すまで保存済みは変わらない）は補足として別に置く。
+        // 文言は evaluate の**引数で渡す**（向こうには ja が無い＝JM-4）
+        await frPage.evaluate(
+          (texts) => {
+            const t = (
+              document.querySelector('[data-testid="confirm"]')?.textContent ?? ''
+            ).replaceAll('\u200b', '')
+            return texts.every((one) => t.includes(one))
+          },
+          [
+            ja.form.resetConfirmKeptLabel,
+            ja.form.resetConfirmKeptStarter,
+            ja.form.resetConfirmSaveNote,
+          ],
+        ),
       )
 
       await frPage.locator('[data-testid="confirm-ok"]').click()
@@ -235,6 +246,73 @@ import './_shared.mjs'
       check(
         'FORMRESET-01b 2回目のクリックで前回保存したタイトルに戻る',
         (await ownTitleInput.inputValue()) === 'FORMRESET自作レシピ',
+      )
+
+      // --- LG-03f（2026-08-26 便LG）: 料理名と写真も含めて全部戻る ---
+      //   オーナー原文「この機能でユーザーが期待するのは、料理名と写真も含めた、編集の
+      //   巻き戻しです。すべて戻るようにしてください。」
+      //   実測: 便GW の時点で写真と見える範囲も戻っていた（直す必要があったのは窓の文だけ）。
+      //   **戻らなくなったら気づけるように**、ここで写真と見える範囲まで見張る
+      currentCheck = 'LG-03f'
+      // 写真を入れて保存する（これが「前回保存した内容」になる）
+      await frPage.locator('input[type=file]').nth(1).setInputFiles({
+        name: 'lg-a.png',
+        mimeType: 'image/png',
+        buffer: makeTestPng(120, 90),
+      })
+      await frPage.waitForTimeout(900)
+      await frPage.getByRole('button', { name: ja.form.save }).click()
+      await frPage.waitForTimeout(900)
+      await frPage.locator('a[href*="/edit"]').first().click()
+      await frPage.waitForTimeout(700)
+      const lgObjectPosition = () =>
+        frPage.evaluate(() => {
+          const img = document.querySelector('[data-testid="photo-focus-open-form"]')
+            ?.parentElement?.querySelector('img')
+          return img ? getComputedStyle(img).objectPosition : ''
+        })
+      const lgSavedPosition = await lgObjectPosition()
+      // 料理名・写真・見える範囲の3つを、保存後の状態から動かす
+      await frPage.getByPlaceholder(ja.form.namePlaceholder).fill('LG巻き戻し前')
+      await frPage.locator('input[type=file]').nth(1).setInputFiles({
+        name: 'lg-b.png',
+        mimeType: 'image/png',
+        buffer: makeTestPng(200, 150),
+      })
+      await frPage.waitForTimeout(900)
+      await frPage.locator('[data-testid="photo-focus-open-form"]').click()
+      await frPage.waitForTimeout(500)
+      const lgPicker = frPage.locator(`[aria-label="${ja.photoFocus.pickerAria}"]`)
+      const lgBox = await lgPicker.boundingBox()
+      await frPage.mouse.click(lgBox.x + lgBox.width * 0.85, lgBox.y + lgBox.height * 0.2)
+      await frPage.waitForTimeout(300)
+      await frPage.getByRole('button', { name: ja.photoFocus.apply }).click()
+      await frPage.waitForTimeout(500)
+      const lgMovedPosition = await lgObjectPosition()
+      check(
+        'LG-03f 前提: 見える範囲を動かせている（中央から離れた）',
+        lgMovedPosition !== lgSavedPosition,
+        `保存時=${lgSavedPosition} 動かした後=${lgMovedPosition}`,
+      )
+      await setConfirmAnswer(frPage, 'off')
+      await frPage.getByRole('button', { name: ja.form.resetToSavedLabel }).click()
+      await frPage.waitForTimeout(400)
+      await frPage.locator('[data-testid="confirm-ok"]').click()
+      await setConfirmAnswer(frPage, 'accept')
+      await frPage.waitForTimeout(800)
+      check(
+        'LG-03f 料理名が前回保存した内容に戻る',
+        (await frPage.getByPlaceholder(ja.form.namePlaceholder).inputValue()) ===
+          'FORMRESET自作レシピ',
+      )
+      check(
+        'LG-03f 見える範囲も前回保存した内容に戻る',
+        (await lgObjectPosition()) === lgSavedPosition,
+        `保存時=${lgSavedPosition} 戻したあと=${await lgObjectPosition()}`,
+      )
+      check(
+        'LG-03f 写真そのものも残っている（消えない）',
+        (await frPage.locator('[data-testid="photo-focus-open-form"]').count()) === 1,
       )
     } finally {
       await frBrowser.close()

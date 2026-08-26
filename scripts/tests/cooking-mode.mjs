@@ -61,6 +61,8 @@ import {
   naviColorWord,
 } from '../../src/logic/naviColors.ts'
 import { ja } from '../../src/i18n/ja.ts'
+// 2026-08-26 便LG: 詰め込みの行組み（読点優先をやめて行数を最小にする経路）を測る
+import { composeLines } from '../../src/logic/lineCompose.ts'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import { readFileSync } from 'node:fs'
@@ -2142,3 +2144,153 @@ eq('端数は丸める', formatMinutesSecondsLabel(60.4), '1分')
   }
 }
 
+
+// ============================================================================
+// LG-2: 調理中モード（2026-08-26 便LG・オーナーの書き溜め）
+// ============================================================================
+{
+  const lgRoot = path.join(path.dirname(fileURLToPath(scriptFileUrl)), '..')
+  const lgOverlay = readFileSync(path.join(lgRoot, 'src/components/CookSessionOverlay.tsx'), 'utf-8')
+
+  // ---- LG-2-a: 「タップすると全文が出ます〜」は消えている ----
+  // オーナー原文「「タップすると全文が出ます〜」削除。触ればわかること。」
+  eq(
+    'LG-2 見出しの横の案内（sessionOthersHint）は ja.ts から消えている',
+    'sessionOthersHint' in ja.cookNavi,
+    false,
+  )
+  eq(
+    'LG-2 画面もその案内を描いていない',
+    lgOverlay.includes('cook-session-others-hint'),
+    false,
+  )
+
+  // ---- LG-2-b: 「他の品」→「他のレシピ」 ----
+  // オーナー原文「「他の品の次の手順」→「他のレシピの次の手順」」
+  eq(
+    'LG-2 下部の見出しは「レシピ」で呼ぶ（「品」ではない）',
+    [ja.cookNavi.sessionOthersTitle.includes('レシピ'), ja.cookNavi.sessionOthersTitle.includes('品')],
+    [true, false],
+  )
+
+  // ---- LG-2-c: エリア外をタップしても閉じる ----
+  // オーナー原文「もう一度タップの他に、エリア外をタップでも元の大きさに戻るようにして。」
+  eq(
+    'LG-2 開いている枠の外を押したら閉じる仕掛けがある',
+    /peekRowRef[\s\S]{0,900}pointerdown/.test(lgOverlay),
+    true,
+  )
+  eq(
+    'LG-2 掴むのは押し始めの捕捉段階（枠の中のボタンより先に効かせない）',
+    lgOverlay.includes("document.addEventListener('pointerdown', onDown, true)"),
+    true,
+  )
+
+  // ---- LG-2-d: レシピのメモは、細いスクロール欄をやめて窓で読む ----
+  // オーナー原文「レシピのメモがスクロール付きの細いスペースにあるが、スクロールするよりは
+  // タップで窓出した方が読みやすい。手順ないには「レシピのメモ」だけ表示。」
+  eq(
+    'LG-2 手順カードの中に高さ24vhのスクロール欄が残っていない',
+    lgOverlay.includes('max-h-[24vh]'),
+    false,
+  )
+  eq(
+    'LG-2 手順カードに出すのは見出しだけの入口（押すと窓が開く）',
+    [
+      lgOverlay.includes('data-testid="cook-session-recipe-memo"'),
+      lgOverlay.includes('setRecipeNotesOpen(true)'),
+      lgOverlay.includes('ja.cookNavi.recipeNotesTitle'),
+    ],
+    [true, true, true],
+  )
+  eq(
+    'LG-2 窓は他の窓と同じ作法（✕・背景・下の大きなボタンで閉じる）',
+    (() => {
+      const modal = readFileSync(path.join(lgRoot, 'src/components/CookRecipeNotesModal.tsx'), 'utf-8')
+      return [
+        modal.includes('useScrollLock'),
+        modal.includes("e.key === 'Escape'"),
+        modal.includes('onClick={onClose}'),
+        modal.includes('data-testid="cook-session-recipe-memo-close"'),
+      ]
+    })(),
+    [true, true, true, true],
+  )
+  eq('LG-2 入口の読み上げ名がある', typeof ja.cookNavi.recipeNotesOpenAria, 'string')
+
+  // ---- LG-2-e: 収まらないときだけ改行位置を詰め直す ----
+  // オーナー原文「文字数が多くてスクロールしないといけないばあい、改行位置をずらして
+  // 画面に収まるようにしてください。」
+  eq(
+    'LG-2 はみ出しを実測してから詰め込みに切り替える（決め打ちの字数で切らない）',
+    [
+      lgOverlay.includes('box.scrollHeight > box.clientHeight'),
+      lgOverlay.includes('packed={packStepText}'),
+      lgOverlay.includes('new ResizeObserver(check)'),
+    ],
+    [true, true, true],
+  )
+  eq(
+    'LG-2 手順が変わったら詰め込みは解く（前の手順の都合を引きずらない）',
+    /setPackStepText\(false\)\s*\n\s*\}, \[index, fontScale\]\)/.test(lgOverlay),
+    true,
+  )
+}
+
+// ============================================================================
+// LG-2-f: 詰め込みの行組み（logic/lineCompose.ts の packed）
+//   既定の読点優先より行数が増えないこと・文節の切れ目以外で切らないことを固定する
+// ============================================================================
+{
+  // 1文字=1幅の物差しで測る（テストは px ではなく字数で判定する＝端末差に依らない）
+  const lgMeasure = (t) => [...t.replace(/​/g, '')].length
+  const lgLineText = (line) => line.map((p) => p.text ?? '').join('')
+  const lgCompose = (text, width, opts) =>
+    composeLines([{ kind: 'text', text }], width, lgMeasure, { eps: 0, ...opts })
+
+  // 読点優先は「残り幅に入らない句は詰め込まずに改行する」ので行が増える。
+  // 詰め込みは同じ幅で行数が増えない（＝この手順が画面に収まる見込みが上がる）
+  const lgSamples = [
+    'なすを乱切りにして水に5分さらし、水気をふきます。フライパンに油を熱してなすを入れ、しんなりするまで3分炒めます。',
+    'ボウルに酢・しょうゆ・砂糖・ごま油・鶏がらスープの素を混ぜ合わせ、春雨・きゅうり・ハムを加えてあえ、器に盛る。',
+    '鍋にたっぷりの湯を沸かし、もやしを入れて1分ほどゆでる。',
+    // 実測でいちばん長い同梱の手順（冷やし茶碗蒸し・83字）。390px幅の実機で10行→8行になった
+    '蒸し器(なければフライパンで代用)の湯を沸かし、器を並べて入れる。ふたを少しずらすか、ふたの代わりに濡れ布巾をかけて、強火で1〜2分、その後弱火にして12分ほど蒸す。',
+  ]
+  for (const [i, text] of lgSamples.entries()) {
+    const plain = lgCompose(text, 20)
+    const packed = lgCompose(text, 20, { packed: true })
+    eq(`LG-2 詰め込みは行数を増やさない（標本${i + 1}）`, packed.length <= plain.length, true)
+    eq(`LG-2 詰め込みでも文字は1つも落ちない（標本${i + 1}）`, packed.map(lgLineText).join(''), text)
+    eq(
+      `LG-2 詰め込みでも1行が幅を超えない（標本${i + 1}）`,
+      packed.every((line) => lgMeasure(lgLineText(line)) <= 20),
+      true,
+    )
+  }
+  // 少なくとも1つは実際に行が減る標本があること（何も変わらない実装になっていないか）
+  eq(
+    'LG-2 詰め込みで行が減る標本がある（切り替えても何も変わらない実装になっていない）',
+    lgSamples.some(
+      (text) => lgCompose(text, 20, { packed: true }).length < lgCompose(text, 20).length,
+    ),
+    true,
+  )
+  // 詰め込みが不利になる幅でも行は増えない（2026-08-26 便LG の実測: 幅14・標本1で
+  // 素の詰め込みは6行→7行になった。両方組んで少ないほうを採る形にしてある）
+  eq(
+    'LG-2 幅が狭くても行数は増えない（両方組んで少ないほうを採る）',
+    [14, 16, 18, 20, 24, 30].every((width) =>
+      lgSamples.every(
+        (text) => lgCompose(text, width, { packed: true }).length <= lgCompose(text, width).length,
+      ),
+    ),
+    true,
+  )
+  // \n の強制改行は詰め込みでも効く
+  eq(
+    'LG-2 詰め込みでも改行（\\n）は行を分ける',
+    lgCompose('あいうえお\nかきくけこ', 40, { packed: true }).length,
+    2,
+  )
+}

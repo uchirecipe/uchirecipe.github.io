@@ -28,6 +28,11 @@ type Props = {
   ingredientNames?: readonly string[]
   onOpenTerm: OpenTerm
   onStartTimer: (tokenText: string, seconds: number) => void
+  /**
+   * 詰め込みで組む（2026-08-26 便LG）。読点優先の改行をやめて行数を最小にする。
+   * 調理中モードが「この手順は枠に収まらない」と実測したときだけ true になる
+   */
+  packed?: boolean
 }
 
 // タイマーボタンの箱(TimeText と同一の JSX。前後の結合文節ごと nowrap で1つの箱にする)
@@ -201,7 +206,13 @@ function mergeTildeBoxes(atoms: BuiltAtom[]): BuiltAtom[] {
   return out
 }
 
-export default function ComposedStepText({ text, ingredientNames, onOpenTerm, onStartTimer }: Props) {
+export default function ComposedStepText({
+  text,
+  ingredientNames,
+  onOpenTerm,
+  onStartTimer,
+  packed,
+}: Props) {
   // コールバックは ref 経由の安定ラッパーで包み、アトム(=箱ノード)を text/材料名だけに依存させる。
   // (RecipeDetailPage は onStartTimer/ingredientNames を毎描画で作り直すため、素で依存すると
   //  アトムが毎回作り直され再計測が無駄に走る)
@@ -234,5 +245,12 @@ export default function ComposedStepText({ text, ingredientNames, onOpenTerm, on
     />
   )
 
-  return <ComposedLines builtAtoms={builtAtoms} fallback={fallback} ingredientNames={ingredientNames} />
+  return (
+    <ComposedLines
+      builtAtoms={builtAtoms}
+      fallback={fallback}
+      ingredientNames={ingredientNames}
+      packed={packed}
+    />
+  )
 }

@@ -1988,3 +1988,307 @@ import './_shared.mjs'
       await koBrowser.close()
     }
   }
+
+  // ============================================================================
+  // LG-03（2026-08-26 便LG）: レシピ登録画面（オーナーの書き溜め）
+  //
+  //   LG-03a 手順・材料の1行削除は、確認の窓をやめて「元に戻す」つきのトーストにする
+  //   LG-03b 材料の「選んで削除」中は、手順の側を触れなくする／消したらトーストを出す／
+  //          「完了」でも黙らない
+  //   LG-03c 材料メモ・手順メモは「メモを追加」で開く（すでに文字があるときは開いた状態）
+  //   LG-03d 「見える範囲を調整」は画像の直下
+  //   LG-03e 印から合わせ調味料の組を作る（ビビンバ）
+  // ============================================================================
+  currentCheck = 'LG-03a'
+  {
+    const lgBrowser = await chromium.launch()
+    const lgCtx = await lgBrowser.newContext({ viewport: { width: 390, height: 844 } })
+    const lgPage = await lgCtx.newPage()
+    lgPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@LG] ${err.message}`)
+    })
+    /** 登録画面を開き直す（前の入力を持ち越さない） */
+    const lgOpenForm = async () => {
+      await lgPage.goto(`${BASE}/#/recipes/new`)
+      await lgPage.reload({ waitUntil: 'networkidle' })
+      await lgPage.waitForTimeout(900)
+    }
+    try {
+      // --- LG-03a: 1行削除は確認の窓を出さず、トーストで戻せる ---
+      await lgOpenForm()
+      await lgPage.getByPlaceholder(ja.form.stepTextPlaceholder).first().fill('LG消す手順')
+      await lgPage.waitForTimeout(200)
+      const lgStepDelete = lgPage
+        .locator('[data-testid="step-section"]')
+        .getByRole('button', { name: ja.form.removeRow })
+        .first()
+      await lgStepDelete.click()
+      await lgPage.waitForTimeout(500)
+      check(
+        'LG-03a 手順の削除で確認の窓が出ない（テンポを止めない）',
+        (await lgPage.locator('[data-testid="confirm"]').count()) === 0,
+      )
+      const lgToastText = stripZwspText(await lgPage.textContent('body'))
+      check(
+        `LG-03a 代わりに「${ja.form.rowRemovedToast}」のトーストが出る`,
+        lgToastText.includes(ja.form.rowRemovedToast),
+        lgToastText.slice(0, 160),
+      )
+      check(
+        'LG-03a 手順の本文は画面から消えている',
+        (await lgPage.getByPlaceholder(ja.form.stepTextPlaceholder).first().inputValue()) === '',
+      )
+      // 「元に戻す」はトーストが消える前に押せる長さか（規約: 6秒で消えるトーストを
+      // 消えたあとに読んでいた失敗例がある）。押せるまでの時間も測る
+      const lgUndoStart = Date.now()
+      const lgUndo = lgPage.getByRole('button', { name: ja.common.undo })
+      check('LG-03a トーストに「元に戻す」が出る', (await lgUndo.count()) >= 1)
+      await lgUndo.first().click()
+      const lgUndoMs = Date.now() - lgUndoStart
+      await lgPage.waitForTimeout(400)
+      check(
+        `LG-03a 「元に戻す」はトーストが消える前に押せる（押すまで${lgUndoMs}ms・自動で消えるのは6000ms）`,
+        lgUndoMs < 6000,
+        `${lgUndoMs}ms`,
+      )
+      check(
+        'LG-03a 「元に戻す」で消した手順が戻る',
+        (await lgPage.getByPlaceholder(ja.form.stepTextPlaceholder).first().inputValue()) ===
+          'LG消す手順',
+      )
+
+      // --- LG-03b: 「選んで削除」中は手順を触れなくする ---
+      currentCheck = 'LG-03b'
+      await lgOpenForm()
+      await lgPage.getByPlaceholder(ja.form.ingredientNamePlaceholder).first().fill('LGにんじん')
+      await lgPage.getByRole('button', { name: ja.form.addIngredient }).click()
+      await lgPage.waitForTimeout(200)
+      await lgPage.getByPlaceholder(ja.form.ingredientNamePlaceholder).nth(1).fill('LGたまねぎ')
+      await lgPage.getByPlaceholder(ja.form.stepTextPlaceholder).first().fill('LG手順')
+      await lgPage.waitForTimeout(200)
+      await lgPage.getByRole('button', { name: ja.form.ingredientOrganizeToggle }).click()
+      await lgPage.waitForTimeout(400)
+      const lgStepBox = await lgPage.evaluate(() => {
+        const el = document.querySelector('[data-testid="step-section"]')
+        if (!el) return null
+        const cs = getComputedStyle(el)
+        return { inert: el.hasAttribute('inert'), opacity: cs.opacity, pointerEvents: cs.pointerEvents }
+      })
+      check(
+        'LG-03b 材料を選んでいる間、手順の枠は薄くなり触れない',
+        lgStepBox !== null &&
+          lgStepBox.inert === true &&
+          Number(lgStepBox.opacity) < 1 &&
+          lgStepBox.pointerEvents === 'none',
+        JSON.stringify(lgStepBox),
+      )
+      // 1件選んで消す → トーストが出る
+      await lgPage.locator('[data-testid="ingredient-row"]').first().click()
+      await lgPage.waitForTimeout(300)
+      await lgPage
+        .getByRole('button', { name: ja.form.ingredientOrganizeDeleteSelected.replace('{n}', '1') })
+        .click()
+      await lgPage.waitForTimeout(400)
+      if ((await lgPage.locator('[data-testid="confirm-ok"]').count()) > 0) {
+        await lgPage.locator('[data-testid="confirm-ok"]').click()
+        await lgPage.waitForTimeout(500)
+      }
+      const lgBulkText = stripZwspText(await lgPage.textContent('body'))
+      check(
+        'LG-03b まとめて削除でも黙って消えない（件数入りのトーストが出る）',
+        lgBulkText.includes(ja.form.ingredientOrganizeRemovedToast.replace('{n}', '1')),
+        lgBulkText.slice(0, 200),
+      )
+      check(
+        'LG-03b まとめて削除にも「元に戻す」が付く',
+        (await lgPage.getByRole('button', { name: ja.common.undo }).count()) >= 1,
+      )
+      // 「完了」でも黙らない
+      await lgOpenForm()
+      await lgPage.getByPlaceholder(ja.form.ingredientNamePlaceholder).first().fill('LGにんじん')
+      await lgPage.getByRole('button', { name: ja.form.addIngredient }).click()
+      await lgPage.waitForTimeout(200)
+      await lgPage.getByPlaceholder(ja.form.ingredientNamePlaceholder).nth(1).fill('LGたまねぎ')
+      await lgPage.waitForTimeout(200)
+      await lgPage.getByRole('button', { name: ja.form.ingredientOrganizeToggle }).click()
+      await lgPage.waitForTimeout(300)
+      await lgPage.locator('[data-testid="ingredient-row"]').first().click()
+      await lgPage.waitForTimeout(300)
+      await lgPage.getByRole('button', { name: ja.form.ingredientOrganizeDone }).click()
+      await lgPage.waitForTimeout(500)
+      const lgDoneText = stripZwspText(await lgPage.textContent('body'))
+      check(
+        'LG-03b 「完了」で選択が外れたことと、消していないことを知らせる',
+        lgDoneText.includes(ja.form.ingredientOrganizeDoneToast),
+        lgDoneText.slice(0, 200),
+      )
+      check(
+        'LG-03b 「完了」では材料は1件も消えていない',
+        (await lgPage.locator('[data-testid="ingredient-row"]').count()) === 2,
+      )
+
+      // --- LG-03c: メモは「メモを追加」で開く ---
+      currentCheck = 'LG-03c'
+      await lgOpenForm()
+      check(
+        'LG-03c 材料メモの欄は、はじめは出ていない',
+        (await lgPage.getByPlaceholder(ja.form.ingredientMemoPlaceholder).count()) === 0,
+      )
+      check(
+        'LG-03c 手順メモの欄も、はじめは出ていない',
+        (await lgPage.getByPlaceholder(ja.form.stepMemoPlaceholder).count()) === 0,
+      )
+      check(
+        'LG-03c 代わりに「メモを追加」が材料と手順の両方に出る',
+        (await lgPage.locator('[data-testid="ingredient-memo-add"]').count()) >= 1 &&
+          (await lgPage.locator('[data-testid="step-memo-add"]').count()) >= 1,
+      )
+      // ページ全体の高さ（メモの欄を畳んだ効き目を測る）
+      const lgHeightFolded = await lgPage.evaluate(() => document.body.scrollHeight)
+      await lgPage.locator('[data-testid="ingredient-memo-add"]').first().click()
+      await lgPage.locator('[data-testid="step-memo-add"]').first().click()
+      await lgPage.waitForTimeout(400)
+      check(
+        'LG-03c 「メモを追加」を押すと、その行のメモの欄が出る',
+        (await lgPage.getByPlaceholder(ja.form.ingredientMemoPlaceholder).count()) === 1 &&
+          (await lgPage.getByPlaceholder(ja.form.stepMemoPlaceholder).count()) === 1,
+      )
+      const lgHeightOpen = await lgPage.evaluate(() => document.body.scrollHeight)
+      check(
+        `LG-03c 畳んでいるぶんページが短い（畳んだとき${lgHeightFolded}px → 2行開くと${lgHeightOpen}px）`,
+        lgHeightFolded < lgHeightOpen,
+        `${lgHeightFolded}px → ${lgHeightOpen}px`,
+      )
+      // 取り込みで文字が入った行は、押さなくても開いている
+      await lgPage.goto(`${BASE}/#/recipes/new`)
+      await lgPage.reload({ waitUntil: 'networkidle' })
+      await lgPage.waitForTimeout(900)
+      await lgPage.getByText(ja.paste.open).click()
+      await lgPage.waitForTimeout(300)
+      await lgPage
+        .locator(`textarea[placeholder="${ja.paste.placeholder}"]`)
+        .fill('LGメモ入りの品\n2人分\n\n材料\n・鶏むね肉 1枚（250g）\n・しょうゆ 大さじ1\n\n作り方\n1. 焼く')
+      await lgPage.getByRole('button', { name: ja.paste.apply }).click()
+      await lgPage.waitForTimeout(900)
+      check(
+        'LG-03c 取り込みでメモが入った行は、押さなくても開いている',
+        (await lgPage.getByPlaceholder(ja.form.ingredientMemoPlaceholder).count()) >= 1,
+      )
+
+      // --- LG-03d: 「見える範囲を調整」は画像の直下 ---
+      currentCheck = 'LG-03d'
+      await lgOpenForm()
+      await lgPage.locator('input[type=file]').nth(1).setInputFiles({
+        name: 'lg.png',
+        mimeType: 'image/png',
+        buffer: makeTestPng(120, 90),
+      })
+      await lgPage.waitForTimeout(900)
+      const lgPhotoOrder = await lgPage.evaluate(() => {
+        const focus = document.querySelector('[data-testid="photo-focus-open-form"]')
+        if (!focus) return null
+        const img = focus.parentElement?.querySelector('img')
+        const take = [...document.querySelectorAll('button')].find((b) =>
+          b.querySelector('svg') && b.textContent && b.textContent.length < 12 && b.textContent.includes('カメラ'),
+        )
+        const r = (el) => (el ? el.getBoundingClientRect() : null)
+        return {
+          imgBottom: r(img)?.bottom ?? null,
+          focusTop: r(focus)?.top ?? null,
+          takeTop: r(take)?.top ?? null,
+        }
+      })
+      check(
+        'LG-03d 「見える範囲を調整」は画像のすぐ下にある（カメラなどの3つより上）',
+        lgPhotoOrder !== null &&
+          lgPhotoOrder.focusTop !== null &&
+          lgPhotoOrder.imgBottom !== null &&
+          lgPhotoOrder.focusTop >= lgPhotoOrder.imgBottom - 1 &&
+          (lgPhotoOrder.takeTop === null || lgPhotoOrder.focusTop < lgPhotoOrder.takeTop),
+        JSON.stringify(lgPhotoOrder),
+      )
+      check(
+        `LG-03d 画像の下端から「見える範囲を調整」の上端までは${
+          lgPhotoOrder ? Math.round(lgPhotoOrder.focusTop - lgPhotoOrder.imgBottom) : '?'
+        }px`,
+        lgPhotoOrder !== null && lgPhotoOrder.focusTop - lgPhotoOrder.imgBottom < 24,
+        JSON.stringify(lgPhotoOrder),
+      )
+
+      // --- LG-03e: 印から合わせ調味料の組を作る（ビビンバ） ---
+      currentCheck = 'LG-03e'
+      await lgPage.goto(`${BASE}/#/recipes/new`)
+      await lgPage.reload({ waitUntil: 'networkidle' })
+      await lgPage.waitForTimeout(900)
+      await lgPage.getByText(ja.paste.open).click()
+      await lgPage.waitForTimeout(300)
+      // 印が名前の先頭に無い（＝取り込みでは組にならない）書き方で入れ、あとから組にできることを見る
+      await lgPage
+        .locator(`textarea[placeholder="${ja.paste.placeholder}"]`)
+        .fill('LGビビンバ\n2人分\n\n材料\n・ご飯 2杯分\n・牛ひき肉 150g\n・●しょうゆ 大さじ1\n・●砂糖 大さじ1/2\n・●コチュジャン 大さじ1\n\n作り方\n1. ●の調味料を合わせておく\n2. 牛ひき肉を炒める')
+      await lgPage.getByRole('button', { name: ja.paste.apply }).click()
+      await lgPage.waitForTimeout(900)
+      const lgGroupLines = await lgPage.evaluate(
+        () =>
+          [...document.querySelectorAll('[data-testid="ingredient-row"]')].filter(
+            (el) => el.style.borderLeft && el.style.borderLeft !== '',
+          ).length,
+      )
+      check(
+        'LG-03e 貼り付け取り込みは、●の3件をその場で同じ組にする（色の線が付く）',
+        lgGroupLines === 3,
+        `色の線が付いた行=${lgGroupLines}`,
+      )
+      check(
+        'LG-03e 組ができたので「印から組を作る」は出さない（押しても何も起きないボタンを置かない）',
+        (await lgPage.locator('[data-testid="ingredient-seasoning-run"]').count()) === 0 &&
+          (await lgPage.locator('[data-testid="import-gap-seasoning-run"]').count()) === 0,
+      )
+      // 速記入力（1行ずつ足す道）は取り込みを通らない。組を作る入口がその場に出ること
+      await lgOpenForm()
+      // 印の付いていない材料も混ぜる（全部に同じ印が付いている並びは「行頭の飾り」として
+      // 組にしない規則なので、実際のレシピと同じ形にする）
+      for (const line of [
+        'ご飯 2杯分',
+        '牛ひき肉 150g',
+        '●しょうゆ 大さじ1',
+        '●砂糖 大さじ1/2',
+        '●コチュジャン 大さじ1',
+      ]) {
+        await lgPage.getByPlaceholder(ja.form.quickIngredientPlaceholder).fill(line)
+        await lgPage.getByRole('button', { name: ja.form.quickIngredientAdd }).click()
+        await lgPage.waitForTimeout(250)
+      }
+      const lgRunButton = lgPage.locator('[data-testid="ingredient-seasoning-run"]')
+      check(
+        'LG-03e 速記入力で印つきの材料を並べると、「印から組を作る」が材料の欄に出る',
+        (await lgRunButton.count()) === 1,
+      )
+      await lgRunButton.click()
+      await lgPage.waitForTimeout(500)
+      const lgQuickGroupLines = await lgPage.evaluate(
+        () =>
+          [...document.querySelectorAll('[data-testid="ingredient-row"]')].filter(
+            (el) => el.style.borderLeft && el.style.borderLeft !== '',
+          ).length,
+      )
+      check(
+        'LG-03e 押すと3件が同じ組になる（印が消えただけで終わらない）',
+        lgQuickGroupLines === 3,
+        `色の線が付いた行=${lgQuickGroupLines}`,
+      )
+      check(
+        'LG-03e 押したあとは入口が消える（もう作るものが無い）',
+        (await lgRunButton.count()) === 0,
+      )
+      const lgDoneNote = stripZwspText(await lgPage.textContent('body'))
+      check(
+        'LG-03e 何をしたのかをその場に出す',
+        lgDoneNote.includes(ja.form.importGapSeasoningDone.replace('{n}', '1')),
+        lgDoneNote.slice(0, 200),
+      )
+    } finally {
+      await lgBrowser.close()
+    }
+  }

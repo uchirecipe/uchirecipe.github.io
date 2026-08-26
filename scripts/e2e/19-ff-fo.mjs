@@ -585,8 +585,7 @@ import './_shared.mjs'
     for (const [label, text] of [
       ['調理中モードの入口', fkValue(fkCookNavi, 'sessionStart')],
       ['閉じたあとの入口', fkValue(fkCookNavi, 'sessionResume')],
-      ['他の品の次の手順の見出し', fkValue(fkCookNavi, 'sessionOthersTitle')],
-      ['他の品の行をタップしたときの案内', fkValue(fkCookNavi, 'sessionOthersHint')],
+      ['他のレシピの次の手順の見出し', fkValue(fkCookNavi, 'sessionOthersTitle')],
       ['最後の手順のボタン', fkValue(fkFocus, 'complete')],
     ]) {
       check(
@@ -1059,10 +1058,24 @@ import './_shared.mjs'
       // 手順本文が出るので、画面全体の文字で位置を判定すると先頭で止まってしまう）
       const currentStep = async () =>
         noZw(await fmPage.textContent('[data-testid="cook-session-step-text"]'))
-      const sessionNote = async () =>
-        (await fmPage.locator('[data-testid="cook-session-recipe-memo"]').count()) === 0
-          ? ''
-          : noZw(await fmPage.textContent('[data-testid="cook-session-recipe-memo"]'))
+      /**
+       * 調理中モードのレシピ本体のメモ。
+       * 2026-08-26 便LG・オーナー原文「レシピのメモがスクロール付きの細いスペースにあるが、
+       * スクロールするよりはタップで窓出した方が読みやすい。手順ないには「レシピのメモ」だけ
+       * 表示。」で、手順カードには見出しだけの入口が出るようになった。**中身は窓を開いて読む**。
+       * 入口が無ければメモも無い（＝今までどおり空文字を返す）
+       */
+      const sessionNote = async () => {
+        if ((await fmPage.locator('[data-testid="cook-session-recipe-memo"]').count()) === 0) return ''
+        await fmPage.locator('[data-testid="cook-session-recipe-memo"]').click()
+        await fmPage.waitForTimeout(300)
+        const text = noZw(
+          await fmPage.textContent('[data-testid="cook-session-recipe-memo-modal"]'),
+        )
+        await fmPage.locator('[data-testid="cook-session-recipe-memo-close"]').click()
+        await fmPage.waitForTimeout(250)
+        return text
+      }
       check(
         'FM-06 調理中モードの先頭（湯を沸かす）にはレシピ本体のメモを出さない',
         (await sessionNote()) === '',
@@ -1356,12 +1369,27 @@ import './_shared.mjs'
           legendMinutes.length === 3 && legendMinutes.every((t) => legendRe.test(t.trim())),
           JSON.stringify(legendMinutes),
         )
-        const compareText = noZw((await p.locator('[data-testid="navi-total-compare"]').innerText().catch(() => '')) || '')
-        const soloSum = legendMinutes.reduce((sum, t) => sum + Number(/約(\d+)分/.exec(t)?.[1] ?? 0), 0)
+        // --- LG-01: 「1品ずつ作ると約◯分 → この段取りで約◯分／約◯分の短縮」は画面から消えている ---
+        //   2026-08-26 便LG・オーナー原文「「1品ずつ作ると〜◯分の短縮」→削除。4分とかだと個人の
+        //   裁量で直ぐに覆るし、目安でさえこれしか変わらないんだと思ってしまう。ない方がいい。」
+        //   便FN がここで見ていた「内訳の合計＝1品ずつ作ると約◯分」は、画面から数字が消えたので
+        //   scripts/tests/cook-navi.mjs（buildCookPlan の sequentialMinutes）側だけで見張る。
+        //   ここは**戻っていないこと**を見る（黙って検査を消すと、次の便が足し直しても気づけない）
+        const bodyNoCompare = noZw(await p.textContent('body'))
         check(
-          'FN-04 内訳の合計が「1品ずつ作ると約◯分」と一致する(画面の上で足し算が合う)',
-          compareText === '' || compareText.includes(`1品ずつ作ると約${soloSum}分`),
-          `内訳合計=${soloSum} / ${compareText}`,
+          'LG-01 「1品ずつ作ると約◯分」の比較行は画面に出ていない（2026-08-26 オーナー指示で削除）',
+          (await p.locator('[data-testid="navi-total-compare"]').count()) === 0 &&
+            !/1品ずつ作ると約\d+分/.test(bodyNoCompare),
+          bodyNoCompare.slice(0, 200),
+        )
+        check(
+          'LG-01 「約◯分の短縮」も画面に出ていない',
+          !/約\d+分の短縮/.test(bodyNoCompare),
+        )
+        // 全体の目安（この段取りで約◯分）は今までどおり出ていること＝消しすぎていないこと
+        check(
+          'LG-01 全体の目安は残っている（消しすぎていない）',
+          (await p.locator('[data-testid="navi-total-estimate"]').count()) === 1,
         )
         // 2026-08-25 便KT・オーナー原文「「レシピの一覧に出ている〜一致しません」削除。
         // どこのことかわからない上に違っているのは前提のうちなので不要」。

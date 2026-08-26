@@ -17,6 +17,7 @@ import {
   Crop,
   RotateCcw,
   Globe,
+  Palette,
 } from 'lucide-react'
 import type {
   DishType,
@@ -75,6 +76,10 @@ import {
   nextSeasoningGroup,
   seasoningGroupColorToken,
 } from '../logic/seasoningGroup'
+import {
+  regroupIngredientRowsByMark,
+  countSeasoningGroupsFromMarks,
+} from '../logic/seasoningRegroup'
 import { normalizeAmountInput, normalizeDigits } from '../logic/amount'
 import { isHttpUrl } from '../logic/url'
 import {
@@ -500,6 +505,17 @@ function RecipeFormInner() {
   // 行が増える操作(まとめて入力・材料を追加)では選択をいったん解除する
   const [ingredientOrganizing, setIngredientOrganizing] = useState(false)
   const [selectedIngredientIndexes, setSelectedIngredientIndexes] = useState<number[]>([])
+  /**
+   * メモの入力欄を開いている行（2026-08-26 便LG・オーナー原文「材料メモ、手順メモは、
+   * 「メモを追加」押下で初めて出る（自動などで既に入力がある場合には開いておく）ようにして。
+   * 材料が多いとスクロールが長くなるので。」）。
+   *
+   * **すでに文字が入っている行は、この控えに関係なく開く**（下の memoOpen）。
+   * 取り込みで入ったメモや、保存済みのメモが隠れることは無い。
+   * ここに持つのは「まだ空だけれど、人が開いたところ」だけ
+   */
+  const [openIngredientMemos, setOpenIngredientMemos] = useState<number[]>([])
+  const [openStepMemos, setOpenStepMemos] = useState<number[]>([])
   const [steps, setSteps] = useState<StepRow[]>([{ ...emptyStep }])
   const [tags, setTags] = useState<string[]>([])
   const [tagInput, setTagInput] = useState('')
@@ -580,6 +596,13 @@ function RecipeFormInner() {
   const [importGapFields, setImportGapFields] = useState<ImportFieldKey[]>([])
   /** 入らない項目の説明を、いま出しているか（この端末での初回だけ true になる） */
   const [importGapNoticeOpen, setImportGapNoticeOpen] = useState(false)
+  /**
+   * 「印から組を作る」を押した結果（2026-08-26 便LG）。**押したボタンのすぐ下**に出す
+   * （入口は取り込みの結果の中と材料の欄の2か所にあり、離れているので場所を持つ）
+   */
+  const [seasoningGroupedNote, setSeasoningGroupedNote] = useState<
+    { at: 'import' | 'ingredients'; text: string } | undefined
+  >()
   /** 1品に複数の料理が入っていそうな取り込みの知らせ（2026-08-25 便KO・④。知らせるだけ） */
   const [importMultiDish, setImportMultiDish] = useState<MultiDishSignal>()
 
@@ -588,6 +611,7 @@ function RecipeFormInner() {
     setEffortPicked(false)
     setImportGapFields([])
     setImportGapNoticeOpen(false)
+    setSeasoningGroupedNote(undefined)
     setImportMultiDish(undefined)
   }
 
@@ -602,6 +626,8 @@ function RecipeFormInner() {
     title: string
     ingredients: readonly { name: string }[]
     steps: readonly { text: string }[]
+    /** 取り込んだ直後の材料の行（印から組を作れるかを数えるため。2026-08-26 便LG） */
+    rows: readonly IngredientRow[]
   }) => {
     // 種別は取り込み後に画面が「選択中」として扱う値と同じにする
     // （料理名から読み取れた品は「入った」ので並びに出さない）
@@ -616,6 +642,8 @@ function RecipeFormInner() {
       suitableFor,
       dishType: guessed,
       effortLevel,
+      // 印から組が作れるときだけ「合わせ調味料の組」を並びに出す（2026-08-26 便LG）
+      seasoningGroupsFromMarks: countSeasoningGroupsFromMarks(params.rows),
     })
     setImportGapFields(gaps)
     // 説明はこの端末での初回だけ（オーナー指示「毎回表示されると邪魔なので、初回のみ」）。
@@ -663,8 +691,37 @@ function RecipeFormInner() {
   // importPhotoFromUrl(Worker画像プロキシ経由のfetchImportedPhoto)を呼ばない
   const [urlImportFetchPhoto, setUrlImportFetchPhoto] = useState(true)
   // 「写真も取り込む」がONで写真だけ取れなかったときの控えめな通知(2026-07-28 便BX/C01)。
-  // レシピ本体の結果メッセージ(パネル内)とは別枠で、画面下のトーストとして数秒だけ出す
+  // レシピ本体の結果メッセージ(パネル内)とは別枠で、画面下のトーストとして数秒だけ出す。
+  // 2026-08-26 便LG: 行を消したときの知らせもここへ乗せる（画面の下に出るトーストは1つだけ。
+  // 2つ置くと同じ場所に重なって、どちらも読めなくなる）
   const [urlImportToast, setUrlImportToast] = useState('')
+  /**
+   * 消した行を戻すための控え（2026-08-26 便LG・オーナー原文
+   * 「手順の削除をするたびに「この行を消します」の確認が出るのはテンポが悪い。
+   *   削除しました（元に戻す）トーストでちょうどいい。」
+   * 「「選んだ材料◯件を削除」を押したら削除しました（元に戻す）旨のトースト出して。
+   *   黙って消える。消えたのかも心配になる。」）。
+   *
+   * 消す前の**配列まるごと**を控える＝1行でもまとめてでも同じ戻し方になる。
+   * 出したトーストの文言まで一緒に持ち、別の知らせに差し替わったら「元に戻す」も消える
+   * （レシピ詳細・買い物メモと同じ作法）。
+   */
+  const [undoRemovedRows, setUndoRemovedRows] = useState<
+    | { kind: 'ingredient'; rows: IngredientRow[]; message: string }
+    | { kind: 'step'; rows: StepRow[]; message: string }
+    | null
+  >(null)
+  /** 行を消した知らせを出す（前の「元に戻す」は無効にする） */
+  const showRemovedToast = (
+    next:
+      | { kind: 'ingredient'; rows: IngredientRow[]; message: string }
+      | { kind: 'step'; rows: StepRow[]; message: string },
+  ) => {
+    setUndoRemovedRows(next)
+    setUrlImportToast(next.message)
+  }
+  /** いま出ている知らせが、行を消したときのものか（違えば「元に戻す」は出さない） */
+  const undoRemoveActive = undoRemovedRows != null && undoRemovedRows.message === urlImportToast
   // 取り込みで分量が読み取れなかった材料の名前(2026-07-28 便BX/C09)。
   // 「どこを直せばよいか分からない」への最小限の答えで、大掛かりなプレビューUIは作らない。
   // 名前で覚えるので、行を並べ替えても印が付いたままになり、分量を入れれば自然に消える
@@ -1368,6 +1425,7 @@ function RecipeFormInner() {
           title: importedTitle || title.trim(),
           ingredients: importedRows.map((row) => ({ name: row.name })),
           steps: importedSteps.map((step) => ({ text: typeof step === 'string' ? step : step.text })),
+          rows: importedRows,
         })
         // 件数だけでは「どこを直せばよいか」が分からないという5体一致の指摘への最小限の答え
         // (便BX/C09ライト版)。分量を読み取れなかった件数だけ内訳として添える
@@ -1553,6 +1611,13 @@ function RecipeFormInner() {
       title: pastedTitle || title.trim(),
       ingredients: parsed.ingredients.map((row) => ({ name: row.name })),
       steps: pastedStepRows.map((row) => ({ text: row.text })),
+      rows: parsed.ingredients.map((row) => ({
+        name: row.name,
+        amount: row.amount,
+        unit: row.unit,
+        memo: row.memo ?? '',
+        group: row.group,
+      })),
     })
     // 2026-08-25 便KS・⑧: 1本の長文にまとめる（句点でつなぐ）のをやめ、1つの知らせ＝1行にする。
     // 空の行は showPasteMessage が落とすので、ここでは並べるだけでよい
@@ -1622,6 +1687,9 @@ function RecipeFormInner() {
       const last = rows[rows.length - 1]
       const lastIsEmpty =
         last && !last.name.trim() && !last.amount.trim() && !last.unit.trim() && !last.memo.trim()
+      /* 2026-08-26 便LG: ここで組を作り直してはいけない（実測）。材料が出そろう前に判定すると、
+         2件そろった時点で「全部に同じ印＝飾り」と読まれて印が消え、4件の●が2件しか
+         組にならなかった。組にするのは材料の欄に出る「印から組を作る」を押したときだけ */
       return lastIsEmpty ? [...rows.slice(0, -1), row] : [...rows, row]
     })
     // 整理中に行が増えると、位置で持っている選択がずれる(最後の空行が差し替わる場合がある)。
@@ -1630,10 +1698,22 @@ function RecipeFormInner() {
     setQuickIngredient('')
   }
 
-  /** 材料の「整理」モードの出入り。抜けるときは選択を空にする（次に入ったとき選択が残っていない） */
+  /**
+   * 材料の「整理」モードの出入り。抜けるときは選択を空にする（次に入ったとき選択が残っていない）。
+   *
+   * 2026-08-26 便LG・オーナー原文「「完了」を押したら黙って選択が外れる。消せたのかもと思う。」:
+   * 選んだ状態から「完了」を押したときだけ、**消していないこと**をトーストで言い切る。
+   * 何も選ばずに押したときは知らせない（外れる選択が無いので、読む理由が無い）
+   */
   const toggleIngredientOrganizing = () => {
+    const leaving = ingredientOrganizing
+    const hadSelection = selectedIngredientIndexes.length > 0
     setIngredientOrganizing((on) => !on)
     setSelectedIngredientIndexes([])
+    if (leaving && hadSelection) {
+      setUndoRemovedRows(null)
+      setUrlImportToast(ja.form.ingredientOrganizeDoneToast)
+    }
   }
   const toggleIngredientSelected = (index: number) => {
     setSelectedIngredientIndexes((prev) =>
@@ -1664,11 +1744,18 @@ function RecipeFormInner() {
     })
     if (!ok) return
     const drop = new Set(selectedIngredientIndexes)
+    const before = ingredients
     setIngredients((rows) => {
       const kept = rows.filter((_, i) => !drop.has(i))
       return kept.length > 0 ? kept : [{ ...emptyIngredient }]
     })
     setSelectedIngredientIndexes([])
+    // 2026-08-26 便LG・オーナー原文「黙って消える。消えたのかも心配になる。」
+    showRemovedToast({
+      kind: 'ingredient',
+      rows: before,
+      message: ja.form.ingredientOrganizeRemovedToast.replace('{n}', String(count)),
+    })
     // 1行になったら整理することが無くなるので、そのまま通常の入力に戻す
     if (remaining <= 1) setIngredientOrganizing(false)
   }
@@ -1696,33 +1783,56 @@ function RecipeFormInner() {
     )
   }
 
-  /**
-   * 入力中の1行を消すときの確認（2026-08-15 便GW）。材料の行と手順の行で同じ窓を出す。
-   * 規約Fの対象外（入力中の1行で、保存を押すまでDBには何も起きない）と司令部が裁定済みなので、
-   * 見出しとボタンだけの短い窓にする。それでも素のダイアログは出さない＝見た目は他とそろえる
-   */
-  const confirmRemoveRow = () =>
-    confirm({ title: ja.form.confirmRemoveRow, confirmLabel: ja.form.confirmRemoveRowOk })
+  /* 2026-08-26 便LG・オーナー原文「手順の削除をするたびに「この行を消します」の確認が出るのは
+     テンポが悪い。削除しました（元に戻す）トーストでちょうどいい。」で、便GW の確認の窓
+     （confirmRemoveRow）はやめた。消してから戻せるトーストにしている（showRemovedToast）。
+     見張りは scripts/tests/recipe-data.mjs の LG-3 と e2e の LG-03 */
 
-  /** 材料行を削除する（入力内容がある行だけ確認を挟む。空行は従来どおり即削除） */
-  const removeIngredientRow = async (index: number) => {
+  /**
+   * 印から作れる合わせ調味料の組の数（2026-08-26 便LG）。0のときは入口を出さない
+   * ＝押しても何も起きないボタンを画面に置かない
+   */
+  const seasoningGroupsFromMarks = countSeasoningGroupsFromMarks(ingredients)
+
+  /**
+   * メモの入力欄を出すか（2026-08-26 便LG）。**すでに文字が入っている行は必ず開く**
+   * ＝取り込みで入ったメモ・保存済みのメモが「メモを追加」の裏に隠れることはない
+   */
+  const ingredientMemoOpen = (index: number) =>
+    (ingredients[index]?.memo ?? '') !== '' || openIngredientMemos.includes(index)
+  const stepMemoOpen = (index: number) =>
+    (steps[index]?.memo ?? '') !== '' || openStepMemos.includes(index)
+
+  /**
+   * 材料行を削除する（2026-08-26 便LG）。確認の窓は出さず、消してからトーストで戻せるようにする。
+   * オーナー原文は手順の話だが、材料の1行削除は**同じ関数・同じ窓**で動いていたので、
+   * 片方だけ窓が残ると同じ操作が2通りになる（規約A・報告に解釈を明記）。
+   * 空の行は今までどおり黙って消える（戻すものが無いため）
+   */
+  const removeIngredientRow = (index: number) => {
     const row = ingredients[index]
     const hasContent = !!(
       row &&
       (row.name.trim() || row.amount.trim() || row.unit.trim() || row.memo.trim())
     )
-    if (hasContent && !(await confirmRemoveRow())) return
+    const before = ingredients
     setIngredients((rows) =>
       rows.length > 1 ? rows.filter((_, i) => i !== index) : [{ ...emptyIngredient }],
     )
+    if (hasContent) {
+      showRemovedToast({ kind: 'ingredient', rows: before, message: ja.form.rowRemovedToast })
+    }
   }
 
-  /** 手順行を削除する（入力内容がある行だけ確認を挟む。空行は従来どおり即削除） */
-  const removeStepRow = async (index: number) => {
+  /** 手順行を削除する（2026-08-26 便LG。確認の窓をやめ、消してから戻せるトーストにする） */
+  const removeStepRow = (index: number) => {
     const row = steps[index]
     const hasContent = !!(row && (row.text.trim() || row.minutes.trim() || row.memo.trim()))
-    if (hasContent && !(await confirmRemoveRow())) return
+    const before = steps
     setSteps((rows) => (rows.length > 1 ? rows.filter((_, i) => i !== index) : [{ ...emptyStep }]))
+    if (hasContent) {
+      showRemovedToast({ kind: 'step', rows: before, message: ja.form.rowRemovedToast })
+    }
   }
 
   const addTagValue = (value: string) => {
@@ -1996,6 +2106,10 @@ function RecipeFormInner() {
     setSeason(target.season)
     setSuitableFor(target.suitableFor)
     setDishType(target.dishType)
+    // 空のまま開いていたメモの欄も畳み直す（2026-08-26 便LG。中身が入っている行は
+    // ingredientMemoOpen / stepMemoOpen が中身を見て開くので、隠れることはない）
+    setOpenIngredientMemos([])
+    setOpenStepMemos([])
     baselineRef.current = JSON.stringify(target)
     clearDraft()
     setError('')
@@ -2082,10 +2196,14 @@ function RecipeFormInner() {
         resetVariant === 'own'
           ? ja.form.resetConfirmTitleOwn
           : ja.form.resetConfirmTitleStarter,
-      bullets: [
-        { label: ja.form.resetConfirmBackLabel, text: ja.form.resetConfirmBack },
-        { label: ja.form.resetConfirmKeptLabel, text: ja.form.resetConfirmKept },
-      ],
+      // 「前回保存した内容に戻す」は名前が戻る中身を言い切っているので並べ立てない（規約Fの例外）。
+      // 「デフォルトに戻す」からは料理名と写真が残ることを読み取れないので、そこだけ書く
+      bullets:
+        resetVariant === 'own'
+          ? undefined
+          : [{ label: ja.form.resetConfirmKeptLabel, text: ja.form.resetConfirmKeptStarter }],
+      // 画面の話ではなくDBの話なので、「変わらないもの」と同じ箱に入れない（2026-08-26 便LG）
+      notes: [ja.form.resetConfirmSaveNote],
       confirmLabel: ja.form.resetConfirmOk,
     })
     if (!ok) return
@@ -2214,6 +2332,43 @@ function RecipeFormInner() {
                 onPick={pickEffort}
                 testId="import-gap-effort"
               />
+            )}
+            {/* 合わせ調味料の組（2026-08-26 便LG・オーナー原文「自動で登録できない項目に
+                計量一緒にできる設定は含みますか」）。ジャンルのように1つ選ぶものではなく
+                材料の組み分けなので、選ぶ並びではなく1タップのボタンにする。
+                押した結果はその場に出す（材料の行まで目を動かさなくても、何が起きたか読める） */}
+            {importGapFields.includes('seasoningGroup') && (
+              <div data-testid="import-gap-seasoning" className="mt-[var(--space-md)]">
+                <p className="text-sm font-bold text-ink">
+                  {ja.form.importGapField.seasoningGroup}
+                </p>
+                <button
+                  type="button"
+                  data-testid="import-gap-seasoning-run"
+                  onClick={() => {
+                    const made = countSeasoningGroupsFromMarks(ingredients)
+                    setIngredients((rows) => regroupIngredientRowsByMark(rows))
+                    setImportGapFields((keys) => keys.filter((key) => key !== 'seasoningGroup'))
+                    setSeasoningGroupedNote({
+                      at: 'import',
+                      text: ja.form.importGapSeasoningDone.replace('{n}', String(made)),
+                    })
+                  }}
+                  className="mt-1 flex min-h-[var(--tap-min)] w-full items-center justify-center gap-1 rounded-md border border-edge bg-surface px-3 text-sm font-bold text-accent-ink shadow-sm"
+                >
+                  <Palette size={16} aria-hidden />
+                  {ja.form.importGapSeasoningButton}
+                </button>
+              </div>
+            )}
+            {seasoningGroupedNote?.at === 'import' && (
+              <p
+                data-testid="import-gap-seasoning-done"
+                role="status"
+                className="ja-phrase mt-[var(--space-sm)] text-sm text-ink-muted"
+              >
+                {seasoningGroupedNote.text}
+              </p>
             )}
           </div>
         )}
@@ -2588,6 +2743,45 @@ function RecipeFormInner() {
             {ja.form.ingredientGroupHint.replace('{last}', String(MAX_SEASONING_GROUP))}
           </p>
         )}
+        {/* 印から組を作る（2026-08-26 便LG・オーナー原文（ビビンバ）「調味料の頭の印を削除する
+            ようにしたが、手順に「●の調味料を合わせておく」とあり、合わせ調味料の設定は自動で
+            出来ていないので、これではただ目印が消えただけになっている。」）。
+
+            材料に同じ印（●・☆・Aなど）が2件以上あり、まだ組が1つも付いていないときだけ出す
+            ＝押しても何も起きないボタンは出さない。速記入力・手入力・取り込みのどの道で入れても
+            同じ場所に出るので、「印は消えたのに組にならない」で行き止まりにならない。
+            取り込み直後は同じボタンを取り込みの結果の中に出しているので、ここには出さない */}
+        {!ingredientOrganizing &&
+          !importGapFields.includes('seasoningGroup') &&
+          seasoningGroupsFromMarks > 0 && (
+            <button
+              type="button"
+              data-testid="ingredient-seasoning-run"
+              onClick={() => {
+                setIngredients((rows) => regroupIngredientRowsByMark(rows))
+                setSeasoningGroupedNote({
+                  at: 'ingredients',
+                  text: ja.form.importGapSeasoningDone.replace(
+                    '{n}',
+                    String(seasoningGroupsFromMarks),
+                  ),
+                })
+              }}
+              className="mt-[var(--space-sm)] flex min-h-[var(--tap-min)] w-full items-center justify-center gap-1 rounded-md border border-edge bg-surface px-3 text-sm font-bold text-accent-ink shadow-sm"
+            >
+              <Palette size={16} aria-hidden />
+              {ja.form.importGapSeasoningButton}
+            </button>
+          )}
+        {seasoningGroupedNote?.at === 'ingredients' && (
+          <p
+            data-testid="ingredient-seasoning-done"
+            role="status"
+            className="ja-phrase mt-[var(--space-sm)] text-sm text-ink-muted"
+          >
+            {seasoningGroupedNote.text}
+          </p>
+        )}
         {/* 価格管理は「食材と価格」ページに一元化(2026-07-14 オーナー要望)。この画面には
             材料ごとの価格入力欄を置かない。
             2026-08-03 オーナー指示: 案内の一文と「食材と価格を編集する」リンクもこの画面から撤去した。
@@ -2800,6 +2994,20 @@ function RecipeFormInner() {
                       />
                     </button>
                   )}
+                  {/* メモの入口（2026-08-26 便LG・オーナー原文「材料は削除や場所変えと同じ列に。」）。
+                      削除・場所変えと同じ行に置く。開いている行・整理中は出さない */}
+                  {!ingredientOrganizing && !ingredientMemoOpen(index) && (
+                    <button
+                      type="button"
+                      data-testid="ingredient-memo-add"
+                      aria-label={ja.form.addIngredientMemoAria}
+                      onClick={() => setOpenIngredientMemos((prev) => [...prev, index])}
+                      className="tap-target flex min-h-[var(--tap-min)] shrink-0 items-center gap-1 rounded-sm px-1 text-sm font-bold text-ink-muted"
+                    >
+                      <Plus size={14} aria-hidden />
+                      {ja.form.addMemo}
+                    </button>
+                  )}
                 </div>
                 {/* 整理中は上下移動・1行ずつの削除を隠す。行の位置で選択を持っているため、
                     選んだ後に並びが変わると消す行を取り違えるおそれがあるため */}
@@ -2836,7 +3044,7 @@ function RecipeFormInner() {
                     </div>
                     <button
                       type="button"
-                      onClick={() => void removeIngredientRow(index)}
+                      onClick={() => removeIngredientRow(index)}
                       aria-label={ja.form.removeRow}
                       className={`${iconBtnCls} text-warning`}
                     >
@@ -2845,17 +3053,19 @@ function RecipeFormInner() {
                   </div>
                 )}
               </div>
-              <input
-                type="text"
-                value={row.memo}
-                onChange={(e) => updateIngredient(index, { memo: e.target.value })}
-                placeholder={ja.form.ingredientMemoPlaceholder}
-                aria-label={ja.form.ingredientMemoPlaceholder}
-                readOnly={ingredientOrganizing}
-                className={`mt-[var(--space-sm)] block w-full rounded-sm border border-edge bg-app px-3 py-2 text-sm text-ink-muted placeholder:text-ink-muted/60 ${
-                  ingredientOrganizing ? 'pointer-events-none' : ''
-                }`}
-              />
+              {ingredientMemoOpen(index) && (
+                <input
+                  type="text"
+                  value={row.memo}
+                  onChange={(e) => updateIngredient(index, { memo: e.target.value })}
+                  placeholder={ja.form.ingredientMemoPlaceholder}
+                  aria-label={ja.form.ingredientMemoPlaceholder}
+                  readOnly={ingredientOrganizing}
+                  className={`mt-[var(--space-sm)] block w-full rounded-sm border border-edge bg-app px-3 py-2 text-sm text-ink-muted placeholder:text-ink-muted/60 ${
+                    ingredientOrganizing ? 'pointer-events-none' : ''
+                  }`}
+                />
+              )}
             </div>
             )
           })}
@@ -2874,8 +3084,19 @@ function RecipeFormInner() {
         </button>
       </div>
 
-      {/* 手順（追加・削除・並べ替え） */}
-      <div className="mt-[var(--space-lg)]">
+      {/* 手順（追加・削除・並べ替え）。
+          2026-08-26 便LG・オーナー原文「材料「選んで削除」→手順もそのまま一緒に選べるように
+          見えるので、他は押せなくしてグレーアウトみたいに選択できないことがわかる見た目にして。」:
+          材料を選んでいる間は、手順の枠ぜんぶを薄くして触れなくする。
+          `inert` は中のボタン・入力欄をまとめて操作不能にし、読み上げからも外す
+          （個々の欄に readOnly を配って回るより漏れが出ない） */}
+      <div
+        className={`mt-[var(--space-lg)] ${
+          ingredientOrganizing ? 'pointer-events-none opacity-40' : ''
+        }`}
+        data-testid="step-section"
+        inert={ingredientOrganizing || undefined}
+      >
         <span className={labelCls}>{ja.form.stepsLabel}</span>
         <div className="mt-1 space-y-[var(--space-sm)]">
           {steps.map((row, index) => (
@@ -2895,7 +3116,13 @@ function RecipeFormInner() {
                   className="min-w-0 flex-1 rounded-sm border border-edge bg-app px-3 py-2 text-base text-ink placeholder:text-ink-muted/60"
                 />
               </div>
-              <div className="mt-[var(--space-sm)] flex items-center gap-[var(--space-sm)]">
+              {/* 2026-08-26 便LG・オーナー原文「手順は時間の入力欄を短くすれば入るはず。」
+                  ＋ 390px幅の実測。時間の欄を 72px に縮めても、1行に必要な幅は 388px で
+                  使える幅 340px に収まらず、削除の✕が 40px→22px まで潰れていた（押す大きさの
+                  下限 44px を割る）。**折り返す形**にして、入る画面では1行・入らない画面では
+                  「時間とメモ」／「並べ替えと削除」の2つの塊に折り返す。塊の中は割れない */}
+              <div className="mt-[var(--space-sm)] flex flex-wrap items-center justify-between gap-[var(--space-sm)]">
+                <div className="flex min-w-0 items-center gap-[var(--space-sm)]">
                 <input
                   type="number"
                   inputMode="numeric"
@@ -2904,9 +3131,24 @@ function RecipeFormInner() {
                   onChange={(e) => updateStep(index, { minutes: e.target.value })}
                   placeholder={ja.form.stepMinutesPlaceholder}
                   aria-label={ja.form.stepMinutes}
-                  className="min-w-0 flex-1 rounded-sm border border-edge bg-app px-3 py-2 text-base text-ink placeholder:text-ink-muted/60"
+                  className="w-[4.5rem] shrink-0 rounded-sm border border-edge bg-app px-2 py-2 text-base text-ink placeholder:text-ink-muted/60"
                 />
-                <span className="text-sm text-ink-muted">{ja.form.stepMinutes}</span>
+                <span className="shrink-0 text-sm text-ink-muted">{ja.form.stepMinutes}</span>
+                {/* メモの入口（2026-08-26 便LG）。開いている行には出さない */}
+                {!stepMemoOpen(index) && (
+                  <button
+                    type="button"
+                    data-testid="step-memo-add"
+                    aria-label={ja.form.addStepMemoAria}
+                    onClick={() => setOpenStepMemos((prev) => [...prev, index])}
+                    className="tap-target flex min-h-[var(--tap-min)] shrink-0 items-center gap-0.5 rounded-sm px-1 text-sm font-bold text-ink-muted"
+                  >
+                    <Plus size={14} aria-hidden />
+                    {ja.form.addMemo}
+                  </button>
+                )}
+                </div>
+                <div className="ml-auto flex shrink-0 items-center gap-[var(--space-sm)]">
                 {/* 材料行と同じ並び替えのつまみ(2026-08-02)。手順行も「分」の数値欄の真横に
                     上下矢印が並んでいて、分数の増減ボタンに見えるため様式をそろえる */}
                 <div
@@ -2936,12 +3178,13 @@ function RecipeFormInner() {
                 </div>
                 <button
                   type="button"
-                  onClick={() => void removeStepRow(index)}
+                  onClick={() => removeStepRow(index)}
                   aria-label={ja.form.removeRow}
                   className={`${iconBtnCls} text-warning`}
                 >
                   <X size={20} aria-hidden />
                 </button>
+                </div>
               </div>
               {/* 取り込みで本文から入れた分数であることを示す（便ED・docs/68 打ち手#2）。
                   書き換える・消すと印は消える＝保存前にユーザーが必ず確かめられる */}
@@ -2950,14 +3193,16 @@ function RecipeFormInner() {
                   {ja.form.stepMinutesAuto}
                 </p>
               )}
-              <input
-                type="text"
-                value={row.memo}
-                onChange={(e) => updateStep(index, { memo: e.target.value })}
-                placeholder={ja.form.stepMemoPlaceholder}
-                aria-label={ja.form.stepMemoPlaceholder}
-                className="mt-[var(--space-sm)] block w-full rounded-sm border border-edge bg-app px-3 py-2 text-sm text-ink-muted placeholder:text-ink-muted/60"
-              />
+              {stepMemoOpen(index) && (
+                <input
+                  type="text"
+                  value={row.memo}
+                  onChange={(e) => updateStep(index, { memo: e.target.value })}
+                  placeholder={ja.form.stepMemoPlaceholder}
+                  aria-label={ja.form.stepMemoPlaceholder}
+                  className="mt-[var(--space-sm)] block w-full rounded-sm border border-edge bg-app px-3 py-2 text-sm text-ink-muted placeholder:text-ink-muted/60"
+                />
+              )}
             </div>
           ))}
         </div>
@@ -2992,6 +3237,22 @@ function RecipeFormInner() {
           >
             <RecipeIcon iconKey={iconKey ?? pickIconKey({ title, tags, ingredients })} size={64} />
           </div>
+        )}
+        {/* 見える範囲の調整(2026-08-22 便JK)。写真を見せている状態のときだけ出す
+            ＝アイコンを画像にしているレシピには出さない(調整するものが無い)。
+            2026-08-26 便LG・オーナー原文「画像の「見える範囲を調整」は、画像の直ぐ下にして。」:
+            カメラ・アルバム・アイコンの3つのボタンより下（写真から2段下）にあったのを、
+            写真のすぐ下へ上げた＝いま見えている画像と、それを直すボタンが隣り合う */}
+        {photo && !showIconInsteadOfPhoto && (
+          <button
+            type="button"
+            data-testid="photo-focus-open-form"
+            onClick={() => setPhotoFocusOpen(true)}
+            className="mt-2 flex min-h-[var(--tap-min)] w-full items-center justify-center gap-1 rounded-md border border-edge bg-surface text-sm font-bold text-accent-ink shadow-sm"
+          >
+            <Crop size={16} aria-hidden />
+            {ja.photoFocus.open}
+          </button>
         )}
         {/* capture="environment" 付き → スマホでカメラが直接開く */}
         <input
@@ -3049,19 +3310,6 @@ function RecipeFormInner() {
             </span>
           </button>
         </div>
-        {/* 見える範囲の調整(2026-08-22 便JK)。写真を見せている状態のときだけ出す
-            ＝アイコンを画像にしているレシピには出さない(調整するものが無い) */}
-        {photo && !showIconInsteadOfPhoto && (
-          <button
-            type="button"
-            data-testid="photo-focus-open-form"
-            onClick={() => setPhotoFocusOpen(true)}
-            className="mt-2 flex min-h-[var(--tap-min)] w-full items-center justify-center gap-1 rounded-md border border-edge bg-surface text-sm font-bold text-accent-ink shadow-sm"
-          >
-            <Crop size={16} aria-hidden />
-            {ja.photoFocus.open}
-          </button>
-        )}
         {photo && (
           <button
             type="button"
@@ -3495,8 +3743,27 @@ function RecipeFormInner() {
         </button>
       )}
       </div>
-      {/* URL取り込みの補足通知(2026-07-28 便BX/C01)。既存のToast+setMessageパターンを流用 */}
-      <Toast message={urlImportToast} onClose={() => setUrlImportToast('')} />
+      {/* URL取り込みの補足通知(2026-07-28 便BX/C01)と、行を消したときの知らせ(2026-08-26 便LG)。
+          「元に戻す」は、いま出ている文言が消したときのものと同じときだけ添える
+          ＝別の知らせに差し替わったら押せる状態を残さない */}
+      <Toast
+        message={urlImportToast}
+        onClose={() => {
+          setUrlImportToast('')
+          setUndoRemovedRows(null)
+        }}
+        actionLabel={undoRemoveActive ? ja.common.undo : undefined}
+        onAction={
+          undoRemoveActive
+            ? () => {
+                if (undoRemovedRows?.kind === 'ingredient') setIngredients(undoRemovedRows.rows)
+                if (undoRemovedRows?.kind === 'step') setSteps(undoRemovedRows.rows)
+                setUndoRemovedRows(null)
+                setUrlImportToast('')
+              }
+            : undefined
+        }
+      />
     </div>
   )
 }

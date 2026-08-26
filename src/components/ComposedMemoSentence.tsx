@@ -28,6 +28,11 @@ type Props = {
   onOpenTerm?: OpenTerm
   /** ブロック内(手順 text+memo 等)で共有する既出用語の集合(タップ可否判定用) */
   seen?: Set<string>
+  /**
+   * 詰め込みで組む（2026-08-26 便LG）。読点優先の改行をやめて行数を最小にする。
+   * 調理中モードが「この手順は枠に収まらない」と実測したときだけ true になる
+   */
+  packed?: boolean
 }
 
 /**
@@ -54,7 +59,7 @@ function buildMemoAtoms(
   return atoms
 }
 
-export default function ComposedMemoSentence({ text, onOpenTerm, seen }: Props) {
+export default function ComposedMemoSentence({ text, onOpenTerm, seen, packed }: Props) {
   // onOpenTerm は ref 経由の安定ラッパーで包み、アトム(=用語箱)を text/seen だけに依存させる。
   const onOpenTermRef = useRef(onOpenTerm)
   onOpenTermRef.current = onOpenTerm
@@ -80,5 +85,5 @@ export default function ComposedMemoSentence({ text, onOpenTerm, seen }: Props) 
     <>{renderJaUnits(text)}</>
   )
 
-  return <ComposedLines builtAtoms={builtAtoms} fallback={fallback} />
+  return <ComposedLines builtAtoms={builtAtoms} fallback={fallback} packed={packed} />
 }

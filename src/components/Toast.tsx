@@ -11,6 +11,14 @@ type Props = {
    */
   actionLabel?: string
   onAction?: () => void
+  /**
+   * 2つ目の操作（2026-08-26 便LG・オーナー原文「レシピ詳細以外からの「作った！」は内容の入力が
+   * 省略されています。記録した後に出るトーストに、「作った記録の一覧にいく」選択が欲しいです。」）。
+   * 「元に戻す」と同時に出せるようにするため、操作は最大2つまで置ける。
+   * 2つ並ぶときはボタンだけを次の行へ回す＝どちらも押す大きさを削らない。
+   */
+  linkLabel?: string
+  onLink?: () => void
 }
 
 // 自動で消えるまでの時間(ミリ秒)。「◯件追加・◯件更新しました（重複◯件はスキップ）」のような
@@ -29,7 +37,14 @@ const AUTO_DISMISS_MS = 6000
  * 出現時は軽いスライドイン(下から10px+フェードイン。motion-safe:でprefers-reduced-motionを尊重。
  * 2026-07-13 UIペルソナQA)。
  */
-export default function Toast({ message, onClose, actionLabel, onAction }: Props) {
+export default function Toast({
+  message,
+  onClose,
+  actionLabel,
+  onAction,
+  linkLabel,
+  onLink,
+}: Props) {
   useEffect(() => {
     if (!message) return
     const timer = window.setTimeout(onClose, AUTO_DISMISS_MS)
@@ -39,6 +54,10 @@ export default function Toast({ message, onClose, actionLabel, onAction }: Props
   if (!message) return null
 
   const hasAction = !!actionLabel && !!onAction
+  const hasLink = !!linkLabel && !!onLink
+  // 2つ並ぶときだけ、ボタンを次の行へ回す（390px幅で文と2つのボタンを1行に並べると、
+  // 文が1〜2文字で折り返して読めなくなる。2026-08-26 便LG で実測して決めた）
+  const stacked = hasAction && hasLink
 
   return (
     <div
@@ -51,29 +70,48 @@ export default function Toast({ message, onClose, actionLabel, onAction }: Props
       role="status"
       aria-live="polite"
     >
-      <div className="flex w-full max-w-sm items-start gap-2 rounded-md border border-accent bg-surface px-4 py-3 text-left shadow-md motion-safe:animate-toast-in">
-        <button
-          type="button"
-          onClick={onClose}
-          className="flex min-w-0 flex-1 items-start gap-2 text-left"
-        >
-          {/* 改行（\n）をそのまま出す（2026-08-24 便KI・オーナー原文「トーストの文が長い上に
-              改行もないので読む前に消える」）。2文以上が地続きの1行に詰まると、どこまでが
-              1つの知らせなのか読み取れないまま消えていた */}
-          <span className="min-w-0 flex-1 whitespace-pre-line text-sm font-bold text-accent-ink">
-            {message}
-          </span>
-          {!hasAction && <X size={16} className="mt-0.5 shrink-0 text-accent-ink" aria-hidden />}
-        </button>
-        {hasAction && (
-          <>
+      <div
+        className={`w-full max-w-sm rounded-md border border-accent bg-surface px-4 py-3 text-left shadow-md motion-safe:animate-toast-in ${
+          stacked ? '' : 'flex items-start gap-2'
+        }`}
+      >
+        <div className={stacked ? 'flex items-start gap-2' : 'contents'}>
+          <button
+            type="button"
+            onClick={onClose}
+            className="flex min-w-0 flex-1 items-start gap-2 text-left"
+          >
+            {/* 改行（\n）をそのまま出す（2026-08-24 便KI・オーナー原文「トーストの文が長い上に
+                改行もないので読む前に消える」）。2文以上が地続きの1行に詰まると、どこまでが
+                1つの知らせなのか読み取れないまま消えていた */}
+            <span className="min-w-0 flex-1 whitespace-pre-line text-sm font-bold text-accent-ink">
+              {message}
+            </span>
+            {!hasAction && !hasLink && (
+              <X size={16} className="mt-0.5 shrink-0 text-accent-ink" aria-hidden />
+            )}
+          </button>
+          {!stacked && hasLink && (
             <button
               type="button"
+              data-testid="toast-link"
+              onClick={onLink}
+              className="shrink-0 rounded-sm border border-accent px-3 py-1 text-sm font-bold text-accent-ink"
+            >
+              {linkLabel}
+            </button>
+          )}
+          {!stacked && hasAction && (
+            <button
+              type="button"
+              data-testid="toast-action"
               onClick={onAction}
               className="shrink-0 rounded-sm border border-accent px-3 py-1 text-sm font-bold text-accent-ink"
             >
               {actionLabel}
             </button>
+          )}
+          {(hasAction || hasLink) && (
             <button
               type="button"
               onClick={onClose}
@@ -82,7 +120,28 @@ export default function Toast({ message, onClose, actionLabel, onAction }: Props
             >
               <X size={16} aria-hidden />
             </button>
-          </>
+          )}
+        </div>
+        {/* 操作が2つあるときだけ、次の行に横並びで置く。1つずつは今までどおり文の右に出る */}
+        {stacked && (
+          <div className="mt-2 flex gap-2">
+            <button
+              type="button"
+              data-testid="toast-action"
+              onClick={onAction}
+              className="min-h-[var(--tap-min)] flex-1 rounded-sm border border-accent px-2 text-sm font-bold text-accent-ink"
+            >
+              {actionLabel}
+            </button>
+            <button
+              type="button"
+              data-testid="toast-link"
+              onClick={onLink}
+              className="min-h-[var(--tap-min)] flex-1 rounded-sm border border-accent px-2 text-sm font-bold text-accent-ink"
+            >
+              {linkLabel}
+            </button>
+          </div>
         )}
       </div>
     </div>

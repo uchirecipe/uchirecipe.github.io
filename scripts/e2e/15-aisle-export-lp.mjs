@@ -828,15 +828,50 @@ import './_shared.mjs'
         (await counter()) === beforePeek,
         `${beforePeek}→${await counter()}`,
       )
+      // 2026-08-26 便LG・オーナー原文「「タップすると全文が出ます〜」削除。触ればわかること。」。
+      // 便ES がここで見ていた見出し横の案内は消した。**戻っていないこと**を見る
       check(
-        // 2026-08-09 便ES（オーナー指示E-6/E-10）: 行ごとに繰り返さず、見出しの横に1回だけ出す
-        'EL-03 見るだけであることを見出しの横に1回だけ書く',
-        ((await elPage.textContent('[data-testid="cook-session-others-hint"]')) ?? '').includes(
-          'タップすると全文が出ます（調理中の手順は変わりません）',
-        ) && (await elPage.locator('[data-testid="cook-session-others-hint"]').count()) === 1,
+        'LG-02 「タップすると全文が出ます〜」の案内は画面に出ていない（2026-08-26 オーナー指示で削除）',
+        (await elPage.locator('[data-testid="cook-session-others-hint"]').count()) === 0 &&
+          !stripZwspText(await elPage.textContent('body')).includes('タップすると全文が出ます'),
+      )
+      // 見出しは ja.ts から読む（書き写さない＝JM-2）。「品」から「レシピ」に変わったことは
+      // 語そのもので見る＝文全体を書き写さずに、呼び名の入れ替わりだけを見張る
+      check(
+        `LG-02 見出しは「${ja.cookNavi.sessionOthersTitle}」（呼び名は「レシピ」）`,
+        stripZwspText(
+          await elPage.locator('[data-testid="cook-session-others"]').innerText(),
+        ).includes(ja.cookNavi.sessionOthersTitle) &&
+          ja.cookNavi.sessionOthersTitle.includes('レシピ') &&
+          !ja.cookNavi.sessionOthersTitle.includes('品'),
+        ja.cookNavi.sessionOthersTitle,
+      )
+      // LG-02: 枠の外を押しても閉じる（オーナー原文「もう一度タップの他に、エリア外をタップでも
+      // 元の大きさに戻るようにして。」）。押す場所は上部の手順の枠＝行の外
+      await elPage.locator('[data-testid="cook-session-step-text"]').click()
+      await elPage.waitForTimeout(400)
+      check(
+        'LG-02 枠の外をタップすると開いていた全文が閉じる',
+        (await elPage.locator('[data-testid="cook-session-peek"]').count()) === 0,
+      )
+      check(
+        'LG-02 外をタップして閉じても調理中の手順は動かない',
+        (await counter()) === beforePeek,
+        `${beforePeek}→${await counter()}`,
+      )
+      // もう一度タップで閉じる道も今までどおり残っている
+      await elPage.locator('[data-testid="cook-session-other-row"]').first().click()
+      await elPage.waitForTimeout(400)
+      check(
+        'LG-02 前提: もう一度開ける',
+        (await elPage.locator('[data-testid="cook-session-peek"]').count()) === 1,
       )
       await elPage.locator('[data-testid="cook-session-other-row"]').first().click()
-      await elPage.waitForTimeout(300)
+      await elPage.waitForTimeout(400)
+      check(
+        'LG-02 もう一度タップでも閉じる（今までどおり）',
+        (await elPage.locator('[data-testid="cook-session-peek"]').count()) === 0,
+      )
 
       // EL-06: この画面から単品レシピ詳細へ離脱する導線を置かない
       currentCheck = 'EL-06'
