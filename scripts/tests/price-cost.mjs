@@ -2976,7 +2976,12 @@ eq('normalizeIngredientNameForPrice 前後空白除去', normalizeIngredientName
   // --- 画面側が「設定が届く前に週を決めてしまう」形に戻っていないこと ---
   {
     const jlRoot = path.join(path.dirname(fileURLToPath(scriptFileUrl)), '..')
-    const src = readFileSync(path.join(jlRoot, 'src/pages/MealPlanPage.tsx'), 'utf-8')
+    // 状態と手続きは 2026-08-27 便LQ（docs/74 第4手）で
+    // src/pages/mealPlan/useMealPlanState.ts へ移した（中身は1文字も動かしていない）。
+    // ここは**画面一式**を1つの本文として読む＝分ける前と同じものを見ている
+    const src = ['src/pages/MealPlanPage.tsx', 'src/pages/mealPlan/useMealPlanState.ts']
+      .map((rel) => readFileSync(path.join(jlRoot, rel), 'utf-8'))
+      .join('\n')
     eq(
       'JL-2 前提: ?focus=week&date= の枝を掴めている（0件なら見張りが壊れている）',
       src.includes("const date = searchParams.get('date')"),

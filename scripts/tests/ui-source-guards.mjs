@@ -386,6 +386,19 @@ import { createRequire } from 'node:module'
       'クラス名だけを置く場所で窓を描かないため（使う側で数える）',
     ],
   ])
+  // 2026-08-27 便LQ（docs/74 第4手）: 献立の画面は「画面に出す形（MealPlanPage.tsx）」と
+  // 「状態と手続き（mealPlan/useMealPlanState.ts）」に分かれた（中身は1文字も動かしていない）。
+  // 窓を描くのは前者・後ろの画面を止める呼び出しは後者にあるので、**2つで1つの画面**として
+  // 数える＝分ける前と同じ数え方（窓が増えたら止める呼び出しも増やす必要があるのは変わらない）
+  const heLockCompanion = new Map([
+    ['src/pages/MealPlanPage.tsx', 'src/pages/mealPlan/useMealPlanState.ts'],
+  ])
+  eq(
+    'HE-3 前提: 窓と止める呼び出しが別のファイルに分かれている画面の、相方を読める',
+    heLockCompanion.size > 0 &&
+      [...heLockCompanion.values()].every((rel) => existsSync(path.join(heAppRoot, rel))),
+    true,
+  )
   const heMissingLock = []
   for (const full of heSources(path.join(heAppRoot, 'src'))) {
     const rel = path.relative(heAppRoot, full).split(path.sep).join('/')
@@ -405,7 +418,11 @@ import { createRequire } from 'node:module'
       (heBody.match(/DIALOG_BACKDROP_CLS/g) ?? []).length
     if (overlays === 0) continue
     if (heOverlayExempt.has(rel)) continue
-    const locks = (src.match(/useScrollLock\(/g) ?? []).length
+    const heCompanion = heLockCompanion.get(rel)
+    const heLockSrc = heCompanion
+      ? `${src}\n${readFileSync(path.join(heAppRoot, heCompanion), 'utf-8')}`
+      : src
+    const locks = (heLockSrc.match(/useScrollLock\(/g) ?? []).length
     if (locks < overlays) heMissingLock.push(`${rel}(窓${overlays}/止める呼び出し${locks})`)
   }
   eq('HE-3 全面の窓はすべて、後ろの画面を止める共通の仕組みを通っている', heMissingLock, [])
@@ -2020,6 +2037,23 @@ import { createRequire } from 'node:module'
     return { file, src, collapse, comps }
   })
 
+  // 2026-08-27 便LQ（docs/74 第4手）: 献立の画面の状態と手続きは
+  // src/pages/mealPlan/useMealPlanState.ts（.ts）へ移した。折りたたみ（<Collapse>）も部品も
+  // JSXの側に残っているので、こちらは**「畳んでいない場所で使っている文言」を数えるためだけ**に
+  // 読む（部品の定義としては数えない＝同じ名前の取り違えで見張りが緩まないようにする）。
+  // ここを読まないと、画面の外へ出しただけの文言が「開かないと触れない」に見えて赤くなる
+  const COLLAPSE_PLAIN_SOURCES = ['src/pages/mealPlan/useMealPlanState.ts']
+  eq(
+    'COLLAPSE-1 前提: 折りたたみの外で文言を使う場所（画面の状態と手続き）を読めている',
+    COLLAPSE_PLAIN_SOURCES.length > 0 &&
+      COLLAPSE_PLAIN_SOURCES.every((rel) => existsSync(path.join(appRoot, rel))),
+    true,
+  )
+  for (const rel of COLLAPSE_PLAIN_SOURCES) {
+    const file = path.join(appRoot, rel)
+    parsed.push({ file, src: readFileSync(file, 'utf-8'), collapse: [], comps: new Map() })
+  }
+
   // 同じ名前の部品が2つ以上あるファイルは、どちらを指しているか決められないので見ない
   const defs = new Map()
   for (const p of parsed) {
@@ -2303,6 +2337,9 @@ import { createRequire } from 'node:module'
     'src/pages/mealPlan/DayParts.tsx',
     'src/pages/mealPlan/IntakeParts.tsx',
     'src/pages/mealPlan/MonthParts.tsx',
+    // 状態と手続き（2026-08-27 便LQ・docs/74 第4手）。JSXは無いが、角のpxを直に書いた
+    // 値をここへ置けば素通りしてしまうので、切り出した先はここにも足す
+    'src/pages/mealPlan/useMealPlanState.ts',
     'src/pages/RecipesPage.tsx',
     // レシピ一覧から切り出した並び替え／絞り込みパネル（2026-08-25 便KZ の献立と同じ形・2026-08-27 便LM）。
     // ここへ足さないと、角の px を直に書く抜け道が「別のファイルへ移せば素通りする」形で残る

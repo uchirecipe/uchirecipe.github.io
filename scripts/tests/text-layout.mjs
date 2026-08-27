@@ -3586,10 +3586,14 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs'
     )
   }
   // 「改行もない」への手当て: 2文以上つながるときは改行でつなぎ、トーストがその改行を出せること
-  const mealPlanSrc = readFileSync(
-    path.join(path.dirname(fileURLToPath(scriptFileUrl)), '..', 'src/pages/MealPlanPage.tsx'),
-    'utf-8',
-  )
+  // 状態と手続きは 2026-08-27 便LQ（docs/74 第4手）で
+  // src/pages/mealPlan/useMealPlanState.ts へ移した（中身は1文字も動かしていない）。
+  // ここは**画面一式**を1つの本文として読む＝分ける前と同じものを見ている
+  const mealPlanSrc = ['src/pages/MealPlanPage.tsx', 'src/pages/mealPlan/useMealPlanState.ts']
+    .map((rel) =>
+      readFileSync(path.join(path.dirname(fileURLToPath(scriptFileUrl)), '..', rel), 'utf-8'),
+    )
+    .join('\n')
   const toastSrc = readFileSync(
     path.join(path.dirname(fileURLToPath(scriptFileUrl)), '..', 'src/components/Toast.tsx'),
     'utf-8',
@@ -3624,7 +3628,13 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs'
 {
   const kjRoot = path.join(path.dirname(fileURLToPath(scriptFileUrl)), '..')
   const kjRead = (rel) => readFileSync(path.join(kjRoot, rel), 'utf-8')
-  const kjPlanSrc = kjRead('src/pages/MealPlanPage.tsx')
+  // 状態と手続きは 2026-08-27 便LQ（docs/74 第4手）で
+  // src/pages/mealPlan/useMealPlanState.ts へ移した（中身は1文字も動かしていない）。
+  // ここは**画面一式**を1つの本文として読む＝「残っていない」を見る側もあるので、
+  // 片方だけ読むと**別のファイルへ移しただけで素通り**してしまう
+  const kjPlanSrc = ['src/pages/MealPlanPage.tsx', 'src/pages/mealPlan/useMealPlanState.ts']
+    .map(kjRead)
+    .join('\n')
   const kjTypesSrc = kjRead('src/db/types.ts')
   const kjLogSrc = kjRead('src/components/CookedLogDetailModal.tsx')
   eq('KJ 前提: 献立の画面を読めている（0字なら見張りが壊れている）', kjPlanSrc.length > 10000, true)
@@ -3910,6 +3920,8 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs'
     'src/pages/mealPlan/DayParts.tsx',
     'src/pages/mealPlan/IntakeParts.tsx',
     'src/pages/mealPlan/MonthParts.tsx',
+    // 状態と手続きは 2026-08-27 便LQ（docs/74 第4手）でここへ移した
+    'src/pages/mealPlan/useMealPlanState.ts',
   ]
     .map((rel) => readFileSync(path.join(appRoot, rel), 'utf-8'))
     .join('\n')

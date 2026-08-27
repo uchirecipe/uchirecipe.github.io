@@ -3269,10 +3269,15 @@ eq('rangeDayCount: 月をまたぐ計算も正しい', rangeDayCount('2026-06-28
       typeof mealPlanLogicIF.planShowWeekLock,
       'undefined',
     )
-    const mealPlanPageSrcIF = readFileSync(
-      path.join(path.dirname(fileURLToPath(scriptFileUrl)), '..', 'src/pages/MealPlanPage.tsx'),
-      'utf-8',
-    )
+    // 状態と手続きは 2026-08-27 便LQ（docs/74 第4手）で
+    // src/pages/mealPlan/useMealPlanState.ts へ移した（中身は1文字も動かしていない）。
+    // ここは**画面一式**を1つの本文として読む＝「残っていない」を見る側なので、
+    // 片方だけ読むと**別のファイルへ移しただけで素通り**してしまう
+    const mealPlanPageSrcIF = ['src/pages/MealPlanPage.tsx', 'src/pages/mealPlan/useMealPlanState.ts']
+      .map((rel) =>
+        readFileSync(path.join(path.dirname(fileURLToPath(scriptFileUrl)), '..', rel), 'utf-8'),
+      )
+      .join('\n')
     eq(
       'IF-11(便JFで巻き戻し) 画面側にも「過去だけの週では出さない」の分岐が残っていない',
       /showWeekLock/.test(mealPlanPageSrcIF),
@@ -3930,10 +3935,14 @@ eq('rangeDayCount: 月をまたぐ計算も正しい', rangeDayCount('2026-06-28
     true,
   )
   {
-    const kiPageSrc = readFileSync(
-      path.join(path.dirname(fileURLToPath(scriptFileUrl)), '..', 'src/pages/MealPlanPage.tsx'),
-      'utf-8',
-    )
+    // 状態と手続きは 2026-08-27 便LQ（docs/74 第4手）で
+    // src/pages/mealPlan/useMealPlanState.ts へ移した（中身は1文字も動かしていない）。
+    // ここは**画面一式**を1つの本文として読む＝分ける前と同じものを見ている
+    const kiPageSrc = ['src/pages/MealPlanPage.tsx', 'src/pages/mealPlan/useMealPlanState.ts']
+      .map((rel) =>
+        readFileSync(path.join(path.dirname(fileURLToPath(scriptFileUrl)), '..', rel), 'utf-8'),
+      )
+      .join('\n')
     eq(
       'KI-1 「◯食に入れる」の2回目は、その用意された知らせを出している',
       kiPageSrc.includes('ja.mealPlan.planMismatchAlready'),
