@@ -213,6 +213,8 @@ import {
   type DetachedLogEntry,
 } from '../../components/useDetachedLogEntries'
 import { shouldShowHomeScreenNoticeNow } from '../../logic/homeScreenNotice'
+// Pro案内から設定へ飛ぶときの帰り道（2026-08-27 便LU）
+import { settingsLinkWithBack } from '../../logic/backLink'
 import { ja } from '../../i18n/ja'
 
 /** 献立タブの3タブ構成（2026-07-16 便U-1: 現行の「今日セクション+週/月切替」をタブへ再構成） */
@@ -3993,6 +3995,25 @@ export function useMealPlanState(demo?: MonthDemoData) {
   }
 
   /**
+   * 「Pro版について見る」から設定へ寄り道するときの行き先と、離れる直前の覚え
+   * （2026-08-27 便LU・オーナー原文「各種pro版について見るからの戻り先、献立ならすべて日に
+   *  戻ってしまう。直前の状態に戻して。折りたたみが閉じてしまう、スクロール場所がズレるのもやめて。」）。
+   *
+   * 直す前は帰り道が `/meal-plan`（現在地のパスだけ）だった。日/週/月のどれを見ていたかも、
+   * 見ていた週も、開いた曜日カードも、縦位置も**URLに乗っていない**ので、設定から帰ると
+   * 必ず既定の姿（日タブ・畳んだ状態・先頭）で開き直していた。
+   *
+   * 新しい仕組みは足していない——**レシピ詳細・作った記録の一覧から帰るときと同じ道**に乗せる
+   * （覚えるのは rememberLogDetailReturn、帰り道は logDetailLinkState.fromPath＝
+   *   `?focus=<タブ>&restore=1`）。行き先が設定に変わるだけなので、
+   *   覚え方・戻し方・捨て方はすでに実測で固めた1つのままになる。
+   */
+  const proGateDetour = {
+    to: settingsLinkWithBack('/settings?section=pro', logDetailLinkState.fromPath),
+    onClick: rememberLogDetailReturn,
+  }
+
+  /**
    * 記録を付けた直後のトーストから「作った記録の一覧へ」を出すか（2026-08-26 便LJ）。
    * 出した文言そのものを見比べる＝別の操作でトーストが差し替わったら行き先も消える。
    */
@@ -4469,7 +4490,15 @@ export function useMealPlanState(demo?: MonthDemoData) {
       includesTodayList: shopIncludesTodayList && (todayList?.length ?? 0) > 0,
     })
     const rangeParam = rangeLabel ? `&range=${encodeURIComponent(rangeLabel)}` : ''
-    navigate(`/shopping?recipeIds=${param}&servings=${servingsParam}${rangeParam}`)
+    /**
+     * 下書きの画面から、いま居た献立へ帰る道（2026-08-27 便LU・オーナー原文
+     * 「下書き画面から直前の画面まで戻ってくる手段がない。」）。
+     * Pro案内の帰り道とまったく同じ道具に乗せる＝離れる直前の週・縦位置・
+     * 開いた曜日カードを覚えてから移り、買い物メモの「◯◯に戻る」で同じ場所へ帰る。
+     */
+    rememberLogDetailReturn()
+    const backParam = `&back=${encodeURIComponent(logDetailLinkState.fromPath)}`
+    navigate(`/shopping?recipeIds=${param}&servings=${servingsParam}${rangeParam}${backParam}`)
   }
 
   const dowLabels = ja.mealPlan.dow
@@ -4552,7 +4581,7 @@ export function useMealPlanState(demo?: MonthDemoData) {
     monthPlanSheet, savePlanSheetImage, servingsEditor, setServingsEditor, submitServings,
     setDayFoldOverrides, weekEditDate, setWeekEditDate, datesWithPlan, isDayFolded,
     setAllDaysFolded, allDaysCollapsed, allDaysLocked, rememberWeekReturn, rememberMonthReturn,
-    rememberDayReturn, logDetailLinkState, rememberLogDetailReturn, historyToastActive,
+    rememberDayReturn, logDetailLinkState, rememberLogDetailReturn, proGateDetour, historyToastActive,
     openHistoryFromToast, weekGroupOpen, setWeekGroupOpen, fillMode, setFillMode, clearSlotTargets,
     toggleClearSlotTarget, clearSlotLabel, clearWeekSlot, includeRice, weekCostEstimate, riceYen,
     riceCostServings, weekCost, weekMealCount, weekPricelessCount, weekBalanceByDate, weekBalance,

@@ -31,6 +31,12 @@ import { buildShareText } from '../../src/logic/share.ts'
 import { ingredientColorToken } from '../../src/logic/ingredientColor.ts'
 import { ja } from '../../src/i18n/ja.ts'
 import { settingsLinkWithBack, resolveBackTarget } from '../../src/logic/backLink.ts'
+import {
+  SCREEN_PANEL,
+  parseScreenReturn,
+  serializeScreenReturn,
+  withScreenReturnParam,
+} from '../../src/logic/navMemory.ts'
 import { isStandaloneDisplay } from '../../src/logic/standalone.ts'
 import { shouldShowHomeScreenNotice } from '../../src/logic/homeScreenNotice.ts'
 import {
@@ -1552,6 +1558,281 @@ eq('紫キャベツは紫カテゴリ(キャベツの野菜カテゴリより優
       'LI-6 表示の乱れの行き先は「困ったとき」の修復のまま',
       ja.settings.appUpdateVsRefreshNote.includes(`「${ja.settings.refreshAppTitle}」`) &&
         ja.settings.appUpdateVsRefreshNote.includes(`「${ja.settings.refreshAppButton}」`),
+      true,
+    )
+  }
+}
+
+// ==========================================================================================
+// 便LU（2026-08-27・オーナーの書き溜め）
+//  LU-1 「設定へ寄り道して帰ってくる」ときの覚え（logic/navMemory.ts の ScreenReturnPoint）
+//  LU-2 「Pro版について見る」の入口が、全部そろって「直前の状態」へ帰る形になっている
+//  LU-3 買い物メモの下書きに、作った画面への帰り道と着いたときの案内がある
+//  LU-4 「作った！」で在庫を減らすスイッチ（トーストを出さない／設定は1つ）
+// ==========================================================================================
+{
+  const luRoot = path.join(path.dirname(fileURLToPath(scriptFileUrl)), '..')
+  const luRead = (rel) => readFileSync(path.join(luRoot, rel), 'utf-8')
+
+  // ---- LU-1: 覚える形と読み方 -------------------------------------------------------------
+  // 直したバグ（オーナー原文）:「各種pro版について見るからの戻り先、献立ならすべて日に
+  // 戻ってしまう。直前の状態に戻して。折りたたみが閉じてしまう、スクロール場所がズレるのもやめて。」
+  {
+    eq(
+      'LU-1 帰り先のパスに「覚えた場所へ戻す」印を足す',
+      withScreenReturnParam('/recipes/12'),
+      '/recipes/12?restore=1',
+    )
+    eq(
+      'LU-1 すでにクエリがあるときは & でつなぐ',
+      withScreenReturnParam('/recipes?q=鶏'),
+      '/recipes?q=鶏&restore=1',
+    )
+    eq(
+      'LU-1 印が二重に付かない',
+      withScreenReturnParam('/meal-plan?focus=week&restore=1'),
+      '/meal-plan?focus=week&restore=1',
+    )
+    // 帰り先の名前を出す道具（設定画面の「◯◯に戻る」）が、印の付いたパスでも今までどおり働く
+    eq(
+      'LU-1 印を付けても帰り先の名前は変わらない',
+      resolveBackTarget('/recipes/12?restore=1')?.label,
+      'レシピに戻る',
+    )
+    eq(
+      'LU-1 印を付けた戻り先は、印ごとそのまま帰る',
+      resolveBackTarget('/meal-plan?focus=month&restore=1')?.to,
+      '/meal-plan?focus=month&restore=1',
+    )
+
+    const luPoint = { path: '/recipes/12', scrollY: 1019.4, openPanels: ['nutrition'] }
+    const luRaw = serializeScreenReturn(luPoint)
+    eq('LU-1 覚えを読み戻せる', parseScreenReturn(luRaw, '/recipes/12'), {
+      path: '/recipes/12',
+      scrollY: 1019,
+      openPanels: ['nutrition'],
+    })
+    // 帰り着いた画面が違えば使わない（別の画面の覚えで勝手にスクロールしないため）
+    eq('LU-1 別の画面の覚えは使わない', parseScreenReturn(luRaw, '/recipes/13'), null)
+    eq(
+      'LU-1 折りたたみを1つも開いていなければ書かない',
+      serializeScreenReturn({ path: '/cook-navi', scrollY: 0, openPanels: [] }),
+      '{"path":"/cook-navi","scrollY":0}',
+    )
+    eq(
+      'LU-1 縦位置は0未満にならない',
+      parseScreenReturn(
+        JSON.stringify({ path: '/cook-navi', scrollY: -5 }),
+        '/cook-navi',
+      ),
+      null,
+    )
+    eq('LU-1 壊れた覚えは無視する', parseScreenReturn('{', '/cook-navi'), null)
+    eq('LU-1 覚えが無ければ何もしない', parseScreenReturn(null, '/cook-navi'), null)
+    eq(
+      'LU-1 折りたたみの名前でない値は、その1件だけ捨てる',
+      parseScreenReturn(
+        JSON.stringify({ path: '/recipes/12', scrollY: 10, openPanels: ['nutrition', 3, ''] }),
+        '/recipes/12',
+      )?.openPanels,
+      ['nutrition'],
+    )
+    // 覚える側と戻す側で同じ字を使う（片方だけ直しても黙って復元されなくならないように）
+    eq('LU-1 折りたたみの名前は1か所で持つ', typeof SCREEN_PANEL.nutrition, 'string')
+  }
+
+  // ---- LU-2: 「Pro版について見る」の入口が全部そろっている --------------------------------
+  // 1つだけ直すと「画面によって戻り方が違う」という新しい混乱になるので、
+  // 5つの入口（月間献立・並行調理ナビ・栄養・レシピ一覧の上限・レシピの登録/編集の上限）を
+  // まとめて見張る。文言は ja.ts の1か所から読む（画面の字を書き写さない）
+  {
+    eq(
+      'LU-2 「Pro版について見る」と名乗る入口が5つある',
+      [
+        ja.mealPlan.monthProGateLink,
+        ja.cookNavi.gateLink,
+        ja.nutrition.gateLink,
+        ja.recipes.freeLimitProLink,
+        ja.form.freeLimitBlockedProLink,
+      ].filter((label) => label === 'Pro版について見る').length,
+      5,
+    )
+    // 献立: 見ていたタブ・週・縦位置・開いた曜日カードごと帰る（?focus=…&restore=1）
+    const luPlanState = luRead('src/pages/mealPlan/useMealPlanState.ts')
+    eq(
+      'LU-2 献立のPro案内が、見ていたタブごと帰る道を作っている',
+      /const proGateDetour = \{\s*\n\s*to: settingsLinkWithBack\('\/settings\?section=pro', logDetailLinkState\.fromPath\),\s*\n\s*onClick: rememberLogDetailReturn,/.test(
+        luPlanState,
+      ),
+      true,
+    )
+    const luPlanUi = luRead('src/pages/MealPlanPage.tsx')
+    eq(
+      'LU-2 献立のPro案内に、現在地のパスだけの帰り道が残っていない',
+      /settingsLinkWithBack\('\/settings\?section=pro'/.test(luPlanUi),
+      false,
+    )
+    // 「栄養から組む（Pro）」「月間献立のPro案内」は Link にそのまま広げ、
+    // 栄養バランスパネルには prop で渡す。数を決め打ちにせず、どの形で使われているかを見る
+    eq(
+      'LU-2 献立の入口が3種類とも同じ帰り道を使う',
+      [
+        (luPlanUi.match(/\{\.\.\.proGateDetour\}/g) ?? []).length,
+        (luPlanUi.match(/proDetour=\{proGateDetour\}/g) ?? []).length,
+      ],
+      [2, 2],
+    )
+    // 栄養の案内は部品が1つで、レシピ詳細と献立の両方に出る。
+    // 献立からは上の帰り道を渡し、それ以外は現在地＋縦位置＋折りたたみで帰る
+    const luTeaser = luRead('src/components/NutritionTeaser.tsx')
+    eq(
+      'LU-2 栄養のPro案内が、渡された帰り道と既定の帰り道を使い分ける',
+      luTeaser.includes("const proLinkTo = detour?.to ?? linkTo('/settings?section=pro')") &&
+        luTeaser.includes('const onProLinkClick = detour?.onClick ?? (() => remember(openPanels))'),
+      true,
+    )
+    eq(
+      'LU-2 レシピ詳細の栄養は「折りたたみを開いていた」ことも覚える',
+      luTeaser.includes('openPanels={[SCREEN_PANEL.nutrition]}'),
+      true,
+    )
+    eq(
+      'LU-2 レシピ詳細が、開いていた折りたたみを開いた姿で迎える',
+      /defaultExpanded=\{wasOpen\(SCREEN_PANEL\.nutrition\)\}/.test(
+        luRead('src/pages/RecipeDetailPage.tsx'),
+      ),
+      true,
+    )
+    eq(
+      'LU-2 献立の栄養バランスパネルに、献立の帰り道が渡っている',
+      /proDetour=\{proGateDetour\}/.test(luPlanUi) &&
+        /<ProNutrientTeaser isPro=\{isPro\} detour=\{proDetour\} \/>/.test(
+          luRead('src/components/NutritionBalancePanel.tsx'),
+        ),
+      true,
+    )
+    // 並行調理ナビ・レシピの登録/編集・買い物メモのレシピ選び
+    for (const [name, rel] of [
+      ['並行調理ナビ', 'src/pages/CookNaviPage.tsx'],
+      ['レシピの登録・編集', 'src/pages/RecipeFormPage.tsx'],
+      ['買い物メモのレシピ選び', 'src/pages/ShoppingPage.tsx'],
+    ]) {
+      const src = luRead(rel)
+      eq(
+        `LU-2 ${name}のPro案内が、覚えた場所へ帰る道を作っている`,
+        /detourLinkTo\('\/settings\?section=pro'\)/.test(src) && src.includes('useScreenReturn()'),
+        true,
+      )
+      eq(
+        `LU-2 ${name}に、現在地のパスだけのPro案内が残っていない`,
+        /settingsLinkWithBack\(\s*'\/settings\?section=pro'/.test(src),
+        false,
+      )
+    }
+    // レシピ一覧は、以前から自前で縦位置を覚えている（RECIPES_LIST_STATE_KEY）ので
+    // そちらに任せる＝同じ画面で2つの復元を走らせない
+    eq(
+      'LU-2 レシピ一覧は自前の覚えで縦位置を戻す（二重に戻さない）',
+      /window\.scrollTo\(0, saved\.y\)/.test(luRead('src/pages/RecipesPage.tsx')),
+      true,
+    )
+  }
+
+  // ---- LU-3: 買い物メモの下書き ------------------------------------------------------------
+  // オーナー原文「『下書きを作成しました』『追加する中身を選択してください』のように案内出して。
+  // 画面飛んだだけだと一瞬何が起きたのかわからなくなる。あと、下書き画面から直前の画面まで
+  // 戻ってくる手段がない。」
+  {
+    eq(
+      'LU-3 着いたときの案内が「何が起きたか」と「次に押すもの」を言う',
+      ja.shopping.fromMealPlanDraftToast.includes(ja.shopping.candidateTitle.replace('（下書き）', 'の下書き')) &&
+        ja.shopping.fromMealPlanDraftToast.includes(`「${ja.shopping.addConfirmed}」`),
+      true,
+    )
+    const luShopping = luRead('src/pages/ShoppingPage.tsx')
+    eq(
+      'LU-3 献立から来たときだけ、その案内を出す',
+      /setCandidateBackTo\(searchParams\.get\('back'\) \?\? undefined\)\s*\n\s*showToast\(ja\.shopping\.fromMealPlanDraftToast\)/.test(
+        luShopping,
+      ),
+      true,
+    )
+    eq(
+      'LU-3 下書きに「作った画面へ帰る道」を持ち、読み込み直しても消えない',
+      luShopping.includes('backTo: candidateBackTo') &&
+        luShopping.includes("backTo: typeof draft.backTo === 'string' ? draft.backTo : undefined"),
+      true,
+    )
+    eq(
+      'LU-3 帰り先の名前は設定画面と同じ道具で決める',
+      luShopping.includes('resolveBackTarget(candidateBackTo)') &&
+        luShopping.includes('data-testid="candidate-back"'),
+      true,
+    )
+    // 献立から作った下書きが片づいたら帰り道も捨てる（作り直し・確定・取り消しの3つ）。
+    // 残すと、献立から来ていない下書きに「献立に戻る」が出る
+    eq(
+      'LU-3 献立由来でなくなった下書きには帰り道を残さない',
+      (luShopping.match(/setCandidateBackTo\(undefined\)/g) ?? []).length,
+      (luShopping.match(/setCandidateRangeLabel\(undefined\)/g) ?? []).length,
+    )
+    eq(
+      'LU-3 献立の「買い物メモを作る」が、帰り道と居場所を渡している',
+      /rememberLogDetailReturn\(\)\s*\n\s*const backParam = `&back=\$\{encodeURIComponent\(logDetailLinkState\.fromPath\)\}`/.test(
+        luRead('src/pages/mealPlan/useMealPlanState.ts'),
+      ),
+      true,
+    )
+    // 帰り先は「献立」。名前も道具も設定画面の「◯◯に戻る」と同じ1か所から出す
+    eq(
+      'LU-3 下書きからの帰り先は献立',
+      resolveBackTarget('/meal-plan?focus=week&restore=1')?.label,
+      ja.backLink.backTo.replace('{page}', ja.backLink.mealPlan),
+    )
+  }
+
+  // ---- LU-4: 「作った！」で在庫を減らすスイッチ ---------------------------------------------
+  // オーナー原文「ONOFFするたびにトーストはいらない。スイッチの見た目が変わるので、
+  // 変更できたことが見えるため」。押した結果は塗りと丸の位置で見え、読み上げにも
+  // role="switch" と aria-checked が新しい状態を伝えるので、知らせが二重になっていた
+  {
+    const luPantry = luRead('src/components/PantryBoard.tsx')
+    eq(
+      'LU-4 スイッチを切り替えてもトーストを出さない',
+      /onClick=\{\(\) => void updateSettings\(\{ cookedReflectPantry: !reflectPantry \}\)\}/.test(
+        luPantry,
+      ),
+      true,
+    )
+    eq(
+      'LU-4 出さなくなった知らせの文言も残っていない',
+      'cookedReflectOnToast' in ja.pantry || 'cookedReflectOffToast' in ja.pantry,
+      false,
+    )
+    eq(
+      'LU-4 押した結果は読み上げにも伝わる（role=switch と aria-checked）',
+      /role="switch"/.test(luPantry) && /aria-checked=\{reflectPantry\}/.test(luPantry),
+      true,
+    )
+    // 設定は cookedReflectPantry の**1つだけ**。だから「同じ設定です」が事実として正しく、
+    // 「同期します」（設定が2つあって足並みをそろえる）にはしない。
+    // 在庫の画面とレシピ詳細の記録の窓が、同じ1つの値を読み書きしていることを見張る
+    const luLogModal = luRead('src/components/CookedLogModal.tsx')
+    const luDetail = luRead('src/pages/RecipeDetailPage.tsx')
+    eq(
+      'LU-4 在庫の画面とレシピ詳細が同じ1つの設定を読み書きする',
+      /updateSettings\(\{ cookedReflectPantry:/.test(luPantry) &&
+        /onReflectPantryChange=\{\(value\) => void updateSettings\(\{ cookedReflectPantry: value \}\)\}/.test(
+          luDetail,
+        ) &&
+        // 記録の窓は自分で設定を持たず、渡された値と手当てをそのまま使う
+        !/updateSettings\(/.test(luLogModal),
+      true,
+    )
+    eq(
+      'LU-4 説明は「同じ設定です」のまま（「同期」は使わない）',
+      ja.pantry.cookedReflectScope.includes('同じ設定です') &&
+        !ja.pantry.cookedReflectScope.includes('同期'),
       true,
     )
   }

@@ -54,6 +54,7 @@ export default function NutritionBalancePanel({
   onToggleIncludeRice,
   riceServings = 0,
   slotBreakdown,
+  proDetour,
 }: {
   /** 'day' = 週タブの各日カード / 'week' = 週まとめ */
   scope: 'day' | 'week'
@@ -86,6 +87,14 @@ export default function NutritionBalancePanel({
    * （小計を足しても1日の合計にならない日には出さない。2026-08-09 便EK）
    */
   slotBreakdown?: SlotBalance[]
+  /**
+   * 「Pro版について見る」の行き先と、押した瞬間に居場所を覚える手当て（2026-08-27 便LU）。
+   * 献立の画面は日/週/月のどこを見ていたかが**URLに乗っていない**ので、現在地だけを
+   * 帰り道に載せると必ず日タブへ着地していた（オーナー原文
+   * 「各種pro版について見るからの戻り先、献立ならすべて日に戻ってしまう」）。
+   * 献立が持っている覚え方（見ていたタブ・週・縦位置・折りたたみ）をここへ渡す。
+   */
+  proDetour?: { to: string; onClick?: () => void }
 }) {
   const [expanded, setExpanded] = useState(false)
   // 但し書きと出典の折りたたみ（2026-08-09 便EN）。既定は畳む
@@ -199,7 +208,7 @@ export default function NutritionBalancePanel({
           {canShowNumbers && unlocked && slotBreakdown && slotBreakdown.length > 1 && (
             <SlotBreakdown slots={slotBreakdown} />
           )}
-          {!unlocked && <ProNutrientTeaser isPro={isPro} />}
+          {!unlocked && <ProNutrientTeaser isPro={isPro} detour={proDetour} />}
           {/* ごはんを含めて計算する（2026-08-02 便CW-10・無料・既定OFF）。
               選択は設定に残り、日・週の合計と週の概算食費に同時に効く */}
           <div className="rounded-md border border-edge p-[var(--space-sm)]">

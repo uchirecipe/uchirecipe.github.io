@@ -391,7 +391,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
     monthPlanSheet, savePlanSheetImage, servingsEditor, setServingsEditor, submitServings,
     setDayFoldOverrides, weekEditDate, setWeekEditDate, datesWithPlan, isDayFolded,
     setAllDaysFolded, allDaysCollapsed, allDaysLocked, rememberWeekReturn, rememberMonthReturn,
-    rememberDayReturn, logDetailLinkState, rememberLogDetailReturn, historyToastActive,
+    rememberDayReturn, logDetailLinkState, rememberLogDetailReturn, proGateDetour, historyToastActive,
     openHistoryFromToast, weekGroupOpen, setWeekGroupOpen, fillMode, setFillMode, clearSlotTargets,
     toggleClearSlotTarget, clearSlotLabel, clearWeekSlot, includeRice, weekCostEstimate, riceYen,
     riceCostServings, weekCost, weekMealCount, weekPricelessCount, weekBalanceByDate, weekBalance,
@@ -1129,7 +1129,9 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
    */
   const renderPurposeLockedRow = () => (
     <Link
-      to={settingsLinkWithBack('/settings?section=pro', location.pathname + location.search)}
+      /* 2026-08-27 便LU: 現在地のパスだけを帰り道に載せていたので、設定から戻ると
+         日タブ・畳んだ状態・先頭で開き直していた。見ていたタブと場所ごと帰す */
+      {...proGateDetour}
       data-testid="purpose-locked-row"
       className="mt-[var(--space-sm)] flex w-full items-center gap-2 rounded-sm border border-edge bg-surface px-3 py-2 shadow-sm"
     >
@@ -2672,7 +2674,9 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                 </Link>
                 <p className="mt-1 text-xs text-ink-muted">{ja.mealPlan.monthDemoLinkNote}</p>
                 <Link
-                  to={settingsLinkWithBack('/settings?section=pro', location.pathname + location.search)}
+                  /* 2026-08-27 便LU: すぐ上のサンプルデモと同じく、見ていた月・縦位置・
+                     開いていた日の窓ごと帰す（現在地のパスだけでは日タブへ着地していた） */
+                  {...proGateDetour}
                   className="mt-1 inline-block text-sm font-bold text-accent-ink underline"
                 >
                   {ja.mealPlan.monthProGateLink}
@@ -3422,6 +3426,9 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                     // 数え直さず dayBalanceMap が数えた実数を渡す＝数字と合計が必ず一致する
                     riceServings={dayBalance.riceServings}
                     slotBreakdown={weekSlotBalanceByDate.get(date)}
+                    // 2026-08-27 便LU: パネルの中の「Pro版について見る」も、
+                    // 見ていたタブ・週・場所ごと帰す
+                    proDetour={proGateDetour}
                   />
                 </div>
               )
@@ -3484,6 +3491,8 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
               includeRice={includeRice}
               onToggleIncludeRice={(next) => void updateSettings({ includeRice: next })}
               riceServings={weekBalance.riceServings}
+              // 2026-08-27 便LU: 上の日カードと同じ帰り道にそろえる
+              proDetour={proGateDetour}
             />
           </div>
         </Collapse>

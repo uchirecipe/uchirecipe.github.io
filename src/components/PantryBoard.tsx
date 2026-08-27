@@ -431,11 +431,12 @@ export default function PantryBoard() {
             data-testid="pantry-cooked-reflect-switch"
             aria-checked={reflectPantry}
             aria-label={ja.pantry.cookedReflectTitle}
-            onClick={() => {
-              const next = !reflectPantry
-              void updateSettings({ cookedReflectPantry: next })
-              setMessage(next ? ja.pantry.cookedReflectOnToast : ja.pantry.cookedReflectOffToast)
-            }}
+            /* 2026-08-27 便LU・オーナー原文「ONOFFするたびにトーストはいらない。
+               スイッチの見た目が変わるので、変更できたことが見えるため」:
+               押した結果は塗りと丸の位置で見え、読み上げにも role="switch" と
+               aria-checked が新しい状態を伝えるので、知らせが二重になっていた。
+               同じ設定を切り替えるレシピ詳細の記録の窓のスイッチも、もともと知らせを出さない */
+            onClick={() => void updateSettings({ cookedReflectPantry: !reflectPantry })}
             className={`relative h-8 w-14 shrink-0 rounded-full transition-colors ${
               reflectPantry ? 'bg-accent' : 'bg-edge'
             }`}

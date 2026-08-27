@@ -66,6 +66,11 @@ export type RecipeSortPanelProps = {
   nutritionUnlocked: boolean
   /** 無料版のときに出す、Pro案内への行き先 */
   proLinkTo: string
+  /**
+   * Pro案内を押した瞬間に、この画面の居場所を覚えるための手当て（任意・2026-08-27 便LU）。
+   * 設定から帰ってきたときに、離れる前の縦位置へ戻すために呼び出し側が渡す。
+   */
+  onProLinkClick?: () => void
   onClose: () => void
 }
 
@@ -78,6 +83,7 @@ export default function RecipeSortPanel({
   onSortDirectionChange,
   nutritionUnlocked,
   proLinkTo,
+  onProLinkClick,
   onClose,
 }: RecipeSortPanelProps) {
   // 並び替えパネル(2026-07-16 便T-1で絞り込みパネルから分離)
@@ -151,6 +157,7 @@ export default function RecipeSortPanel({
         {!nutritionUnlocked && (
           <Link
             to={proLinkTo}
+            onClick={onProLinkClick}
             className="mt-[var(--space-sm)] flex w-full items-start gap-2 rounded-md border border-edge bg-app px-3 py-2.5 text-left text-sm text-ink-muted opacity-60"
           >
             <Lock size={16} className="mt-0.5 shrink-0" aria-hidden />

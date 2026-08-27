@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
-import { settingsLinkWithBack } from '../logic/backLink'
+import { Link, useNavigate, useParams } from 'react-router-dom'
+// 設定の「Pro版について見る」から帰ってきたときに、離れる前の縦位置へ戻す（2026-08-27 便LU）
+import { useScreenReturn, useSettingsDetour } from '../components/useScreenReturn'
 import { useLiveQuery } from 'dexie-react-hooks'
 import {
   Camera,
@@ -477,8 +478,13 @@ function RecipeFormInner() {
   useAppBusyWhileMounted()
   const params = useParams()
   const navigate = useNavigate()
-  // Pro案内・サンプルデモから飛んだ先に「押す前の画面」を渡すため（2026-08-22 便JF・⑦）
-  const location = useLocation()
+  /**
+   * Pro案内から飛んだ先に「押す前の画面」を渡すため（2026-08-22 便JF・⑦）。
+   * 2026-08-27 便LU: 渡していたのがパスだけだったので、設定から戻ると入力画面の先頭に着いた。
+   * 縦位置も覚える＝帰ってきたときに同じ場所から書き続けられる。
+   */
+  const { linkTo: detourLinkTo, remember: rememberDetour } = useSettingsDetour()
+  useScreenReturn()
   const editId = params.id ? Number(params.id) : undefined
   const isEdit = editId !== undefined
 
@@ -2403,8 +2409,10 @@ function RecipeFormInner() {
           <p className="text-sm text-ink">{ja.form.freeLimitBlockedProNote}</p>
           <Link
             /* 2026-08-22 便JF・⑦: 飛んだ先の設定に帰り道が無く、書きかけの入力へ戻る道が
-               下のタブしか無かった（ほかのPro案内はすべて ?back= を載せている） */
-            to={settingsLinkWithBack('/settings?section=pro', location.pathname + location.search)}
+               下のタブしか無かった（ほかのPro案内はすべて ?back= を載せている）。
+               2026-08-27 便LU: 縦位置も覚える＝帰ってきたときに同じ場所から続けられる */
+            to={detourLinkTo('/settings?section=pro')}
+            onClick={() => rememberDetour()}
             className="mt-[var(--space-sm)] inline-flex items-center justify-center rounded-md border border-accent bg-app px-4 py-3 font-bold text-accent-ink"
           >
             {ja.form.freeLimitBlockedProLink}

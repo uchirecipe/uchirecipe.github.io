@@ -81,6 +81,10 @@ import SafetyNotes from '../components/SafetyNotes'
 // レシピに添える注意（2026-08-22 便JH）。レシピのデータには書き込まず、開くたびに材料と手順から組み立てる
 import { safetyNotesFor, stepSafetyNotes, wholeRecipeSafetyNotes } from '../logic/safetyNotes'
 import NutritionTeaser from '../components/NutritionTeaser'
+// 設定の「Pro版について見る」から帰ってきたときに、離れる前の縦位置と折りたたみへ戻す
+// （2026-08-27 便LU）。覚える形は logic/navMemory.ts の ScreenReturnPoint
+import { SCREEN_PANEL } from '../logic/navMemory'
+import { useScreenReturn } from '../components/useScreenReturn'
 import FirstSetupNotice from '../components/FirstSetupNotice'
 import {
   hasChosenFirstSetup,
@@ -181,6 +185,13 @@ export default function RecipeDetailPage() {
   const lockedKeys = useMemo(() => toLockKeySet(mealPlanLocks), [mealPlanLocks])
   // 食材価格マスタ（未入力の材料だけ目安価格で補うフォールバック。docs/20 §3）
   const priceEntries = usePriceEntries()
+
+  /**
+   * 設定の「Pro版について見る」から帰ってきたときの復元（2026-08-27 便LU）。
+   * `?restore=1` が付いているときだけ働き、覚えていた縦位置まで戻す。
+   * 「栄養価の概算」を開いたまま離れたかは wasOpen で読み、下の NutritionTeaser に渡す。
+   */
+  const { wasOpen } = useScreenReturn()
 
   // 一覧からの遷移でスクロール位置が引き継がれることがあるため、詳細を開いたら必ず先頭から
   // 表示する（2026-07-11 オーナー実機フィードバック）。?step= の自動スクロールより先に効くよう
@@ -1130,7 +1141,13 @@ export default function RecipeDetailPage() {
         {/* 栄養価の目安（M6-1）: 公開前はティーザー、公開後は未解錠ゲート/実表示(③)。
             key={id}: レシピを移ったら作り直す。1回だけのお試し表示(2026-08-08 便DZ)を
             開いたまま別のレシピへ移ると、そのレシピでも8項目が出たままになるため */}
-        <NutritionTeaser key={id} isPro={!!settings?.proCode} recipe={recipe} servings={servings} />
+        <NutritionTeaser
+          key={id}
+          isPro={!!settings?.proCode}
+          recipe={recipe}
+          servings={servings}
+          defaultExpanded={wasOpen(SCREEN_PANEL.nutrition)}
+        />
 
         {/* 手順 */}
         <section className="mt-[var(--space-lg)]">

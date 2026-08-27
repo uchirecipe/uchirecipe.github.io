@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Link, useLocation, useSearchParams } from 'react-router-dom'
+import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { useLiveQuery } from 'dexie-react-hooks'
 import {
   ChefHat,
   Search,
   ChevronUp,
   ChevronDown,
+  ChevronLeft,
   X,
   Plus,
   Minus,
@@ -78,7 +79,9 @@ import Toast from '../components/Toast'
 import { useConfirm } from '../components/ConfirmProvider'
 import { useOverlayDismiss } from '../components/useOverlayDismiss'
 import { lockedScrollY, useScrollLock } from '../components/useScrollLock'
-import { settingsLinkWithBack } from '../logic/backLink'
+import { resolveBackTarget, settingsLinkWithBack } from '../logic/backLink'
+// 設定の「Pro版について見る」から帰ってきたときに、離れる前の縦位置へ戻す（2026-08-27 便LU）
+import { useScreenReturn, useSettingsDetour } from '../components/useScreenReturn'
 import {
   SHOPPING_RETURN_KEY,
   WEEK_RETURN_PARAM,
@@ -127,6 +130,14 @@ type ShoppingDraft = {
    * 献立の週タブが組み立てた1行をそのまま持つ。レシピを手で選んで作った下書きには無い。
    */
   rangeLabel?: string
+  /**
+   * 下書きを作った画面へ帰る道（2026-08-27 便LU・オーナー原文
+   * 「下書き画面から直前の画面まで戻ってくる手段がない。」）。
+   * 献立の週タブが載せてきた `?back=` をそのまま持つ。下書きと一緒に残すのは、
+   * 読み込み直しても帰り道が消えないようにするため（下書きは7日間残る）。
+   * レシピを手で選んで作った下書きには無い＝そのときは押したボタンのすぐ下に下書きが出る。
+   */
+  backTo?: string
 }
 
 function readShoppingDraft(): ShoppingDraft | null {
@@ -149,6 +160,7 @@ function readShoppingDraft(): ShoppingDraft | null {
           ? draft.lastPickerCounts
           : {},
       rangeLabel: typeof draft.rangeLabel === 'string' ? draft.rangeLabel : undefined,
+      backTo: typeof draft.backTo === 'string' ? draft.backTo : undefined,
     }
   } catch {
     return null
@@ -465,6 +477,18 @@ export default function ShoppingPage() {
   const [candidateRangeLabel, setCandidateRangeLabel] = useState<string | undefined>(
     restoredDraft?.rangeLabel,
   )
+  /**
+   * 下書きを作った画面への帰り道（2026-08-27 便LU）。献立の「買い物メモを作る」が
+   * `?back=` で渡してくる。読み込み直しても消えないよう、下書きと一緒に持つ。
+   * 行き先の名前は logic/backLink.ts が決める＝設定画面の「◯◯に戻る」と同じ道具。
+   */
+  const [candidateBackTo, setCandidateBackTo] = useState<string | undefined>(
+    restoredDraft?.backTo,
+  )
+  const candidateBackTarget = useMemo(
+    () => resolveBackTarget(candidateBackTo),
+    [candidateBackTo],
+  )
   // 生成した下書きへ自動スクロールする(2026-07-24 実機FB #13)。候補がDOMに乗ってから実行するため
   // フラグ+useEffectで1テンポ遅らせる
   const candidatesRef = useRef<HTMLElement>(null)
@@ -516,6 +540,15 @@ export default function ShoppingPage() {
   const [searchParams, setSearchParams] = useSearchParams()
   // Pro案内・設定への入口から飛んだあと、この画面へ帰れるようにするための現在地(2026-08-02 便DF)
   const location = useLocation()
+  // 下書きの「◯◯に戻る」で、作った画面へ帰る(2026-08-27 便LU)
+  const navigate = useNavigate()
+  /**
+   * レシピを選ぶ窓の並び替えパネルにあるPro案内から、設定へ寄り道して帰ってくる道
+   * （2026-08-27 便LU）。窓が開いているあいだ後ろの画面は固定してあるので、
+   * 覚える縦位置は window.scrollY ではなく固定する前に控えた位置を渡す（lockedScrollY）。
+   */
+  const { linkTo: detourLinkTo, remember: rememberDetour } = useSettingsDetour()
+  useScreenReturn()
   useEffect(() => {
     const raw = searchParams.get('recipeIds')
     if (raw == null || !recipes) return
@@ -544,6 +577,10 @@ export default function ShoppingPage() {
       setCandidates(built.map((c) => ({ ...c, checked: !c.isSeasoningLike })))
       // どの範囲の献立から作ったか(2026-08-08 便EA)。献立側が組み立てた1行をそのまま出す
       setCandidateRangeLabel(searchParams.get('range') ?? undefined)
+      // 作った画面へ帰る道と、いま何が起きたのかの案内(2026-08-27 便LU)。
+      // 画面が入れ替わっただけでは、下書きができたことも次に押すものも分からない
+      setCandidateBackTo(searchParams.get('back') ?? undefined)
+      showToast(ja.shopping.fromMealPlanDraftToast)
       // 「レシピを選び直す」で復元できるよう選択を覚えておく(#8)。献立由来は
       // 献立で決めた食数の合計(未設定なら「登録人数 × 献立に入っている回数」)を初期の食数にする
       setLastPickerCounts(
@@ -563,6 +600,7 @@ export default function ShoppingPage() {
         next.delete('recipeIds')
         next.delete('servings')
         next.delete('range')
+        next.delete('back')
         return next
       },
       { replace: true },
@@ -574,9 +612,14 @@ export default function ShoppingPage() {
   // 確定・キャンセルで candidates が null になったら保存も消す
   useEffect(() => {
     if (candidates && candidates.length > 0)
-      writeShoppingDraft({ candidates, lastPickerCounts, rangeLabel: candidateRangeLabel })
+      writeShoppingDraft({
+        candidates,
+        lastPickerCounts,
+        rangeLabel: candidateRangeLabel,
+        backTo: candidateBackTo,
+      })
     else clearShoppingDraft()
-  }, [candidates, lastPickerCounts, candidateRangeLabel])
+  }, [candidates, lastPickerCounts, candidateRangeLabel, candidateBackTo])
 
   const makeCandidates = async () => {
     // 既に下書きがあるときの作り直しは、手で直した分量が自動計算に戻るので先に一言確認する
@@ -601,6 +644,8 @@ export default function ShoppingPage() {
     setCandidates(built.map((c) => ({ ...c, checked: !c.isSeasoningLike })))
     // 手でレシピを選び直した下書きなので、献立から来た「範囲」の1行は外す(嘘になるため)
     setCandidateRangeLabel(undefined)
+    // 帰り道も同じ理由で外す(2026-08-27 便LU)。この下書きは献立から来たものではない
+    setCandidateBackTo(undefined)
     setLastPickerCounts(pickerCounts) // 「レシピを選び直す」で復元できるよう、直前の選択を覚えておく(#8)
     setPickerOpen(false)
     setPickerCounts({})
@@ -622,6 +667,7 @@ export default function ShoppingPage() {
     )
     setCandidates(null)
     setCandidateRangeLabel(undefined)
+    setCandidateBackTo(undefined)
     showToast(ja.shopping.addedToMemoToast.replace('{n}', String(chosen.length)))
   }
 
@@ -636,6 +682,7 @@ export default function ShoppingPage() {
     if (!ok) return
     setCandidates(null)
     setCandidateRangeLabel(undefined)
+    setCandidateBackTo(undefined)
     showToast(ja.shopping.discardedToast)
   }
 
@@ -1049,6 +1096,21 @@ export default function ShoppingPage() {
             ref={candidatesRef}
             className="mt-[var(--space-md)] scroll-mt-[var(--space-md)] rounded-md border border-accent bg-surface p-[var(--space-md)] shadow-sm"
           >
+            {/* 下書きを作った画面への帰り道（2026-08-27 便LU・オーナー原文
+                「下書き画面から直前の画面まで戻ってくる手段がない。」）。
+                献立の「買い物メモを作る」で来たときだけ出す。行き先の名前も見た目も、
+                設定画面の「◯◯に戻る」と同じ道具（logic/backLink.ts）にそろえる */}
+            {candidateBackTarget && (
+              <button
+                type="button"
+                data-testid="candidate-back"
+                onClick={() => navigate(candidateBackTarget.to)}
+                className="mb-1 flex items-center gap-1 rounded-sm py-1 font-bold text-accent-ink"
+              >
+                <ChevronLeft size={22} aria-hidden />
+                {candidateBackTarget.label}
+              </button>
+            )}
             <h2 className="text-xl font-bold">{ja.shopping.candidateTitle}</h2>
             <button
               type="button"
@@ -1469,10 +1531,8 @@ export default function ShoppingPage() {
                 }}
                 onSortDirectionChange={setPickerSortDirection}
                 nutritionUnlocked={pickerNutritionUnlocked}
-                proLinkTo={settingsLinkWithBack(
-                  '/settings?section=pro',
-                  location.pathname + location.search,
-                )}
+                proLinkTo={detourLinkTo('/settings?section=pro')}
+                onProLinkClick={() => rememberDetour([], lockedScrollY())}
                 onClose={closePickerPanels}
               />
               <RecipeFilterPanel

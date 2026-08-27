@@ -476,3 +476,102 @@ export function parseShoppingReturn(raw: string | null | undefined): ShoppingRet
   if (typeof scrollY !== 'number' || !Number.isFinite(scrollY) || scrollY < 0) return null
   return { tab, kind, name, scrollY: Math.round(scrollY) }
 }
+
+// ---------- ⑤ 設定へ寄り道して帰ってくるときの居場所 ----------
+
+/**
+ * 「Pro版について見る」などで設定へ移る直前の居場所（2026-08-27 便LU・オーナー原文
+ * 「各種pro版について見るからの戻り先、献立ならすべて日に戻ってしまう。直前の状態に戻して。
+ *  折りたたみが閉じてしまう、スクロール場所がズレるのもやめて。」）。
+ *
+ * 直す前は、飛ぶ先のリンクに載せる帰り道が `location.pathname + location.search` だった。
+ * 画面の中の状態（開いているタブ・折りたたみ・縦位置）はURLに乗っていないので、
+ * 帰ってきた画面は必ず既定の姿（献立なら日タブ・畳んだ状態・先頭）で開き直していた。
+ *
+ * 献立のように「どのタブの・どの週の・どのカードを見ていたか」を専用に覚える仕組みを
+ * すでに持つ画面は、そちらを使う（WeekReturnPoint・ViewReturnPoint）。
+ * ここが受け持つのは、**縦位置と、人が開いた折りたたみだけ**で元どおりになる画面
+ * （レシピ詳細・レシピ一覧・レシピの登録/編集・並行調理ナビ・食材）。
+ *
+ * `path` を一緒に持つのは、**別の画面で覚えたものを使わない**ため。帰り先を決めるのは
+ * リンクに載せた `?back=` なので、覚えた画面と帰り着く画面がずれることがありうる。
+ */
+export interface ScreenReturnPoint {
+  /** 覚えた画面（location.pathname）。帰り着いた画面と一致したときだけ使う */
+  path: string
+  /** 離れたときの縦スクロール位置（px。0以上の整数） */
+  scrollY: number
+  /** 離れたときに開いていた折りたたみの名前（閉じていたものは入れない） */
+  openPanels?: string[]
+}
+
+/** 設定へ寄り道するときに居場所を覚えるキー */
+export const SCREEN_RETURN_KEY = 'screen:return'
+
+/**
+ * 折りたたみの名前。覚える側と戻す側で同じ字を使うために1か所で持つ
+ * （画面ごとに文字列を書くと、片方だけ直したときに黙って復元されなくなる）。
+ */
+export const SCREEN_PANEL = {
+  /** レシピ詳細の「栄養価の概算」 */
+  nutrition: 'nutrition',
+} as const
+
+export function serializeScreenReturn(point: ScreenReturnPoint): string {
+  const openPanels = point.openPanels ?? []
+  return JSON.stringify({
+    path: point.path,
+    scrollY: Math.max(0, Math.round(point.scrollY)),
+    // 1つも開いていなければ書かない（以前の版と同じ形のまま）
+    ...(openPanels.length > 0 ? { openPanels } : {}),
+  })
+}
+
+/**
+ * 覚えた居場所を読み出す。壊れた値・別の形の値・**別の画面の覚え**は null にして無視する
+ * （復元できないときは「何もしない」＝その画面を普通に開くのが正しい振る舞い）。
+ *
+ * @param forPath いま帰り着いた画面の pathname
+ */
+export function parseScreenReturn(
+  raw: string | null | undefined,
+  forPath: string,
+): ScreenReturnPoint | null {
+  if (!raw) return null
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    return null
+  }
+  if (typeof parsed !== 'object' || parsed === null) return null
+  const { path, scrollY, openPanels } = parsed as {
+    path?: unknown
+    scrollY?: unknown
+    openPanels?: unknown
+  }
+  if (typeof path !== 'string' || path === '' || path !== forPath) return null
+  if (typeof scrollY !== 'number' || !Number.isFinite(scrollY) || scrollY < 0) return null
+  // 折りたたみは任意。名前でない値が混じっていたら、その1件だけ捨てる（残りは活かす）
+  const panels = Array.isArray(openPanels)
+    ? openPanels.filter((name): name is string => typeof name === 'string' && name !== '')
+    : []
+  return {
+    path,
+    scrollY: Math.round(scrollY),
+    ...(panels.length > 0 ? { openPanels: panels } : {}),
+  }
+}
+
+/**
+ * 帰り先のパスに「覚えた場所へ戻す」印（`restore=1`）を足す。
+ * 印そのものは週タブが使っている WEEK_RETURN_PARAM と同じ字を使う
+ * ＝アプリの中で「覚えた場所へ戻す」を表す言葉を1つに保つ。
+ * すでに付いていれば二重に足さない。
+ */
+export function withScreenReturnParam(path: string): string {
+  const queryAt = path.indexOf('?')
+  const params = new URLSearchParams(queryAt >= 0 ? path.slice(queryAt + 1) : '')
+  if (params.get(WEEK_RETURN_PARAM) === '1') return path
+  return `${path}${queryAt >= 0 ? '&' : '?'}${WEEK_RETURN_PARAM}=1`
+}
