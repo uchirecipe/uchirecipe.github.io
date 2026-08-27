@@ -2304,6 +2304,11 @@ import { createRequire } from 'node:module'
     'src/pages/mealPlan/IntakeParts.tsx',
     'src/pages/mealPlan/MonthParts.tsx',
     'src/pages/RecipesPage.tsx',
+    // レシピ一覧から切り出した並び替え／絞り込みパネル（2026-08-25 便KZ の献立と同じ形・2026-08-27 便LM）。
+    // ここへ足さないと、角の px を直に書く抜け道が「別のファイルへ移せば素通りする」形で残る
+    'src/components/RecipeSortPanel.tsx',
+    'src/components/RecipeFilterPanel.tsx',
+    'src/components/recipePanelParts.tsx',
     'src/pages/MealTemplatesPage.tsx',
     'src/pages/MealPlanCopyWeekPage.tsx',
   ]

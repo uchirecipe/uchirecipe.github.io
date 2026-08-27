@@ -829,6 +829,9 @@ import { readFileSync } from 'node:fs'
     return code
   }
   const page = read('src/pages/RecipesPage.tsx')
+  // タグのチップは2026-08-27 便LM で絞り込みパネルへ切り出した。
+  // 「レシピを書き換える経路が無い」の見張りも一緒に移さないと、移した先で素通りする
+  const filterPanel = read('src/components/RecipeFilterPanel.tsx')
   const dbRecipes = read('src/db/recipes.ts')
   const logic = read('src/logic/tagRegister.ts')
   // 前提: 同じ読み方で、いま在るものは「在る」と読める(見張りの空振り防止)
@@ -845,6 +848,17 @@ import { readFileSync } from 'node:fs'
     false,
   )
   eq('② レシピ一覧からも addTagToRecipes を呼んでいない', /addTagToRecipes/.test(page), false)
+  eq(
+    '② 切り出した絞り込みパネルからも addTagToRecipes を呼んでいない（2026-08-27 便LM）',
+    /addTagToRecipes/.test(filterPanel),
+    false,
+  )
+  // 前提: 絞り込みパネルの側も、いま在るものは「在る」と読める（見張りの空振り防止）
+  eq(
+    '② 前提: 絞り込みパネルを読み取れている（タグのチップが在る）',
+    /recipes-saved-search-chip/.test(filterPanel) && /recipes-tag-chip/.test(filterPanel),
+    true,
+  )
   eq(
     '② 登録のロジックにタグを足す道具(tagsWithAdded・recipeIdsMissingTag)が残っていない',
     /tagsWithAdded|recipeIdsMissingTag/.test(logic),

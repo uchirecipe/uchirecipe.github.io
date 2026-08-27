@@ -14,21 +14,14 @@ import {
   SlidersHorizontal,
   ArrowDownUp,
   ArrowRight,
-  Refrigerator,
   LayoutGrid,
   List,
-  ArrowUpNarrowWide,
-  ArrowDownWideNarrow,
-  SquareCheck,
-  Square,
-  Lock,
   ListChecks,
   CheckCircle2,
   CalendarPlus,
   Download,
   Trash2,
   X,
-  ChevronDown,
   Tag,
 } from 'lucide-react'
 import { useLiveQuery } from 'dexie-react-hooks'
@@ -80,7 +73,6 @@ import {
   buildSavedSearchRemoveConfirm,
   buildLegacyTagRemoveConfirm,
 } from '../logic/tagRegister'
-import { DISH_TYPE_OPTIONS } from '../logic/homeSuggest'
 import {
   sortResults,
   defaultSortDirection,
@@ -88,8 +80,6 @@ import {
   buildCostSortValues,
   isNutrientSortOption,
   isFreeSortOption,
-  NUTRIENT_SORT_OPTIONS,
-  FREE_NUTRIENT_SORT_OPTIONS,
   NUTRIENT_SORT_FIELD,
   NUTRIENT_SORT_LABELS,
   nutrientSortUnit,
@@ -108,10 +98,14 @@ import {
   FREE_LIMIT_ENABLED,
 } from '../logic/freeLimit'
 import { splitValues } from '../logic/textSplit'
-import Collapse from '../components/Collapse'
+// 並び替え／絞り込みパネル（2026-08-27 便LM でこの画面から切り出した共有部品）
+import RecipeSortPanel from '../components/RecipeSortPanel'
+import RecipeFilterPanel, {
+  type RecipeFilterValues,
+} from '../components/RecipeFilterPanel'
+import { usePanelMaxHeight } from '../components/recipePanelParts'
 import RecipeCard from '../components/RecipeCard'
-import { EFFORT_FILTER_LEVELS, normalizeEffortFilter } from '../logic/effort'
-import ChipInput from '../components/ChipInput'
+import { normalizeEffortFilter } from '../logic/effort'
 import Toast from '../components/Toast'
 import { useConfirm } from '../components/ConfirmProvider'
 import { settingsLinkWithBack } from '../logic/backLink'
@@ -126,34 +120,6 @@ const LONG_PRESS_MS = 550
 /** 長押し判定を取り消す指の移動量（px） */
 const LONG_PRESS_MOVE_TOLERANCE = 10
 
-const timeOptions: { value: TimeFilter; label: string }[] = [
-  { value: 'all', label: ja.search.timeAll },
-  { value: 'under10', label: ja.search.timeUnder10 },
-  { value: 'under30', label: ja.search.timeUnder30 },
-  { value: 'over30', label: ja.search.timeOver30 },
-]
-
-/* 絞り込みに出す手間レベル（2026-08-23 便JP・②追補・オーナー指示「絞り込みからも普通はずして」）。
-   顔ぶれは logic/effort.ts の EFFORT_FILTER_LEVELS が決める＝カードにバッジを出す規則と同じ1か所。
-   既定値の「普通」には、選んだ品と選ばなかった品が混ざって落ちてくるので条件にならない */
-const effortOptions: { value: EffortFilter; label: string }[] = [
-  { value: 'all', label: ja.search.effortAll },
-  ...EFFORT_FILTER_LEVELS.map((level) => ({ value: level, label: ja.effort[level] })),
-]
-
-/**
- * 料理の種別の絞り込み（2026-08-10 便FF・オーナー要望「主菜副菜などでも絞り込みしたい」）。
- * 区分と並びはレシピ登録の「料理の種別」・献立の「今日なに作る？」と同じ4つを使う
- * （logic/homeSuggest.ts DISH_TYPE_OPTIONS）。4区分は互いに重ならず、合わせると全レシピを覆う。
- *
- * 2026-08-19 便HU・⑬（オーナー「料理の種別については複数選択できても良いと思う」）:
- * **複数選べるチップ**にした（調理時間・手間レベルはプルダウンへ）。複数選べるプルダウンは
- * スマホで押しづらく、選んでいる中身も閉じた状態から読めないため、種別だけはチップのまま残す。
- * 押す回数は選ぶ1回で変わらない（従来の☑リストと同じ）。
- */
-const dishTypeOptions: { value: DishTypeFilter; label: string }[] = DISH_TYPE_OPTIONS.map(
-  (value) => ({ value, label: ja.dishType[value] }),
-)
 
 /**
  * タグのチップに出す最大件数（「すべて」は別枠）。
@@ -172,86 +138,6 @@ const TAG_CHIP_LIMIT = 6
  */
 const MATCH_WORD_LIMIT = TAG_CHIP_LIMIT
 
-const baseSortOptions: { value: RecipeSortOption; label: string }[] = [
-  { value: 'updated', label: ja.search.sortUpdated },
-  { value: 'pantryMatch', label: ja.search.sortPantryMatch },
-  { value: 'kana', label: ja.search.sortKana },
-  { value: 'cooked', label: ja.search.sortCooked },
-  // 最近作った順(2026-08-03 オーナー指示)。回数で数える「よく使う順」の隣に置く
-  { value: 'recentCooked', label: ja.search.sortRecentCooked },
-  // 1食あたりの原価順(2026-08-25 便KS・②。オーナー原文「原価で並び替えもほしい」)。
-  // 栄養の並び替えと違って**無料**なので、Proの区分ではなくこちらの並びに入れる
-  { value: 'cost', label: ja.search.sortCost },
-  // 「基本レシピ順」は2026-07-24 便BN・タスク4で廃止(配布テーマ全廃で無意味化)
-]
-
-/**
- * 栄養並び替えの項目（2026-08-19 便HU・⑯で栄養価の表示と同じ8項目にそろえた）。
- * 顔ぶれも名前も logic/recipeSort.ts が栄養表示（logic/nutrition.ts）から引くので、
- * この画面で項目名を書き写さない＝表示と並び替えで違う名前が出ない
- */
-const nutrientSortOptions: { value: RecipeSortOption; label: string }[] = NUTRIENT_SORT_OPTIONS.map(
-  (value) => ({ value, label: NUTRIENT_SORT_LABELS[value] }),
-)
-/** 無料版で選べる栄養並び替え（2026-08-01 線引きB': エネルギー順のみ） */
-const freeNutrientSortOptions: { value: RecipeSortOption; label: string }[] =
-  FREE_NUTRIENT_SORT_OPTIONS.map((value) => ({ value, label: NUTRIENT_SORT_LABELS[value] }))
-
-/**
- * 並び替え／絞り込みパネルの箱（2026-08-10 便FF）。
- *
- * 一覧の上に重ねて出すので、
- *  - pointer-events-auto: 親の入れ物で切ったタップをパネルの中だけ戻す
- *  - bg-surface: 下の一覧が透けないよう不透明にする（重ねる以上、透けると読めない）
- *  - overflow-y-auto: 画面からはみ出す長さのときはパネルの中だけをスクロールさせる
- *    （高さは下の usePanelMaxHeight が実測して入れる。calc の値は測り終わるまでの控え）
- *  - overscroll-contain: パネルの端まで送っても、後ろの一覧が動かないようにする
- *    ＝開いている間にスクロール位置が変わらない
- */
-const PANEL_CLS =
-  'pointer-events-auto mt-[var(--space-sm)] max-h-[calc(100dvh-14rem)] overflow-x-hidden overflow-y-auto overscroll-contain rounded-md border border-edge bg-surface px-[var(--space-md)] pb-[var(--space-md)] shadow-md'
-
-/** パネルと画面の縁（貼り付く検索バー・下のタブナビ）のあいだに残す余白（px） */
-const PANEL_EDGE_GAP = 8
-/** これ以上は縮めない高さ（px）。極端に低い画面でもパネルが潰れて読めなくならないように */
-const PANEL_MIN_HEIGHT = 240
-
-/**
- * 重ねて出すパネルの高さの上限を実測する（2026-08-10 便FF）。
- *
- * パネルの上端は検索バーの下端。検索バーは画面上部に貼り付くので、上端の位置は
- * 「一覧のどこを見ているか」で変わる（先頭では見出しのぶん下、スクロール中は画面の上）。
- * さらにレシピの登録件数の案内が出ている日は検索バーがもう一段下がる。
- * そのため固定値では決められず、開いている間だけ実際の位置を測って上限を入れる。
- * 下はタブナビ・タイマーの浮遊バー（`data-app-bottom-bar`）の手前で止める。
- */
-function usePanelMaxHeight(open: boolean, barRef: RefObject<HTMLDivElement | null>) {
-  const [maxHeight, setMaxHeight] = useState<number>()
-  useEffect(() => {
-    if (!open) return
-    const update = () => {
-      const bar = barRef.current
-      if (!bar) return
-      const top = bar.getBoundingClientRect().bottom + PANEL_EDGE_GAP
-      let bottomInset = 0
-      for (const el of document.querySelectorAll<HTMLElement>('[data-app-bottom-bar]')) {
-        const r = el.getBoundingClientRect()
-        if (r.height > 0 && r.top < window.innerHeight)
-          bottomInset = Math.max(bottomInset, window.innerHeight - r.top)
-      }
-      const bottom = window.innerHeight - bottomInset - PANEL_EDGE_GAP
-      setMaxHeight(Math.max(PANEL_MIN_HEIGHT, Math.round(bottom - top)))
-    }
-    update()
-    window.addEventListener('scroll', update, { passive: true })
-    window.addEventListener('resize', update)
-    return () => {
-      window.removeEventListener('scroll', update)
-      window.removeEventListener('resize', update)
-    }
-  }, [open, barRef])
-  return maxHeight
-}
 
 /**
  * 画面下に固定する帯を、すでに下にいる帯（タブナビ・タイマー・新しい版のお知らせ）の
@@ -303,99 +189,6 @@ function useStackedBottomOffset(active: boolean, selfRef: RefObject<HTMLElement 
     }
   }, [active, selfRef])
   return offset
-}
-
-const chipCls = (active: boolean) =>
-  `rounded-sm border px-3 py-2 text-sm font-bold ${
-    active ? 'border-accent bg-accent text-on-accent' : 'border-edge bg-surface text-ink-muted'
-  }`
-
-/**
- * 並べ替え・調理時間・手間レベルの単一選択UI(2026-07-16 UI総点検B-7オーナー個別指示)。
- * 従来はチップ/ボタン並びだったが、選択中の項目が一目で分かる☑付き縦リストに変更する
- * (radioの見た目を☑にするだけで、複数選択にはしない。AskUserで確認済み)。
- * 選択中の行はアクセント背景+白文字(bg-accent text-on-accent。2026-07-16 便T-6オーナー指示。
- * 行の背景が角からはみ出さないようコンテナにoverflow-hiddenを併せて付ける)
- */
-function CheckList<T extends string>({
-  options,
-  value,
-  onSelect,
-}: {
-  options: { value: T; label: string }[]
-  value: T
-  onSelect: (value: T) => void
-}) {
-  return (
-    <div className="mt-1 divide-y divide-edge overflow-hidden rounded-md border border-edge bg-app">
-      {options.map((option) => {
-        const selected = option.value === value
-        return (
-          <button
-            key={option.value}
-            type="button"
-            onClick={() => onSelect(option.value)}
-            aria-pressed={selected}
-            className={`flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm font-bold ${
-              selected ? 'bg-accent text-on-accent' : 'text-ink-muted'
-            }`}
-          >
-            {selected ? (
-              <SquareCheck size={18} className="shrink-0" aria-hidden />
-            ) : (
-              <Square size={18} className="shrink-0 opacity-40" aria-hidden />
-            )}
-            {option.label}
-          </button>
-        )
-      })}
-    </div>
-  )
-}
-
-/**
- * 1つだけ選ぶ絞り込みのプルダウン（2026-08-19 便HU・⑬ オーナー
- * 「料理の種別・時間・手間レベルは複数選択できないのでプルダウンにして見た目をシンプルに」）。
- *
- * 調理時間・手間レベルは1つしか選べないので、☑付きの縦リスト（CheckList）だと
- * 選択肢の数だけ縦に伸びる。閉じた1行にすると絞り込みパネル全体が短くなり、
- * 下にある欄までスクロールせずに届く。
- *
- * 高さは .tap-target（44px）と同じ 3rem を下限にして、押せる大きさを小さくしない。
- * appearance-none + 自前の▼で、端末ごとに違う既定の見た目に引きずられないようにする。
- */
-function FilterSelect<T extends string>({
-  label,
-  options,
-  value,
-  onSelect,
-}: {
-  label: string
-  options: { value: T; label: string }[]
-  value: T
-  onSelect: (value: T) => void
-}) {
-  return (
-    <div className="relative mt-1">
-      <select
-        aria-label={label}
-        value={value}
-        onChange={(e) => onSelect(e.target.value as T)}
-        className="tap-target w-full appearance-none rounded-md border border-edge bg-app py-3 pl-3 pr-10 text-sm font-bold text-ink"
-      >
-        {options.map((option) => (
-          <option key={option.value} value={option.value}>
-            {option.label}
-          </option>
-        ))}
-      </select>
-      <ChevronDown
-        size={18}
-        aria-hidden
-        className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-ink-muted"
-      />
-    </div>
-  )
 }
 
 /**
@@ -643,25 +436,17 @@ export default function RecipesPage() {
    * ③1つだけ選んでいるあいだは、どちらでも結果は今までと同じ
    */
   const [tagMatch, setTagMatch] = useState<TagMatchMode>(saved?.tagMatch ?? 'any')
-  const toggleTag = (value: string) =>
-    setTags((prev) => (prev.includes(value) ? prev.filter((v) => v !== value) : [...prev, value]))
+  // 押すたびに選び外しする処理（旧 toggleTag / toggleKeyword / toggleDishType）は、
+  // 2026-08-27 便LM で絞り込みパネルの側（components/RecipeFilterPanel.tsx の toggleIn）へ移した
   /**
    * 自分で登録したタグ（＝検索の言葉）のうち、いま選んでいるもの（2026-08-19 便IB・②）。
    * もとからあるタグと同じ並びに出し、同じ選び方（tagMatch）に乗せる。
    * 押したときに検索欄へ言葉を入れる旧来の作りをやめたので、検索欄とは無関係に選び外しできる
    */
   const [keywords, setKeywords] = useState<string[]>(saved?.keywords ?? [])
-  const toggleKeyword = (value: string) =>
-    setKeywords((prev) =>
-      prev.includes(value) ? prev.filter((v) => v !== value) : [...prev, value],
-    )
   // 料理の種別(主菜・副菜・汁物・その他)で絞る(2026-08-10 便FF → 2026-08-19 便HU・⑬で複数選択)。
   // 空＝絞らない。選んだ区分の**どれか**に当たるレシピが残る
   const [dishTypes, setDishTypes] = useState<DishTypeFilter[]>(saved?.dishTypes ?? [])
-  const toggleDishType = (value: DishTypeFilter) =>
-    setDishTypes((prev) =>
-      prev.includes(value) ? prev.filter((v) => v !== value) : [...prev, value],
-    )
   const [favoriteOnly, setFavoriteOnly] = useState(saved?.favoriteOnly ?? false)
   const [excludeNg, setExcludeNg] = useState(saved?.excludeNg ?? false)
   const [quickOnly, setQuickOnly] = useState(saved?.quickOnly ?? false)
@@ -670,11 +455,54 @@ export default function RecipesPage() {
   const [pantryOnly, setPantryOnly] = useState(entry.pantry || (saved?.pantryOnly ?? false))
   const [sort, setSort] = useState<RecipeSortOption>(saved?.sort ?? 'updated')
   // 並べ替えの昇順/降順(2026-07-13 UI改善)。並べ替えの種類自体を変えたときは
-  // その種類の既定方向にリセットする(選ぶ側のonClickで一緒にsetする。下記baseSortOptions/
-  // nutrientSortOptions参照)
+  // その種類の既定方向にリセットする(下記 selectSort。並べ替えの項目そのものは
+  // 2026-08-27 便LM で components/RecipeSortPanel.tsx へ移した)
   const [sortDirection, setSortDirection] = useState<SortDirection>(
     saved?.sortDirection ?? defaultSortDirection[saved?.sort ?? 'updated'],
   )
+
+  /**
+   * 並べ替えの種類を選んだとき（2026-08-27 便LM でパネルから移した。中身は変えていない）。
+   * 種類を変えたら、その種類の既定方向に戻す(2026-07-13 UI改善。
+   * 例: 「五十音順」は常にあ→んから始まる、というこれまでの見え方を保つ)
+   */
+  const selectSort = (next: RecipeSortOption) => {
+    setSort(next)
+    setSortDirection(defaultSortDirection[next])
+  }
+
+  /**
+   * 絞り込みの条件を、共有部品（components/RecipeFilterPanel.tsx）が受け取る1つの形にまとめる
+   * （2026-08-27 便LM）。この画面は条件を1つずつ useState で持ち、そのまま
+   * sessionStorage への保存・URLへの反映・復元に使っているので、**持ち方は変えていない**。
+   * ここでやっているのは、パネルへ渡すときに束ね、返ってきた分だけ元の setter へ配ることだけ
+   */
+  const filterValues: RecipeFilterValues = {
+    ingredients,
+    time,
+    effort,
+    tags,
+    keywords,
+    tagMatch,
+    dishTypes,
+    favoriteOnly,
+    excludeNg,
+    quickOnly,
+    pantryOnly,
+  }
+  const setFilterValues = (patch: Partial<RecipeFilterValues>) => {
+    if (patch.ingredients !== undefined) setIngredients(patch.ingredients)
+    if (patch.time !== undefined) setTime(patch.time)
+    if (patch.effort !== undefined) setEffort(patch.effort)
+    if (patch.tags !== undefined) setTags(patch.tags)
+    if (patch.keywords !== undefined) setKeywords(patch.keywords)
+    if (patch.tagMatch !== undefined) setTagMatch(patch.tagMatch)
+    if (patch.dishTypes !== undefined) setDishTypes(patch.dishTypes)
+    if (patch.favoriteOnly !== undefined) setFavoriteOnly(patch.favoriteOnly)
+    if (patch.excludeNg !== undefined) setExcludeNg(patch.excludeNg)
+    if (patch.quickOnly !== undefined) setQuickOnly(patch.quickOnly)
+    if (patch.pantryOnly !== undefined) setPantryOnly(patch.pantryOnly)
+  }
 
   const recipes = useLiveQuery(listRecipes, [])
   /** 「今日の献立に追加済み」の印を出すのに使う今日の日付（描き直しで日付が動かないよう1回だけ決める） */
@@ -1589,452 +1417,46 @@ export default function RecipesPage() {
         ref={panelWrapRef}
         className="pointer-events-none absolute inset-x-0 top-full px-[var(--space-md)]"
       >
-      {/* 並び替えパネル(2026-07-16 便T-1で絞り込みパネルから分離) */}
-      <Collapse open={sortPanelOpen} reveal={false}>
-        <div
-          data-testid="recipes-sort-panel"
-          // 絞り込みパネルは上端に貼り付く行(件数)が上余白を持つので、PANEL_CLS には上余白を
-          // 入れていない。並べ替えパネルにはその行が無いのでここで足す
-          className={`${PANEL_CLS} pt-[var(--space-md)]`}
-          style={panelMaxHeight != null ? { maxHeight: panelMaxHeight } : undefined}
-        >
-          {/* 昇順/降順(2026-08-02 便DFで件数表記の横からこのパネル内へ移動 → 2026-08-03
-              オーナー指示でパネルの一番上へ。従来はパネル末尾(栄養価の区分より下)にあり、
-              スクロールしないと見えなかった) */}
-          <p className="text-sm font-bold text-ink-muted">{ja.search.sortDirectionTitle}</p>
-          <div className="mt-1 flex flex-wrap gap-[var(--space-sm)]">
-            <button
-              type="button"
-              onClick={() => setSortDirection('asc')}
-              aria-pressed={sortDirection === 'asc'}
-              className={`inline-flex items-center gap-1 ${chipCls(sortDirection === 'asc')}`}
-            >
-              <ArrowUpNarrowWide size={16} aria-hidden />
-              {ja.search.sortAsc}
-            </button>
-            <button
-              type="button"
-              onClick={() => setSortDirection('desc')}
-              aria-pressed={sortDirection === 'desc'}
-              className={`inline-flex items-center gap-1 ${chipCls(sortDirection === 'desc')}`}
-            >
-              <ArrowDownWideNarrow size={16} aria-hidden />
-              {ja.search.sortDesc}
-            </button>
-          </div>
+      {/* 並び替えパネル(2026-07-16 便T-1で絞り込みパネルから分離。
+          2026-08-27 便LM で src/components/RecipeSortPanel.tsx へ切り出した) */}
+      <RecipeSortPanel
+        open={sortPanelOpen}
+        maxHeight={panelMaxHeight}
+        sort={sort}
+        sortDirection={sortDirection}
+        onSortChange={selectSort}
+        onSortDirectionChange={setSortDirection}
+        nutritionUnlocked={nutritionUnlocked}
+        proLinkTo={settingsLinkWithBack(
+          '/settings?section=pro',
+          location.pathname + location.search,
+        )}
+        onClose={closePanels}
+      />
 
-          <p className="mt-[var(--space-md)] text-sm font-bold text-ink-muted">
-            {ja.search.sortTitle}
-          </p>
-          <CheckList
-            options={baseSortOptions}
-            value={sort}
-            onSelect={(next) => {
-              setSort(next)
-              // 並べ替えの種類を変えたら、その種類の既定方向に戻す(2026-07-13 UI改善。
-              // 例: 「五十音順」は常にあ→んから始まる、というこれまでの見え方を保つ)
-              setSortDirection(defaultSortDirection[next])
-            }}
-          />
-          {/* 「よく使う順」が何を数えた順かを一言で示す(2026-07-29 便CI/C13) */}
-          <p className="mt-1 text-xs text-ink-muted">{ja.search.sortCookedHint}</p>
-          {/* 原価順を選んでいるあいだだけ、並び方の決めごとを1行で出す(2026-08-25 便KS・②)。
-              価格が分からない材料がある品は金額が実際より安く出るので、金額がそろっている品の
-              あとにまとめている。常時出すと並び替えの並びが説明文で埋まるため、選んだときだけ */}
-          {sort === 'cost' && (
-            <p data-testid="sort-cost-hint" className="mt-1 text-xs text-ink-muted">
-              {ja.search.sortCostHint}
-            </p>
-          )}
-
-          {/* 栄養価並び替え(便T-4で5項目をPro機能化 → 2026-08-01 線引きB'でカロリー順のみ無料開放)。
-              無料版は「カロリー」だけを選べる欄＋残り4項目のグレーのティーザー行を出し、
-              タップで既存のProゲート表現(Lock+ミュート色)からPro案内へ送る */}
-          <p className="mt-[var(--space-md)] text-sm font-bold text-ink-muted">
-            {ja.search.sortNutritionTitle}
-          </p>
-          {/* 2026-08-19 便HZ・①(オーナー「並び替え『たんぱく質が多い順〜探せます』削除。
-              タイトルのみで目的がわかるため」): 見出しの下に添えていた用途の1行(旧
-              sortNutritionHint / sortNutritionFreeHint)を、無料・Proの両方とも消した */}
-          <CheckList
-            options={nutritionUnlocked ? nutrientSortOptions : freeNutrientSortOptions}
-            value={sort}
-            onSelect={(next) => {
-              setSort(next)
-              setSortDirection(defaultSortDirection[next])
-            }}
-          />
-          {!nutritionUnlocked && (
-            <Link
-              to={settingsLinkWithBack('/settings?section=pro', location.pathname + location.search)}
-              className="mt-[var(--space-sm)] flex w-full items-start gap-2 rounded-md border border-edge bg-app px-3 py-2.5 text-left text-sm text-ink-muted opacity-60"
-            >
-              <Lock size={16} className="mt-0.5 shrink-0" aria-hidden />
-              <span>
-                <span className="font-bold">{ja.search.sortNutritionGate}</span>
-                <span className="block text-xs">{ja.search.sortNutritionGateHint}</span>
-              </span>
-            </Link>
-          )}
-
-          {/* 2026-08-19 便HU・⑰: 旧「決定」を廃止。選んだ時点で並び替えは既に効いていて、
-              このボタンは閉じるだけだったので、名前を動作に合わせた。
-              窓の外のタップと同じ closePanels を呼ぶ＝どちらで閉じても結果は変わらない。
-              押したことで何かが決まる見た目にしないよう、塗りではなく枠のボタンにする */}
-          <button
-            type="button"
-            data-testid="sort-panel-close"
-            onClick={closePanels}
-            className="tap-target mt-[var(--space-md)] w-full rounded-md border border-edge bg-surface py-3 font-bold text-accent-ink shadow-sm"
-          >
-            {ja.common.close}
-          </button>
-        </div>
-      </Collapse>
-
-      {/* 絞り込みパネル(2026-07-16 便T-3: 「条件をクリア」を欄の上方に移動) */}
-      <Collapse open={filterPanelOpen} reveal={false}>
-        <div
-          data-testid="recipes-filter-panel"
-          className={PANEL_CLS}
-          style={panelMaxHeight != null ? { maxHeight: panelMaxHeight } : undefined}
-        >
-          {/* パネルの上端に貼り付く行(2026-08-10 便FF)。一覧の上に重ねて出すようになり、
-              一覧の上に常設している件数の行がパネルに隠れるため、いま何件になっているかを
-              パネルの中でも見られるようにする。条件を変えるたびに動く数字なので、
-              パネルを下まで送っても見えるよう上端に貼り付ける。
-              「条件をクリア」は2026-07-16 便T-3で欄の上方へ置いたものを、この行にまとめた */}
-          <div className="sticky top-0 z-10 -mx-4 flex items-center justify-between gap-2 bg-surface px-4 pb-2 pt-4">
-            {anyConditionActive ? (
-              <button
-                type="button"
-                onClick={clearFilters}
-                className="text-sm font-bold text-accent-ink underline"
-              >
-                {ja.search.clear}
-              </button>
-            ) : (
-              <span />
-            )}
-            {results && totalCount !== undefined && (
-              <span data-testid="filter-panel-count" className="shrink-0 text-sm text-ink-muted">
-                {filterActive
-                  ? ja.search.resultCountWithTotal
-                      .replace('{n}', String(results.length))
-                      .replace('{t}', String(totalCount))
-                  : ja.search.totalCount.replace('{n}', String(totalCount))}
-              </span>
-            )}
-          </div>
-
-          {/* --- 区分①「どのレシピから探すか」 ---
-              2026-08-03 オーナー指示でパネルの最上段に置いた区分(「お気に入り」など毎回使う
-              条件が一番下にあって見えていなかったため)。位置はそのまま。
-              2026-08-10 便FF(オーナー「在庫の食材、NG食材隠しのタグ、登録したレシピのみ、が
-              同列で並んでいるのもわかりにくくしている」): 性質の違う「在庫の食材で絞る」を
-              区分③「食材で絞り込む」へ移し、ここは『一覧に出すレシピの母集団を決める』3つだけにした */}
-          <p className="text-sm font-bold text-ink-muted">{ja.search.shownRecipesTitle}</p>
-          <div className="mt-1 flex flex-wrap gap-[var(--space-sm)]">
-            <button
-              type="button"
-              onClick={() => setFavoriteOnly((v) => !v)}
-              aria-pressed={favoriteOnly}
-              className={chipCls(favoriteOnly)}
-            >
-              {ja.search.favoriteOnly}
-            </button>
-            <button
-              type="button"
-              onClick={() => setExcludeNg((v) => !v)}
-              aria-pressed={excludeNg}
-              className={chipCls(excludeNg)}
-            >
-              {ja.search.excludeNg}
-            </button>
-            <button
-              type="button"
-              onClick={() => updateSettings({ hideStarters: !hideStarters })}
-              aria-pressed={hideStarters}
-              className={chipCls(hideStarters)}
-            >
-              {ja.search.myRecipesOnly}
-            </button>
-          </div>
-
-          {/* --- 区分②「料理の種別」(2026-08-10 便FF・オーナー要望
-              「主菜副菜などでも絞り込みしたい（タグ）」) ---
-              主菜/副菜はタグではなくレシピの項目(dishType)なので、タグのチップに混ぜず
-              専用の区分にする。区分名と選択肢はレシピ登録の「料理の種別」と同じ4つ。
-
-              2026-08-19 便HU・⑬(オーナー「料理の種別については複数選択できても良いと思う」):
-              **複数選べるチップ**にした。「主菜と汁物だけ見たい」のように、まとめて見たい組み合わせが
-              あるため。調理時間・手間レベルは1つしか選べないのでプルダウンにしたが、種別は
-              複数選べる以上プルダウンにすると「いま何を選んでいるか」が閉じた状態から読めない。
-              1つ選ぶのに要る操作は1回のままで、☑付きリストのときから増えていない */}
-          <p className="mt-[var(--space-md)] text-sm font-bold text-ink-muted">
-            {ja.search.dishTypeTitle}
-          </p>
-          <div className="mt-1 flex flex-wrap gap-[var(--space-sm)]">
-            {/* 選んだ区分をまとめて外して元に戻すチップ。何も選んでいない＝すべて */}
-            <button
-              type="button"
-              data-testid="recipes-dishtype-chip"
-              onClick={() => setDishTypes([])}
-              aria-pressed={dishTypes.length === 0}
-              className={chipCls(dishTypes.length === 0)}
-            >
-              {ja.search.dishTypeAll}
-            </button>
-            {dishTypeOptions.map((option) => (
-              <button
-                key={option.value}
-                type="button"
-                data-testid="recipes-dishtype-chip"
-                onClick={() => toggleDishType(option.value)}
-                aria-pressed={dishTypes.includes(option.value)}
-                className={chipCls(dishTypes.includes(option.value))}
-              >
-                {option.label}
-              </button>
-            ))}
-          </div>
-
-          {/* --- 区分③「タグ」(2026-07-24 便BN・タスク3で絞り込みパネルの上部へ移動 →
-              2026-08-03 使用件数の集計に変更 → 2026-08-10 便FFで件数を併記・見出しを改称 →
-              2026-08-19 便HZ・③で複数選択に → 便IB・②で「自分で登録したタグ」もこの並びへ) ---
-
-              便IB・②(オーナー実機フィードバック「絞り込みタグは、実質キーワード検索？
-              説明に『タグが付いているレシピの品数』とあるので、表現を揃えたい。やりたいことは
-              『好きなキーワードをよく使うタグとして絞り込みに登録したい』):
-              直す前は、同じ「タグ」でも**押したときの効き方が違う2つ**が別々の欄に並んでいた
-              (もとからあるタグ=複数選択に入る／登録したタグ=検索欄に言葉が入るだけ)。
-              利用者から見ればどちらも「絞り込みに使うタグ」なので、1つの並びにまとめ、
-              押したときの効き方(複数選択・下のスイッチ)も数字の出し方もそろえる。
-              並び順は「登録したタグ→もとからあるタグ(品数の多い順)」。登録したタグは数が少なく、
-              消す操作もここにあるので、件数で埋もれない先頭に固定する。
-              チップの数字はどちらも「そのタグだけで絞り込んだときの品数」で意味が同じ */}
-          {(tagOptions.length > 0 || savedTagOptions.length > 0) && (
-            <>
-              <p className="mt-[var(--space-md)] text-sm font-bold text-ink-muted">
-                {ja.search.tagTitle}
-              </p>
-              <div className="mt-1 flex flex-wrap gap-[var(--space-sm)]">
-                <button
-                  type="button"
-                  data-testid="recipes-tag-chip"
-                  onClick={() => {
-                    setTags([])
-                    setKeywords([])
-                  }}
-                  aria-pressed={tags.length === 0 && keywords.length === 0}
-                  className={chipCls(tags.length === 0 && keywords.length === 0)}
-                >
-                  {ja.search.tagAll}
-                </button>
-                {/* 自分で登録したタグ。チップの形はもとからあるタグと同じにし、
-                    自分で作ったものだけ消せるように削除ボタンを隣に添える
-                    (押せる大きさは tap-target で確保する) */}
-                {savedTagOptions.map((option) => (
-                  <span key={option.value} className="inline-flex items-center">
-                    <button
-                      type="button"
-                      data-testid="recipes-saved-search-chip"
-                      onClick={() => toggleKeyword(option.value)}
-                      aria-pressed={keywords.includes(option.value)}
-                      className={chipCls(keywords.includes(option.value))}
-                    >
-                      {option.label}
-                    </button>
-                    <button
-                      type="button"
-                      data-testid="recipes-saved-search-remove"
-                      onClick={() => void removeSavedSearch(option.value)}
-                      disabled={tagBusy}
-                      aria-label={ja.search.savedSearchRemoveAria.replace('{name}', option.value)}
-                      className="tap-target rounded-sm px-1.5 py-2 text-ink-muted disabled:opacity-40"
-                    >
-                      <Trash2 size={16} aria-hidden />
-                    </button>
-                  </span>
-                ))}
-                {tagOptions.map((option) => (
-                  <button
-                    key={option.value}
-                    type="button"
-                    data-testid="recipes-tag-chip"
-                    onClick={() => toggleTag(option.value)}
-                    aria-pressed={tags.includes(option.value)}
-                    className={chipCls(tags.includes(option.value))}
-                  >
-                    {option.label}
-                  </button>
-                ))}
-              </div>
-              {/* チップの数字が何を指すのか(2026-08-19 便HZ・③ → 便IB・②)。複数選べるので
-                  「押したら何品になるか」と読み違えられるため、数字の意味を1行で示す。
-                  この数字は選んでいるタグや下のスイッチでは変わらない */}
-              <p className="mt-1 text-xs text-ink-muted">{ja.search.tagCountHint}</p>
-              {/* タグを2つ以上選んだときの選び方(2026-08-19 便HZ・③ → 便IB・① オーナー実機
-                  フィードバック「絞り込みタグ複数選択のANDとORの切り替えは、『すべてのタグを含む』と
-                  ON/OFFスイッチの方がわかりやすいかも」)。2つのチップからスイッチ1つにした。
-                  形はアプリに既にあるON/OFFスイッチ(設定の「画面を暗くしない」等)と同じ作法
-                  ——role="switch"+aria-checked、見出しの右にスイッチ、押せる面は tap-target。
-                  1つしか選んでいないときも出したままにする: 入れても結果は変わらないだけで
-                  間違った結果にはならず、タグを押すたびに欄が出入りして押す位置がずれる方が危ない */}
-              <label className="mt-[var(--space-sm)] flex items-center justify-between gap-3">
-                <span className="min-w-0 text-sm font-bold text-ink-muted">
-                  {ja.search.tagMatchAllSwitch}
-                </span>
-                <button
-                  type="button"
-                  role="switch"
-                  data-testid="recipes-tag-match"
-                  aria-checked={tagMatch === 'all'}
-                  aria-label={ja.search.tagMatchAllSwitch}
-                  onClick={() => setTagMatch((prev) => (prev === 'all' ? 'any' : 'all'))}
-                  className={`tap-target relative h-8 w-14 shrink-0 rounded-full transition-colors ${
-                    tagMatch === 'all' ? 'bg-accent' : 'bg-edge'
-                  }`}
-                >
-                  <span
-                    className={`absolute top-1 h-6 w-6 rounded-full bg-surface shadow-sm transition-all ${
-                      tagMatch === 'all' ? 'left-7' : 'left-1'
-                    }`}
-                  />
-                </button>
-              </label>
-            </>
-          )}
-
-          {/* 以前の版(便HU・⑭)がレシピ本体に書き込んだタグの後始末(2026-08-19 便HZ・②)。
-              書き込まれたタグを作り直しに合わせて黙って外すとデータを失うので、
-              残したままにもできる形にして、外したいときだけ外せる道をここに置く。
-              残っていなければ欄ごと出さない＝使ったことのない人には最初から出ない */}
-          {legacyTagUsages.length > 0 && (
-            <>
-              <p className="mt-[var(--space-md)] text-sm font-bold text-ink-muted">
-                {ja.search.legacyTagTitle}
-              </p>
-              <p className="mt-1 text-xs text-ink-muted">{ja.search.legacyTagHint}</p>
-              <div className="mt-1 flex flex-col gap-[var(--space-sm)]">
-                {legacyTagUsages.map(({ tag: name, count }) => (
-                  <button
-                    key={name}
-                    type="button"
-                    data-testid="recipes-legacy-tag-remove"
-                    onClick={() => void removeLegacyTag(name, count)}
-                    disabled={tagBusy}
-                    aria-label={ja.search.legacyTagRemoveAria
-                      .replace('{name}', name)
-                      .replace('{n}', String(count))}
-                    className="tap-target flex w-full items-center justify-between gap-[var(--space-sm)] rounded-sm border border-edge bg-surface px-3 py-2 text-left text-sm font-bold text-ink-muted disabled:opacity-40"
-                  >
-                    <span className="min-w-0 truncate">{name}</span>
-                    <span className="shrink-0 text-accent-ink">
-                      {ja.search.legacyTagRemove.replace('{n}', String(count))}
-                    </span>
-                  </button>
-                ))}
-              </div>
-            </>
-          )}
-
-          {/* --- 区分④「食材で絞り込む」 ---
-              2026-08-10 便FF: 「在庫の食材で絞る」を区分①からここへ移した。
-              どちらも食材で一覧を絞る操作で、「食材の在庫から入れる」とも隣り合う */}
-          <p className="mt-[var(--space-md)] text-sm font-bold text-ink-muted">
-            {ja.search.ingredientTitle}
-          </p>
-          {/* 在庫の食材で絞る(2026-07-24 便BN・司令部追加)。在庫(ある/少ない)が1件以上あるときだけ出す */}
-          {pantryNames.length > 0 && (
-            <div className="mt-1 flex flex-wrap gap-[var(--space-sm)]">
-              <button
-                type="button"
-                onClick={() => setPantryOnly((v) => !v)}
-                aria-pressed={pantryOnly}
-                className={`inline-flex items-center gap-1 ${chipCls(pantryOnly)}`}
-              >
-                <Refrigerator size={16} aria-hidden />
-                {ja.search.pantryFilter}
-              </button>
-            </div>
-          )}
-          <p className="mt-[var(--space-sm)] text-sm text-ink-muted">
-            {ja.search.ingredientSubTitle}
-          </p>
-          <div className="mt-1">
-            <ChipInput
-              values={ingredients}
-              onChange={setIngredients}
-              placeholder={ja.search.ingredientPlaceholder}
-              addLabel={ja.search.ingredientAdd}
-            />
-            {/* 食材の在庫にある食材を、この欄へ1タップで入れる(2026-08-02 オーナー指示・便DF)。
-                従来も同じボタンがあったが、①文言が「在庫から追加」で何がどこへ入るのか読めず
-                ②「ある/少ない」が1件も無いと消えていて、押せない理由も分からなかった。
-                ボタンは常に出し、入れられる食材が無いときは押せない状態＋理由を1行で示す */}
-            <button
-              type="button"
-              onClick={() => setIngredients((prev) => Array.from(new Set([...prev, ...pantryNames])))}
-              disabled={pantryNames.length === 0}
-              className="mt-[var(--space-sm)] inline-flex items-center gap-1 rounded-sm border border-edge bg-surface px-3 py-2 text-sm font-bold text-accent-ink shadow-sm disabled:opacity-40"
-            >
-              <Refrigerator size={16} aria-hidden />
-              {ja.search.pantryToIngredients}
-            </button>
-            {pantryNames.length === 0 && (
-              <p className="mt-1 text-xs text-ink-muted">{ja.search.pantryToIngredientsEmpty}</p>
-            )}
-          </div>
-
-          {/* --- 区分⑤「調理時間」(2026-07-16 UI総点検B-7: ☑付き単一選択リスト →
-              2026-08-19 便HU・⑬でプルダウン。1つしか選べない欄なので、閉じた1行にして
-              パネル全体を短くする) --- */}
-          <p className="mt-[var(--space-md)] text-sm font-bold text-ink-muted">
-            {ja.search.timeTitle}
-          </p>
-          <FilterSelect
-            label={ja.search.timeTitle}
-            options={timeOptions}
-            value={time}
-            onSelect={setTime}
-          />
-          {/* 時短版の手順(quickSteps)があるレシピだけに絞る独立トグル。単一選択の並べ替え・時間・
-              手間とは別枠のON/OFFなのでチップのまま維持する。有効な間は一覧カードの調理時間表示も
-              quickCookMinutesに切り替わる(2026-07-11 オーナー実機フィードバック) */}
-          <div className="mt-[var(--space-sm)] flex flex-wrap gap-[var(--space-sm)]">
-            <button
-              type="button"
-              onClick={() => setQuickOnly((v) => !v)}
-              className={chipCls(quickOnly)}
-            >
-              {ja.search.quickOnly}
-            </button>
-          </div>
-
-          {/* --- 区分⑥「手間レベル」(2026-07-16 UI総点検B-7: ☑付き単一選択リスト →
-              2026-08-19 便HU・⑬でプルダウン。調理時間と同じ理由) --- */}
-          <p className="mt-[var(--space-md)] text-sm font-bold text-ink-muted">
-            {ja.search.effortTitle}
-          </p>
-          <FilterSelect
-            label={ja.search.effortTitle}
-            options={effortOptions}
-            value={effort}
-            onSelect={setEffort}
-          />
-
-          {/* 2026-08-19 便HU・⑰: 旧「決定」を廃止（並び替えパネルと同じ理由・同じ形） */}
-          <button
-            type="button"
-            data-testid="filter-panel-close"
-            onClick={closePanels}
-            className="tap-target mt-[var(--space-md)] w-full rounded-md border border-edge bg-surface py-3 font-bold text-accent-ink shadow-sm"
-          >
-            {ja.common.close}
-          </button>
-        </div>
-      </Collapse>
+      {/* 絞り込みパネル(2026-07-16 便T-3: 「条件をクリア」を欄の上方に移動。
+          2026-08-27 便LM で src/components/RecipeFilterPanel.tsx へ切り出した) */}
+      <RecipeFilterPanel
+        open={filterPanelOpen}
+        maxHeight={panelMaxHeight}
+        values={filterValues}
+        onChange={setFilterValues}
+        anyConditionActive={anyConditionActive}
+        onClear={clearFilters}
+        filterActive={filterActive}
+        resultCount={results?.length}
+        totalCount={totalCount}
+        hideStarters={hideStarters}
+        onToggleHideStarters={() => void updateSettings({ hideStarters: !hideStarters })}
+        tagOptions={tagOptions}
+        savedTagOptions={savedTagOptions}
+        onRemoveSavedSearch={(name) => void removeSavedSearch(name)}
+        legacyTagUsages={legacyTagUsages}
+        onRemoveLegacyTag={(name, count) => void removeLegacyTag(name, count)}
+        tagBusy={tagBusy}
+        pantryNames={pantryNames}
+        onClose={closePanels}
+      />
       </div>
       </div>
 

@@ -1278,6 +1278,9 @@ const NUTRITION_DB_VERSION_FOR_KP = NUTRITION_DATA_FOR_KP.dbVersion
   const ksForm = ksRead('src/pages/RecipeFormPage.tsx')
   const ksDetail = ksRead('src/pages/RecipeDetailPage.tsx')
   const ksList = ksRead('src/pages/RecipesPage.tsx')
+  // 並べ替えパネルは2026-08-27 便LM でこのファイルから切り出した。
+  // 「原価順が並んでいる」を見る先も一緒に移す（画面ファイルに残った文字だけを見ると素通りする）
+  const ksSortPanel = ksRead('src/components/RecipeSortPanel.tsx')
   const ksManual = ksRead('public/about/manual.html')
 
   // ---------- KS-1: 「くわしく」にも料理のジャンルを置く ----------
@@ -1318,8 +1321,20 @@ const NUTRITION_DB_VERSION_FOR_KP = NUTRITION_DATA_FOR_KP.dbVersion
       typeof ja.search.sortCostHint,
     ], ['string', 'string'])
     eq('KS-2 名前に「1食あたり」を入れて、何を比べた順か言い切る', ja.search.sortCost.includes('1食あたり'), true)
-    eq('KS-2 レシピ一覧の並べ替えに原価順が並んでいる', ksList.includes("value: 'cost'"), true)
-    eq('KS-2 無料/Proで出し分ける栄養の並びには足していない', ksList.includes('nutrientSortOptions'), true)
+    eq('KS-2 レシピ一覧の並べ替えに原価順が並んでいる', ksSortPanel.includes("value: 'cost'"), true)
+    eq('KS-2 無料/Proで出し分ける栄養の並びには足していない', ksSortPanel.includes('nutrientSortOptions'), true)
+    // 原価順が並ぶのは「ふだんの並べ替え」の一覧（baseSortOptions）で、栄養の一覧ではない。
+    // 便LM で切り出したあとも、この2つの一覧が混ざっていないことを見る（2026-08-27）
+    eq(
+      'KS-2 原価順は、栄養の一覧ではなくふだんの並べ替えの一覧に入っている',
+      ksSortPanel.slice(
+        ksSortPanel.indexOf('const baseSortOptions'),
+        ksSortPanel.indexOf('const nutrientSortOptions'),
+      ).includes("value: 'cost'"),
+      true,
+    )
+    // レシピ一覧の画面は、切り出したパネルをちゃんと呼んでいる（呼ぶのをやめたら赤にする）
+    eq('KS-2 レシピ一覧が並べ替えパネルを呼んでいる', ksList.includes('<RecipeSortPanel'), true)
 
     const ksIndex = buildPriceIndex([
       { id: 1, name: 'たまねぎ', pricePerUnit: 50, unit: '1個' },
