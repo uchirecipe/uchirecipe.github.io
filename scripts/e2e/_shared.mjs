@@ -24,6 +24,10 @@ import { existsSync, readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import net from 'node:net'
 import path from 'node:path'
+// 2026-08-27: 金額を検査に書き写すと、価格を動かすたびに落ちる（2026-08-26〜27 で3回）。
+// **マスタから読める**ようにここで持つ。節のファイル側で import しても
+// `scripts/e2e-part.mjs` は節ファイルの import を持っていかないので、共有側に置く
+import { PRICE_DEFAULTS } from '../../src/data/priceDefaults.ts'
 import zlib from 'node:zlib'
 // 文言は src/i18n/ja.ts の1か所から読む（規約H。画面の字を書き写して二重管理しない）
 import { ja } from '../../src/i18n/ja.ts'
@@ -637,7 +641,7 @@ page.on('dialog', (dialog) => dialog.accept())
 // ------------------------------------------------------------------------------------------
 Object.assign(globalThis, {
   BASE, FIRST_SETUP_NOTICE_SEEN_KEY, FREE_LIMIT, MEAL_GENRES, NB_GUIDE_FULL, NB_GUIDE_VEG,
-  NUTRITION_DISPLAY_KEYS, appRoot, browser, check, chromium, clickReplaceImport,
+  NUTRITION_DISPLAY_KEYS, PRICE_DEFAULTS, appRoot, browser, check, chromium, clickReplaceImport,
   collectConfirms, context, errors, execSync, existsSync, hasCount,
   hasCountAfter, installConfirmAutoPress, ja, makeTestPng, newContextWithFirstSetupNotice, ng,
   nutritionLabelFor, ok, openAllWeekDays, openDayOrganize, openMonthDayEdit, openWeekDayEdit,
