@@ -553,6 +553,45 @@ const context = await browser.newContext({
   locale: 'ja-JP',
 })
 context.setDefaultTimeout(10000)
+
+/**
+ * 撮るたびに絵が変わるのを止める（2026-08-27 便LM・②）。
+ *
+ * 便LJの実測「day-suggest の高さが撮るたびに変わる（1148px → 956px。同じビルド・同じ台本）」の
+ * 正体は**献立のおまかせ抽選**だった。原因は logic/mealPlan.ts の suggestForSlot が
+ * `Math.random()` で主菜を1品引いていること（988行）で、引いた主菜が
+ * 「一品もの」（ご飯もの／麺／鍋、カレー・シチュー）だと副菜を付けない決まり（1152行）のため、
+ * **候補のカードが2枚のときと1枚のときができる**。カード1枚ぶん（実測164px）だけ絵が縮む。
+ * 同じ抽選は「週」タブのまとめて入力にも入っているので、そこから流れてくる
+ * plan-day-buttons も同じ理由で変わる（実測356px）。
+ *
+ * 実測（この手当ての前・全40カットを2回撮って突き合わせ）:
+ *   大きさが変わったカット … 2件（day-suggest 956→1120px ／ plan-day-buttons 572→928px）
+ *   絵の中身まで変わったカット … 11件
+ *     （cooknavi / cooknavi-reorder / cost-week / day-suggest / nav-tabs / plan-day-buttons /
+ *       plan-month / plan-week-day / plan-week-day-edit / plan-week-nutrition-open /
+ *       plan-week-nutrition-row。いずれも「どの品が当たったか」で中身が動くもの）
+ *
+ * 直し方は**アプリを触らず、撮るときだけ抽選の目を固定する**。抽選そのものは
+ * 利用者にとっては毎回変わってよい機能なので、アプリ側に「固定する口」を作らない
+ * （作れば本番のコードに撮影用の分岐が残る）。ここで Math.random を、種を決めた
+ * 同じ数列に置き換える＝台本が同じなら毎回同じ品が当たる。
+ * mulberry32（32bitの整数を回すだけの短い擬似乱数）を使う。暗号用途ではないので十分。
+ *
+ * SHOT_RANDOM_SEED で種を変えられる（別の品ぞろえで撮りたいときに使う）。
+ */
+const RANDOM_SEED = Number(process.env.SHOT_RANDOM_SEED ?? 20260827)
+await context.addInitScript((seed) => {
+  let a = seed >>> 0
+  Math.random = () => {
+    a = (a + 0x6d2b79f5) >>> 0
+    let t = a
+    t = Math.imul(t ^ (t >>> 15), t | 1)
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61)
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296
+  }
+}, RANDOM_SEED)
+
 const page = await context.newPage()
 page.on('dialog', (d) => d.accept())
 

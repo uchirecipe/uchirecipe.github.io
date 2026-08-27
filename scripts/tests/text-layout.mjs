@@ -1700,6 +1700,42 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs'
     }
     eq('IK-5 使い方ページ以外が載せている図も、width/height が撮影の控えと同じ', otherFigureSizes, [])
 
+    // ---------- IK-6: 撮り直しても同じ絵になる（2026-08-27 便LM・②） ----------
+    //
+    // 便LJの実測「day-suggest の絵が撮るたびに高さが変わった（1148px → 956px。
+    // 同じビルド・同じ台本）」。原因は献立のおまかせ抽選（logic/mealPlan.ts suggestForSlot の
+    // `Math.random()`）で、引いた主菜が「一品もの」だと副菜のカードが付かず、
+    // 候補のカードが2枚のときと1枚のときができていた。
+    //
+    // 実測（全40カットを2回ずつ撮って突き合わせ）:
+    //   手当ての前 … 大きさが変わったカット2件（day-suggest・plan-day-buttons）／
+    //                 絵の中身まで変わったカット11件
+    //   手当ての後 … 3回撮って40カットすべてが同じ大きさ・同じ絵（0件）
+    //
+    // 直したのは**撮るときだけ**で、アプリには手を入れていない（抽選は利用者にとっては
+    // 毎回変わってよい機能なので、本番のコードに撮影用の分岐を作らない）。
+    // ここで見張るのは「撮る側が抽選の目を固定したままであること」だけ。
+    // 外すと、次の部分撮り直しで**関係のないカットにまで差分が出る**（それが便LJの報告そのもの）
+    {
+      const ikShots = readFileSync(path.join(appRoot, 'scripts/shots-manual.mjs'), 'utf-8')
+      eq('IK-6 撮影の台本を読み取れている', ikShots.length > 2000, true)
+      eq(
+        'IK-6 撮るときは抽選の目を固定している（Math.random を種つきの数列に置き換える）',
+        /addInitScript\(\s*\(seed\)\s*=>\s*\{[\s\S]{0,400}?Math\.random\s*=/.test(ikShots),
+        true,
+      )
+      eq(
+        'IK-6 種は決め打ちの値から始める（実行のたびに変わる値を種にしない）',
+        /const RANDOM_SEED = Number\(process\.env\.SHOT_RANDOM_SEED \?\? \d+\)/.test(ikShots),
+        true,
+      )
+      eq(
+        'IK-6 種に時計や乱数を混ぜていない',
+        /SHOT_RANDOM_SEED \?\? (Date\.now\(\)|Math\.random\(\))/.test(ikShots),
+        false,
+      )
+    }
+
     eq(
       'IK-3 どの図にも説明（alt）がある',
       figures.filter((f) => f.alt.trim().length < 6).map((f) => f.name ?? '(名前の取れない図)'),
