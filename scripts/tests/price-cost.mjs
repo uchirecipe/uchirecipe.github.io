@@ -1541,15 +1541,18 @@ eq('normalizeIngredientNameForPrice 前後空白除去', normalizeIngredientName
     unitFixesToApply([{ ...untouched, name: 'イチゴ' }], fixes).length,
     1,
   )
-  // 実データ側: 今回の対象7件が漏れなく載っていること(価格は据え置き=旧既定と同じ値)
+  // 実データ側: 対象が漏れなく載っていること(価格は据え置き=旧既定と同じ値)
+  // 2026-08-27 便LM・③: 「万能ねぎ」を足した（同じ野菜の「小ねぎ」と同じ物差しへ。1束→100g）
   eq(
-    'PRICE_DEFAULT_UNIT_FIXES 対象は7件',
+    'PRICE_DEFAULT_UNIT_FIXES 対象は8件',
     PRICE_DEFAULT_UNIT_FIXES.map((f) => f.name),
-    ['いちご', 'しいたけ', '生しいたけ', 'オクラ', '小ねぎ', '粉寒天', 'ブルーベリー'],
+    ['いちご', 'しいたけ', '生しいたけ', 'オクラ', '小ねぎ', '万能ねぎ', '粉寒天', 'ブルーベリー'],
   )
   {
     const byName = new Map(PRICE_DEFAULTS.map((d) => [d.name, d]))
-    const UNIT_FIX_PRICE_REVISED = new Set(['生しいたけ'])
+    // 2026-08-27 便LM・③: 「万能ねぎ」も同じ形。単位の言い直し(1束→100g)は旧い行を
+    // 見分けるために旧価格100円を目印に使い、新しく入れる人の目安は小ねぎと同じ80円/100gにした
+    const UNIT_FIX_PRICE_REVISED = new Set(['生しいたけ', '万能ねぎ'])
     for (const fix of PRICE_DEFAULT_UNIT_FIXES) {
       // 「しいたけ」は2026-08-10 便FAで「生しいたけ」へ名寄せしたためPRICE_DEFAULTSには無い
       // (畳む側の行は版7の PRICE_DEFAULT_MERGES が先に処理する)。記録として配列には残す
@@ -2029,11 +2032,45 @@ eq('normalizeIngredientNameForPrice 前後空白除去', normalizeIngredientName
     PRICE_DEFAULTS.length,
   )
 
-  // (3) 抜き取り3品の値がマスタと一字一句一致する(桁の丸め・列の並びの取り違えを検知)
+  // (3) **ページに出ている目安価格を1件残らずマスタと突き合わせる**（2026-08-27 便LM・③）。
+  //
+  // 直す前は抜き取り4品だけを見ていた。2026-08-26 便LF が同じ穴（値を直したのにページを
+  // 再生成し忘れても素通りする）に気づいて抜き取りに「昆布」を1品足したが、**抜き取りである
+  // 限り、次に値を直した便が別の品なら また素通りする**。実際そのとおりになっていた:
+  // 便LM・③で `npm run gen:foods` を掛けたところ、**17行が古い値のまま**だった
+  // （はちみつ 40→26円／食パン 30→37円／黒こしょう 10→16円 など。便LL・便LB・便LFが
+  //  目安価格を直したのに、公開ページだけ古い数字を出し続けていた）。
+  // 抜き取りをやめて全件にすれば、どの品を直しても必ず気づける。
+  {
+    const priceCellOf = (row) => cellsOf(row)[0]
+    const stale = []
+    for (const row of foodRows) {
+      const cell = priceCellOf(row)
+      if (cell.includes('価格なし')) continue
+      const master = PRICE_DEFAULTS.find((m) => priceKey(m.name) === priceKey(nameOf(row)))
+      if (!master) {
+        stale.push(`${nameOf(row)}: ページ=${cell} / マスタに行が無い`)
+        continue
+      }
+      const want = `${master.pricePerUnit}円 / ${master.unit}`
+      if (cell !== want) stale.push(`${nameOf(row)}: ページ=${cell} / マスタ=${want}`)
+    }
+    for (const row of aliasRows) {
+      const master = PRICE_DEFAULTS.find((m) => m.name === nameOf(row))
+      if (!master) {
+        stale.push(`${nameOf(row)}(別名の行): マスタに行が無い`)
+        continue
+      }
+      const want = `${master.pricePerUnit}円 / ${master.unit}`
+      if (priceCellOf(row) !== want) stale.push(`${nameOf(row)}(別名の行): ページ=${priceCellOf(row)} / マスタ=${want}`)
+    }
+    eq('CX foods.html 出ている目安価格がすべてマスタと同じ（違ったら npm run gen:foods）', stale, [])
+    // 見張りが空振りしていないこと（0件を突き合わせて合格、にならないようにする）
+    eq('CX foods.html 前提: 目安価格の出ている行を拾えている', foodRows.length + aliasRows.length > 100, true)
+  }
+
+  // (4) 抜き取り4品は成分値と収載名まで一字一句一致する(桁の丸め・列の並びの取り違えを検知)
   const dec1 = (v) => (Math.round(v * 10) / 10).toFixed(1)
-  // 2026-08-26 便LF: 抜き取りに「昆布」を足した。それまでの3品はどれも便LFで値を直していない品で、
-  // **目安価格を直したのにページを再生成し忘れても、この検査は素通りしていた**（(2)は名前が
-  // 出ているかしか見ていない）。値を直した品を1つ入れておくと、次に値を直した便が気づける
   for (const label of ['玉ねぎ', '鶏もも肉', 'しょうゆ', '昆布']) {
     const food = NUTRITION_DATA.foods.find((f) => f.label === label)
     const master = PRICE_DEFAULTS.find((p) => priceKey(p.name) === priceKey(label))
@@ -4075,6 +4112,10 @@ eq('normalizeIngredientNameForPrice 前後空白除去', normalizeIngredientName
   // 同じ食材が書き方で値段が変わらないこと（ここが崩れると「豚バラ肉」と「豚バラ薄切り」で原価が食い違う）
   eq('LF-8 豚バラ肉と豚バラ薄切りは同じ値', lf2Entry('豚バラ肉'), lf2Entry('豚バラ薄切り'))
   eq('LF-8 牛こま切れ肉と牛薄切り肉・牛切り落とし肉は同じ値', [lf2Entry('牛薄切り肉'), lf2Entry('牛切り落とし肉')], [lf2Entry('牛こま切れ肉'), lf2Entry('牛こま切れ肉')])
+  // 2026-08-27 便LM・③（便LLの申し送り）: 小ねぎと万能ねぎも同じ野菜。成分表は前から
+  // 1つの食品として扱っている（八訂 06228 こねぎ の別名に「万能ねぎ」が入っている）のに、
+  // 価格マスタだけ 80円/100g と 100円/1束 に分かれていた。豚バラ・牛と同じ形にそろえる
+  eq('LF-8 小ねぎと万能ねぎは同じ値（同じ野菜）', lf2Entry('小ねぎ'), lf2Entry('万能ねぎ'))
   // ②実勢との差が±20%に届かないもの
   // 2026-08-26 便LF 第7弾: 並のグレード（各店のPBの4連パック）で測り直したら93円/4枚まで下がり、
   // ±20%を超えたので150→95円に直した。第2弾は棚の9件の中央値（123円）で「-18%だから据え置き」と
