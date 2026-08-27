@@ -26,6 +26,8 @@ import {
   regroupIngredientRowsByMark,
   countSeasoningGroupsFromMarks,
 } from '../../src/logic/seasoningRegroup.ts'
+// 2026-08-27 便LR: 取り込み直後に並べる項目が、取り込みの経路で実際に出せるかを見る（LR-1）
+import { missingImportFields, IMPORT_FIELD_KEYS } from '../../src/logic/importFieldGaps.ts'
 
 // ---------- parseRecipeText(理想フォーマット+ゆらぎのコーパス) ----------
 const ideal = `肉じゃが
@@ -1957,4 +1959,106 @@ import { safetyNotesFor, stepSafetyNotes, wholeRecipeSafetyNotes } from '../../s
       true,
     )
   }
+}
+
+
+// ============================================================================
+// LR-1: 取り込み直後に並べる項目は、**取り込みの経路で実際に出せるもの**だけにする
+//        （2026-08-27 便LR・到達不能なUIを作らないための見張り）
+//
+// ## なぜ要るか（来歴）
+// 2026-08-26 に「合わせ調味料の組」(seasoningGroup) を `IMPORT_FIELD_KEYS` に足したが、
+// **どの取り込み経路でも1度も出せない欄**だった。出す条件が
+// 「取り込み直後の材料に、まだ組が付いていない印が2件以上ある」だったのに、貼り付け取り込みも
+// URL取り込みも印を見つけた時点で必ず組を付けるので、条件が成り立つ並びが作れなかった。
+// 押せないボタンではなく**出ないボタン**＝画面・文言・検査だけが残っていた。
+//
+// ## ここで測ること
+// 貼り付け取り込み（parseRecipeText）と URL取り込み（buildImportedIngredientRows）を
+// **実際に通した材料の行**から `missingImportFields` を呼び、
+// **`IMPORT_FIELD_KEYS` の1つ1つが、少なくとも1通りの取り込みで並びに出ること**を見る。
+// 出せない項目を足したら、その項目の名前を挙げて赤くなる。
+//
+// 逆向き（出さないほうの確かめ）は KO-1 が持っている。ここは「出せるか」だけを見る。
+// ============================================================================
+{
+  /** 取り込み直後の画面と同じ形で「入らなかった項目」を数える（RecipeFormPage の noteImportFollowUp と同じ引数） */
+  const lrGaps = (over = {}) =>
+    missingImportFields({
+      tags: [],
+      season: undefined,
+      suitableFor: [],
+      dishType: undefined,
+      effortLevel: 'normal',
+      ...over,
+    })
+
+  /** 取り込みの2経路が実際に返す材料の行（印つき・印なしの代表） */
+  const lrPasteText = `LRテスト炒め
+2人分
+
+材料
+・豚こま切れ肉 200g
+・キャベツ 2枚
+・●しょうゆ 大さじ2
+・●みりん 大さじ1
+
+作り方
+1. ●を合わせておく
+2. 豚肉を炒める
+3. キャベツを加えて炒める`
+  const lrPasted = parseRecipeText(lrPasteText)
+  const lrUrlRows = buildImportedIngredientRows([
+    { name: '豚こま切れ肉', amount: '200g' },
+    { name: 'キャベツ', amount: '2枚' },
+    { name: '●しょうゆ', amount: '大さじ2' },
+    { name: '●みりん', amount: '大さじ1' },
+  ])
+  eq('LR-1 前提: 貼り付け取り込みが材料を読めている', lrPasted.ingredients.length, 4)
+  eq('LR-1 前提: URL取り込みが材料を読めている', lrUrlRows.length, 4)
+
+  // 取り込み直後は、献立の絞り込みが読む項目が1つも入らない＝5項目とも並びに出る。
+  // これが「どの項目も出せる」ことの実測（項目を足したら、ここに出てくるかで到達できるか分かる）
+  const lrShown = new Set(lrGaps())
+  eq(
+    'LR-1 取り込み直後に出せない項目を並びに置かない（出せなかったもの＝到達できないUI）',
+    IMPORT_FIELD_KEYS.filter((key) => !lrShown.has(key)),
+    [],
+  )
+
+  // 「印から組を作る」は取り込みの結果の中には出さない（出せないから）。
+  // 印が2件以上あっても、取り込みは**その場で組を付けてしまう**ので入口の出番が無い
+  const lrPasteMarks = countSeasoningGroupsFromMarks(
+    lrPasted.ingredients.map((row) => ({ name: row.name, memo: row.memo ?? '', group: row.group })),
+  )
+  const lrUrlMarks = countSeasoningGroupsFromMarks(
+    lrUrlRows.map((row) => ({ name: row.name, memo: row.memo ?? '', group: row.group })),
+  )
+  eq(
+    'LR-1 貼り付け取り込みは●を1組にするので、あとから作れる組は0（入口が出ない）',
+    [new Set(lrPasted.ingredients.map((r) => r.group).filter((g) => g != null)).size, lrPasteMarks],
+    [1, 0],
+  )
+  eq(
+    'LR-1 URL取り込みも同じ（●を1組にするので、あとから作れる組は0）',
+    [new Set(lrUrlRows.map((r) => r.group).filter((g) => g != null)).size, lrUrlMarks],
+    [1, 0],
+  )
+
+  // 材料の欄の入口（本命）は生きている＝取り込みを通らない道では、いまも組を作れる。
+  // 速記入力は1行ずつ足すので組が付かないまま印だけがメモに残る
+  const lrQuickRows = [
+    { name: 'ご飯', memo: '', group: undefined },
+    { name: '牛ひき肉', memo: '', group: undefined },
+    { name: 'しょうゆ', memo: '●', group: undefined },
+    { name: '砂糖', memo: '●', group: undefined },
+    { name: 'コチュジャン', memo: '●', group: undefined },
+    { name: 'おろしにんにく', memo: '●', group: undefined },
+  ]
+  eq('LR-1 材料の欄の入口は生きている（速記入力の並びからは1組作れる）', countSeasoningGroupsFromMarks(lrQuickRows), 1)
+  eq(
+    'LR-1 押すと●の4件が同じ組になる',
+    regroupIngredientRowsByMark(lrQuickRows).map((r) => (r.group != null ? `${r.name}#${r.group}` : r.name)),
+    ['ご飯', '牛ひき肉', 'しょうゆ#1', '砂糖#1', 'コチュジャン#1', 'おろしにんにく#1'],
+  )
 }

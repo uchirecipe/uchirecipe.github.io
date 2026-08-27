@@ -597,12 +597,11 @@ function RecipeFormInner() {
   /** 入らない項目の説明を、いま出しているか（この端末での初回だけ true になる） */
   const [importGapNoticeOpen, setImportGapNoticeOpen] = useState(false)
   /**
-   * 「印から組を作る」を押した結果（2026-08-26 便LG）。**押したボタンのすぐ下**に出す
-   * （入口は取り込みの結果の中と材料の欄の2か所にあり、離れているので場所を持つ）
+   * 「印から組を作る」を押した結果（2026-08-26 便LG）。**押したボタンのすぐ下**に出す。
+   * 2026-08-27 便LR: 入口は材料の欄の1か所だけになったので、場所を持たない1本の文にした
+   * （取り込みの結果の中にも同じボタンを置いていたが、どの取り込み経路でも出せなかった）
    */
-  const [seasoningGroupedNote, setSeasoningGroupedNote] = useState<
-    { at: 'import' | 'ingredients'; text: string } | undefined
-  >()
+  const [seasoningGroupedNote, setSeasoningGroupedNote] = useState<string>()
   /** 1品に複数の料理が入っていそうな取り込みの知らせ（2026-08-25 便KO・④。知らせるだけ） */
   const [importMultiDish, setImportMultiDish] = useState<MultiDishSignal>()
 
@@ -626,8 +625,6 @@ function RecipeFormInner() {
     title: string
     ingredients: readonly { name: string }[]
     steps: readonly { text: string }[]
-    /** 取り込んだ直後の材料の行（印から組を作れるかを数えるため。2026-08-26 便LG） */
-    rows: readonly IngredientRow[]
   }) => {
     // 種別は取り込み後に画面が「選択中」として扱う値と同じにする
     // （料理名から読み取れた品は「入った」ので並びに出さない）
@@ -642,8 +639,6 @@ function RecipeFormInner() {
       suitableFor,
       dishType: guessed,
       effortLevel,
-      // 印から組が作れるときだけ「合わせ調味料の組」を並びに出す（2026-08-26 便LG）
-      seasoningGroupsFromMarks: countSeasoningGroupsFromMarks(params.rows),
     })
     setImportGapFields(gaps)
     // 説明はこの端末での初回だけ（オーナー指示「毎回表示されると邪魔なので、初回のみ」）。
@@ -1474,7 +1469,6 @@ function RecipeFormInner() {
           title: importedTitle || title.trim(),
           ingredients: importedRows.map((row) => ({ name: row.name })),
           steps: importedSteps.map((step) => ({ text: typeof step === 'string' ? step : step.text })),
-          rows: importedRows,
         })
         // 件数だけでは「どこを直せばよいか」が分からないという5体一致の指摘への最小限の答え
         // (便BX/C09ライト版)。分量を読み取れなかった件数だけ内訳として添える
@@ -1660,13 +1654,6 @@ function RecipeFormInner() {
       title: pastedTitle || title.trim(),
       ingredients: parsed.ingredients.map((row) => ({ name: row.name })),
       steps: pastedStepRows.map((row) => ({ text: row.text })),
-      rows: parsed.ingredients.map((row) => ({
-        name: row.name,
-        amount: row.amount,
-        unit: row.unit,
-        memo: row.memo ?? '',
-        group: row.group,
-      })),
     })
     // 2026-08-25 便KS・⑧: 1本の長文にまとめる（句点でつなぐ）のをやめ、1つの知らせ＝1行にする。
     // 空の行は showPasteMessage が落とすので、ここでは並べるだけでよい
@@ -2384,43 +2371,11 @@ function RecipeFormInner() {
                 testId="import-gap-effort"
               />
             )}
-            {/* 合わせ調味料の組（2026-08-26 便LG・オーナー原文「自動で登録できない項目に
-                計量一緒にできる設定は含みますか」）。ジャンルのように1つ選ぶものではなく
-                材料の組み分けなので、選ぶ並びではなく1タップのボタンにする。
-                押した結果はその場に出す（材料の行まで目を動かさなくても、何が起きたか読める） */}
-            {importGapFields.includes('seasoningGroup') && (
-              <div data-testid="import-gap-seasoning" className="mt-[var(--space-md)]">
-                <p className="text-sm font-bold text-ink">
-                  {ja.form.importGapField.seasoningGroup}
-                </p>
-                <button
-                  type="button"
-                  data-testid="import-gap-seasoning-run"
-                  onClick={() => {
-                    const made = countSeasoningGroupsFromMarks(ingredients)
-                    setIngredients((rows) => regroupIngredientRowsByMark(rows))
-                    setImportGapFields((keys) => keys.filter((key) => key !== 'seasoningGroup'))
-                    setSeasoningGroupedNote({
-                      at: 'import',
-                      text: ja.form.importGapSeasoningDone.replace('{n}', String(made)),
-                    })
-                  }}
-                  className="mt-1 flex min-h-[var(--tap-min)] w-full items-center justify-center gap-1 rounded-md border border-edge bg-surface px-3 text-sm font-bold text-accent-ink shadow-sm"
-                >
-                  <Palette size={16} aria-hidden />
-                  {ja.form.importGapSeasoningButton}
-                </button>
-              </div>
-            )}
-            {seasoningGroupedNote?.at === 'import' && (
-              <p
-                data-testid="import-gap-seasoning-done"
-                role="status"
-                className="ja-phrase mt-[var(--space-sm)] text-sm text-ink-muted"
-              >
-                {seasoningGroupedNote.text}
-              </p>
-            )}
+            {/* 2026-08-27 便LR: ここに置いていた「印から組を作る」ボタン（2026-08-26 便LG）は外した。
+                出す条件が「取り込み直後の材料に、まだ組が付いていない印が2件以上ある」だったが、
+                貼り付け取り込みもURL取り込みも印を見つけた時点で必ず組を付けるので、
+                **どの経路でも1度も出せなかった**（693通りで実測。見張りは LR-1）。
+                印から組を作り直す入口は、下の材料の欄に1か所だけ置いてある。 */}
           </div>
         )}
       </div>
@@ -2801,22 +2756,17 @@ function RecipeFormInner() {
             材料に同じ印（●・☆・Aなど）が2件以上あり、まだ組が1つも付いていないときだけ出す
             ＝押しても何も起きないボタンは出さない。速記入力・手入力・取り込みのどの道で入れても
             同じ場所に出るので、「印は消えたのに組にならない」で行き止まりにならない。
-            取り込み直後は同じボタンを取り込みの結果の中に出しているので、ここには出さない */}
-        {!ingredientOrganizing &&
-          !importGapFields.includes('seasoningGroup') &&
-          seasoningGroupsFromMarks > 0 && (
+            2026-08-27 便LR: 取り込みの結果の中に置いていた同じボタンは外したので、
+            この画面での入口はここ1か所になった（取り込み直後もここに出る） */}
+        {!ingredientOrganizing && seasoningGroupsFromMarks > 0 && (
             <button
               type="button"
               data-testid="ingredient-seasoning-run"
               onClick={() => {
                 setIngredients((rows) => regroupIngredientRowsByMark(rows))
-                setSeasoningGroupedNote({
-                  at: 'ingredients',
-                  text: ja.form.importGapSeasoningDone.replace(
-                    '{n}',
-                    String(seasoningGroupsFromMarks),
-                  ),
-                })
+                setSeasoningGroupedNote(
+                  ja.form.importGapSeasoningDone.replace('{n}', String(seasoningGroupsFromMarks)),
+                )
               }}
               className="mt-[var(--space-sm)] flex min-h-[var(--tap-min)] w-full items-center justify-center gap-1 rounded-md border border-edge bg-surface px-3 text-sm font-bold text-accent-ink shadow-sm"
             >
@@ -2824,13 +2774,13 @@ function RecipeFormInner() {
               {ja.form.importGapSeasoningButton}
             </button>
           )}
-        {seasoningGroupedNote?.at === 'ingredients' && (
+        {seasoningGroupedNote !== undefined && (
           <p
             data-testid="ingredient-seasoning-done"
             role="status"
             className="ja-phrase mt-[var(--space-sm)] text-sm text-ink-muted"
           >
-            {seasoningGroupedNote.text}
+            {seasoningGroupedNote}
           </p>
         )}
         {/* 価格管理は「食材と価格」ページに一元化(2026-07-14 オーナー要望)。この画面には

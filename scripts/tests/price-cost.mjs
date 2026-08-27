@@ -4844,3 +4844,61 @@ eq('normalizeIngredientNameForPrice 前後空白除去', normalizeIngredientName
     )
   }
 }
+
+
+// ==========================================================================================
+// LR-3: しょうがは「2件目が取れるまで動かさない」（2026-08-27 便LR）
+//
+// 便LL が東急ストア「Vマーク 黄金しょうが」1パック(40g) 149円 ＝3.73円/g を採り、
+// 1かけ＝10g で 37.3円／いまの20円から+86% と測った。**ヤオコーが袋の重さを書いていない**ので
+// 比べられる実売が1件だけになり、物差し（docs/75 §1「単一ソースは動かさない」）で据え置いた。
+// 便LR が両店の棚を読み直したが、重さの分かる根しょうがは同じ1件のままだった。
+//
+// ここで見るのは2つ。**値が黙って動いていないこと**と、**「測ったが単一ソースだった」ことが
+// 行に残っていること**（残っていないと、次の便が「まだ測っていない」と読んで測り直す）。
+// 2件目が取れて動かすときは、この検査の数字とコメントの条件を一緒に直す。
+// ==========================================================================================
+{
+  const lrRoot = path.join(path.dirname(fileURLToPath(scriptFileUrl)), '..')
+  const lrSrc = readFileSync(path.join(lrRoot, 'src/data/priceDefaults.ts'), 'utf-8')
+  /** その行の直前に続いているコメントの塊を取り出す */
+  const lrComment = (name) => {
+    const at = lrSrc.indexOf(`{ name: '${name}', pricePerUnit:`)
+    if (at < 0) return ''
+    const before = lrSrc.slice(0, at).split('\n')
+    const lines = []
+    for (let i = before.length - 2; i >= 0; i--) {
+      const line = before[i].trim()
+      if (!line.startsWith('//')) break
+      lines.unshift(line)
+    }
+    return lines.join('\n')
+  }
+  const lrGinger = PRICE_DEFAULTS.find((d) => d.name === 'しょうが')
+  eq('LR-3 しょうがは20円/1かけのまま（2件目が取れていない）', [lrGinger?.pricePerUnit, lrGinger?.unit], [20, '1かけ'])
+  eq(
+    'LR-3 「測ったが単一ソースだった」ことが行に書いてある',
+    [
+      /単一ソース/.test(lrComment('しょうが')),
+      /東急ストア/.test(lrComment('しょうが')) && /ヤオコー/.test(lrComment('しょうが')),
+      /便LR/.test(lrComment('しょうが')),
+    ],
+    [true, true, true],
+  )
+  // 動かしたときに何品が動くのかを、その場で数えられるようにしておく。
+  // **名前がちょうど「しょうが」の行は9行しかない**（残りは「しょうが(すりおろし)」6行と
+  // 「しょうが(せん切り)」1行）ので、名前の一致で数えると取りこぼす。原価と同じ照合器で数える
+  {
+    const lrIndex = buildPriceIndex(PRICE_DEFAULTS.map((d) => ({ ...d })))
+    const lrTitles = []
+    for (const def of starterDefs) {
+      for (const ing of def.ingredients) {
+        if (matchPriceEntry(ing.name, lrIndex)?.normalizedName === 'しょうが') lrTitles.push(def.title)
+      }
+    }
+    eq('LR-3 同梱109品でしょうがの行に当たる材料は16行', lrTitles.length, 16)
+    eq('LR-3 それは16品にまたがる（1品につき1行）', new Set(lrTitles).size, 16)
+    // 2026-08-27 便LR の実測: 20円→37円にすると 47,864→48,064円（+200円・16品が上がる）。
+    // 差の割合は+0.4%で、いま据え置いていることが総額を大きく歪めてはいない
+  }
+}

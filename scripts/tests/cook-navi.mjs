@@ -3895,8 +3895,6 @@ import { existsSync, readFileSync } from 'node:fs'
     suitableFor: [],
     dishType: undefined,
     effortLevel: 'normal',
-    // 2026-08-26 便LG: 印から作れる組の数（0＝印が無い／すでに組が付いている）
-    seasoningGroupsFromMarks: 0,
   }
   eq('KO-1 取り込んだ直後（何も入っていない）は5項目とも足りない', missingImportFields(koEmpty), [
     'genre',
@@ -3934,28 +3932,19 @@ import { existsSync, readFileSync } from 'node:fs'
     }),
     [],
   )
-  // 2026-08-26 便LG・オーナー原文「自動で登録できない項目に計量一緒にできる設定は含みますか」で
-  // 合わせ調味料の組（seasoningGroup）を足した。**材料の話なので最後**（献立の絞り込みに使う
-  // 5つと混ぜて読ませない）
+  // 2026-08-27 便LR: 2026-08-26 に足した「合わせ調味料の組」(seasoningGroup) は落とした。
+  // どの取り込み経路でも出せない欄だったため（理由と実測は logic/importFieldGaps.ts と LR-1）
   eq('KO-1 出す順は画面の並びと同じ', [...IMPORT_FIELD_KEYS], [
     'genre',
     'season',
     'suitableFor',
     'dishType',
     'effort',
-    'seasoningGroup',
   ])
-  // ---- LG-1: 合わせ調味料の組は「印から実際に作れるとき」だけ並びに出す ----
-  //   押しても何も起きないボタンを画面に置かないため（2026-08-26 便LG）
   eq(
-    'LG-1 印から組が作れないレシピでは、合わせ調味料の組を出さない',
-    missingImportFields({ ...koEmpty, seasoningGroupsFromMarks: 0 }).includes('seasoningGroup'),
+    'LR-1 落とした「合わせ調味料の組」は並びに戻っていない',
+    IMPORT_FIELD_KEYS.includes('seasoningGroup'),
     false,
-  )
-  eq(
-    'LG-1 印から組が作れるレシピでは出す',
-    missingImportFields({ ...koEmpty, seasoningGroupsFromMarks: 1 }).includes('seasoningGroup'),
-    true,
   )
 
   // ---- KO-2: ジャンルはタグ1つ（絞り込みが読むのと同じ形） ----

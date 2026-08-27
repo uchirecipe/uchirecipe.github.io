@@ -10,6 +10,8 @@ import {
   cardPartsFor,
 } from '../../src/logic/cardParts.ts'
 import { ja } from '../../src/i18n/ja.ts'
+// 2026-08-27 便LR: 取り込み直後の欄の項目と、画面に出す行が1対1であることを見る（LR-2）
+import { IMPORT_FIELD_KEYS } from '../../src/logic/importFieldGaps.ts'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
@@ -3043,4 +3045,73 @@ import { createRequire } from 'node:module'
       [],
     )
   }
+}
+
+
+// ==========================================================================================
+// LR-2: 取り込み直後の欄に「出せない行」を置かない（2026-08-27 便LR）
+//
+// ## 来歴（同じ形をもう1度作らないための見張り）
+// 2026-08-26 に「合わせ調味料の組」の行をこの欄へ足したが、`importGapFields` にその名前が
+// 入る道が無く、**画面に1度も出ないボタン**になっていた（押せないボタンではなく出ないボタン）。
+// 便LO が「e2e が『出ること』を1度も測っていない目印」を数えて見つけ、便LR が
+// 貼り付け・URLの2経路 693通りで「どの経路でも出ない」ことを実測して落とした。
+//
+// ## ここで見ること（LR-1 と対になる）
+//   LR-1（scripts/tests/import-paste.mjs）= 一覧の項目が**取り込みで実際に出せる**こと
+//   LR-2（ここ）                          = 一覧の項目と**画面の行が1対1**であること
+// この2つで「出せない項目を足す」「一覧に無い名前で行を書く」のどちらも赤になる。
+// ==========================================================================================
+{
+  const lrRoot = path.join(path.dirname(fileURLToPath(scriptFileUrl)), '..')
+  const lrForm = readFileSync(path.join(lrRoot, 'src/pages/RecipeFormPage.tsx'), 'utf-8')
+  /** 画面が「この名前の行を出す」と書いている名前（importGapFields.includes('…') の中身） */
+  const lrDrawn = [...lrForm.matchAll(/importGapFields\.includes\('([^']+)'\)/g)].map((m) => m[1])
+
+  eq(
+    'LR-2 画面が出す行は、すべて一覧（IMPORT_FIELD_KEYS）にある名前',
+    lrDrawn.filter((key) => !IMPORT_FIELD_KEYS.includes(key)),
+    [],
+  )
+  eq(
+    'LR-2 一覧の項目は、すべて画面に出す行を持っている',
+    IMPORT_FIELD_KEYS.filter((key) => !lrDrawn.includes(key)),
+    [],
+  )
+  eq(
+    'LR-2 出す行に重複が無い（同じ項目を2か所に描かない）',
+    lrDrawn.length,
+    new Set(lrDrawn).size,
+  )
+  eq(
+    'LR-2 項目の見出しの文言も、一覧の項目とちょうど同じだけ持っている',
+    Object.keys(ja.form.importGapField).sort(),
+    [...IMPORT_FIELD_KEYS].sort(),
+  )
+  // 落とした「合わせ調味料の組」が、画面・文言・一覧のどこにも戻っていないこと。
+  // 戻すなら、まず取り込みの経路で出せるようにしてから（LR-1 が測る）
+  eq(
+    'LR-2 到達できなかった「合わせ調味料の組」は画面にも文言にも戻っていない',
+    [
+      lrDrawn.includes('seasoningGroup'),
+      'seasoningGroup' in ja.form.importGapField,
+      IMPORT_FIELD_KEYS.includes('seasoningGroup'),
+    ],
+    [false, false, false],
+  )
+  // 印から組を作り直す入口そのものは**材料の欄に1か所だけ**残っている（本命のほう）
+  eq(
+    'LR-2 印から組を作る入口は材料の欄に1か所だけある',
+    (lrForm.match(/data-testid="ingredient-seasoning-run"/g) ?? []).length,
+    1,
+  )
+  eq(
+    'LR-2 その入口の文言は残っている（落としたのは取り込みの結果の中の重複だけ）',
+    [
+      typeof ja.form.importGapSeasoningButton === 'string' && ja.form.importGapSeasoningButton.length > 0,
+      ja.form.importGapSeasoningDone.includes('{n}'),
+      lrForm.includes('ja.form.importGapSeasoningButton'),
+    ],
+    [true, true, true],
+  )
 }

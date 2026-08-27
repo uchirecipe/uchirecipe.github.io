@@ -2271,10 +2271,11 @@ import './_shared.mjs'
         lgGroupLines === 3,
         `色の線が付いた行=${lgGroupLines}`,
       )
+      // 2026-08-27 便LR: 取り込みの結果の中に置いていた同じボタンは外した（どの取り込み経路でも
+      // 出せなかった）。ここで見るのは材料の欄の入口が出ないことだけ
       check(
         'LG-03e 組ができたので「印から組を作る」は出さない（押しても何も起きないボタンを置かない）',
-        (await lgPage.locator('[data-testid="ingredient-seasoning-run"]').count()) === 0 &&
-          (await lgPage.locator('[data-testid="import-gap-seasoning-run"]').count()) === 0,
+        (await lgPage.locator('[data-testid="ingredient-seasoning-run"]').count()) === 0,
       )
       // 速記入力（1行ずつ足す道）は取り込みを通らない。組を作る入口がその場に出ること
       await lgOpenForm()
