@@ -2068,13 +2068,19 @@ const NUTRITION_DB_VERSION_FOR_KP = NUTRITION_DATA_FOR_KP.dbVersion
       ja.mealPlan.fillMonthKeptManual.replace('{n}', '28').replace('{a}', '14'),
       'すでに入っている28品はそのままにして、14品を新しく入れました',
     )
+    // 状態と手続きは 2026-08-27 便LQ（docs/74 第4手）で
+    // src/pages/mealPlan/useMealPlanState.ts へ移した（中身は1文字も動かしていない）。
+    // ここは**画面一式**を1つの本文として読む＝分ける前と同じものを見ている
+    const ktPlanSrc = ['src/pages/MealPlanPage.tsx', 'src/pages/mealPlan/useMealPlanState.ts']
+      .map(ktRead)
+      .join('\n')
     eq(
       'KT-6 画面が品で数える関数を使っている（枠の数をそのまま出していない）',
       [
-        /const preserved = preservedItemCount\(plan, entries \?\? \[\]\)/.test(ktRead('src/pages/MealPlanPage.tsx')),
+        /const preserved = preservedItemCount\(plan, entries \?\? \[\]\)/.test(ktPlanSrc),
         // 2026-08-26 便LH: 月タブの対象が「表示している月 or 選んだ期間」になったので monthTargetEntries
-        /const preserved = preservedItemCount\(plan, monthTargetEntries\)/.test(ktRead('src/pages/MealPlanPage.tsx')),
-        ktRead('src/pages/MealPlanPage.tsx').includes('plan.keptItemCount'),
+        /const preserved = preservedItemCount\(plan, monthTargetEntries\)/.test(ktPlanSrc),
+        ktPlanSrc.includes('plan.keptItemCount'),
       ],
       [true, true, true],
     )

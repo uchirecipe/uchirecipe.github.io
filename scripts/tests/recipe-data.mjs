@@ -1629,7 +1629,12 @@ for (const [title, expected] of futureIconCases) {
       true,
     )
     // 集計へ混ぜない歯止め(材料が無い記録を栄養・食費に0として数えない)
-    const mealPlanSrc = readFileSync(path.join(appRoot, 'src/pages/MealPlanPage.tsx'), 'utf-8')
+    // 状態と手続きは 2026-08-27 便LQ（docs/74 第4手）で
+    // src/pages/mealPlan/useMealPlanState.ts へ移した（中身は1文字も動かしていない）。
+    // ここは**画面一式**を1つの本文として読む＝分ける前と同じものを見ている
+    const mealPlanSrc = ['src/pages/MealPlanPage.tsx', 'src/pages/mealPlan/useMealPlanState.ts']
+      .map((rel) => readFileSync(path.join(appRoot, rel), 'utf-8'))
+      .join('\n')
     eq(
       'GZ-配線 削除済みレシピの記録は栄養・食費の入力(cookedLogsByDate)に混ぜない',
       /const cookedLogsByDate = useMemo\(\(\) => \{[\s\S]{0,500}\}, \[recipes\]\)/.test(mealPlanSrc),
@@ -2290,6 +2295,8 @@ for (const [title, expected] of futureIconCases) {
     'src/pages/mealPlan/DayParts.tsx',
     'src/pages/mealPlan/IntakeParts.tsx',
     'src/pages/mealPlan/MonthParts.tsx',
+    // 状態と手続きは 2026-08-27 便LQ（docs/74 第4手）でここへ移した
+    'src/pages/mealPlan/useMealPlanState.ts',
   ]
     .map(jfRead)
     .join('\n')
