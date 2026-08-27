@@ -1534,7 +1534,8 @@ import './_shared.mjs'
       )
       check(
         'ET-01 料理名は2行までで打ち切る設定になっている',
-        etcSeeded.rows.every((r) => r.clamp === '2'),
+        // 便LK: 空だと every は中身を1回も見ずに true になる（測れていないのに緑）
+        etcSeeded.rows.length > 0 && etcSeeded.rows.every((r) => r.clamp === '2'),
         JSON.stringify([...new Set(etcSeeded.rows.map((r) => r.clamp))]),
       )
 

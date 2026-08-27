@@ -1120,9 +1120,13 @@ import './_shared.mjs'
       )
       check(
         'MEALPLAN-A1B2 テンプレートから入れた枠は手動配置扱い(auto無し)＝まとめて献立で上書きされない',
-        tpAfter
-          .filter((e) => e.date.startsWith(tpNextPrefix) && e.recipeId === tpIds.curryId)
-          .every((e) => !e.auto),
+        // 便LK: 空だと every は中身を1回も見ずに true になる（測れていないのに緑）（1件も入らなくなった退行が緑で通る）
+        (() => {
+          const rows = tpAfter.filter(
+            (e) => e.date.startsWith(tpNextPrefix) && e.recipeId === tpIds.curryId,
+          )
+          return rows.length > 0 && rows.every((e) => !e.auto)
+        })(),
       )
       check(
         'MEALPLAN-A1B2 結果は入れた品数つきで伝える',
@@ -1615,7 +1619,11 @@ import './_shared.mjs'
       )
       check(
         'MEALPLAN-A5 自動で入れた枠にはautoが付く(次の提案で再抽選できる)',
-        fmMonthPlans.filter((e) => e.date !== fmManualDate).every((e) => e.auto === true),
+        // 便LK: 空だと every は中身を1回も見ずに true になる（測れていないのに緑）
+        (() => {
+          const rows = fmMonthPlans.filter((e) => e.date !== fmManualDate)
+          return rows.length > 0 && rows.every((e) => e.auto === true)
+        })(),
       )
       // 結果のトーストも ja.ts から組み立てて拾う（2026-08-25 便KT で「◯食分はそのままにして」
       // →「◯品はそのままにして」に変わった）。上で**出るまで待って**控えた本文を見る

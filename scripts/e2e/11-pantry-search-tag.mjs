@@ -503,7 +503,8 @@ import './_shared.mjs'
       )
       check(
         'LG-04 2つ並んでも、どちらも高さ44px以上で画面からはみ出さない',
-        lgToastBtns.every((b) => b && b.h >= 44 && b.right <= 390),
+        // 便LK: 空だと every は中身を1回も見ずに true になる（測れていないのに緑）
+        lgToastBtns.length > 0 && lgToastBtns.every((b) => b && b.h >= 44 && b.right <= 390),
         JSON.stringify(lgToastBtns),
       )
       // 規約: 6秒で消えるトーストを、消えたあとに読んでいた失敗例がある。

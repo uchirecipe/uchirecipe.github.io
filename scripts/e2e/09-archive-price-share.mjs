@@ -1066,7 +1066,8 @@ import './_shared.mjs'
       const jdBaseTitles = jdTitles2.filter((t) => t.startsWith(JD_BASE))
       check(
         'JA-DUP-01③ 番号の付いた品を入れ直しても「(2) (2)」にならない（オーナーの懸念）',
-        jdBaseTitles.every((t) => !/\(\d+\)\s*\(\d+\)$/.test(t)),
+        // 便LK: 空だと every は中身を1回も見ずに true になる（測れていないのに緑）
+        jdBaseTitles.length > 0 && jdBaseTitles.every((t) => !/\(\d+\)\s*\(\d+\)$/.test(t)),
         JSON.stringify(jdBaseTitles),
       )
       check(

@@ -774,7 +774,9 @@ import './_shared.mjs'
       }
       check(
         'GJ-02 調理中モードは、手で変えた順番のまま進む（元の順に戻らない）',
-        gjSessionTexts.every((t, i) => gjShown[i].includes(t) || t.includes(gjShown[i])),
+        // 便LK: 空だと every は中身を1回も見ずに true になる（測れていないのに緑）
+        gjSessionTexts.length > 0 &&
+          gjSessionTexts.every((t, i) => gjShown[i].includes(t) || t.includes(gjShown[i])),
         `一覧=${gjShown.slice(0, 3).join(' / ')} 調理中=${gjSessionTexts.join(' / ')}`,
       )
       check(

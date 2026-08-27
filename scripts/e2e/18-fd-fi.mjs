@@ -1166,7 +1166,8 @@ import './_shared.mjs'
         }
         check(
           `FG-LP(${scheme}) 390pxの吹き出しが重なっている(隙間が負)`,
-          fg.painsGaps.every((g) => g < 0),
+          // 便LK: 空だと every は中身を1回も見ずに true になる（測れていないのに緑）
+          fg.painsGaps.length > 0 && fg.painsGaps.every((g) => g < 0),
           `隙間=${fg.painsGaps.join(',')} 全体の高さ=${fg.painsUlH}`,
         )
         check(

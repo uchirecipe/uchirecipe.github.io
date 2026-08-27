@@ -1043,9 +1043,13 @@ import './_shared.mjs'
       )
       check(
         'FM-05 本体のメモが無い自作レシピの手順には「レシピのメモ」の枠を出さない',
-        cardTexts
-          .filter((t) => t.includes('キャベツをせん切りにする') || t.includes('塩昆布とごま油であえる'))
-          .every((t) => !t.includes('レシピのメモ')),
+        // 便LK: 空だと every は中身を1回も見ずに true になる（測れていないのに緑）（手順の文が変わって0件になると、枠が出ていても緑になる）
+        (() => {
+          const rows = cardTexts.filter(
+            (t) => t.includes('キャベツをせん切りにする') || t.includes('塩昆布とごま油であえる'),
+          )
+          return rows.length > 0 && rows.every((t) => !t.includes('レシピのメモ'))
+        })(),
         JSON.stringify(
           cardTexts.filter((t) => t.includes('塩昆布とごま油であえる')).map((t) => t.replace(/\n/g, ' / ')),
         ),
@@ -2058,7 +2062,8 @@ import './_shared.mjs'
       })
       check(
         'FX-07 「調理を続ける」では記録は付かない',
-        foBackLogs.every((n) => n === 0),
+        // 便LK: 空だと every は中身を1回も見ずに true になる（測れていないのに緑）
+        foBackLogs.length > 0 && foBackLogs.every((n) => n === 0),
         JSON.stringify(foBackLogs),
       )
       // 「記録をつけずに閉じる」を選ぶと、記録は付かず段取りのページに戻る（従来の「やめる」）

@@ -593,7 +593,8 @@ import './_shared.mjs'
     })
     check(
       'GF-B 保存した材料名に記号が混ざらない（栄養・原価の名前照合を壊さない）',
-      gfSaved != null && gfSaved.every(([name]) => !/[☆◎]/.test(name)),
+      // 便LK: 空だと every は中身を1回も見ずに true になる（測れていないのに緑）
+      gfSaved != null && gfSaved.length > 0 && gfSaved.every(([name]) => !/[☆◎]/.test(name)),
       JSON.stringify(gfSaved),
     )
     check(

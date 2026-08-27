@@ -2496,12 +2496,11 @@ import { createRequire } from 'node:module'
    * ②「空の並びでも通る every」を数える。
    * 受け手が固定の並び（`[…]` / `Array.from`）でなく、同じ判定式で長さも見ていないものだけ。
    */
-  const lkCountBareEvery = (code) => {
+  const lkCountBareEvery = (code, fnNames = ['eq', 'neq']) => {
     let count = 0
     lkWalk(lkParse(code), (n) => {
       if (n.type !== 'CallExpression') return
-      if (n.callee.type !== 'Identifier' || (n.callee.name !== 'eq' && n.callee.name !== 'neq'))
-        return
+      if (n.callee.type !== 'Identifier' || !fnNames.includes(n.callee.name)) return
       for (const cond of [n.arguments[1], n.arguments[2]].filter(Boolean)) {
         const condText = code.slice(cond.start, cond.end)
         lkWalk(cond, (m) => {
@@ -2605,25 +2604,37 @@ import { createRequire } from 'node:module'
     eq('LK-1 画面に無い目印を見ている「出ていないこと」の検査が増えていない', lkGrew, [])
     eq('LK-1 その一覧に、もう当てはまらないものが残っていない', lkShrank, [])
 
-    // ---- LK-2: 「空の並びでも通る every」が増えていないこと ----
-    const lkTestsDir = path.join(lkRoot, 'scripts/tests')
-    let lkEveryNow = 0
-    for (const file of readdirSync(lkTestsDir).filter((f) => f.endsWith('.mjs'))) {
-      lkEveryNow += lkCountBareEvery(readFileSync(path.join(lkTestsDir, file), 'utf-8'))
+    // ---- LK-2: 「空の並びでも通る every」が増えていないこと（npm test 側と e2e 側の両方） ----
+    const lkEveryCounts = [
+      ['npm test 側', 'scripts/tests', ['eq', 'neq'], 'npm test 側の件数'],
+      ['e2e 側', 'scripts/e2e', ['check'], 'e2e 側の件数'],
+    ]
+    for (const [where, dir, fns, knownKey] of lkEveryCounts) {
+      let now = 0
+      for (const file of readdirSync(path.join(lkRoot, dir)).filter((f) => f.endsWith('.mjs'))) {
+        now += lkCountBareEvery(readFileSync(path.join(lkRoot, dir, file), 'utf-8'), fns)
+      }
+      const known = lkKnown['空の並びでも通る every の残り'][knownKey]
+      // 走査そのものが動いていること（0件になったら「違反なし」に化ける）
+      eq(`LK-2 前提: ${where}の every を数えられている`, now > 20, true)
+      eq(
+        `LK-2 ${where}の「空の並びでも通る every」が増えていない（一覧は${known}件）`,
+        now <= known
+          ? []
+          : [
+              `${known}→${now}件に増えた。新しい検査は「長さも同じ条件で見る」形` +
+                '（例: rows.length > 0 && rows.every(…)）にすること',
+            ],
+        [],
+      )
+      eq(
+        `LK-2 ${where}で直したぶんは一覧の件数も下げる（下げないと次の1件が隠れる）`,
+        now >= known
+          ? []
+          : [`${known}→${now}件に減った。scripts/data/e2e-vacuous-known.json の「${knownKey}」を ${now} に直してください`],
+        [],
+      )
     }
-    const lkEveryKnown = lkKnown['空の並びでも通る every の残り']['件数']
-    eq(
-      `LK-2 空の並びでも通る every が増えていない（一覧の${lkEveryKnown}件を超えていない）`,
-      lkEveryNow <= lkEveryKnown ? [] : [`${lkEveryKnown}→${lkEveryNow}件に増えた。新しい検査は「長さも同じ条件で見る」形（例: rows.length > 0 && rows.every(…)）にすること`],
-      [],
-    )
-    eq(
-      'LK-2 直したぶんは一覧の件数も下げる（下げないと次の1件が隠れる）',
-      lkEveryNow >= lkEveryKnown
-        ? []
-        : [`${lkEveryKnown}→${lkEveryNow}件に減った。scripts/data/e2e-vacuous-known.json の「件数」を ${lkEveryNow} に直してください`],
-      [],
-    )
 
     // ---- LK-3: 素通りの見つけ方そのものを書き残しておく（次の便が同じ走査をやり直せるように） ----
     // 走査の型と、実測でどれが当たりだったかは CLAUDE.md ではなくこの見張りの頭のコメントにある。
