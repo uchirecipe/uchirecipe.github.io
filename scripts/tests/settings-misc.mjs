@@ -1343,14 +1343,49 @@ eq('紫キャベツは紫カテゴリ(キャベツの野菜カテゴリより優
   // ---- LI-1: 初回は警告にしない ----------------------------------------------------------
   // オーナー原文「いきなり『まだ〜』と出てきても、まだも何も何も説明受けてないけど？、と
   // 思ってしまう。初回のみ、バックアップのすすめと説明にすべきでは？」
+  //
+  // 2026-08-27 便LS（オーナー追記「初回のみ、バックアップのすすめと説明にすべき→お知らせの文章に」）:
+  // 出す場所が **設定の書き出しカード → 献立の画面のお知らせ** に移った。
+  // 旧 ja.settings.backupNotYet「最初のバックアップを取りましょう」は
+  // オーナー原文「場所が中途半端で目立たないので、存在意義がない。削除」のとおり外している。
+  // 見張りは「2か所そろっているか」ではなく、**責めない言い方が、すすめと説明として残っているか**を見る。
   {
     eq('LI-1 「まだバックアップしていません」は残っていない', 'backupNever' in ja.settings, false)
-    const liNotYet = [ja.settings.bannerBackupNotYet, ja.settings.backupNotYet]
     eq(
-      'LI-1 未実施のときの文言が2か所（バナー・書き出しカード）そろっている',
+      'LI-1 書き出しカードの中の1行（旧 backupNotYet）は外れている',
+      'backupNotYet' in ja.settings,
+      false,
+    )
+    const liNotYet = [
+      ja.settings.bannerBackupNotYet,
+      ja.dayStart.backupReminderFirst,
+      ja.dayStart.backupReminderFirstNote,
+    ]
+    eq(
+      'LI-1 未実施のときの文言が2か所（設定のバナー・お知らせ）そろっている',
       liNotYet.filter((t) => typeof t !== 'string' || t.length === 0),
       [],
     )
+    // お知らせは「すすめ」だけでなく「説明」も言う（何のために書き出すのかを先に読ませる）
+    eq(
+      'LI-1 お知らせが、レシピの置き場所を説明している',
+      /端末/.test(ja.dayStart.backupReminderFirst),
+      true,
+    )
+    eq(
+      'LI-1 お知らせが、書き出すと何ができるかを言っている',
+      /戻せます|戻せる/.test(ja.dayStart.backupReminderFirstNote),
+      true,
+    )
+    // 「初回のみ」を守る: すすめの2行目を出す条件が backupNotice === 'first' に閉じている
+    {
+      const liNoticeSrc = liRead('src/components/DayStartNotices.tsx')
+      eq(
+        'LI-1 すすめの説明は、一度も書き出していない人（first）にだけ出している',
+        /backupNotice === 'first' && \([\s\S]{0,300}backupReminderFirstNote/.test(liNoticeSrc),
+        true,
+      )
+    }
     eq(
       'LI-1 未実施の文言が「まだ〜していません」と責める形になっていない',
       liNotYet.filter((t) => /まだ/.test(t)),
@@ -1428,12 +1463,33 @@ eq('紫キャベツは紫カテゴリ(キャベツの野菜カテゴリより優
       liMove.includes(`「${ja.settings.backupImportReplace}」`),
       true,
     )
-    // 逃げ道が本当（logic/backup.ts の merge は今のデータを消さない）ことを、実装の説明で裏取りする
+    // 逃げ道が本当（logic/backup.ts の merge は今のデータを消さない）ことを裏取りする。
+    // 2026-08-27 便LS: 裏取りに使っていた「変わらないもの: 今のデータ（1件も消えず、内容も
+    // 書き換えません）」は、オーナー指示（理由「すでに言っているため」）で窓から外した。
+    // 同じ約束は**確認の窓の見出し**が言っているので、そちらへ付け替える。
+    // 実装そのものは logic/backup.ts の merge 分岐に clear が1つも無いことで見る
     eq(
-      'LI-3 「今のデータに追加」は今のデータを消さない（実装の建て付け）',
-      ja.settings.backupImportMergeKept.includes('1件も消えず'),
+      'LI-3 「今のデータに追加」の見出しが、無いものだけを足すと言い切っている',
+      /無いもの/.test(ja.settings.backupImportMergeTitle) &&
+        /追加します/.test(ja.settings.backupImportMergeTitle),
       true,
     )
+    {
+      const liBackupSrc = liRead('src/logic/backup.ts')
+      const liMergeBranch = liBackupSrc.slice(
+        liBackupSrc.indexOf('// merge: 今のデータは1件も消さず'),
+      )
+      eq(
+        'LI-3 見張りが merge の分岐を掴めている（0字なら壊れている）',
+        liMergeBranch.length > 1000,
+        true,
+      )
+      eq(
+        'LI-3 merge の分岐に、今のデータを消す指示（clear）が1つも無い',
+        /\.clear\(\)/.test(liMergeBranch),
+        false,
+      )
+    }
   }
 
   // ---- LI-4: 「何を消すとき」の主語 --------------------------------------------------------

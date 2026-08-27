@@ -74,37 +74,62 @@ export default function DayStartNotices({
   return (
     <div className="mt-[var(--space-sm)] space-y-[var(--space-sm)]">
       {/* バックアップの控えめなうながし(2026-07-16 便S)。タップで設定のバックアップの節へ。
-          ×は行内にネストした role="button" でタップ伝播を止めて閉じるだけにする */}
+          ×は行内にネストした role="button" でタップ伝播を止めて閉じるだけにする。
+
+          2026-08-27 便LS（オーナー指示）:
+          ・並びを左右から上下にした。オーナー原文「この窓の中身は、説明文と『設定のバックアップへ』を
+            左右じゃなくて上下に並べた方が読みやすそう。バックアップへは右下に」。
+            実測（説明文・行き先・×を1行に押し込んでいた形）: 320px幅で帯の高さが198pxまで伸び、
+            説明文が細い柱のように折り返していた
+          ・一度も書き出していない人（backupNotice === 'first'）には、**すすめと説明**を出す。
+            オーナー追記「初回のみ、バックアップのすすめと説明にすべき→お知らせの文章に」。
+            2026-08-26 に便LIが設定の書き出しカードへ置いた1行の行き先がここに移った
+            （設定の側からは外した＝オーナー原文「場所が中途半端で目立たない」）。
+            31日以上空けた人への うながし（backupReminder）は今までどおり1文のまま */}
       {showBackupReminder && !backupReminderDismissed && (
         <Link
           to={settingsLinkWithBack('/settings?section=backup', currentPath)}
           data-testid="backup-reminder"
-          className="flex items-center gap-2 rounded-md border border-edge bg-surface px-[var(--space-md)] py-2 text-sm text-ink-muted shadow-sm"
+          className="block rounded-md border border-edge bg-surface px-[var(--space-md)] py-2 text-sm text-ink-muted shadow-sm"
         >
-          <HardDriveDownload size={16} className="shrink-0 text-accent-ink" aria-hidden />
-          <span className="min-w-0 flex-1">
-            {backupNotice === 'first' ? ja.dayStart.backupReminderFirst : ja.dayStart.backupReminder}
-          </span>
-          <span className="shrink-0 font-bold text-accent-ink">{ja.dayStart.backupReminderLink}</span>
-          <span
-            role="button"
-            tabIndex={0}
-            onClick={(e) => {
-              e.preventDefault()
-              e.stopPropagation()
-              dismissBackupReminder()
-            }}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' || e.key === ' ') {
+          <span className="flex items-start gap-2">
+            <HardDriveDownload size={16} className="mt-0.5 shrink-0 text-accent-ink" aria-hidden />
+            <span className="min-w-0 flex-1">
+              <span className="block">
+                {backupNotice === 'first'
+                  ? ja.dayStart.backupReminderFirst
+                  : ja.dayStart.backupReminder}
+              </span>
+              {backupNotice === 'first' && (
+                <span data-testid="backup-reminder-first-note" className="mt-0.5 block">
+                  {ja.dayStart.backupReminderFirstNote}
+                </span>
+              )}
+            </span>
+            <span
+              role="button"
+              tabIndex={0}
+              onClick={(e) => {
                 e.preventDefault()
                 e.stopPropagation()
                 dismissBackupReminder()
-              }
-            }}
-            aria-label={ja.common.close}
-            className="tap-target -m-2 shrink-0 rounded-full p-2 text-ink-muted"
-          >
-            <X size={16} aria-hidden />
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault()
+                  e.stopPropagation()
+                  dismissBackupReminder()
+                }
+              }}
+              aria-label={ja.common.close}
+              className="tap-target -m-2 shrink-0 rounded-full p-2 text-ink-muted"
+            >
+              <X size={16} aria-hidden />
+            </span>
+          </span>
+          {/* 行き先は右下（オーナー指示）。×と同じ行に置くと、閉じるつもりで押してしまう */}
+          <span className="mt-1 block text-right font-bold text-accent-ink">
+            {ja.dayStart.backupReminderLink}
           </span>
         </Link>
       )}

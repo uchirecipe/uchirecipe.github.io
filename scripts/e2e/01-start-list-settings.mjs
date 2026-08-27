@@ -1756,9 +1756,13 @@ import './_shared.mjs'
       `class=${bannerWarnCls}`,
     )
   }
+  // 2026-08-27 便LS（オーナー追記「初回のみ、バックアップのすすめと説明にすべき→お知らせの
+  // 文章に」）: すすめの置き場所が**書き出しカードの中→献立の画面のお知らせ**に移った。
+  // カードの中の1行（旧 backupNotYet）は、オーナー原文「場所が中途半端で目立たないので、
+  // 存在意義がない。削除」のとおり外している。移った先の中身は BKNOTICE-01 が見る
   check(
-    'BANNER-01(便LI) 書き出しカードにも「最初のバックアップ」のすすめが出ている',
-    stripZwspText(await page.textContent('body')).includes(ja.settings.backupNotYet),
+    'BANNER-01(便LS) 書き出しカードの中に、未実施の1行が残っていない',
+    !stripZwspText(await page.textContent('body')).includes('最初のバックアップ'),
   )
   await page.getByRole('button', { name: ja.settings.bannerSaveNow, exact: true }).click()
   await waitScrollSettled()
@@ -1894,6 +1898,21 @@ import './_shared.mjs'
   // 畳んで元に戻す(以降のチェックに影響しないように)
   await page.getByRole('button', { name: ja.settings.moveGuideToggle, exact: true }).click()
   await page.waitForTimeout(200)
+  // 2026-08-27 便LS（オーナー指示）: バックアップの注意書きと詳しい説明のリンク、
+  // 「アプリの更新」「困ったとき」の押すとき・消えるもの・残るものは折りたたみに入った。
+  // **中身は1つも減らしていない**ので、開いてから今までどおり見る
+  for (const lsToggle of [
+    'backup-notice-toggle',
+    'app-update-detail-toggle',
+    'refresh-app-detail-toggle',
+  ]) {
+    const lsBtn = page.locator(`[data-testid="${lsToggle}"]`)
+    check(`BACKUPCARDS-01(便LS) 折りたたみ「${lsToggle}」がある`, (await lsBtn.count()) === 1)
+    if ((await lsBtn.count()) === 1) {
+      await lsBtn.click()
+      await page.waitForTimeout(400)
+    }
+  }
 
   currentCheck = 'BACKUPCARDS-01'
   // 修正5(2026-07-17バックアップ改修): バックアップタブが3カード

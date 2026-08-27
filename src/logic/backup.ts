@@ -509,15 +509,20 @@ export function buildReplaceConfirm(
   }
 }
 
-/** 「今のデータに追加」の確認の中身（非破壊マージ。2026-07-30 便CJ/C1・C12 → 便GWで窓の形に） */
+/**
+ * 「今のデータに追加」の確認の中身（非破壊マージ。2026-07-30 便CJ/C1・C12 → 便GWで窓の形に）。
+ *
+ * 2026-08-27 便LS: 「変わらないもの」の項目を外した（オーナー指示・理由「すでに言っているため」）。
+ * 見出しの backupImportMergeTitle「ファイルの中で今のデータに無いものを追加します」が、
+ * 1件も消さないことも、今のデータを書き換えないことも言い切っている。
+ * **この操作は何も消さない**ので、規約F（消えるもの・残るものを両方書く）には当たらない
+ * ＝消える側そのものが存在しない。
+ */
 export function buildMergeConfirm(): ConfirmContent {
   const t = ja.settings
   return {
     title: t.backupImportMergeTitle,
-    bullets: [
-      { label: t.backupImportMergeAddLabel, text: t.backupImportMergeAdd },
-      { label: t.backupImportMergeKeptLabel, text: t.backupImportMergeKept },
-    ],
+    bullets: [{ label: t.backupImportMergeAddLabel, text: t.backupImportMergeAdd }],
     confirmLabel: t.backupImportMergeOk,
   }
 }
@@ -931,8 +936,14 @@ export function buildNumberedRecipeCopy(
 }
 
 /**
- * 「同じ料理名のレシピが既にあるので入らなかった品」を、番号を付けて入れるか聞く窓
+ * 「同じ料理名のレシピが既にあって追加できなかった品」を、番号を付けて追加するか聞く窓
  * （2026-08-22 便JA）。聞くのは**1回だけ**で、品ごとには聞かない。
+ *
+ * 2026-08-27 便LS: 「追加するもの: ファイルの{n}品（材料・手順・メモ・写真）」を外した
+ * （オーナー指示）。件数は見出しが言っていて、中身は本文の「別のレシピとして追加できます」で
+ * 読み取れるため。**「変わらないもの」は残す**＝本文の「料理名の後ろに (2) (3) を付けて」だけだと
+ * 今あるレシピのほうに番号が付くとも読めるので、名前からは読み取れない。
+ * この操作も何も消さない（規約Fの対象外）。
  */
 export function buildDuplicateTitleConfirm(count: number): ConfirmContent {
   const t = ja.settings
@@ -940,10 +951,7 @@ export function buildDuplicateTitleConfirm(count: number): ConfirmContent {
   return {
     title: t.backupImportDuplicateTitle.replace('{n}', n),
     body: t.backupImportDuplicateBody,
-    bullets: [
-      { label: t.backupImportDuplicateAddLabel, text: t.backupImportDuplicateAdd.replace('{n}', n) },
-      { label: t.backupImportDuplicateKeptLabel, text: t.backupImportDuplicateKept },
-    ],
+    bullets: [{ label: t.backupImportDuplicateKeptLabel, text: t.backupImportDuplicateKept }],
     notes: [t.backupImportDuplicateNote],
     confirmLabel: t.backupImportDuplicateOk,
   }
@@ -1074,8 +1082,10 @@ function toRecipe(backup: BackupRecipe): Recipe {
 export interface MergeImportDetail {
   /** 新しく追加したレシピ数（版ズレでIDを振り直した分も含む） */
   recipesAdded: number
-  /** そのうち、IDが別の料理に使われていたため新しいIDで追加した数（版ズレ） */
-  recipesRenumbered: number
+  // 2026-08-27 便LS: 「そのうち版ズレでIDを振り直した数」(recipesRenumbered)は数えるのをやめた。
+  // 結果表示の1行（旧 backupImportMergeResultRenumbered）だけが読み手で、そこに出していた番号は
+  // 画面のどこにも出ないレシピのidだった（オーナー指摘「どの番号？」）。
+  // 利用者から見た結果は「そのレシピが追加された」だけなので recipesAdded に含めて数える
   /** 同じ料理が既にあったため本体を取り込まなかったレシピ数 */
   recipesMatched: number
   /** そのうち、記録・お気に入り・写真を足したレシピ数 */
@@ -1236,7 +1246,6 @@ export async function importBackup(
   const duplicateTitleRecipes: Recipe[] = []
   const detail: MergeImportDetail = {
     recipesAdded: 0,
-    recipesRenumbered: 0,
     recipesMatched: 0,
     recipesEnriched: 0,
     cookedLogsAdded: 0,
@@ -1340,10 +1349,7 @@ export async function importBackup(
         const { id: fileId, ...rest } = recipe
         const newId = (await db.recipes.add(rest as Recipe)) as number
         indexExisting(newId, recipe.title, recipe.uid)
-        if (fileId != null) {
-          idRemap.set(fileId, newId)
-          detail.recipesRenumbered++
-        }
+        if (fileId != null) idRemap.set(fileId, newId)
         added++
         detail.recipesAdded++
       }

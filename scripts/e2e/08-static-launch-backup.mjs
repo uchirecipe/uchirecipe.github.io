@@ -1454,12 +1454,17 @@ import './_shared.mjs'
       })
       await mergePage.waitForTimeout(1200)
       const mergeBody = await mergePage.textContent('body')
+      // 2026-08-27 便LS: 「足す」を「追加」にそろえた（オーナー指示）ので、文字を書き写さず
+      // ja.ts の型紙から見出しの部分を取る（言い回しが変わっても、この判定はそのまま当たる）
+      const mergeLead = ja.settings.backupImportMergeResult.split('{a}')[0]
+      const mergeTables = ja.settings.backupImportMergeResultTables.split('{t}')[0]
       check(
-        'MERGE-01 結果に取り込みの内訳が出る(何が足されたかを画面で確認できる)',
-        mergeBody.includes('新しく足したレシピは') &&
-          mergeBody.includes('在庫・買い物メモ・献立・価格・日付メモ・献立テンプレートを合わせて') &&
+        'MERGE-01 結果に取り込みの内訳が出る(何が追加されたかを画面で確認できる)',
+        mergeLead.length > 4 &&
+          mergeBody.includes(mergeLead) &&
+          mergeBody.includes(mergeTables) &&
           mergeBody.includes('「作った記録」'),
-        `body抜粋=${mergeBody.slice(mergeBody.indexOf('新しく足したレシピは'), mergeBody.indexOf('新しく足したレシピは') + 200)}`,
+        `body抜粋=${mergeBody.slice(mergeBody.indexOf(mergeLead), mergeBody.indexOf(mergeLead) + 200)}`,
       )
       check('MERGE-01 エラーメッセージは出ない', !mergeBody.includes('ファイルを読み込めませんでした'))
       const mergedData = await mergePage.evaluate(async (recipeId) => {

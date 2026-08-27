@@ -62,7 +62,7 @@ import { clampServings, MIN_SERVINGS, MAX_SERVINGS } from '../logic/servings'
 // 献立の栄養・概算食費に足すごはん1杯のグラム数（成分表から機械的に引く。2026-08-21 便IN）
 import { riceServingGrams } from '../logic/nutritionBalance'
 import { clampBurners, DEFAULT_KITCHEN, MIN_BURNERS, MAX_BURNERS } from '../logic/cookAppliance'
-import { resolveBackTarget } from '../logic/backLink'
+import { aboutLinkWithReturn, resolveBackTarget } from '../logic/backLink'
 import { refreshApp } from '../logic/appRefresh'
 import { applyAppUpdate, checkForAppUpdate } from '../logic/appUpdate'
 import {
@@ -340,9 +340,9 @@ function formatRecipeSetResult(result: {
 
 /**
  * 「今のデータに追加」の結果の内訳を組み立てる（2026-07-30 便CJ/C1(d)・C11・C12）。
- * 足したものを項目ごとに1行ずつ返し、0件の行は出さない（「作った記録0件・写真0枚を足しました」
+ * 追加したものを項目ごとに1行ずつ返し、0件の行は出さない（「作った記録0件・写真0枚を追加しました」
  * のような無意味な行を並べない）。復元したつもりで実は戻っていない、という誤認を防ぐのが目的なので、
- * 何も足さなかった場合もその旨を1行返す（無言で終わらせない）
+ * 何も追加しなかった場合もその旨を1行返す（無言で終わらせない）
  */
 function buildMergeResultLines(detail: MergeImportDetail): string[] {
   const lines = [
@@ -350,11 +350,9 @@ function buildMergeResultLines(detail: MergeImportDetail): string[] {
       .replace('{a}', String(detail.recipesAdded))
       .replace('{s}', String(detail.recipesMatched)),
   ]
-  if (detail.recipesRenumbered > 0) {
-    lines.push(
-      ja.settings.backupImportMergeResultRenumbered.replace('{n}', String(detail.recipesRenumbered)),
-    )
-  }
+  // 2026-08-27 便LS: 「うち{n}品は今のレシピと番号が重なっていたので〜」の1行は落とした。
+  // そこで言っていた番号はレシピのidで、画面のどこにも出ない内部の番号だった
+  // （オーナー指摘「どの番号？」）。振り直した品も上の {a}＝新しく追加したレシピに数えている
   const addedToExisting = [
     detail.cookedLogsAdded > 0 &&
       ja.settings.backupImportMergeResultLogsCooked.replace('{c}', String(detail.cookedLogsAdded)),
@@ -522,6 +520,12 @@ export default function SettingsPage() {
   const [archiveOpen, setArchiveOpen] = useState(false)
   // Pro版の機能説明の折りたたみ（2026-08-09 便EO: <details>から共通の折りたたみへ）
   const [proFeaturesOpen, setProFeaturesOpen] = useState(false)
+  // 「バックアップを取る」の注意点と詳しい説明の折りたたみ（2026-08-27 便LS・オーナー指示
+  // 「写真の選択と『ファイルに書き出す』ボタンが一番目立って欲しい」）。畳むだけで中身は減らさない
+  const [backupNoticeOpen, setBackupNoticeOpen] = useState(false)
+  // 「アプリの更新」「困ったとき」の押すとき・消えるもの・残るものの折りたたみ（2026-08-27 便LS）
+  const [appUpdateDetailOpen, setAppUpdateDetailOpen] = useState(false)
+  const [refreshAppDetailOpen, setRefreshAppDetailOpen] = useState(false)
   // 「最新の状態にする」を押してから結果が出るまで（2026-08-09 便ER）。
   // 通信を伴うので、押しっぱなしに見えないようボタンの文字を「確認中…」に替えて二重押しも止める
   const [appUpdateChecking, setAppUpdateChecking] = useState(false)
@@ -1202,19 +1206,27 @@ export default function SettingsPage() {
           「ファイルに書き出す」を押す既存の流れを維持するため)。30日超(または未実施)は警告色。
           ボタン文言は2026-07-30 便CJ/C7で「今すぐ保存」から改名(保存しないのに保存を名乗っていた) */}
       <div
-        className={`mt-[var(--space-sm)] flex items-center gap-2 rounded-md border px-[var(--space-sm)] py-2 ${
+        className={`mt-[var(--space-sm)] flex items-start gap-2 rounded-md border px-[var(--space-sm)] py-2 ${
           backupBannerWarning ? 'border-warning' : 'border-edge'
         }`}
       >
         <HardDriveDownload
           size={16}
-          className={`shrink-0 ${backupBannerWarning ? 'text-warning' : 'text-ink-muted'}`}
+          className={`mt-0.5 shrink-0 ${backupBannerWarning ? 'text-warning' : 'text-ink-muted'}`}
           aria-hidden
         />
+        {/* 2026-08-27 便LS（オーナー報告・★不具合）:
+            「設定画面のバックアップのお知らせ：文字が切れている。タップしたら全文表示ではなく
+            移動なので、全文読む方法がない」。原因は truncate（1行に押し込んで末尾を「…」にする）で、
+            実測すると 390px幅では18字のうち16字目から・320px幅では11字目から切れており、
+            押すと書き出しへ移動するだけなので**全文を読む手段が画面のどこにも無かった**。
+            折り返して2行で出す（帯の高さは中身に合わせて伸びる）。
+            見張りは scripts/tests/ui-source-guards.mjs の LS-2 */}
         <button
           type="button"
+          data-testid="backup-banner-text"
           onClick={goToBackupExport}
-          className={`min-w-0 flex-1 truncate text-left text-sm font-bold ${
+          className={`min-w-0 flex-1 text-left text-sm font-bold ${
             backupBannerWarning ? 'text-warning' : 'text-ink-muted'
           }`}
         >
@@ -1556,126 +1568,128 @@ export default function SettingsPage() {
           </section>
 
           {/* 料理中 */}
+          {/* 2026-08-27 便LS（オーナー指示「スイッチはサブタイトルの真横にして。とくにタイマー音は、
+              説明文のスペースを狭くしているのが目立つ」）:
+              この3枚は「サブタイトル＋説明文」の塊とスイッチを左右に並べていたので、
+              **説明文の折り返し幅がスイッチのぶんだけ狭く**なっていた（390px幅で実測 256px。
+              タイマー音は説明が4行に折り返していた）。
+              スイッチはサブタイトルと同じ行に置き、説明文はカードの幅いっぱいを使う形にする
+              （390px幅で 326px・タイマー音は2行）。スイッチの中身・aria・押したときの動きは
+              1つも変えていない。見張りは scripts/tests/ui-source-guards.mjs の LS-1 */}
           <p className={groupHeadingCls}>{ja.settings.groupCookingTitle}</p>
 
           {/* 画面を暗くしない。非対応のときだけ「対応していません」・スイッチONで許可が
               下りていないときだけ許可の取り方を出す(2026-08-04 便DV-6/7) */}
           <section className={sectionCls}>
-            <label className="flex items-center justify-between gap-3">
-              <div className="min-w-0">
-                <h2 className="font-bold">{ja.settings.screenTitle}</h2>
-                <p className="mt-1 text-sm text-ink-muted">{ja.settings.screenDescription}</p>
-                {shouldShowUnsupportedNote(wakeLockIsSupported) && (
-                  <p className="mt-1 text-sm text-ink-muted">{ja.settings.wakeLockUnsupportedNote}</p>
-                )}
-                {shouldShowPermissionHelp(
-                  settings.keepScreenOn,
-                  wakeLockIsSupported,
-                  wakeLockPermission,
-                ) && (
-                  <p className="mt-1 text-sm text-warning">{ja.settings.wakeLockBlockedNote}</p>
-                )}
-              </div>
-              <button
-                type="button"
-                role="switch"
-                aria-checked={settings.keepScreenOn}
-                aria-label={ja.settings.screenTitle}
-                onClick={() => {
-                  const next = !settings.keepScreenOn
-                  void updateSettings({ keepScreenOn: next })
-                  if (next) checkWakeLockPermission()
-                }}
-                className={`relative h-8 w-14 shrink-0 rounded-full transition-colors ${
-                  settings.keepScreenOn ? 'bg-accent' : 'bg-edge'
-                }`}
-              >
-                <span
-                  className={`absolute top-1 h-6 w-6 rounded-full bg-surface shadow-sm transition-all ${
-                    settings.keepScreenOn ? 'left-7' : 'left-1'
+            <label className="block" data-testid="setting-keep-screen-on">
+              <div className="flex items-center justify-between gap-3">
+                <h2 className="min-w-0 font-bold">{ja.settings.screenTitle}</h2>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={settings.keepScreenOn}
+                  aria-label={ja.settings.screenTitle}
+                  onClick={() => {
+                    const next = !settings.keepScreenOn
+                    void updateSettings({ keepScreenOn: next })
+                    if (next) checkWakeLockPermission()
+                  }}
+                  className={`relative h-8 w-14 shrink-0 rounded-full transition-colors ${
+                    settings.keepScreenOn ? 'bg-accent' : 'bg-edge'
                   }`}
-                />
-              </button>
+                >
+                  <span
+                    className={`absolute top-1 h-6 w-6 rounded-full bg-surface shadow-sm transition-all ${
+                      settings.keepScreenOn ? 'left-7' : 'left-1'
+                    }`}
+                  />
+                </button>
+              </div>
+              <p className="mt-1 text-sm text-ink-muted">{ja.settings.screenDescription}</p>
+              {shouldShowUnsupportedNote(wakeLockIsSupported) && (
+                <p className="mt-1 text-sm text-ink-muted">{ja.settings.wakeLockUnsupportedNote}</p>
+              )}
+              {shouldShowPermissionHelp(
+                settings.keepScreenOn,
+                wakeLockIsSupported,
+                wakeLockPermission,
+              ) && <p className="mt-1 text-sm text-warning">{ja.settings.wakeLockBlockedNote}</p>}
             </label>
           </section>
 
           {/* タイマー中は画面を暗くしない（「画面を暗くしない」系の設定をタイマー音より先にまとめる） */}
           <section className={sectionCls}>
-            <label className="flex items-center justify-between gap-3">
-              <div className="min-w-0">
-                <h2 className="font-bold">{ja.settings.timerWakeLockTitle}</h2>
-                <p className="mt-1 text-sm text-ink-muted">{ja.settings.timerWakeLockDescription}</p>
-                {shouldShowUnsupportedNote(wakeLockIsSupported) && (
-                  <p className="mt-1 text-sm text-ink-muted">{ja.settings.wakeLockUnsupportedNote}</p>
-                )}
-                {shouldShowPermissionHelp(
-                  settings.timerWakeLockEnabled,
-                  wakeLockIsSupported,
-                  wakeLockPermission,
-                ) && (
-                  <p className="mt-1 text-sm text-warning">{ja.settings.wakeLockBlockedNote}</p>
-                )}
-              </div>
-              <button
-                type="button"
-                role="switch"
-                aria-checked={settings.timerWakeLockEnabled}
-                aria-label={ja.settings.timerWakeLockTitle}
-                onClick={() => {
-                  const next = !settings.timerWakeLockEnabled
-                  void updateSettings({ timerWakeLockEnabled: next })
-                  if (next) checkWakeLockPermission()
-                }}
-                className={`relative h-8 w-14 shrink-0 rounded-full transition-colors ${
-                  settings.timerWakeLockEnabled ? 'bg-accent' : 'bg-edge'
-                }`}
-              >
-                <span
-                  className={`absolute top-1 h-6 w-6 rounded-full bg-surface shadow-sm transition-all ${
-                    settings.timerWakeLockEnabled ? 'left-7' : 'left-1'
+            <label className="block" data-testid="setting-timer-wake-lock">
+              <div className="flex items-center justify-between gap-3">
+                <h2 className="min-w-0 font-bold">{ja.settings.timerWakeLockTitle}</h2>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={settings.timerWakeLockEnabled}
+                  aria-label={ja.settings.timerWakeLockTitle}
+                  onClick={() => {
+                    const next = !settings.timerWakeLockEnabled
+                    void updateSettings({ timerWakeLockEnabled: next })
+                    if (next) checkWakeLockPermission()
+                  }}
+                  className={`relative h-8 w-14 shrink-0 rounded-full transition-colors ${
+                    settings.timerWakeLockEnabled ? 'bg-accent' : 'bg-edge'
                   }`}
-                />
-              </button>
+                >
+                  <span
+                    className={`absolute top-1 h-6 w-6 rounded-full bg-surface shadow-sm transition-all ${
+                      settings.timerWakeLockEnabled ? 'left-7' : 'left-1'
+                    }`}
+                  />
+                </button>
+              </div>
+              <p className="mt-1 text-sm text-ink-muted">{ja.settings.timerWakeLockDescription}</p>
+              {shouldShowUnsupportedNote(wakeLockIsSupported) && (
+                <p className="mt-1 text-sm text-ink-muted">{ja.settings.wakeLockUnsupportedNote}</p>
+              )}
+              {shouldShowPermissionHelp(
+                settings.timerWakeLockEnabled,
+                wakeLockIsSupported,
+                wakeLockPermission,
+              ) && <p className="mt-1 text-sm text-warning">{ja.settings.wakeLockBlockedNote}</p>}
             </label>
           </section>
 
           {/* タイマー音 */}
           <section className={sectionCls}>
-            <label className="flex items-center justify-between gap-3">
-              <div className="min-w-0">
-                <h2 className="font-bold">{ja.settings.timerSoundTitle}</h2>
-                <p className="mt-1 text-sm text-ink-muted">{ja.settings.timerSoundDescription}</p>
-                {shouldShowUnsupportedNote(vibrationIsSupported) && (
-                  <p className="mt-1 text-sm text-ink-muted">{ja.settings.timerVibrationUnsupportedNote}</p>
-                )}
-                {shouldShowPermissionHelp(
-                  settings.timerSoundEnabled,
-                  audioIsSupported,
-                  audioPermission,
-                ) && (
-                  <p className="mt-1 text-sm text-warning">{ja.settings.timerSoundBlockedNote}</p>
-                )}
-              </div>
-              <button
-                type="button"
-                role="switch"
-                aria-checked={settings.timerSoundEnabled}
-                aria-label={ja.settings.timerSoundTitle}
-                onClick={() => {
-                  const next = !settings.timerSoundEnabled
-                  void updateSettings({ timerSoundEnabled: next })
-                  if (next) checkAudioPermission()
-                }}
-                className={`relative h-8 w-14 shrink-0 rounded-full transition-colors ${
-                  settings.timerSoundEnabled ? 'bg-accent' : 'bg-edge'
-                }`}
-              >
-                <span
-                  className={`absolute top-1 h-6 w-6 rounded-full bg-surface shadow-sm transition-all ${
-                    settings.timerSoundEnabled ? 'left-7' : 'left-1'
+            <label className="block" data-testid="setting-timer-sound">
+              <div className="flex items-center justify-between gap-3">
+                <h2 className="min-w-0 font-bold">{ja.settings.timerSoundTitle}</h2>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={settings.timerSoundEnabled}
+                  aria-label={ja.settings.timerSoundTitle}
+                  onClick={() => {
+                    const next = !settings.timerSoundEnabled
+                    void updateSettings({ timerSoundEnabled: next })
+                    if (next) checkAudioPermission()
+                  }}
+                  className={`relative h-8 w-14 shrink-0 rounded-full transition-colors ${
+                    settings.timerSoundEnabled ? 'bg-accent' : 'bg-edge'
                   }`}
-                />
-              </button>
+                >
+                  <span
+                    className={`absolute top-1 h-6 w-6 rounded-full bg-surface shadow-sm transition-all ${
+                      settings.timerSoundEnabled ? 'left-7' : 'left-1'
+                    }`}
+                  />
+                </button>
+              </div>
+              <p className="mt-1 text-sm text-ink-muted">{ja.settings.timerSoundDescription}</p>
+              {shouldShowUnsupportedNote(vibrationIsSupported) && (
+                <p className="mt-1 text-sm text-ink-muted">{ja.settings.timerVibrationUnsupportedNote}</p>
+              )}
+              {shouldShowPermissionHelp(
+                settings.timerSoundEnabled,
+                audioIsSupported,
+                audioPermission,
+              ) && <p className="mt-1 text-sm text-warning">{ja.settings.timerSoundBlockedNote}</p>}
             </label>
 
             {/* 音量と鳴る長さ(2026-08-08 オーナー実機フィードバック③)。
@@ -1942,27 +1956,26 @@ export default function SettingsPage() {
         <>
           {/* ①バックアップを取る(2026-07-17バックアップ改修 修正5でカード再構成。
               修正2+3: File System Access API対応ブラウザは保存先選択+前回の場所に上書きボタンを併設) */}
+          {/* 2026-08-27 便LS（オーナー指示）: カードの並びを組み替えた。
+              オーナー原文「バックアップの注意書きと詳しい説明へのリンクは折りたたみにして隠して。
+              写真の選択と『ファイルに書き出す』ボタンが一番目立って欲しい」＋追記
+              「初回のみ、バックアップのすすめと説明にすべき→お知らせの文章に」。
+              ・注意書き3種と詳しい説明のリンクは、カードのいちばん下の折りたたみへ入れた
+                （**中身は1行も減らしていない**。どれも知らないと事故になる事実で、
+                  見張りは scripts/tests/meal-plan.mjs IJ-3）
+              ・一度もバックアップしていない人への1行（旧 backupNotYet）はここから外し、
+                初回のすすめと説明は献立の画面のお知らせ（DayStartNotices）が引き継いだ
+              実測（390px幅・カード上端から「ファイルに書き出す」ボタンまで）: 303px → 111px */}
           <section id="backup-section" className={`${sectionCls} scroll-mt-24`}>
             <h2 className="font-bold">{ja.settings.backupTitle}</h2>
             <p className="mt-1 text-sm text-ink-muted">{ja.settings.backupDescription}</p>
-            {/* 修正1: バックアップに購入コードが含まれることの注意喚起 */}
-            <p className="mt-[var(--space-sm)] flex items-start gap-1 text-xs text-ink-muted">
-              <Info size={14} className="mt-0.5 shrink-0" aria-hidden />
-              {ja.settings.backupContainsCodeNotice}
-            </p>
-            {/* ファイル名を自分で付け替えてよいことの注記（2026-08-20 便IH・④ オーナー承認済み）。
-                読み込みはファイルの中身の種別マークだけを見ていて名前は見ていないが、
-                拡張子を変えるとファイルを選ぶ画面に出てこなくなる（accept="…,.json"）ので、
-                そこだけを書く。アーカイブの欄にも同じ文言を出す（ja に1つだけ持つ） */}
-            <p data-testid="file-name-free-note" className="mt-[var(--space-sm)] flex items-start gap-1 text-xs text-ink-muted">
-              <Info size={14} className="mt-0.5 shrink-0" aria-hidden />
-              {ja.settings.fileNameFreeNote}
-            </p>
-            <p className="mt-[var(--space-sm)] text-sm font-bold text-ink-muted">
-              {settings.lastBackupAt
-                ? ja.settings.backupLastDate.replace('{date}', formatDate(settings.lastBackupAt))
-                : ja.settings.backupNotYet}
-            </p>
+            {/* 一度でも書き出した人にだけ日付を出す。未実施のときは何も出さない
+                （催促は目次の下の常設バナー ja.settings.bannerBackupNotYet が受け持つ） */}
+            {settings.lastBackupAt !== undefined && (
+              <p className="mt-[var(--space-sm)] text-sm font-bold text-ink-muted">
+                {ja.settings.backupLastDate.replace('{date}', formatDate(settings.lastBackupAt))}
+              </p>
+            )}
             {showCookedPhotoLimitBanner && (
               <p className="mt-[var(--space-sm)] rounded-sm bg-app px-3 py-2 text-sm text-ink-muted">
                 {ja.settings.cookedPhotoOverLimitBanner.replace('{n}', String(bytesToMB(cookedPhotoBytes)))}
@@ -2023,39 +2036,72 @@ export default function SettingsPage() {
                 </p>
               </>
             )}
-            {/* ブラウザの設定でデータを消すときの注意(2026-08-22 便JJ・オーナー指摘)。
-                オーナー原文:「『ブラウザの設定から〜全て消えます』など注意３点→修復ではクッキーと
-                他サイトのデータを削除するのですか？ここに注意書きがあると、修復＝クッキーと
-                他サイトのデータを削除、捉えられます。全て消えるからバックアップが必要なので
-                あれば、違う場所に必要な注意書きでは？」
-                → 「困ったとき」(アプリの表示を修復する)から、この「バックアップを取る」カードへ移した。
-                修復はキャッシュとService Workerしか触らないので、その隣に置くと
-                「修復するとCookieが消える」と読めてしまう。バックアップが要る理由そのものなので
-                ここが置き場所として正しい */}
-            <ul
-              data-testid="cache-clear-warnings"
-              className="mt-[var(--space-md)] space-y-1"
+            {/* 注意点と詳しい説明の折りたたみ（2026-08-27 便LS）。開閉ボタンの作りは、
+                同じ節の「機種変更するときは」「古い記録の書き出し」とそろえる */}
+            <button
+              type="button"
+              data-testid="backup-notice-toggle"
+              onClick={() => setBackupNoticeOpen((v) => !v)}
+              aria-expanded={backupNoticeOpen}
+              className="mt-[var(--space-md)] flex w-full items-center justify-between gap-2 py-[10px] text-left text-sm font-bold"
             >
-              {ja.settings.refreshAppCacheClearWarnings.map((line) => (
-                <li key={line} className="flex items-start gap-1 text-xs font-bold text-warning">
-                  <TriangleAlert size={14} className="mt-0.5 shrink-0" aria-hidden />
-                  {line}
-                </li>
-              ))}
-            </ul>
-            {/* 詳しい説明は使い方ページに任せる(2026-08-12 便FW・オーナー指示
-                「詳しくは説明リンクつけとけばいい」)。行き先は「バックアップと機種変更」の節で、
-                保存先・容量の目安・読み込みの2種類・機種変更の手順までまとまっている。
-                別窓にしないのは、この画面の /about/ 配下へのリンクと同じ作法に揃えるため */}
-            <p className="mt-[var(--space-md)]">
-              <a
-                href="/about/manual.html#backup"
-                data-testid="backup-detail-link"
-                className="text-sm font-bold text-accent-ink underline"
+              {ja.settings.backupNoticeToggle}
+              <ChevronDown
+                size={18}
+                className={`shrink-0 text-ink-muted transition-transform ${backupNoticeOpen ? 'rotate-180' : ''}`}
+                aria-hidden
+              />
+            </button>
+            <Collapse open={backupNoticeOpen}>
+              {/* 修正1: バックアップに購入コードが含まれることの注意喚起 */}
+              <p className="flex items-start gap-1 text-xs text-ink-muted">
+                <Info size={14} className="mt-0.5 shrink-0" aria-hidden />
+                {ja.settings.backupContainsCodeNotice}
+              </p>
+              {/* ファイル名を自分で付け替えてよいことの注記（2026-08-20 便IH・④ オーナー承認済み）。
+                  読み込みはファイルの中身の種別マークだけを見ていて名前は見ていないが、
+                  拡張子を変えるとファイルを選ぶ画面に出てこなくなる（accept="…,.json"）ので、
+                  そこだけを書く。アーカイブの欄にも同じ文言を出す（ja に1つだけ持つ） */}
+              <p data-testid="file-name-free-note" className="mt-[var(--space-sm)] flex items-start gap-1 text-xs text-ink-muted">
+                <Info size={14} className="mt-0.5 shrink-0" aria-hidden />
+                {ja.settings.fileNameFreeNote}
+              </p>
+              {/* ブラウザの設定でデータを消すときの注意(2026-08-22 便JJ・オーナー指摘)。
+                  オーナー原文:「『ブラウザの設定から〜全て消えます』など注意３点→修復ではクッキーと
+                  他サイトのデータを削除するのですか？ここに注意書きがあると、修復＝クッキーと
+                  他サイトのデータを削除、捉えられます。全て消えるからバックアップが必要なので
+                  あれば、違う場所に必要な注意書きでは？」
+                  → 「困ったとき」(アプリの表示を修復する)から、この「バックアップを取る」カードへ移した。
+                  修復はキャッシュとService Workerしか触らないので、その隣に置くと
+                  「修復するとCookieが消える」と読めてしまう。バックアップが要る理由そのものなので
+                  ここが置き場所として正しい */}
+              <ul
+                data-testid="cache-clear-warnings"
+                className="mt-[var(--space-md)] space-y-1"
               >
-                {ja.settings.backupDetailLink}
-              </a>
-            </p>
+                {ja.settings.refreshAppCacheClearWarnings.map((line) => (
+                  <li key={line} className="flex items-start gap-1 text-xs font-bold text-warning">
+                    <TriangleAlert size={14} className="mt-0.5 shrink-0" aria-hidden />
+                    {line}
+                  </li>
+                ))}
+              </ul>
+              {/* 詳しい説明は使い方ページに任せる(2026-08-12 便FW・オーナー指示
+                  「詳しくは説明リンクつけとけばいい」)。行き先は「バックアップと機種変更」の節で、
+                  保存先・容量の目安・読み込みの2種類・機種変更の手順までまとまっている。
+                  別窓にしないのは、この画面の /about/ 配下へのリンクと同じ作法に揃えるため。
+                  2026-08-27 便LS: 静的なページには戻る道が無かったので、帰り先を ?from= に載せる
+                  （受け取り側は public/about/manual.html の appReturn） */}
+              <p className="mt-[var(--space-md)]">
+                <a
+                  href={aboutLinkWithReturn('/about/manual.html#backup', '/settings?section=backup')}
+                  data-testid="backup-detail-link"
+                  className="text-sm font-bold text-accent-ink underline"
+                >
+                  {ja.settings.backupDetailLink}
+                </a>
+              </p>
+            </Collapse>
           </section>
 
           {/* ②バックアップを読み込む: 「今のデータに追加」「データを上書き」を並べて配置し、
@@ -2180,7 +2226,10 @@ export default function SettingsPage() {
                     (紹介ページ・ホーム画面への追加・利用規約)と同じ作法に揃えるため
                     (iOSのホーム画面追加アプリはSafariとストレージが別) */}
                 <a
-                  href="/about/multi-device.html"
+                  href={aboutLinkWithReturn(
+                    '/about/multi-device.html',
+                    '/settings?section=backup',
+                  )}
                   data-testid="move-guide-transfer-link"
                   className="mt-1 inline-block text-xs font-bold text-accent-ink underline"
                 >
@@ -2473,11 +2522,29 @@ export default function SettingsPage() {
               画面下の更新のお知らせを閉じたあとの受け皿でもある(?section=update で直接ここへ来られる) */}
           <section id="app-update-section" className={`${sectionCls} scroll-mt-24`}>
             <h2 className="font-bold">{ja.settings.appUpdateTitle}</h2>
-            <ul className="mt-1 space-y-1 text-sm text-ink-muted">
-              <li>{ja.settings.appUpdateWhenToUse}</li>
-              <li>{ja.settings.appUpdateWhatHappens}</li>
-              <li>{ja.settings.appUpdateWhatRemains}</li>
-            </ul>
+            {/* 2026-08-27 便LS（オーナー指示「アプリの更新、困ったとき、の押すとき残るものの
+                説明は、折りたたみにして」）。3行とも残したまま畳む＝押す前に開けば読める */}
+            <button
+              type="button"
+              data-testid="app-update-detail-toggle"
+              onClick={() => setAppUpdateDetailOpen((v) => !v)}
+              aria-expanded={appUpdateDetailOpen}
+              className="flex w-full items-center justify-between gap-2 py-[10px] text-left text-sm font-bold"
+            >
+              {ja.settings.pressEffectToggle}
+              <ChevronDown
+                size={18}
+                className={`shrink-0 text-ink-muted transition-transform ${appUpdateDetailOpen ? 'rotate-180' : ''}`}
+                aria-hidden
+              />
+            </button>
+            <Collapse open={appUpdateDetailOpen}>
+              <ul data-testid="app-update-detail" className="space-y-1 text-sm text-ink-muted">
+                <li>{ja.settings.appUpdateWhenToUse}</li>
+                <li>{ja.settings.appUpdateWhatHappens}</li>
+                <li>{ja.settings.appUpdateWhatRemains}</li>
+              </ul>
+            </Collapse>
             <button
               type="button"
               data-testid="app-update-check"
@@ -2519,11 +2586,29 @@ export default function SettingsPage() {
               レシピ・価格・購入コード等のIndexedDBデータには一切触れない(src/logic/appRefresh.ts参照) */}
           <section className={sectionCls}>
             <h2 className="font-bold">{ja.settings.refreshAppTitle}</h2>
-            <ul className="mt-1 space-y-1 text-sm text-ink-muted">
-              <li>{ja.settings.refreshAppWhenToUse}</li>
-              <li>{ja.settings.refreshAppWhatIsCleared}</li>
-              <li>{ja.settings.refreshAppWhatRemains}</li>
-            </ul>
+            {/* 2026-08-27 便LS（オーナー指示）。「消えるもの／残るもの」は規約Fの説明そのものなので
+                消さず、**押す前に開ける場所**に置いたまま畳む（確認の窓 refreshAppConfirm も別にある） */}
+            <button
+              type="button"
+              data-testid="refresh-app-detail-toggle"
+              onClick={() => setRefreshAppDetailOpen((v) => !v)}
+              aria-expanded={refreshAppDetailOpen}
+              className="flex w-full items-center justify-between gap-2 py-[10px] text-left text-sm font-bold"
+            >
+              {ja.settings.pressEffectToggle}
+              <ChevronDown
+                size={18}
+                className={`shrink-0 text-ink-muted transition-transform ${refreshAppDetailOpen ? 'rotate-180' : ''}`}
+                aria-hidden
+              />
+            </button>
+            <Collapse open={refreshAppDetailOpen}>
+              <ul data-testid="refresh-app-detail" className="space-y-1 text-sm text-ink-muted">
+                <li>{ja.settings.refreshAppWhenToUse}</li>
+                <li>{ja.settings.refreshAppWhatIsCleared}</li>
+                <li>{ja.settings.refreshAppWhatRemains}</li>
+              </ul>
+            </Collapse>
             {/* 「アプリの更新」との使い分け(2026-08-09 便ER) */}
             <p className="mt-[var(--space-sm)] text-xs text-ink-muted">
               {ja.settings.refreshAppVsUpdateNote}

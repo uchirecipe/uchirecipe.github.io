@@ -735,12 +735,15 @@ import { readFileSync } from 'node:fs'
     false,
   )
   eq('うながし: 30日以上の人には「しばらく」と言う', /しばらく/.test(ja.dayStart.backupReminder), true)
-  // 2つの言い方は、どちらも同じ締めくくり（設定の「ファイルに書き出す」）に着地する
+  // 2つの言い方は、どちらも同じ締めくくり（設定の「ファイルに書き出す」）に着地する。
+  // 2026-08-27 便LS: 一度も書き出していない人への言い方は、置き場所の説明（1行目）と
+  // すすめ（2行目 backupReminderFirstNote）の2行になったので、**2行あわせて**着地を見る
   eq(
     'うながし: どちらの言い方も、設定の「ファイルに書き出す」に着地する',
-    [ja.dayStart.backupReminder, ja.dayStart.backupReminderFirst].filter(
-      (t) => !t.includes(ja.settings.backupExport.replace('す', 'し')),
-    ),
+    [
+      ja.dayStart.backupReminder,
+      `${ja.dayStart.backupReminderFirst}\n${ja.dayStart.backupReminderFirstNote}`,
+    ].filter((t) => !t.includes(ja.settings.backupExport.replace('す', 'し'))),
     [],
   )
 

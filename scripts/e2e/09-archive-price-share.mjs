@@ -812,7 +812,7 @@ import './_shared.mjs'
   // 入れる。いいえで重複して入れない。」／「懸念、『肉じゃが（２）』を重複で入れると、
   // 『肉じゃが（３）』ではなく『肉じゃが（２）（２）』になりそう。」
   // 実DBで守るのは5つ:
-  //  ①入らなかった品があれば、件数を出して「番号を付けて入れるか」を1回だけ聞く
+  //  ①追加できなかった品があれば、件数を出して「番号を付けて追加するか」を1回だけ聞く
   //  ②「はい」で番号が付いて入る／もとからある品は料理名も材料も変わらない
   //  ③1回の読み込みで同じ名前が2品あっても番号が続く／「(2) (2)」にならない（オーナーの懸念）
   //  ④中身まで同じ品では聞かない（自分のバックアップを読み直しただけで窓を出さない）
@@ -1018,10 +1018,14 @@ import './_shared.mjs'
         JSON.stringify(jdCopy?.words),
       )
       const jdBody1 = (await jdPage.textContent('body')).replaceAll('​', '')
+      // 2026-08-27 便LS: 「足す」を「追加」にそろえた（オーナー指示）。文字を書き写さず
+      // ja.ts の型紙に件数を埋めて突き合わせる
+      const jdAdded2 = ja.settings.backupImportDuplicateAdded.replace('{n}', '2')
+      const jdMergeLead = ja.settings.backupImportMergeResult.split('{a}')[0]
       check(
-        'JA-DUP-01② 何品を足したかを画面に残す',
-        /番号を付けて2品/.test(jdBody1),
-        jdBody1.slice(jdBody1.indexOf('新しく足したレシピは'), jdBody1.indexOf('新しく足したレシピは') + 160),
+        'JA-DUP-01② 何品を追加したかを画面に残す',
+        jdBody1.includes(jdAdded2),
+        jdBody1.slice(jdBody1.indexOf(jdMergeLead), jdBody1.indexOf(jdMergeLead) + 160),
       )
 
       // ---- ④: 中身まで同じ品しか無いファイルでは聞かない（黙って読み込みが終わる） ----
@@ -1101,7 +1105,11 @@ import './_shared.mjs'
         JSON.stringify((await jdRead(jdPage)).map((r) => r.title)),
       )
       const jdBody3 = (await jdPage.textContent('body')).replaceAll('​', '')
-      check('JA-DUP-01⑤ 入れなかったことも画面に残す（黙って終わらせない）', /1品は入れませんでした/.test(jdBody3))
+      check(
+        'JA-DUP-01⑤ 追加しなかったことも画面に残す（黙って終わらせない）',
+        jdBody3.includes(ja.settings.backupImportDuplicateDeclined.replace('{n}', '1')),
+        jdBody3.slice(-200),
+      )
     } finally {
       await jdBrowser.close()
     }

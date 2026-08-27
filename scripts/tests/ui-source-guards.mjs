@@ -3115,3 +3115,189 @@ import { createRequire } from 'node:module'
     [true, true, true],
   )
 }
+
+// ==========================================================================================
+// LS-1〜LS-4: オーナーの書き溜め（2026-08-27 便LS）
+// 設定の「料理中」のスイッチの位置・バックアップの常設バナーの文字切れ・
+// 「バックアップを取る」カードの並び・説明ページからの帰り道。
+//
+// 直した不具合が2つあるので、**同じ形が戻ったら赤になる**ように、
+// 画面のソースの側から見る（文言ではなく作りを測る）。
+//   LS-1 「料理中」の3枚は、スイッチをサブタイトルと同じ行に置く（説明文の幅を削らない）
+//   LS-2 バックアップの常設バナーは truncate で1行に押し込まない（全文が読めない形に戻さない）
+//   LS-3 説明ページへのリンクは帰り先を持ち、説明ページはそれを受け取って帰り道を出す
+//   LS-4 折りたたみに入れた注意書きは、畳んだだけで1つも消していない
+// ==========================================================================================
+{
+  const lsRoot = path.join(path.dirname(fileURLToPath(scriptFileUrl)), '..')
+  const lsRead = (rel) => readFileSync(path.join(lsRoot, rel), 'utf-8')
+  const lsSettings = lsRead('src/pages/SettingsPage.tsx')
+
+  // ---- LS-1: スイッチはサブタイトルの真横 ----------------------------------------------
+  // オーナー原文「スイッチはサブタイトルの真横にして。特にタイマー音は、説明文のスペースを
+  // 狭くしているのが目立つ」。
+  // 直す前は「サブタイトル＋説明文」の塊とスイッチを左右に並べていたので、説明文の折り返し幅が
+  // スイッチのぶんだけ狭かった（390px幅で実測 256px・タイマー音は4行）。
+  // 見るのは**並べ方**そのもの: 見出し(h2)とスイッチが同じ1行の箱に入っていること。
+  {
+    const LS_CARDS = [
+      ['料理中に画面を暗くしない', 'setting-keep-screen-on', 'screenTitle', 'screenDescription'],
+      ['タイマー中は画面を暗くしない', 'setting-timer-wake-lock', 'timerWakeLockTitle', 'timerWakeLockDescription'],
+      ['タイマー音', 'setting-timer-sound', 'timerSoundTitle', 'timerSoundDescription'],
+    ]
+    for (const [name, testid, titleKey, descKey] of LS_CARDS) {
+      const at = lsSettings.indexOf(`data-testid="${testid}"`)
+      eq(`LS-1 ${name}のカードを掴めている（-1なら見張りが壊れている）`, at >= 0, true)
+      // カード1枚分（次の </label> まで）を切り出して、その中の並びだけを見る
+      const card = at >= 0 ? lsSettings.slice(at, lsSettings.indexOf('</label>', at)) : ''
+      const titleAt = card.indexOf(`ja.settings.${titleKey}}</h2>`)
+      const switchAt = card.indexOf('role="switch"')
+      const descAt = card.indexOf(`ja.settings.${descKey}`)
+      eq(
+        `LS-1 ${name}: 見出し・スイッチ・説明文が1枚の中に全部ある`,
+        [titleAt >= 0, switchAt >= 0, descAt >= 0],
+        [true, true, true],
+      )
+      // 並び順: 見出し → スイッチ → 説明文（説明文がスイッチより前にあると、
+      // 左右に並べる古い形＝説明文の幅が削られる形に戻っている）
+      eq(`LS-1 ${name}: スイッチが見出しのすぐ横（説明文より前）にある`, titleAt < switchAt && switchAt < descAt, true)
+      // 見出しとスイッチを包む箱が1行の並び（flex）であること
+      eq(
+        `LS-1 ${name}: 見出しとスイッチが同じ1行の箱に入っている`,
+        /<div className="flex items-center justify-between gap-3">\s*<h2/.test(card),
+        true,
+      )
+      // 説明文がその箱の外＝カードの幅いっぱいを使う位置にあること
+      eq(
+        `LS-1 ${name}: 説明文が、幅を分け合う箱の中に戻っていない`,
+        card.slice(descAt).startsWith(`ja.settings.${descKey}`) &&
+          card.lastIndexOf('</div>', descAt) < switchAt + 4000,
+        true,
+      )
+    }
+  }
+
+  // ---- LS-2: 常設バナーの文字切れ（★不具合） ---------------------------------------------
+  // オーナー原文「設定画面のバックアップのお知らせ：文字が切れている。タップしたら全文表示ではなく
+  // 移動なので、全文読む方法がない（小さい画面だから？）」。
+  // 実測: bannerBackupNotYet は18字で、390px幅では16字目から・320px幅では11字目から切れていた。
+  // 押すと書き出しへ移動するだけなので、全文を読む手段が画面のどこにも無かった。
+  {
+    const at = lsSettings.indexOf('data-testid="backup-banner-text"')
+    eq('LS-2 常設バナーの文字を掴めている（-1なら見張りが壊れている）', at >= 0, true)
+    const btn = at >= 0 ? lsSettings.slice(at, lsSettings.indexOf('</button>', at)) : ''
+    eq('LS-2 バナーの文字を1行に押し込んでいない（truncate を使わない）', /truncate/.test(btn), false)
+    eq('LS-2 バナーの文字が省略記号で切られていない（line-clamp も使わない）', /line-clamp/.test(btn), false)
+    // 折り返して2行になっても、アイコンと「書き出しへ」が縦にずれないこと
+    eq(
+      'LS-2 折り返した2行目にアイコンが引っぱられない（items-start で上ぞろえ）',
+      /flex items-start gap-2 rounded-md border/.test(lsSettings),
+      true,
+    )
+    // 出している文言そのものは、1行で読み切れる短さのまま（LI-1 の20字と対）
+    eq(
+      'LS-2 未実施のバナーの文言が短いまま',
+      ja.settings.bannerBackupNotYet.replace(/​/g, '').length <= 20,
+      true,
+    )
+  }
+
+  // ---- LS-3: 説明ページからの帰り道（★不具合） --------------------------------------------
+  // オーナー原文「『バックアップの詳しい説明を見る』から現在地へ戻る手段がない。アプリではなく
+  // HPへ飛ばされるので、アプリを開きなおしたり、『アプリを開く』をHPから探さないといけない」。
+  // 直し方は 2026-08-26 のレシピ詳細の帰り道と同じ「行き先に帰り先を持たせる」形。
+  {
+    eq(
+      'LS-3 説明ページへのリンクが、帰り先を載せて作られている',
+      /aboutLinkWithReturn\('\/about\/manual\.html#backup', '\/settings\?section=backup'\)/.test(lsSettings),
+      true,
+    )
+    eq(
+      'LS-3 機種変更の「複数の端末で使う方法」も同じ帰り道を持っている',
+      /aboutLinkWithReturn\(\s*'\/about\/multi-device\.html',/.test(lsSettings),
+      true,
+    )
+    // 帰り先を持たない裸のリンクに戻っていないこと（この2ページだけを見る）
+    eq(
+      'LS-3 帰り先を持たない裸のリンクに戻っていない',
+      [/href="\/about\/manual\.html#backup"/, /href="\/about\/multi-device\.html"/].filter((re) =>
+        re.test(lsSettings),
+      ),
+      [],
+    )
+    // 受け取り側: 説明ページが ?from= を読んで帰り道を出す
+    for (const rel of ['public/about/manual.html', 'public/about/multi-device.html']) {
+      const page = lsRead(rel)
+      eq(`LS-3 ${rel} に帰り道の場所がある`, /id="appReturn"/.test(page), true)
+      eq(`LS-3 ${rel} が ?from= を読んでいる`, /URLSearchParams\(window\.location\.search\)/.test(page), true)
+      eq(`LS-3 ${rel} が帰り道をアプリのURL（\/#…）に組み立てている`, /'\/#' \+ from/.test(page), true)
+      // 外部サイトへ飛ばす踏み台にしない（アプリ内のパスだけを受ける＝backLink.ts と同じ規則）
+      eq(
+        `LS-3 ${rel} がアプリ内のパス以外を受け付けない`,
+        /from\.charAt\(0\) !== '\/'/.test(page) && /from\.slice\(0, 2\) === '\/\/'/.test(page),
+        true,
+      )
+      // アプリから来ていない人には出さない（初期状態は hidden）
+      eq(`LS-3 ${rel} の帰り道が、既定では隠れている`, /id="appReturn" href="\/" hidden/.test(page), true)
+    }
+  }
+
+  // ---- LS-4: 畳んだだけで消していない ------------------------------------------------------
+  // オーナー原文「バックアップの注意書きと詳しい説明へのリンクは折りたたみにして隠して。
+  // 写真の選択と『ファイルに書き出す』ボタンが一番目立って欲しい」／
+  // 「アプリの更新、困ったとき、の押すとき残るものの説明は、折りたたみにして」。
+  // 畳むのは**読ませ方**の話なので、中身が1つでも減っていたら赤にする
+  // （事実そのものの見張りは scripts/tests/meal-plan.mjs の IJ-3 が別に持っている）。
+  {
+    const LS_FOLDED = [
+      ['バックアップの注意点と詳しい説明', 'backup-notice-toggle', 'backupNoticeOpen', [
+        'ja.settings.backupContainsCodeNotice',
+        'ja.settings.fileNameFreeNote',
+        'ja.settings.refreshAppCacheClearWarnings',
+        'ja.settings.backupDetailLink',
+      ]],
+      ['アプリの更新の説明', 'app-update-detail-toggle', 'appUpdateDetailOpen', [
+        'ja.settings.appUpdateWhenToUse',
+        'ja.settings.appUpdateWhatHappens',
+        'ja.settings.appUpdateWhatRemains',
+      ]],
+      ['困ったときの説明', 'refresh-app-detail-toggle', 'refreshAppDetailOpen', [
+        'ja.settings.refreshAppWhenToUse',
+        'ja.settings.refreshAppWhatIsCleared',
+        'ja.settings.refreshAppWhatRemains',
+      ]],
+    ]
+    for (const [name, testid, stateName, keys] of LS_FOLDED) {
+      eq(`LS-4 ${name}の開閉ボタンがある`, lsSettings.includes(`data-testid="${testid}"`), true)
+      eq(`LS-4 ${name}が共通の折りたたみ（Collapse）に入っている`, lsSettings.includes(`<Collapse open={${stateName}}>`), true)
+      eq(`LS-4 ${name}の中身が1つも消えていない`, keys.filter((k) => !lsSettings.includes(k)), [])
+    }
+    // 開閉ボタンの見出しは1つの文言を2枚で使い回す（同じ文字を2か所で定義しない）
+    eq(
+      'LS-4 「押すとどうなるか」の見出しを2枚のカードで使い回している',
+      (lsSettings.match(/ja\.settings\.pressEffectToggle/g) ?? []).length,
+      2,
+    )
+    // 「写真の選択」と「ファイルに書き出す」は畳まない（いちばん目立つ位置に置いたまま）
+    const cardAt = lsSettings.indexOf('<section id="backup-section"')
+    const noticeAt = lsSettings.indexOf('data-testid="backup-notice-toggle"')
+    const photoAt = lsSettings.indexOf('ja.settings.backupIncludeCookedPhotos}', cardAt)
+    const exportAt = lsSettings.indexOf('ja.settings.backupExport}', cardAt)
+    eq(
+      'LS-4 写真のチェックと「ファイルに書き出す」を掴めている',
+      [cardAt >= 0, noticeAt >= 0, photoAt >= 0, exportAt >= 0],
+      [true, true, true, true],
+    )
+    eq(
+      'LS-4 写真のチェックと「ファイルに書き出す」が、折りたたみより前にある',
+      photoAt < exportAt && exportAt < noticeAt,
+      true,
+    )
+    // 一度もバックアップしていない人への1行は、このカードから外れている（お知らせへ移した）
+    eq(
+      'LS-4 書き出しカードの中の旧 backupNotYet は残っていない',
+      /ja\.settings\.backupNotYet/.test(lsSettings),
+      false,
+    )
+  }
+}

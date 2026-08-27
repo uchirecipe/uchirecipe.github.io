@@ -142,6 +142,13 @@ import './_shared.mjs'
       currentCheck = 'FW-02'
       await fwPage.goto(`${BASE}/#/settings?section=backup`, { waitUntil: 'networkidle' })
       await fwPage.waitForTimeout(1200)
+      // 2026-08-27 便LS: 注意書きと詳しい説明のリンクは折りたたみに入った（中身は減っていない）
+      const fwNotice = fwPage.locator('[data-testid="backup-notice-toggle"]')
+      check('FW-02 注意点と詳しい説明の折りたたみがある（便LS）', (await fwNotice.count()) === 1)
+      if ((await fwNotice.count()) === 1) {
+        await fwNotice.click()
+        await fwPage.waitForTimeout(500)
+      }
       const fwBackupText = ((await fwPage.textContent('body')) ?? '').replace(/\u200B/g, '')
       check(
         'FW-02 バックアップの説明が「何が入るファイルか」を1文で言っている',
@@ -178,8 +185,18 @@ import './_shared.mjs'
       const fwBackupLink = fwPage.locator('[data-testid="backup-detail-link"]')
       const fwBackupHref = (await fwBackupLink.count()) > 0 ? await fwBackupLink.getAttribute('href') : null
       check(
+        // 2026-08-27 便LS: リンクに帰り先（?from=）が載るようになったので、行き先そのもの
+        // （パスと見出しの目印）で見る。帰り先の受け渡しは scripts/tests/ui-source-guards.mjs LS-3
         'FW-02 詳しい説明のリンクが使い方ページの「バックアップと機種変更」を指す',
-        fwBackupHref === '/about/manual.html#backup',
+        typeof fwBackupHref === 'string' &&
+          fwBackupHref.startsWith('/about/manual.html') &&
+          fwBackupHref.endsWith('#backup'),
+        String(fwBackupHref),
+      )
+      check(
+        'FW-02 詳しい説明のリンクが、アプリへの帰り先を持っている（便LS）',
+        typeof fwBackupHref === 'string' &&
+          fwBackupHref.includes(`from=${encodeURIComponent('/settings?section=backup')}`),
         String(fwBackupHref),
       )
       check(

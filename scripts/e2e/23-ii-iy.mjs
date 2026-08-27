@@ -393,6 +393,13 @@ import './_shared.mjs'
         await bkMoveToggle.first().click()
         await ngPage.waitForTimeout(800)
       }
+      // 2026-08-27 便LS: 「バックアップを取る」の注意点と詳しい説明も畳んであるので開く
+      const bkNoticeToggle = ngPage.locator('[data-testid="backup-notice-toggle"]')
+      check('BKFACT-01 前提: 「注意点と詳しい説明」を開ける', (await bkNoticeToggle.count()) >= 1)
+      if ((await bkNoticeToggle.count()) >= 1) {
+        await bkNoticeToggle.first().click()
+        await ngPage.waitForTimeout(800)
+      }
       // 2026-08-22 便JJ: 「古い記録の書き出し（アーカイブ）」も畳んであるので開く
       const bkArchiveToggle = ngPage.locator('[data-testid="archive-toggle"]')
       check('BKFACT-01 前提: 「古い記録の書き出し（アーカイブ）」を開ける', (await bkArchiveToggle.count()) >= 1)
@@ -426,16 +433,19 @@ import './_shared.mjs'
         bkMissing.length === 0,
         `画面に無い=${JSON.stringify(bkMissing)}`,
       )
-      // 詳しい説明の行き先（アプリ側を短くしたぶん、案内先が生きていること）
-      for (const [name, sel, href] of [
-        ['バックアップ', '[data-testid="backup-detail-link"]', '/about/manual.html#backup'],
-        ['古い記録の書き出し', '[data-testid="archive-detail-link"]', '/about/manual.html#archive'],
+      // 詳しい説明の行き先（アプリ側を短くしたぶん、案内先が生きていること）。
+      // 2026-08-27 便LS: バックアップ側のリンクにはアプリへの帰り先（?from=）が載るように
+      // なったので、**行き先のパスと見出しの目印**で見る（完全一致だと帰り先の有無で落ちる）
+      for (const [name, sel, base, hash] of [
+        ['バックアップ', '[data-testid="backup-detail-link"]', '/about/manual.html', '#backup'],
+        ['古い記録の書き出し', '[data-testid="archive-detail-link"]', '/about/manual.html', '#archive'],
       ]) {
         const link = ngPage.locator(sel)
+        const linkHref = (await link.count()) === 1 ? await link.getAttribute('href') : null
         check(
           `BKFACT-01 ${name}の詳しい説明への案内が生きている`,
-          (await link.count()) === 1 && (await link.getAttribute('href')) === href,
-          `href=${(await link.count()) === 1 ? await link.getAttribute('href') : 'なし'}`,
+          typeof linkHref === 'string' && linkHref.startsWith(base) && linkHref.endsWith(hash),
+          `href=${linkHref ?? 'なし'}`,
         )
       }
     } finally {

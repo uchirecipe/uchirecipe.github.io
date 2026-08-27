@@ -1480,6 +1480,13 @@ import './_shared.mjs'
       // 全体のバックアップは言うべきことが違う: 解錠コードが入るので渡さないと言い切る
       await fa4Page.goto(`${BASE}/#/settings`, { waitUntil: 'networkidle' })
       await fa4Page.waitForTimeout(900)
+      // 2026-08-27 便LS: 解錠コードの注意は「バックアップを取る」カードの折りたたみに入った
+      // （中身は減っていない）。開いてから読む
+      const fa4Notice = fa4Page.locator('[data-testid="backup-notice-toggle"]')
+      if ((await fa4Notice.count()) === 1) {
+        await fa4Notice.click()
+        await fa4Page.waitForTimeout(400)
+      }
       const fa4Settings = (await fa4Page.textContent('body')) ?? ''
       check(
         'FA-3 全体のバックアップは「他の人に渡さないでください」のまま(解錠コードが入るため)',

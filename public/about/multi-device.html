@@ -300,6 +300,35 @@
   }
   footer a { color: var(--text-muted); text-decoration: underline; }
   footer span.sep { margin: 0 8px; }
+
+  /* アプリから開いたときだけ出る帰り道（2026-08-27 便LS）。
+     直した不具合（オーナー報告）: 設定の「バックアップの詳しい説明を見る」から、
+     アプリではなくこの静的なページへ移るので戻る道が無かった。オーナー原文
+     「アプリではなくHPへ飛ばされるので、アプリを開きなおしたり、『アプリを開く』を
+     HPから探さないといけない」。ホーム画面に追加したアプリにはブラウザの戻るボタンが
+     出ないことがあるので、**ページの上に固定して常に見える**形にする。
+     ページの下の「うちレシピを開く」はアプリの入口へ行くだけで、
+     元いた画面（設定のバックアップ）へは帰れないため、別に置いている。
+     アプリから来ていないときは出さない（下の appReturn の script が出す） */
+  .app-return {
+    position: fixed;
+    left: 12px;
+    bottom: 12px;
+    z-index: 60;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 10px 16px;
+    border-radius: 999px;
+    background: var(--surface);
+    color: var(--accent-ink-surface);
+    border: 1px solid var(--border);
+    box-shadow: 0 4px 14px rgba(67, 54, 42, 0.18);
+    font-weight: bold;
+    font-size: 15px;
+    text-decoration: none;
+  }
+  .app-return[hidden] { display: none; }
   .skip { position: absolute; left: -9999px; }
   .skip:focus {
     left: 8px;
@@ -314,6 +343,10 @@
 </head>
 <body>
 <a class="skip" href="#main">本文へ移動</a>
+<!-- アプリの設定から来たときだけ出る帰り道（2026-08-27 便LS）。
+     行き先は ?from= に載っているアプリ内のパス（app/src/logic/backLink.ts の aboutLinkWithReturn）。
+     アプリ内のパス以外は無視する＝外部サイトへ飛ばす踏み台にしない -->
+<a class="app-return" id="appReturn" href="/" hidden>← うちレシピに戻る</a>
 <main id="main">
   <header class="page">
     <img src="/icon.svg" alt="" aria-hidden="true">
@@ -379,7 +412,7 @@
   <h2 id="import">読み込みは「追加」と「上書き」の2種類</h2>
   <p>設定の「バックアップを読み込む」には、ボタンが2つ並びます。</p>
   <figure class="shot" style="--w:390px">
-    <img src="/about/img/manual/backup-import.webp" width="780" height="348" loading="lazy" decoding="async" alt="バックアップの読み込みの2つのボタン。「今のデータに追加」と、赤い枠の「データを上書き」が並び、上書きのほうの下だけに「今のデータを消して選んだファイルの内容だけにします」の注意が付いている">
+    <img src="/about/img/manual/backup-import.webp" width="780" height="348" loading="lazy" decoding="async" alt="バックアップの読み込みの2つのボタン。「今のデータに追加」と、赤い枠の「データを上書き」が並び、上書きのほうの下だけに「今のデータを全部消して、選んだファイルの内容に入れ替えます」の注意が付いている">
     <figcaption>まるごと移すときは「データを上書き」、2台のぶんを合わせるときは「今のデータに追加」です</figcaption>
   </figure>
   <table class="cmp">
@@ -456,16 +489,16 @@
   <p>両方のレシピを残したいときは「今のデータに追加」を使います。</p>
 
   <div class="note">
-    <strong>同じ料理名のレシピは、番号を付けて足せます</strong>
-    <p>足されるのは、今のデータに無いものだけです。<strong>同じ料理名のレシピは今の内容のまま</strong>で、もう1台で書き換えた材料や手順は入りません。</p>
-    <p>そのレシピに足されるのは「作った記録」・お気に入り・写真です。</p>
-    <p>入らなかった品があると、読み込んだあとに品数が出て、番号を付けて入れるかを聞かれます。</p>
+    <strong>同じ料理名のレシピは、番号を付けて追加できます</strong>
+    <p>追加されるのは、今のデータに無いものだけです。<strong>同じ料理名のレシピは今の内容のまま</strong>で、もう1台で書き換えた材料や手順は入りません。</p>
+    <p>そのレシピに追加されるのは「作った記録」・お気に入り・写真です。</p>
+    <p>追加できなかった品があると、読み込んだあとに品数が出て、番号を付けて追加するかを聞かれます。</p>
     <ul class="plain">
-      <li><strong>「番号を付けて入れる」</strong>: 「肉じゃが (2)」のように番号が付いた別のレシピとして足されます。今あるレシピは料理名も内容もそのままです</li>
-      <li><strong>「やめる」</strong>: 入りません。書き換えたレシピで今のレシピを置き換えるときは「データを上書き」を使います</li>
+      <li><strong>「番号を付けて追加する」</strong>: 「肉じゃが (2)」のように番号が付いた別のレシピとして追加されます。今あるレシピは料理名も内容もそのままです</li>
+      <li><strong>「やめる」</strong>: 追加しません。書き換えたレシピで今のレシピを置き換えるときは「データを上書き」を使います</li>
     </ul>
   </div>
-  <p class="muted">読み込みが終わると「新しく足したレシピは◯品です（◯品は同じ料理が既にあったので、内容はそのままにしました）」のように結果が出ます。</p>
+  <p class="muted">読み込みが終わると「新しく追加したレシピは◯品です（◯品は同じ料理が既にあるため、ファイルのレシピは追加していません）」のように結果が出ます。</p>
 
   <div class="note">
     <strong>ファイルは自分だけが取り出せる場所に置いてください</strong>
@@ -520,6 +553,24 @@
   </footer>
 </main>
 <!-- Cloudflare Web Analytics -->
+<script>
+// アプリから開いたときだけ「うちレシピに戻る」を出す（2026-08-27 便LS）。
+// 受け付けるのはアプリ内のパスだけ（"/" で始まり "//" で始まらない）。
+// 判定は app/src/logic/backLink.ts の isInAppPath と同じ規則にそろえてある。
+(function () {
+  var link = document.getElementById('appReturn')
+  if (!link) return
+  var from = null
+  try {
+    from = new URLSearchParams(window.location.search).get('from')
+  } catch (e) {
+    return
+  }
+  if (!from || from.charAt(0) !== '/' || from.slice(0, 2) === '//') return
+  link.setAttribute('href', '/#' + from)
+  link.hidden = false
+})()
+</script>
 <script defer src='https://static.cloudflareinsights.com/beacon.min.js' data-cf-beacon='{"token": "9386f480590d44cdae47f8526841e1ab"}'></script>
 <!-- End Cloudflare Web Analytics -->
 </body>
