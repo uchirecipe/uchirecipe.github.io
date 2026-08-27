@@ -406,11 +406,12 @@ export function useMealPlanState(demo?: MonthDemoData) {
   const toggleMealLock = async (toggle: { lock: { date: string; slot: MealSlot }[]; unlock: { date: string; slot: MealSlot }[] }, scope: 'one' | 'all') => {
     await applyMealLockToggle(toggle)
     const locking = toggle.lock.length > 0
+    // 2026-08-27 便LT: 掛けたときの知らせは「ロックしました。」だけ（i18n/ja.ts の lockDone 参照）。
+    // 何ができなくなるかは、枠の「ロック中」と、変えようとした瞬間の lockedEditBlocked が言う
     const done = locking
-      ? (scope === 'all' ? ja.mealPlan.lockAllDone : ja.mealPlan.lockDone).replace(
-          '{effect}',
-          ja.mealPlan.lockEffectNote,
-        )
+      ? scope === 'all'
+        ? ja.mealPlan.lockAllDone
+        : ja.mealPlan.lockDone
       : scope === 'all'
         ? ja.mealPlan.lockAllReleaseDone
         : ja.mealPlan.lockReleaseDone
@@ -3406,7 +3407,13 @@ export function useMealPlanState(demo?: MonthDemoData) {
               text: ja.mealPlan.fillModeReplaceAllKept,
             },
           ],
-          notes: lockNotice ? [lockNotice] : [],
+          /* 2026-08-27 便LT: 入れ替え先に過ぎた日が混ざっているときだけ「今日以降が対象」を
+             1行で添える（見出しの途中に埋めない）。表示している週が全部これからの日付なら、
+             実装（isPastDate）は1日も外していないので、書くと余計な条件になる */
+          notes: [
+            ...(isPastDate(dates[0], today) ? [ja.mealPlan.replaceAllPastNote] : []),
+            ...(lockNotice ? [lockNotice] : []),
+          ],
           confirmLabel: ja.mealPlan.fillModeReplaceAllConfirmOk,
         })
         if (!ok) return

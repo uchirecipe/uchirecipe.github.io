@@ -280,9 +280,28 @@ import './_shared.mjs'
       // 規約F: 消えるものも件数つきで書く。「変わりません」だけでは片手落ち
       check(
         'WEEKLOCK(LOCK-5) 総入れ替えの確認文に消える品数と食分が入っている(規約F)',
-        // 2026-08-17 便HI(オーナー実機「『これからの7食分に〜』→『今日以降の献立７食分に〜』
-        // とかのほうがわかりやすい」)で言い方を変えた。数字の入る形はそのまま
-        lkDialogs.some((m) => /消えるもの: 今日以降の献立[1-9]\d*食分に入っている[1-9]\d*品/.test(m)),
+        // 2026-08-27 便LT: 言い方は ja.ts の型紙から組み立てる（画面の字を書き写さない＝禁じ手②）。
+        // 数字の入る形だけを見るので、文言を書き直しても数が出ているかぎり赤くならない
+        lkDialogs.some((m) =>
+          new RegExp(
+            `消えるもの: ${ja.mealPlan.fillModeReplaceAllGone
+              .replace('{s}', '[1-9]\\d*')
+              .replace('{n}', '[1-9]\\d*')}`,
+          ).test(m),
+        ),
+        `dialogs=${JSON.stringify(lkDialogs)}`,
+      )
+      /* 2026-08-27 便LT（オーナー原文「すべて未来の日付でも「今日以降の献立を」と文の途中に
+         はいっていたり。…文に分けてみては？」）: 「今日以降」は見出しにも項目にも埋めず、
+         過ぎた日が混ざるときだけ出す1行に分けた。**日付に左右されない形で見る**＝
+         その語が出ているなら、必ずその1行の形で出ていること（禁じ手①よけ） */
+      check(
+        'WEEKLOCK(便LT) 「今日以降」は、見出しや項目の途中ではなく分けた1行でだけ出る',
+        // 空の並びでも通る every にしない（窓を1つも読めていないなら、まず前提が崩れている）
+        lkDialogs.length > 0 &&
+          lkDialogs.every(
+            (m) => !m.includes('今日以降') || m.includes(stripZwspText(ja.mealPlan.replaceAllPastNote)),
+          ),
         `dialogs=${JSON.stringify(lkDialogs)}`,
       )
 

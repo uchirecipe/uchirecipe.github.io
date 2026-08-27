@@ -2914,11 +2914,26 @@ eq('rangeDayCount: 月をまたぐ計算も正しい', rangeDayCount('2026-06-28
     ['add', 'replace', 'remove', 'servings', 'suggest'],
   )
   eq('EA-LOCK 鍵を外せば元どおり操作できる', isMealEditBlocked(new Set(), '2026-08-10', 'dinner', 'remove'), false)
-  // 注意書きは1文(オーナー指示「削除と変更ができない事がわかる一文にして」)
-  eq('EA-LOCK 注意書きは1文', ja.mealPlan.lockEffectNote.split('。').filter(Boolean).length, 1)
+  /*
+   * 2026-08-27 便LT（オーナー原文「「ロックしました。鍵を外すまで〜」→「ロックしました。」
+   * 説明しすぎなので」）: 鍵を掛けたときの知らせから、効き目の説明（旧 lockEffectNote）を外した。
+   *
+   * 2026-08-08 のオーナー指示「削除と変更ができない事がわかる一文にして」を捨てたのではなく、
+   * **言う場所を変えた**（掛けた直後 → 変えようとした瞬間）。だから見張りも場所ごと移す:
+   *  ・掛けたときの知らせは、終わったことだけを言う（1文・説明を足さない）
+   *  ・「削除も変更もできない」は、掛かったまま触ったときの案内が言い続ける
+   */
+  eq('EA-LOCK 効き目の説明は、掛けたときの知らせから外してある', 'lockEffectNote' in ja.mealPlan, false)
   eq(
-    'EA-LOCK 注意書きが「削除」と「変更」の両方に触れている',
-    ja.mealPlan.lockEffectNote.includes('削除') && ja.mealPlan.lockEffectNote.includes('変更'),
+    'EA-LOCK 掛けたときの知らせは1文（差し込み口も持たない＝説明を足せない形）',
+    ja.mealPlan.lockDone.split('。').filter(Boolean).length === 1 &&
+      !ja.mealPlan.lockDone.includes('{') &&
+      !ja.mealPlan.lockAllDone.includes('{'),
+    true,
+  )
+  eq(
+    'EA-LOCK 「変更できない」は、鍵が掛かったまま触ったときの案内が言い続ける',
+    ja.mealPlan.lockedEditBlocked.includes('変更'),
     true,
   )
 }
@@ -3030,29 +3045,27 @@ eq('rangeDayCount: 月をまたぐ計算も正しい', rangeDayCount('2026-06-28
       planCopyLastWeek({ ...base, entries: [{ date: '2026-08-10', slot: 'dinner' }] }).ops,
       [{ date: '2026-08-11', slot: 'dinner', recipeId: 32, role: 'main' }],
     )
-    // 2026-08-19 便IF・⑧: コピーにも「入れかた」が効くようになったので、説明は入れかたごとに
-    // 2本に分かれた。「上書きしない」と言えるのは**空いた枠だけ**を選んでいるときの説明と
-    // 確認の窓の本文の2つ（総入れ替えの側は消してから入れるので、別の言い方で言う＝IF-8が見る）
-    for (const [name, text] of [
-      ['空いた枠だけのときの説明', ja.mealPlan.copyWeekFillEmptyHint],
-      ['空いた枠だけの確認の窓の本文', ja.mealPlan.copyWeekConfirm],
-    ]) {
-      eq(
-        `ID-6 ${name}は「上書きします」と言わない(この入れかたは上書きしない)`,
-        typeof text === 'string' && !/上書きします/.test(text),
-        true,
-      )
-    }
-    for (const [name, text] of [
-      ['空いた枠だけのときの説明', ja.mealPlan.copyWeekFillEmptyHint],
-      ['総入れ替えのときの説明', ja.mealPlan.copyWeekReplaceAllHint],
-    ]) {
-      eq(
-        `ID-6 ${name}は、押すと何が入るかを「入力」で言う`,
-        typeof text === 'string' && text.includes('入力します'),
-        true,
-      )
-    }
+    /*
+     * 2026-08-27 便LT（オーナー原文「入れかたの説明文削除。」「この週の献立をコピー押下後、
+     * 確認画面は日付確認のみ。「今ある〜」削除。」）: 入れかたの下の1行（旧 copyWeekFillEmptyHint /
+     * copyWeekReplaceAllHint）と、空いた枠だけの確認の本文（旧 copyWeekConfirm）を無くした。
+     * 見張りは、**上書きしないことが確認の見出しから読めること**へ移す
+     * ＝入る先を「まだ決まっていないところ」と言い切っているので、今ある献立に触らないと読める
+     * （規約Fの例外・2026-08-25 裁定D。しかもこれは足すだけで、消えるものが1つも無い操作）。
+     */
+    eq(
+      'ID-6(便LT) 入れかたの下の説明と、空いた枠だけの確認の本文は無くしてある',
+      'copyWeekFillEmptyHint' in ja.mealPlan ||
+        'copyWeekReplaceAllHint' in ja.mealPlan ||
+        'copyWeekConfirm' in ja.mealPlan,
+      false,
+    )
+    eq(
+      'ID-6(便LT) 空いた枠だけの確認の見出しが、入る先を「まだ決まっていないところ」と言い切る',
+      ja.mealPlan.copyWeekConfirmTitle.includes('まだ決まっていないところ') &&
+        !/上書きします/.test(ja.mealPlan.copyWeekConfirmTitle),
+      true,
+    )
   }
 
   // --- ⑤ 「多め/ひかえめ」の見出しと選択肢名の両立 ---
@@ -3110,15 +3123,29 @@ eq('rangeDayCount: 月をまたぐ計算も正しい', rangeDayCount('2026-06-28
       eq(`ID-2 入れかたのボタン「${name}」は6文字以内`, label.length <= 6, true)
     }
     neq('ID-2 2つのボタンは違う名前', ja.mealPlan.fillModeFillEmpty, ja.mealPlan.fillModeReplaceAll)
-    // 短くしても、押すと何が起きるかは下の1行が言い切る(規約H。名前だけに背負わせない)
+    /*
+     * 2026-08-27 便LT（オーナー原文「サブタイ「入れかた」の「「まとめて献立を入力」を押すと〜」の
+     * 説明は削除。選択肢の文だけで理解できる。」）: 下の1行（旧 fillModeFillEmptyHint /
+     * fillModeReplaceAllHint）を無くした。**背負わせる先を変えた**ので、見張りもそこへ移す:
+     *  ・押しても今ある献立が動かないことは、終わったあとの知らせが品数で言う
+     *  ・消える側（総入れ替え）で何が消えて何が残るかは、押すと必ず出る確認の窓が言う（規約F）
+     * 消したはずの1行が黙って戻ってこないことも、ここで見張る
+     */
     eq(
-      'ID-2 空き埋めの説明は「今ある献立はそのまま」を言う',
-      ja.mealPlan.fillModeFillEmptyHint.includes('今ある献立はそのまま'),
+      'ID-2(便LT) 入れかたの下の説明は無くしてある（選択肢の名前と確認の窓が受け持つ）',
+      'fillModeFillEmptyHint' in ja.mealPlan || 'fillModeReplaceAllHint' in ja.mealPlan,
+      false,
+    )
+    eq(
+      'ID-2(便LT) 空き埋めは、終わったあとの知らせが「そのままにした品数」を言う',
+      ja.mealPlan.fillWeekKeptManual.includes('そのまま') &&
+        ja.mealPlan.fillWeekKeptManual.includes('{n}'),
       true,
     )
     eq(
-      'ID-2 総入れ替えの説明は「消してから入れ直す」を言う',
-      ja.mealPlan.fillModeReplaceAllHint.includes('消して'),
+      'ID-2(便LT) 総入れ替えは、確認の窓が消えるものと残るものを両方言う（規約F）',
+      ja.mealPlan.fillModeReplaceAllGone.includes('{n}') &&
+        ja.mealPlan.fillModeReplaceAllKept.length > 0,
       true,
     )
   }
@@ -3300,9 +3327,8 @@ eq('rangeDayCount: 月をまたぐ計算も正しい', rangeDayCount('2026-06-28
   // 表示している週を送ればコピー元も動くので、**文言に日付を書き込まず差し込み口を持つ**。
   // 実際に出る日付が画面の週と合っているかは e2e の WEEKFMT-01 が見る
   {
+    // 2026-08-27 便LT: 入れかたの下の説明の1行は無くしたので、この一覧からも外した
     const rangeTexts = {
-      '空いた枠だけのときの説明': ja.mealPlan.copyWeekFillEmptyHint,
-      '総入れ替えのときの説明': ja.mealPlan.copyWeekReplaceAllHint,
       '空いた枠だけの確認の窓の見出し': ja.mealPlan.copyWeekConfirmTitle,
       '総入れ替えの確認の窓の見出し': ja.mealPlan.copyWeekReplaceAllConfirmTitle,
       'コピー元が空のときの知らせ': ja.mealPlan.copyWeekNoSource,
@@ -3321,30 +3347,25 @@ eq('rangeDayCount: 月をまたぐ計算も正しい', rangeDayCount('2026-06-28
     }
   }
 
-  // --- ⑧ 説明文が、直した動きと食い違っていないこと ---
+  // --- ⑧ 文言が、直した動きと食い違っていないこと ---
   {
+    /*
+     * 2026-08-27 便LT: 入れかたの下の説明の1行は無くした（ID-6 に理由を書いた）。
+     * 「入れかたが効いている」ことを言う先は、**確認の窓**だけになったので、
+     * 見張りも2つの入れかたで確認の窓が別物であることへ移す
+     * （どちらも同じ窓になったら、入れかたが効かなくなった合図）。
+     */
     eq(
-      'IF-8 空いた枠だけのコピーの説明は「上書きしません」を言う(実装も上書きしない)',
-      typeof ja.mealPlan.copyWeekFillEmptyHint === 'string' &&
-        ja.mealPlan.copyWeekFillEmptyHint.includes('上書きしません'),
+      'IF-8(便LT) 入れかたごとに確認の窓の見出しが違う（入れかたが効いている）',
+      ja.mealPlan.copyWeekConfirmTitle !== ja.mealPlan.copyWeekReplaceAllConfirmTitle,
       true,
     )
     eq(
-      'IF-8 総入れ替えのコピーの説明は「消してから」を言う(実装は消してから入れる)',
-      typeof ja.mealPlan.copyWeekReplaceAllHint === 'string' &&
-        ja.mealPlan.copyWeekReplaceAllHint.includes('消してから'),
+      'IF-8(便LT) 総入れ替えの側だけが「入れ替え」と名乗る（足すだけの側と読み違えない）',
+      ja.mealPlan.copyWeekReplaceAllConfirmTitle.includes('入れ替え') &&
+        !ja.mealPlan.copyWeekConfirmTitle.includes('入れ替え'),
       true,
     )
-    for (const [name, text] of [
-      ['空いた枠だけのときの説明', ja.mealPlan.copyWeekFillEmptyHint],
-      ['総入れ替えのときの説明', ja.mealPlan.copyWeekReplaceAllHint],
-    ]) {
-      eq(
-        `IF-8 ${name}から「入れかたは反映しません」が消えている(入れかたが効くようになったため)`,
-        typeof text === 'string' && !text.includes('入れかたは反映しません'),
-        true,
-      )
-    }
     // 規約F: 消える側の確認は「何が消えて何が残るか」を件数つきで両方言う
     eq(
       'IF-8 総入れ替えのコピーの確認に、消える品数の差し込み口がある',

@@ -1154,12 +1154,10 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs'
 {
   const weekScopeTexts = {
     weekCostTitle: ja.mealPlan.weekCostTitle,
-    // 2026-08-19 便IF・⑥: 旧 fillWeekHint は無くし、出しかた×入れかたの4通りの1行にまとめた
-    fillModeFillEmptyHint: ja.mealPlan.fillModeFillEmptyHint,
     // 2026-08-21 便IO: コピーの文言(copyWeek*)はここから外した。別の画面へ移っており、
     // その画面には週が2つある（入れ先と、中身を見ている週）ので「表示している週」では
     // どちらを指すか読めない。あちらは日付で言い切る規律にした＝IO-5 が見る
-    fillModeReplaceAllHint: ja.mealPlan.fillModeReplaceAllHint,
+    // 2026-08-27 便LT: 入れかたの下の説明の1行（旧 fillMode*Hint）は無くしたので、ここからも外した
     // 2026-08-15 便GW: 確認文を見出し＋項目に割ったので、週を名乗る側(見出し)も見る
     fillModeReplaceAllConfirmTitle: ja.mealPlan.fillModeReplaceAllConfirmTitle,
     fillModeReplaceAllGone: ja.mealPlan.fillModeReplaceAllGone,
@@ -2891,18 +2889,16 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs'
         true,
       )
     }
-    // 説明は押すボタンの名前を主語にする（規約H: 指示語で場所を示さない）。
-    // 名前は ja から組み立てる＝ボタン名を変えた瞬間にここが赤くなる（書き写しではない）
-    for (const [name, text] of [
-      ['空いた枠だけのときの説明', ja.mealPlan.copyWeekFillEmptyHint],
-      ['総入れ替えのときの説明', ja.mealPlan.copyWeekReplaceAllHint],
-    ]) {
-      eq(
-        `IU-2 ${name}が、押すボタンの名前をそのまま引いている`,
-        typeof text === 'string' && text.includes(`「${ja.mealPlan.copyPickRun}」`),
-        true,
-      )
-    }
+    /*
+     * 2026-08-27 便LT: 入れかたの下の説明の1行（旧 copyWeek*Hint）は無くした。
+     * この画面は入れる先も、コピー元の週の中身も、その週の日付もすべて並んでいるので、
+     * 同じことを文でもう一度言っていた。消したはずの1行が黙って戻ってこないことを見張る。
+     */
+    eq(
+      'IU-2(便LT) 入れかたの下の説明の1行は無くしてある',
+      'copyWeekFillEmptyHint' in ja.mealPlan || 'copyWeekReplaceAllHint' in ja.mealPlan,
+      false,
+    )
     // 使い方ページも一緒に直す（画面の名前は ja から読む＝ページ側だけ古いまま残せない）
     const iuManual = iuRead('public/about/manual.html')
     for (const [name, text] of [
@@ -4559,3 +4555,140 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs'
   })(), [])
 }
 
+
+// ==========================================================================================
+// 便LT（2026-08-27 オーナーの書き溜め）: 献立の「週」・テンプレート・過去の献立をコピーの文言。
+// **オーナーの言い回しをそのまま貼らない**回なので、見張るのは「言い方」ではなく**規律**にする
+// （書き直しても、規律を守っているかぎり赤にならない形にする）。
+// ==========================================================================================
+{
+  // --- ① 入れる先の呼び方（オーナー原文「「コピー先」→…コピー先だと、コピーする場所とも
+  //     とれるので。」）。「コピー」は元と先のどちらにも掛かって読めるので使わない ---
+  {
+    eq(
+      'LT-5 入れる先の1行が、入る方向を一方向に読める言い方になっている',
+      ja.mealPlan.copyPickTarget.includes('入れる先') &&
+        !ja.mealPlan.copyPickTarget.includes('コピー先'),
+      true,
+    )
+    // 画面の中で1つのものを2つの言葉で呼ばない（規約H）
+    const ltCopyTexts = {
+      copyPickTarget: ja.mealPlan.copyPickTarget,
+      copyPickDescription: ja.mealPlan.copyPickDescription,
+      copyWeekConfirmTitle: ja.mealPlan.copyWeekConfirmTitle,
+      copyWeekReplaceAllConfirmTitle: ja.mealPlan.copyWeekReplaceAllConfirmTitle,
+      copyWeekReplaceAllGone: ja.mealPlan.copyWeekReplaceAllGone,
+      copyWeekReplaceAllKept: ja.mealPlan.copyWeekReplaceAllKept,
+      copyWeekReplaceAllDone: ja.mealPlan.copyWeekReplaceAllDone,
+      copyWeekDone: ja.mealPlan.copyWeekDone,
+      copyPickSlotLabel: ja.mealPlan.copyPickSlotLabel,
+    }
+    for (const [key, text] of Object.entries(ltCopyTexts)) {
+      eq(`LT-5 ${key} が入る先を「コピー先」と呼んでいない`, text.includes('コピー先'), false)
+    }
+  }
+
+  // --- ② 総入れ替えの「今日以降」（オーナー原文「すべて未来の日付でも「今日以降の献立を」と
+  //     文の途中にはいっていたり。…文に分けてみては？」） ---
+  // 実装（logic/mealPlan.ts の isPastDate）は過ぎた日を外すだけなので、
+  // 入れ先が全部これからの日付なら「今日以降」は1日も絞っていない＝読む側には余計な条件になる。
+  // だから**見出しと項目からは外し、過ぎた日が混ざるときだけ出す1行**へ分ける。
+  {
+    const ltAlwaysShown = {
+      copyWeekReplaceAllConfirmTitle: ja.mealPlan.copyWeekReplaceAllConfirmTitle,
+      copyWeekReplaceAllGone: ja.mealPlan.copyWeekReplaceAllGone,
+      copyWeekReplaceAllKept: ja.mealPlan.copyWeekReplaceAllKept,
+      copyWeekReplaceAllDone: ja.mealPlan.copyWeekReplaceAllDone,
+      fillModeReplaceAllConfirmTitle: ja.mealPlan.fillModeReplaceAllConfirmTitle,
+      fillModeReplaceAllGone: ja.mealPlan.fillModeReplaceAllGone,
+      fillModeReplaceAllKept: ja.mealPlan.fillModeReplaceAllKept,
+    }
+    for (const [key, text] of Object.entries(ltAlwaysShown)) {
+      eq(`LT-6 ${key} は、いつでも出る文なので「今日以降」「過ぎた日」を書かない`, /今日以降|過ぎた日/.test(text), false)
+    }
+    eq(
+      'LT-6 分けた1行が、入れ替えの範囲と、変わらない日の両方を言う',
+      ja.mealPlan.replaceAllPastNote.includes('今日以降') &&
+        ja.mealPlan.replaceAllPastNote.includes('過ぎた日'),
+      true,
+    )
+    // 「週」の画面と「過去の献立をコピー」の画面で、同じ決まりを2つの言い方で書かない
+    const ltPlanSrc = ['src/pages/mealPlan/useMealPlanState.ts', 'src/pages/MealPlanCopyWeekPage.tsx']
+      .map((rel) =>
+        readFileSync(path.join(path.dirname(fileURLToPath(scriptFileUrl)), '..', rel), 'utf-8'),
+      )
+    for (const [i, src] of ltPlanSrc.entries()) {
+      eq(
+        `LT-6 ${['週', 'コピー'][i]}の画面が、同じ1行（replaceAllPastNote）を使っている`,
+        src.includes('ja.mealPlan.replaceAllPastNote'),
+        true,
+      )
+    }
+  }
+
+  // --- ③ テンプレートの「中身」→「内容」（オーナー指示）。同じものを2つの言葉で呼ばない ---
+  {
+    const ltTemplateNames = {
+      'mealTemplates.title': ja.mealTemplates.title,
+      'mealTemplates.description': ja.mealTemplates.description,
+      'mealTemplates.pickLabel': ja.mealTemplates.pickLabel,
+      'mealPlan.templateManageLink': ja.mealPlan.templateManageLink,
+    }
+    for (const [key, text] of Object.entries(ltTemplateNames)) {
+      eq(`LT-7 ${key} がテンプレートの中を「中身」と呼んでいない（「内容」で1つ）`, text.includes('中身'), false)
+    }
+    eq(
+      'LT-7 画面の名前と、そこへの入口の名前が同じ言葉を使っている',
+      ja.mealPlan.templateManageLink.includes('内容') && ja.mealTemplates.title.includes('内容'),
+      true,
+    )
+    // オーナー原文「「保存したテンプレートの中身を確かめて〜」→…短く」。
+    // 直す前は76字（実測4行）。できることの数え上げと、確認の窓が言うことの先取りをやめた
+    eq('LT-7 画面の上の説明が30字以内（直す前は76字）', ja.mealTemplates.description.length <= 30, true)
+  }
+
+  // --- ④ 消す操作の確認文（規約Fの例外・2026-08-25 裁定D の当てはめ） ---
+  // 「このテンプレートを削除」という名乗りから読めることは書かない。
+  // 名乗りから読めないこと（テンプレートから入れた献立まで消えるのか）は書き続ける。
+  {
+    eq(
+      'LT-8 テンプレートの削除の確認から、名乗りで分かること（他のテンプレート）を外してある',
+      ja.mealPlan.templateDeleteConfirm.includes('他のテンプレート'),
+      false,
+    )
+    eq(
+      'LT-8 名乗りから読めないこと（すでに献立に入れた分）は書き続ける',
+      ja.mealPlan.templateDeleteConfirm.includes('すでに献立に入れた分'),
+      true,
+    )
+    eq(
+      'LT-8 見出しが、消える1本を名前と品数で名指ししている（規約F: 何が消えるか）',
+      ja.mealPlan.templateDeleteConfirmTitle.includes('{name}') &&
+        ja.mealPlan.templateDeleteConfirmTitle.includes('{n}'),
+      true,
+    )
+  }
+
+  // --- ⑤ ロックの知らせ・買い物メモの範囲（オーナー指示の短縮） ---
+  {
+    eq('LT-9 鍵を掛けたときの知らせは、終わったことだけを言う', ja.mealPlan.lockDone, 'ロックしました。')
+    for (const [key, text] of [
+      ['shopRangeSummaryAll', ja.mealPlan.shopRangeSummaryAll],
+      ['shopRangeReset', ja.mealPlan.shopRangeReset],
+    ]) {
+      eq(`LT-9 ${key} に重ね言葉の「全部」が入っていない`, text.includes('全部'), false)
+      eq(`LT-9 ${key} は範囲を「表示している週」で言い切る`, text.includes('表示している週'), true)
+    }
+    // 使い方ページも同じ名前で載っている（画面だけ直してページが古いまま残らない）
+    const ltManual = readFileSync(
+      path.join(path.dirname(fileURLToPath(scriptFileUrl)), '..', 'public/about/manual.html'),
+      'utf-8',
+    )
+    eq('LT-9 使い方ページに「表示している週全部」が残っていない', ltManual.includes('表示している週全部'), false)
+    eq(
+      'LT-9 使い方ページに、テンプレートの内容の画面が今の名前で載っている',
+      ltManual.includes(ja.mealPlan.templateManageLink),
+      true,
+    )
+  }
+}

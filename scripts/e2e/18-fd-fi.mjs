@@ -284,10 +284,21 @@ import './_shared.mjs'
       const fdLockToast = await fdPage.evaluate(
         () => document.querySelector('[role="status"]')?.textContent ?? '',
       )
+      /* 2026-08-27 便LT（オーナー原文「「ロックしました。鍵を外すまで〜」→「ロックしました。」
+         説明しすぎなので」）: 掛けたときの案内からは効き目の説明を外した。
+         **言うのをやめたのではなく、言う場所を変えた**（掛けた直後→変えようとした瞬間）ので、
+         ここでは「掛けたときは終わったことだけを言う」ことと、
+         「変えようとしたときの案内が残っている」ことの両方を見る */
       check(
-        'FD-01 鍵を掛けたときの案内では「削除も変更もできません」を言い続ける（規約F）',
-        fdLockToast.includes(ja.mealPlan.lockEffectNote),
+        'FD-01(便LT) 鍵を掛けたときの案内は、終わったことだけを言う',
+        // 1つ掛けたときも「すべてロック」のときも、効き目の説明は足さない
+        [ja.mealPlan.lockDone, ja.mealPlan.lockAllDone].includes(fdLockToast.replaceAll('​', '')),
         fdLockToast,
+      )
+      check(
+        'FD-01(便LT) 「変更できない」は、鍵が掛かったまま触ったときの案内が言い続ける',
+        ja.mealPlan.lockedEditBlocked.includes('変更'),
+        ja.mealPlan.lockedEditBlocked,
       )
       await fdClickSel('[data-testid="lock-all"]')
       await fdPage.waitForTimeout(1200)

@@ -1503,9 +1503,20 @@ import './_shared.mjs'
       await cwPage.locator('[data-testid="copy-pick-run"]').click()
       await cwPage.waitForTimeout(1800)
 
+      /* 2026-08-27 便LT（オーナー原文「この週の献立をコピー押下後、確認画面は日付確認のみ。
+         「今ある〜」削除。」）: 本文（旧 copyWeekConfirm「今ある献立◯品は…そのまま残ります。」）を
+         外した＝規約Fの例外（2026-08-25 裁定D）。**見出しが入る先を言い切っている**ので、
+         今ある献立に触らないことはそこから読める。見張りも見出しへ移す */
       check(
-        'MEALPLAN-S3 確認文が「入る品数」と「残る」を明示する(規約F準拠)',
-        /入れます/.test(cwDialogMsg) && /\d+品/.test(cwDialogMsg) && /残ります/.test(cwDialogMsg),
+        'MEALPLAN-S3(便LT) 確認文が「入る品数」と「入る先」を明示する（規約F準拠）',
+        /入れます/.test(cwDialogMsg) &&
+          /\d+品/.test(cwDialogMsg) &&
+          cwDialogMsg.includes('まだ決まっていないところ'),
+        `dialog=${cwDialogMsg}`,
+      )
+      check(
+        'MEALPLAN-S3(便LT) 見出しから読めること（今ある献立は残る）を、本文で言い直していない',
+        !/そのまま残ります/.test(cwDialogMsg),
         `dialog=${cwDialogMsg}`,
       )
       check(
