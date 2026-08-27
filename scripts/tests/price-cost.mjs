@@ -1337,7 +1337,15 @@ eq('normalizeIngredientNameForPrice 前後空白除去', normalizeIngredientName
     // 乾燥ハーブ（ラタトゥイユ 194→219円・ブロッコリーとにんじんのハーブマリネ 190→215円）。
     // 残り12件は**並のグレードで測ったうえで動かさなかった**（差が±20%未満・単一ソース・
     // 単位が「少々」で1回に使う量をアプリが持っていない、のいずれか。1件ずつの理由は priceDefaults.ts の行）
-    eq('同梱109品の概算食費の合計(便LL第1弾後。便LF第13弾後は47,662円/便LF第12弾後は47,252円/便LF第11弾後は47,212円/便LF第10弾後は47,430円/便LF第9弾後は45,450円/便LF第8弾後は38,932円/便LF第7弾後は38,147円/便LF第6弾後は39,124円/便LF第5弾後は40,051円/便LF第4弾後は39,777円/便LF第3弾後は38,121円/便LF第2弾後は37,802円/便LF第1弾後は37,015円/便KX後は35,814円/便KE後は35,826円/便JI後は37,951円/便JG後は37,934円/便BY修正前は48,377円)', grand, 47956)
+    // 2026-08-27 便LL 第2弾（だし・揚げ油・甘味・缶詰の10件）で47,956→47,838円(-118円)。
+    // 直したのは3件（はちみつ 40→26円/大さじ1・こしあん 450→360円/300g・グラノーラ 500→915円/1袋）で、
+    // 動いたのは2品（フルーツヨーグルトバーク 137→130円・水ようかん 125→103円）。**下がった**のは、
+    // はちみつが産地で7倍ちがう品で、オーナー裁定の「輸入の並」で置くと安くなるため。
+    // グラノーラは値を3倍近くに直したが、同梱109品での使い方が「適量(お好みで)」1行で
+    // 単位が販売単位（1袋）なので金額は出ない＝合計は動かない。
+    // **だし汁は司令部の判断待ちで据え置いた**（だしの素で作れば約8円/200ml・アプリの「だしのとり方」で
+    // 自分で取れば92円/200ml と4.6倍ちがう。詳しくは priceDefaults.ts の「だし汁」の行）
+    eq('同梱109品の概算食費の合計(便LL第2弾後。便LL第1弾後は47,956円/便LF第13弾後は47,662円/便LF第12弾後は47,252円/便LF第11弾後は47,212円/便LF第10弾後は47,430円/便LF第9弾後は45,450円/便LF第8弾後は38,932円/便LF第7弾後は38,147円/便LF第6弾後は39,124円/便LF第5弾後は40,051円/便LF第4弾後は39,777円/便LF第3弾後は38,121円/便LF第2弾後は37,802円/便LF第1弾後は37,015円/便KX後は35,814円/便KE後は35,826円/便JI後は37,951円/便JG後は37,934円/便BY修正前は48,377円)', grand, 47838)
     const nabe = starterDefs.find((d) => d.title === '寄せ鍋')
     eq(
       '寄せ鍋 1食あたり(便EY後226円→便FAのしいたけ名寄せで217円→便LFのピン留め解除で315円)',
@@ -4000,11 +4008,10 @@ eq('normalizeIngredientNameForPrice 前後空白除去', normalizeIngredientName
       else if (line !== '') lfHasComment = false
     }
     // 2026-08-27 便LL 第1弾（香辛料・薬味・中華調味料の18件）で 42→24件。
+    // 2026-08-27 便LL 第2弾（だし・揚げ油・甘味・缶詰・こしあん・グラノーラの10件）で 24→14件。
     const LF_NO_SOURCE_KNOWN = [
       'しょうが', 'さんま', 'すだち', '刻みねぎ', 'むきえび', '錦糸卵', '冷凍うどん',
-      '食パン', '揚げ油', 'だし汁', '水またはだし汁',
-      'みかん缶', 'メープルシロップ', '黒みつ', 'アーモンドエッセンス', 'さわら', '万能ねぎ', '梅干し',
-      'そうめん', 'グラノーラ', 'こしあん', 'キウイ', 'はちみつ',
+      '食パン', 'さわら', '万能ねぎ', '梅干し', 'そうめん', 'キウイ',
       '卵白',
     ]
     eq(
@@ -4635,10 +4642,25 @@ eq('normalizeIngredientNameForPrice 前後空白除去', normalizeIngredientName
   const LL_GRADE = /並|標準品/
   // 2店とも扱いが無く、棚の値段そのものが取れなかった行（②の免除。理由は各行のコメント）
   const LL_NO_SHELF_PRICE = []
-  const llAll = llBlocks.filter((b) => b.comment.includes('便LL'))
+  const llEvery = llBlocks.filter((b) => b.comment.includes('便LL'))
+  // 便LFの LF-20 と同じ扱い: 「同じものなので根拠は『◯◯』の行のコメント」と**自分では店を1つも挙げず**
+  // 別の行に根拠を預けている行は、①②③を指し先で見る（同じ根拠を2か所に置くと片方だけ直したときに食い違う）
+  const llNames = new Set(PRICE_DEFAULTS.map((d) => d.name))
+  const llRefOf = (comment) => {
+    const m = comment.match(/「(.+?)」の行のコメント/)
+    return m && llNames.has(m[1]) ? m[1] : null
+  }
+  const llIsRef = (b) => llRefOf(b.comment) != null && !LL_SHOP.test(b.comment)
+  const llRefs = llEvery.filter(llIsRef)
+  const llAll = llEvery.filter((b) => !llIsRef(b))
   const llMissing = (test, only) =>
     llAll.filter((b) => (only ? only(b) : true)).filter((b) => !test.test(b.comment)).map((b) => b.name)
 
+  eq(
+    'LL-1 別の行を指しているコメントは、指し先も便LLの根拠を持っている',
+    llRefs.filter((b) => !llAll.some((x) => x.name === llRefOf(b.comment))).map((b) => b.name),
+    [],
+  )
   eq('LL-1 便LLが根拠を書いた行は15件以上ある（見張りが空振りしていない）', llAll.length >= 15, true)
   eq('LL-1 ①どの店で見たかが書いてある', llMissing(LL_SHOP), [])
   eq(
