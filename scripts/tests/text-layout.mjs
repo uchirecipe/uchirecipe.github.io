@@ -3961,14 +3961,14 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs'
     return start < 0 || end < 0 ? '' : kuPlanSrc.slice(start, end + 1)
   })()
   eq('KU-3 前提: 「作った記録を見る」に検査用の目印がある', kuOpenDetailTag !== '', true)
+  // 2026-08-27 便LK: 目印が消えると indexOf が -1 を返し、slice(0, -1) が
+  // **ファイルのほぼ全体**を指してしまう（それが 2026-08-25 に見つかった素通りの正体）。
+  // 前提の行で赤にはなるが、ここも -1 を渡さない形にしておく
+  const kuOpenDetailAt = kuPlanSrc.indexOf('data-testid="cooked-log-open-detail"')
   eq(
     'KU-3 「作った記録を見る」の行は右端に寄せる（左に48px空けて置かない）',
-    /justify-end/.test(
-      kuPlanSrc.slice(
-        Math.max(0, kuPlanSrc.indexOf('data-testid="cooked-log-open-detail"') - 600),
-        kuPlanSrc.indexOf('data-testid="cooked-log-open-detail"'),
-      ),
-    ),
+    kuOpenDetailAt >= 0 &&
+      /justify-end/.test(kuPlanSrc.slice(Math.max(0, kuOpenDetailAt - 600), kuOpenDetailAt)),
     true,
   )
   eq(
