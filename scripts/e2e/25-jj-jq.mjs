@@ -71,10 +71,28 @@ import './_shared.mjs'
 
       // ②ブラウザのデータ削除の注意の置き場所（オーナー原文「ここに注意書きがあると、
       //   修復＝クッキーと他サイトのデータを削除、捉えられます」）
+      // 2026-08-27 便LS（オーナー原文「バックアップの注意書きと詳しい説明へのリンクは折りたたみにして隠して。
+      // **写真の選択と「ファイルに書き出す」ボタンが一番目立って欲しい**」）:
+      // 注意はカードから消えたのではなく、**「注意点と詳しい説明」の折りたたみの中へ入った**。
+      // `Collapse` は畳んでいるあいだ中身をDOMに置かない作り（読み上げとページ内検索に
+      // 隠れた文字を残さないため・2026-08-19 便IC）なので、**開いてから数える**。
+      // 見張る中身は変えない＝「バックアップのカードの中にだけあり、他所には無い」
+      const jjNotesToggle = jjPage.getByRole('button', { name: ja.settings.backupNoticeToggle })
+      check('JJSET-01 前提: 「注意点と詳しい説明」の折りたたみがある', (await jjNotesToggle.count()) >= 1)
+      const jjWarnFolded = await jjPage.locator('[data-testid="cache-clear-warnings"]').count()
+      check(
+        'JJSET-01 畳んでいるあいだは注意が画面に出ていない（折りたたみに入った）',
+        jjWarnFolded === 0,
+        `畳んだまま=${jjWarnFolded}`,
+      )
+      if ((await jjNotesToggle.count()) >= 1) {
+        await jjNotesToggle.first().click()
+        await jjPage.waitForTimeout(700)
+      }
       const jjWarnBackup = await jjPage.locator('#backup-section [data-testid="cache-clear-warnings"]').count()
       const jjWarnAll = await jjPage.locator('[data-testid="cache-clear-warnings"]').count()
       check(
-        'JJSET-01 ブラウザのデータ削除の注意は「バックアップを取る」カードの中にだけある',
+        'JJSET-01 開くと、ブラウザのデータ削除の注意は「バックアップを取る」カードの中にだけある',
         jjWarnBackup === 1 && jjWarnAll === 1,
         `バックアップの中=${jjWarnBackup} 画面全体=${jjWarnAll}`,
       )
@@ -82,6 +100,15 @@ import './_shared.mjs'
       check('JJSET-01 前提: 「アプリの表示を修復する」は今までどおりある', (await jjRefreshBtn.count()) >= 1)
 
       // ③「困ったとき」の3行（文言は ja から読む）
+      // 2026-08-27 便LS（オーナー原文「アプリの更新、困ったとき、の押すとき残るものの説明は、
+      // 折りたたみにして」）: この3行は「押すとどうなるか」の折りたたみの中へ入った。
+      // **畳んでいるとDOMに無い**ので、読む前に開く
+      const jjPressToggle = jjPage.getByRole('button', { name: ja.settings.pressEffectToggle })
+      check('JJSET-01 前提: 「押すとどうなるか」の折りたたみがある', (await jjPressToggle.count()) >= 1)
+      for (let i = 0; i < (await jjPressToggle.count()); i++) {
+        await jjPressToggle.nth(i).click()
+        await jjPage.waitForTimeout(400)
+      }
       const jjBody = (await jjPage.textContent('body')).replaceAll('​', '')
       check(
         'JJSET-01 「消えるもの」は言い切らない書き方で出ている',
