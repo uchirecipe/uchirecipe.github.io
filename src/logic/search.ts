@@ -13,6 +13,7 @@ import { makePantryMatcher } from './pantry'
 import { hasNgIngredient } from './ng'
 import { splitValues } from './textSplit'
 import { recipeDishType } from './mealPlan'
+import { countRecipesWithTag } from './tagRegister'
 import type { DishType, EffortLevel, Recipe } from '../db/types'
 
 /** 調理時間の絞り込み: すべて / 〜10分 / 〜30分 / 30分超 */
@@ -198,6 +199,77 @@ export function countRecipesMatchingKeyword(recipes: Recipe[], keyword: string):
     ngIngredients: [],
     keywords: [keyword],
   }).length
+}
+
+/**
+ * タグのチップに出す最大件数（「すべて」は別枠）。
+ * 2026-08-10 便FF: チップに件数を併記した分だけ1つが横に広がるので8→6に減らし、
+ * スマホ縦画面（390px）で2行に収まる範囲を保つ。
+ * 2026-08-27 便LN: 「レシピから追加」の選択画面でも同じチップを出すのでここへ移した
+ * （画面ごとに数を書くと、同じチップの並びが画面によって違う長さになる）
+ */
+export const TAG_CHIP_LIMIT = 6
+
+/**
+ * 検索まどの下に並べる「一致した場所」の上限（2026-08-20 便IH・②）。
+ *
+ * 同梱109品・語彙376語で実測したところ、一致した場所が1種類で済む言葉が242語、3種類までで289語。
+ * 6を超えたのは「きのこ」（7種）と、1文字だけ打ったとき（「ん」23種・「い」19種）の3語だけだった。
+ * 数はキーワードのチップと同じ6にそろえる＝同じ画面に出る「多い順の並び」が、
+ * 場所によって違う長さにならない。**入りきらなかった数は必ず「ほか◯件」で出す**（黙って切らない）
+ */
+export const MATCH_WORD_LIMIT = TAG_CHIP_LIMIT
+
+/** 絞り込みパネルのタグのチップ1つ分（名前と、その名前で絞ったときの品数を入れた見出し） */
+export interface TagChipOption {
+  value: string
+  label: string
+}
+
+/**
+ * もとからあるタグのチップ（2026-08-27 便LN で pages/RecipesPage.tsx から出した。中身は変えていない）。
+ *
+ * いま一覧に出ているレシピのタグを数え、そのタグが付いているレシピの多い順に出す。
+ * チップに件数を出すのは、並びの規則を画面から読めるようにするため
+ * （オーナー「現状は勝手にこちらできめた『よく使いようなタグ』をとにかく並べただけ」）。
+ * 選択中のタグは、件数の変動で上位から外れても必ず残す（外す手段が消えないように）。
+ *
+ * ここへ出した理由: まったく同じ数え方を「レシピから追加」の選択画面でも使う。
+ * 画面ごとに数え方を書き写すと、同じチップの数字が画面によって違う、ということが起きる
+ */
+export function tagChipOptions(
+  recipes: { tags: string[] }[],
+  selectedTags: readonly string[],
+  limit: number,
+): TagChipOption[] {
+  // 2026-08-19 便HU・⑮: 「高たんぱく」は候補に出さない（FILTER_HIDDEN_TAGS）
+  const usages = filterTagUsageCounts(recipes, limit)
+  for (const name of selectedTags) {
+    if (!usages.some((u) => u.tag === name)) {
+      usages.push({ tag: name, count: countRecipesWithTag(recipes, name) })
+    }
+  }
+  return usages.map(({ tag: value, count }) => ({
+    value,
+    label: ja.search.tagChip.replace('{name}', value).replace('{n}', String(count)),
+  }))
+}
+
+/**
+ * 自分で登録したタグのチップ（2026-08-27 便LN で pages/RecipesPage.tsx から出した。中身は変えていない）。
+ * もとからあるタグと同じ「{name} {n}」の形。数える対象も同じ集合にそろえる
+ * ＝「自分で登録したレシピのみ」をONにすれば、どちらの数字も同じように数え直される
+ */
+export function savedTagChipOptions(
+  recipes: Recipe[],
+  savedSearches: readonly string[],
+): TagChipOption[] {
+  return savedSearches.map((name) => ({
+    value: name,
+    label: ja.search.tagChip
+      .replace('{name}', name)
+      .replace('{n}', String(countRecipesMatchingKeyword(recipes, name))),
+  }))
 }
 
 /** 件数を捨ててタグ名だけを返す版（献立のレシピ選択ピッカーが使う） */

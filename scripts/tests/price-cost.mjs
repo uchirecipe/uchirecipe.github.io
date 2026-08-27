@@ -4747,3 +4747,91 @@ eq('normalizeIngredientNameForPrice 前後空白除去', normalizeIngredientName
   )
   eq('LL-1 免除の一覧に同じ名前を2回書いていない', new Set(LL_NO_SHELF_PRICE).size, LL_NO_SHELF_PRICE.length)
 }
+
+// ---------- LN-1（2026-08-27 便LN）: 「刻みねぎ」と「青ねぎ」は同じ食品だが、行の建て方が違う ----------
+//
+// 便LMの申し送り「刻みねぎ 15円/少々 は成分表では青ねぎ（06227）の別名なのに、独自の行・
+// 独自の単位を持っている。万能ねぎと同じ形でそろえる価値がある」への回答を、行のコメントだけでなく
+// **測って見張れる形**にしたもの。結論は「そろえない（少々建てのまま・値も据え置き）」で、
+// 理由は src/data/priceDefaults.ts の「刻みねぎ」の行に書いてある。
+//
+// ここで見るのは利用者が確かめたいこと2つ:
+//   ①『刻みねぎ 適量』に金額が出る（原価から黙って消えない）
+//   ②2つの行が別々の相場になっていない（15円を青ねぎの値で言い直すと、1回に散らす量に収まる）
+// どちらかの行の値・単位を動かすとここが赤くなるので、片方だけ動かして食い違わせることができない。
+{
+  const { matchNutritionFood } = await import('../../src/logic/nutrition.ts')
+  const lnIndex = buildPriceIndex(PRICE_DEFAULTS.map((d) => ({ ...d, isDefault: true })))
+  const lnRow = (name) => PRICE_DEFAULTS.find((d) => d.name === name)
+  const kizami = lnRow('刻みねぎ')
+  const aonegi = lnRow('青ねぎ')
+
+  // 前提: 成分表では同じ食品（八訂 06227 葉ねぎ。別名に「刻みねぎ」が入っている）
+  eq(
+    'LN-1 前提: 刻みねぎと青ねぎは成分表で同じ食品',
+    [matchNutritionFood('刻みねぎ')?.id, matchNutritionFood('青ねぎ')?.id],
+    ['06227', '06227'],
+  )
+  // 前提: それでも行の建て方は違う（刻みねぎ＝1回に使う量／青ねぎ＝販売単位）
+  eq('LN-1 刻みねぎの登録単位は「1回に使う量」の側', [kizami?.pricePerUnit, kizami?.unit], [15, '少々'])
+  eq('LN-1 青ねぎの登録単位は販売単位の側', [aonegi?.pricePerUnit, aonegi?.unit], [80, '100g'])
+  // 「少々」が1回に使う量の側に入っていること＝分量が読めなくてもその金額を1行ぶんとして使う。
+  // 区分そのものは外に出していないので、**振る舞いで**確かめる
+  // （販売単位の側なら金額は出ず undefined になる。すぐ下の①がまさにその形）
+  eq(
+    'LN-1 「少々」は1回に使う量として扱われる単位（分量が読めなくても金額が出る）',
+    estimateIngredientYen({ name: '刻みねぎ', amount: '', unit: '' }, lnIndex)?.yen ?? null,
+    15,
+  )
+
+  // ① 同梱の書き方（『刻みねぎ 適量』＝オートミール卵雑炊）で金額が出る。
+  //    青ねぎの物差し（100g建て）にそろえると、ここが「価格が分からない材料」に落ちる
+  eq(
+    'LN-1 ①「刻みねぎ 適量」に金額が出る（1回ぶん＝15円）',
+    estimateIngredientYen({ name: '刻みねぎ', amount: '適量', unit: '' }, lnIndex)?.yen ?? null,
+    15,
+  )
+  eq(
+    'LN-1 ①「刻みねぎ 適量」は価格が分からない材料に落ちない',
+    pricelessIngredientNamesOfRecipes(
+      [{ ingredients: [{ name: '刻みねぎ', amount: '適量', unit: '' }] }],
+      lnIndex,
+    ),
+    [],
+  )
+  // 100g建てにそろえたら何が起きるかを、実際に組み替えて見せる（コメントの主張が空手形にならないように）
+  {
+    const lnAligned = buildPriceIndex(
+      PRICE_DEFAULTS.map((d) =>
+        d.name === '刻みねぎ' ? { ...d, pricePerUnit: 80, unit: '100g', isDefault: true } : { ...d, isDefault: true },
+      ),
+    )
+    eq(
+      'LN-1 ①（そろえた場合）「刻みねぎ 適量」は金額が出なくなる＝そろえない理由',
+      [
+        estimateIngredientYen({ name: '刻みねぎ', amount: '適量', unit: '' }, lnAligned) ?? null,
+        pricelessIngredientNamesOfRecipes(
+          [{ ingredients: [{ name: '刻みねぎ', amount: '適量', unit: '' }] }],
+          lnAligned,
+        ),
+      ],
+      [null, ['刻みねぎ']],
+    )
+  }
+
+  // ② 2つの行が別々の相場になっていない。
+  //    15円 ÷ (80円/100g) = 18.75g。成分表の青ねぎ 1本=10g なので約1.9本＝薬味として1回に散らす量。
+  //    幅は「青ねぎ1〜3本」で見る（新しい相場を決めるためではなく、桁で外れたら気づくための帯）
+  {
+    const gramsPerYen = 100 / aonegi.pricePerUnit
+    const kizamiGrams = kizami.pricePerUnit * gramsPerYen
+    const gramsPerStalk = matchNutritionFood('青ねぎ')?.unitGrams?.['本']
+    eq('LN-1 ②前提: 成分表の青ねぎは1本=10g', gramsPerStalk, 10)
+    eq(
+      'LN-1 ②「刻みねぎ 少々」1回ぶんは、青ねぎ1〜3本ぶんの金額に収まる',
+      kizamiGrams >= gramsPerStalk && kizamiGrams <= gramsPerStalk * 3,
+      true,
+      `1回ぶん=${kizamiGrams}g（青ねぎ${(kizamiGrams / gramsPerStalk).toFixed(1)}本）`,
+    )
+  }
+}

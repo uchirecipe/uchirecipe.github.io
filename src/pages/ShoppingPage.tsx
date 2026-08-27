@@ -12,6 +12,8 @@ import {
   CheckCircle2,
   CheckCheck,
   HelpCircle,
+  ArrowDownUp,
+  SlidersHorizontal,
 } from 'lucide-react'
 import Collapse from '../components/Collapse'
 import SwapLabel from '../components/SwapLabel'
@@ -39,8 +41,36 @@ import {
   type ShoppingCandidate,
   type ShoppingSourceResult,
 } from '../logic/shopping'
-import { sortResults, type RecipeSortOption } from '../logic/recipeSort'
-import type { SearchResult } from '../logic/search'
+import {
+  sortResults,
+  defaultSortDirection,
+  buildNutrientSortValues,
+  buildCostSortValues,
+  isNutrientSortOption,
+  type RecipeSortOption,
+  type SortDirection,
+} from '../logic/recipeSort'
+import {
+  searchRecipes,
+  searchMatchSummary,
+  splitTerms,
+  tagChipOptions,
+  savedTagChipOptions,
+  MATCH_WORD_LIMIT,
+  TAG_CHIP_LIMIT,
+} from '../logic/search'
+// レシピ一覧と同じ並び替え／絞り込みのパネル（2026-08-27 便LM が共有部品に切り出したもの）
+import RecipeSortPanel from '../components/RecipeSortPanel'
+import RecipeFilterPanel, {
+  EMPTY_RECIPE_FILTER_VALUES,
+  type RecipeFilterValues,
+} from '../components/RecipeFilterPanel'
+import { usePanelMaxHeight, useOutsidePanelClose } from '../components/recipePanelParts'
+import SearchMatchDialog from '../components/SearchMatchDialog'
+import { isNutritionUnlocked } from '../logic/nutrition'
+import { usePriceEntries } from '../db/prices'
+import { buildPriceIndex } from '../logic/priceEstimate'
+import { savedSearchesWithout, buildSavedSearchRemoveConfirm } from '../logic/tagRegister'
 import type { Ingredient, Recipe, ShoppingItem } from '../db/types'
 import PantryBoard from '../components/PantryBoard'
 import RecipeCard from '../components/RecipeCard'
@@ -144,14 +174,9 @@ function clearShoppingDraft(): void {
   }
 }
 
-/** レシピピッカーの並び替え(2026-07-23 #2: 一覧の並び替え機構=recipeSortを流用。栄養並び替えは
- * Pro機能なので除き、無料で使える4種に絞る。ラベルはレシピ一覧のもの=ja.searchを共用する) */
-const PICKER_SORT_OPTIONS: { value: RecipeSortOption; label: string }[] = [
-  { value: 'updated', label: ja.search.sortUpdated },
-  { value: 'pantryMatch', label: ja.search.sortPantryMatch },
-  { value: 'kana', label: ja.search.sortKana },
-  { value: 'cooked', label: ja.search.sortCooked },
-]
+/* レシピを選ぶ画面の並び替えの顔ぶれは、2026-08-27 便LN で
+   components/RecipeSortPanel.tsx（レシピ一覧と同じパネル）に一本化した。
+   それまでは無料で使える4種だけを並べたプルダウンをこの画面が自前で持っていた */
 
 /** 食材タブ: 「食材の在庫」（在庫ボード）／「買い物メモ」（レシピからの候補づくり＋確定した
  * 買い物メモ）の2タブ構成(2026-07-16 UI総点検B-9: 買い物メモが最上部を占有しヘビーユーザーの
@@ -210,6 +235,45 @@ export default function ShoppingPage() {
   const [pickerOpen, setPickerOpen] = useState(false)
   const [pickerQuery, setPickerQuery] = useState('')
   const [pickerSort, setPickerSort] = useState<RecipeSortOption>('updated')
+  const [pickerSortDirection, setPickerSortDirection] = useState<SortDirection>(
+    defaultSortDirection.updated,
+  )
+  /**
+   * 絞り込みの条件（2026-08-27 便LN・オーナー原文「レシピから追加のレシピ選択画面は、
+   * 検索と絞り込み、並び替えの使い勝手をレシピタブと同じにしたい」）。
+   *
+   * レシピ一覧は条件を1つずつ useState で持ち、そのまま sessionStorage への保存・
+   * URLへの反映・復元に使っている。この画面は**開くたびに何も絞っていない状態から始める**ので、
+   * その持ち回りは要らない＝共有部品が受け取る形（RecipeFilterValues）のまま1本で持つ。
+   * 検索まどの言葉と同じで、窓を開くたびに初期値へ戻す（前に選んだ条件が残っていると、
+   * 「レシピが出てこない」の原因が窓の外から読めなくなる）
+   */
+  const [pickerFilters, setPickerFilters] = useState<RecipeFilterValues>(EMPTY_RECIPE_FILTER_VALUES)
+  const setPickerFilterValues = (patch: Partial<RecipeFilterValues>) => {
+    setPickerFilters((prev) => ({ ...prev, ...patch }))
+  }
+  // 並び替え／絞り込みパネルの開閉（レシピ一覧と同じで、片方を開くともう片方は閉じる）
+  const [pickerSortPanelOpen, setPickerSortPanelOpen] = useState(false)
+  const [pickerFilterPanelOpen, setPickerFilterPanelOpen] = useState(false)
+  const togglePickerSortPanel = () => {
+    setPickerSortPanelOpen((open) => !open)
+    setPickerFilterPanelOpen(false)
+  }
+  const togglePickerFilterPanel = () => {
+    setPickerFilterPanelOpen((open) => !open)
+    setPickerSortPanelOpen(false)
+  }
+  const closePickerPanels = () => {
+    setPickerSortPanelOpen(false)
+    setPickerFilterPanelOpen(false)
+  }
+  const pickerPanelOpen = pickerSortPanelOpen || pickerFilterPanelOpen
+  /** 検索まどの帯（パネルの上端）と、下の「下書きを作る」の帯（パネルの下端）。高さの上限を実測する */
+  const pickerBarRef = useRef<HTMLDivElement>(null)
+  const pickerFooterRef = useRef<HTMLDivElement>(null)
+  const pickerPanelWrapRef = useRef<HTMLDivElement>(null)
+  const pickerPanelMaxHeight = usePanelMaxHeight(pickerPanelOpen, pickerBarRef, pickerFooterRef)
+  useOutsidePanelClose(pickerPanelOpen, pickerPanelWrapRef, closePickerPanels)
   // 食数の+/-方式(2026-07-23 #3): recipeId → 食数。1食以上で「選択」扱い(既定0=未選択)
   const [pickerCounts, setPickerCounts] = useState<Record<number, number>>({})
   // 直前のレシピ選択(食数)を覚えておき、「レシピを選び直す」でそのまま復元する(2026-07-24 実機FB #8)
@@ -217,13 +281,149 @@ export default function ShoppingPage() {
     restoredDraft?.lastPickerCounts ?? {},
   )
 
-  const filteredRecipes = useMemo(() => {
-    const q = pickerQuery.trim()
-    const base = q ? visibleRecipes.filter((r) => r.title.includes(q)) : visibleRecipes
-    // 一覧の並び替え機構(sortResults)を流用する。SearchResultの形に包んで並べ替え、レシピへ戻す
-    const wrapped: SearchResult[] = base.map((recipe) => ({ recipe, usedCount: 0, wantedCount: 0 }))
-    return sortResults(wrapped, pickerSort, availableNames).map((r) => r.recipe)
-  }, [visibleRecipes, pickerQuery, pickerSort, availableNames])
+  /**
+   * 栄養の並び替えが使えるか（2026-08-01 線引きB'）。無料はカロリー順まで・8項目はPro。
+   * レシピ一覧とまったく同じ判定を使う＝画面によって選べる並びが違う、ということが起きない
+   */
+  const pickerNutritionUnlocked = isNutritionUnlocked(!!settings?.proCode)
+  // 栄養順・原価順を選んでいるあいだだけ、全レシピ分の値をまとめて1回計算する（レシピ一覧と同じ作り）
+  const pickerNutrientSortValues = useMemo(() => {
+    if (!recipes || !pickerOpen || !isNutrientSortOption(pickerSort)) return undefined
+    return buildNutrientSortValues(recipes)
+  }, [recipes, pickerOpen, pickerSort])
+  const priceEntries = usePriceEntries()
+  const pickerCostSortValues = useMemo(() => {
+    if (!recipes || !pickerOpen || pickerSort !== 'cost') return undefined
+    return buildCostSortValues(recipes, buildPriceIndex(priceEntries ?? []))
+  }, [recipes, pickerOpen, pickerSort, priceEntries])
+
+  /**
+   * 選択画面に並べるレシピ（2026-08-27 便LN）。
+   * 検索は logic/search.ts の searchRecipes をそのまま使う＝レシピタブと同じ当たり方
+   * （かなの正規化・別名・材料/手順/メモ/タグまで見る）。この画面だけの検索は持たない
+   */
+  const pickerResults = useMemo(
+    () =>
+      sortResults(
+        searchRecipes(visibleRecipes, {
+          query: pickerQuery,
+          ingredients: pickerFilters.ingredients.join(' '),
+          time: pickerFilters.time,
+          effort: pickerFilters.effort,
+          tags: pickerFilters.tags,
+          keywords: pickerFilters.keywords,
+          tagMatch: pickerFilters.tagMatch,
+          dishTypes: pickerFilters.dishTypes,
+          favoriteOnly: pickerFilters.favoriteOnly,
+          excludeNg: pickerFilters.excludeNg,
+          quickOnly: pickerFilters.quickOnly,
+          pantryOnly: pickerFilters.pantryOnly,
+          pantryNames: availableNames,
+          ngIngredients: settings?.ngIngredients ?? [],
+        }),
+        pickerSort,
+        availableNames,
+        pickerSortDirection,
+        pickerNutrientSortValues,
+        pickerCostSortValues,
+      ),
+    [
+      visibleRecipes,
+      pickerQuery,
+      pickerFilters,
+      availableNames,
+      settings?.ngIngredients,
+      pickerSort,
+      pickerSortDirection,
+      pickerNutrientSortValues,
+      pickerCostSortValues,
+    ],
+  )
+  const filteredRecipes = useMemo(() => pickerResults.map((r) => r.recipe), [pickerResults])
+
+  /**
+   * 検索まどに打った言葉が、レシピのどこに一致したか（2026-08-20 便IH・②）。
+   * 数える相手はいま並んでいる品そのものなので、画面の数字と並びが食い違わない
+   */
+  const pickerQueryTerms = useMemo(() => splitTerms(pickerQuery), [pickerQuery])
+  const pickerMatchSummary = useMemo(
+    () => searchMatchSummary(filteredRecipes, pickerQueryTerms, MATCH_WORD_LIMIT),
+    [filteredRecipes, pickerQueryTerms],
+  )
+  const [pickerMatchOpen, setPickerMatchOpen] = useState(false)
+  useEffect(() => {
+    if (pickerMatchSummary.rows.length === 0) setPickerMatchOpen(false)
+  }, [pickerMatchSummary])
+
+  /** 絞り込みのタグのチップ。数え方はレシピ一覧と同じ1か所（logic/search.ts） */
+  const savedSearches = useMemo(() => settings?.savedSearches ?? [], [settings?.savedSearches])
+  const pickerTagOptions = useMemo(
+    () => tagChipOptions(visibleRecipes, pickerFilters.tags, TAG_CHIP_LIMIT),
+    [visibleRecipes, pickerFilters.tags],
+  )
+  const pickerSavedTagOptions = useMemo(
+    () => savedTagChipOptions(visibleRecipes, savedSearches),
+    [visibleRecipes, savedSearches],
+  )
+  const [tagBusy, setTagBusy] = useState(false)
+  /**
+   * 自分で登録したタグを消す（レシピ一覧の同じチップと同じ操作）。
+   * 消えるのは絞り込みに並ぶタグだけで、レシピは1品も変わらない（規約Fで両方書く＝共通の窓を使う）
+   */
+  const removeSavedSearch = async (name: string) => {
+    if (tagBusy) return
+    setTagBusy(true)
+    try {
+      const ok = await confirm(
+        buildSavedSearchRemoveConfirm({ name, recipeCount: recipes?.length ?? 0 }),
+      )
+      if (!ok) return
+      await updateSettings({ savedSearches: savedSearchesWithout(settings?.savedSearches, name) })
+      // そのタグで絞り込んでいたら外す（押して外すチップごと消えるため）
+      setPickerFilters((prev) => ({
+        ...prev,
+        keywords: prev.keywords.filter((value) => value !== name),
+      }))
+      showToast(ja.search.savedSearchRemovedToast.replace('{name}', name))
+    } finally {
+      setTagBusy(false)
+    }
+  }
+
+  // 2026-07-16 便T-1と同じ分け方: 絞り込みが効いているか／並び替えが既定から動いているか
+  const pickerFilterActive =
+    pickerQuery !== '' ||
+    pickerFilters.ingredients.length > 0 ||
+    pickerFilters.time !== 'all' ||
+    pickerFilters.effort !== 'all' ||
+    pickerFilters.tags.length > 0 ||
+    pickerFilters.keywords.length > 0 ||
+    pickerFilters.dishTypes.length > 0 ||
+    pickerFilters.favoriteOnly ||
+    pickerFilters.excludeNg ||
+    pickerFilters.quickOnly ||
+    pickerFilters.pantryOnly
+  const pickerSortActive =
+    pickerSort !== 'updated' || pickerSortDirection !== defaultSortDirection[pickerSort]
+  const pickerAnyConditionActive =
+    pickerFilterActive || pickerSortActive || (settings?.hideStarters ?? false)
+  const clearPickerFilters = () => {
+    setPickerQuery('')
+    setPickerFilters(EMPTY_RECIPE_FILTER_VALUES)
+    setPickerSort('updated')
+    setPickerSortDirection(defaultSortDirection.updated)
+    // 「自分で登録したレシピのみ」も一緒に戻す（2026-08-03 オーナー指示。レシピ一覧と同じ）
+    if (settings?.hideStarters) void updateSettings({ hideStarters: false })
+  }
+  /** 窓を開くたびに、検索・絞り込み・並び替えを何も掛けていない状態へ戻す */
+  const resetPickerConditions = () => {
+    setPickerQuery('')
+    setPickerFilters(EMPTY_RECIPE_FILTER_VALUES)
+    setPickerSort('updated')
+    setPickerSortDirection(defaultSortDirection.updated)
+    closePickerPanels()
+    setPickerMatchOpen(false)
+  }
 
   const setCount = (id: number, next: number) => {
     setPickerCounts((prev) => ({ ...prev, [id]: Math.max(0, next) }))
@@ -235,14 +435,14 @@ export default function ShoppingPage() {
 
   const openPicker = () => {
     setPickerCounts({})
-    setPickerQuery('')
+    resetPickerConditions()
     setPickerOpen(true)
   }
   // レシピを選び直す(2026-07-24 実機FB #8): 直前の選択(食数)を保ったままピッカーを開き直す。
   // 下書き自体は消さず、「下書きを作る」を再度押したときに作り直す
   const repickRecipes = () => {
     setPickerCounts(lastPickerCounts)
-    setPickerQuery('')
+    resetPickerConditions()
     setPickerOpen(true)
   }
 
@@ -404,7 +604,7 @@ export default function ShoppingPage() {
     setLastPickerCounts(pickerCounts) // 「レシピを選び直す」で復元できるよう、直前の選択を覚えておく(#8)
     setPickerOpen(false)
     setPickerCounts({})
-    setPickerQuery('')
+    resetPickerConditions()
     showToast(ja.shopping.candidatesMadeToast)
     setScrollToCandidates(true) // 生成した下書きへ自動スクロール(#13)
   }
@@ -1174,42 +1374,150 @@ export default function ShoppingPage() {
               <X size={22} aria-hidden />
             </button>
           </div>
-          <div className="px-[var(--space-md)]">
-            <div className="relative">
-              <Search
-                size={18}
-                className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-ink-muted"
-                aria-hidden
+          {/* 検索まど＋並び替え／絞り込みのボタン（2026-08-27 便LN・オーナー原文
+              「レシピから追加のレシピ選択画面は、検索と絞り込み、並び替えの使い勝手を
+              レシピタブと同じにしたい」）。並び・見た目・押す順番までレシピタブと同じにしてある。
+
+              relative: パネルはこの帯の真下に**重ねて**出す（レシピ一覧と同じ作り。
+              一覧の高さを1pxも変えないので、開いても閉じても縦位置が動かない）。
+              z-10: 重ねたパネルを、下のレシピの並びより手前に置く */}
+          <div ref={pickerBarRef} className="relative z-10 px-[var(--space-md)]">
+            <div className="flex gap-[var(--space-sm)]">
+              <div className="relative min-w-0 flex-1">
+                <Search
+                  size={18}
+                  className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-ink-muted"
+                  aria-hidden
+                />
+                <input
+                  type="search"
+                  value={pickerQuery}
+                  onChange={(e) => setPickerQuery(e.target.value)}
+                  placeholder={ja.search.placeholder}
+                  className="w-full rounded-md border border-edge bg-surface py-3 pl-10 pr-3 text-base text-ink placeholder:text-ink-muted/60 shadow-sm"
+                />
+              </div>
+              <button
+                type="button"
+                onClick={togglePickerSortPanel}
+                data-panel-toggle
+                aria-expanded={pickerSortPanelOpen}
+                aria-label={ja.search.sortToggle}
+                className={`flex h-[50px] w-[50px] shrink-0 items-center justify-center rounded-md border bg-surface shadow-sm ${
+                  pickerSortPanelOpen || pickerSortActive
+                    ? 'border-accent text-accent-ink'
+                    : 'border-edge text-ink-muted'
+                }`}
+              >
+                <ArrowDownUp size={22} aria-hidden />
+              </button>
+              <button
+                type="button"
+                onClick={togglePickerFilterPanel}
+                data-panel-toggle
+                aria-expanded={pickerFilterPanelOpen}
+                aria-label={ja.search.filterToggle}
+                className={`flex h-[50px] w-[50px] shrink-0 items-center justify-center rounded-md border bg-surface shadow-sm ${
+                  pickerFilterPanelOpen || pickerFilterActive
+                    ? 'border-accent text-accent-ink'
+                    : 'border-edge text-ink-muted'
+                }`}
+              >
+                <SlidersHorizontal size={22} aria-hidden />
+              </button>
+            </div>
+
+            {/* 品数と「一致した場所」の入口（レシピ一覧の件数の行と同じ形・同じ並び）。
+                絞り込みパネルの中にも同じ数字は出ているが、パネルを閉じているあいだも
+                いま何品に絞れているかが読めるように、1行だけ常に出す */}
+            <div className="mt-[var(--space-sm)] flex items-center justify-between gap-2">
+              <p className="shrink-0 whitespace-nowrap text-sm text-ink-muted">
+                {pickerFilterActive
+                  ? ja.search.resultCountWithTotal
+                      .replace('{n}', String(filteredRecipes.length))
+                      .replace('{t}', String(visibleRecipes.length))
+                  : ja.search.totalCount.replace('{n}', String(visibleRecipes.length))}
+              </p>
+              {pickerMatchSummary.rows.length > 0 && (
+                <button
+                  type="button"
+                  data-testid="picker-match-open"
+                  onClick={() => setPickerMatchOpen(true)}
+                  className="tap-target inline-flex min-w-0 items-center rounded-sm border border-edge bg-surface px-1 py-1 text-[10px] text-ink-muted"
+                >
+                  <span className="min-w-0 truncate">{ja.search.matchEntry}</span>
+                </button>
+              )}
+            </div>
+
+            {/* 並び替え／絞り込みのパネルを、レシピの並びの上に重ねて出す入れ物
+                （レシピ一覧と同じ作り・同じ部品）。pointer-events-none/auto は、
+                パネルの外側の余白でレシピのタップを奪わないため */}
+            <div
+              ref={pickerPanelWrapRef}
+              className="pointer-events-none absolute inset-x-0 top-full px-[var(--space-md)]"
+            >
+              <RecipeSortPanel
+                open={pickerSortPanelOpen}
+                maxHeight={pickerPanelMaxHeight}
+                sort={pickerSort}
+                sortDirection={pickerSortDirection}
+                onSortChange={(next) => {
+                  setPickerSort(next)
+                  // 種類を変えたらその種類の既定方向に戻す（レシピ一覧と同じ・2026-07-13 UI改善）
+                  setPickerSortDirection(defaultSortDirection[next])
+                }}
+                onSortDirectionChange={setPickerSortDirection}
+                nutritionUnlocked={pickerNutritionUnlocked}
+                proLinkTo={settingsLinkWithBack(
+                  '/settings?section=pro',
+                  location.pathname + location.search,
+                )}
+                onClose={closePickerPanels}
               />
-              <input
-                type="search"
-                value={pickerQuery}
-                onChange={(e) => setPickerQuery(e.target.value)}
-                placeholder={ja.shopping.pickerSearchPlaceholder}
-                className="w-full rounded-md border border-edge bg-surface py-3 pl-10 pr-3 text-base text-ink placeholder:text-ink-muted/60 shadow-sm"
+              <RecipeFilterPanel
+                open={pickerFilterPanelOpen}
+                maxHeight={pickerPanelMaxHeight}
+                values={pickerFilters}
+                onChange={setPickerFilterValues}
+                anyConditionActive={pickerAnyConditionActive}
+                onClear={clearPickerFilters}
+                filterActive={pickerFilterActive}
+                resultCount={filteredRecipes.length}
+                totalCount={visibleRecipes.length}
+                hideStarters={settings?.hideStarters ?? false}
+                onToggleHideStarters={() =>
+                  void updateSettings({ hideStarters: !(settings?.hideStarters ?? false) })
+                }
+                tagOptions={pickerTagOptions}
+                savedTagOptions={pickerSavedTagOptions}
+                onRemoveSavedSearch={(name) => void removeSavedSearch(name)}
+                tagBusy={tagBusy}
+                pantryNames={availableNames}
+                onClose={closePickerPanels}
               />
             </div>
-            {/* 並び替え(2026-07-23 #2: 一覧の並び替え機構を流用) */}
-            <label className="mt-[var(--space-sm)] flex items-center gap-2 text-sm text-ink-muted">
-              <span className="shrink-0">{ja.shopping.pickerSortLabel}</span>
-              <select
-                value={pickerSort}
-                onChange={(e) => setPickerSort(e.target.value as RecipeSortOption)}
-                className="min-w-0 flex-1 rounded-sm border border-edge bg-surface px-2 py-2 text-sm text-ink shadow-sm"
-              >
-                {PICKER_SORT_OPTIONS.map((opt) => (
-                  <option key={opt.value} value={opt.value}>
-                    {opt.label}
-                  </option>
-                ))}
-              </select>
-            </label>
           </div>
           <div className="mt-[var(--space-sm)] flex-1 overflow-x-hidden overflow-y-auto overscroll-contain px-[var(--space-md)]">
             {filteredRecipes.length === 0 ? (
-              <p className="mt-[var(--space-md)] text-center text-ink-muted">
-                {visibleRecipes.length === 0 ? ja.mealPlan.pickEmpty : ja.mealPlan.pickNoMatch}
-              </p>
+              <div className="mt-[var(--space-md)] text-center text-ink-muted">
+                <p>{visibleRecipes.length === 0 ? ja.mealPlan.pickEmpty : ja.mealPlan.pickNoMatch}</p>
+                {/* 0品の原因が条件のときは、その場で外せるようにする（レシピ一覧と同じ作法・
+                    2026-07-29 便CI/C20。パネルを開き直さないと「条件をクリア」に届かない、を作らない） */}
+                {visibleRecipes.length > 0 && pickerAnyConditionActive && (
+                  <>
+                    <p className="mt-1 text-sm">{ja.search.noResultFilteredHint}</p>
+                    <button
+                      type="button"
+                      data-testid="picker-clear"
+                      onClick={clearPickerFilters}
+                      className="mt-[var(--space-sm)] rounded-md border border-accent bg-surface px-4 py-2 text-sm font-bold text-accent-ink shadow-sm"
+                    >
+                      {ja.search.clear}
+                    </button>
+                  </>
+                )}
+              </div>
             ) : (
               <ul className="space-y-[var(--space-sm)]">
                 {filteredRecipes.map((recipe) => {
@@ -1271,7 +1579,11 @@ export default function ShoppingPage() {
               </ul>
             )}
           </div>
-          <div className="px-[var(--space-md)] pb-[calc(var(--space-md)+env(safe-area-inset-bottom))] pt-[var(--space-sm)]">
+          {/* 下の帯（パネルの高さの上限を測る下端でもある＝パネルがこのボタンに潜り込まない） */}
+          <div
+            ref={pickerFooterRef}
+            className="px-[var(--space-md)] pb-[calc(var(--space-md)+env(safe-area-inset-bottom))] pt-[var(--space-sm)]"
+          >
             <button
               type="button"
               onClick={() => void makeCandidates()}
@@ -1282,6 +1594,16 @@ export default function ShoppingPage() {
               {selectedRecipeCount > 0 ? `（${selectedRecipeCount}）` : ''}
             </button>
           </div>
+
+          {/* 打った言葉がレシピのどこに一致したか（レシピ一覧と同じ窓・components/SearchMatchDialog.tsx）。
+              この窓は選択画面（z-50）より上（z-70）に出る */}
+          {pickerMatchOpen && (
+            <SearchMatchDialog
+              query={pickerQuery}
+              summary={pickerMatchSummary}
+              onClose={() => setPickerMatchOpen(false)}
+            />
+          )}
         </div>
       )}
 

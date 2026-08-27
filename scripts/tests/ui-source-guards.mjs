@@ -2672,3 +2672,95 @@ import { createRequire } from 'node:module'
     )
   }
 }
+
+// ---------- LN-2（2026-08-27 便LN）: 「レシピから追加」の選択画面は、レシピタブと同じ道具で探す ----------
+//
+// オーナー原文「レシピから追加のレシピ選択画面は、検索と絞り込み、並び替えの使い勝手を
+// レシピタブと同じにしたい。レシピの表示の仕方は今のまま、食数増減できる状態で。」
+//
+// 直す前のこの画面は、レシピタブと**別の探し方**を持っていた:
+//   ・検索が `r.title.includes(q)` の素の部分一致（かなの正規化も別名も材料も見ない）
+//   ・絞り込みが1つも無い
+//   ・並び替えが4種だけの自前のプルダウン（レシピタブは基本8種＋栄養＋昇降）
+// 画面ごとに探し方を持つと、同じ言葉を打っても画面によって出る品が違う。
+// ここで見張るのは「同じ道具を使っていること」と「オーナーが名指しで“今のまま”と言った2つ」。
+{
+  const lnRoot = path.join(path.dirname(fileURLToPath(scriptFileUrl)), '..')
+  const lnShopping = readFileSync(path.join(lnRoot, 'src/pages/ShoppingPage.tsx'), 'utf-8')
+
+  // ① 検索は logic/search.ts の searchRecipes を使う（画面ごとに別の検索を持たない）
+  eq(
+    'LN-2 ①選択画面は searchRecipes で探している',
+    /searchRecipes\(/.test(lnShopping) && /from '\.\.\/logic\/search'/.test(lnShopping),
+    true,
+  )
+  // ② 画面独自の素の部分一致が残っていない（戻したら赤くなる）
+  eq(
+    'LN-2 ②画面独自の「料理名だけの部分一致」が残っていない',
+    /\.title\.includes\(/.test(lnShopping),
+    false,
+  )
+  // ③ 並び替え・絞り込みはレシピ一覧と同じ部品（顔ぶれもProの線も1か所で決まる）
+  eq(
+    'LN-2 ③レシピ一覧と同じ並び替え／絞り込みのパネルを出している',
+    ['<RecipeSortPanel', '<RecipeFilterPanel'].filter((tag) => !lnShopping.includes(tag)),
+    [],
+  )
+  // ④ 栄養の並び替えの解錠は共通の判定から渡す（Proの線を画面ごとに書き写さない）
+  eq(
+    'LN-2 ④栄養の並び替えの解錠は isNutritionUnlocked から渡している',
+    /isNutritionUnlocked\(!!settings\?\.proCode\)/.test(lnShopping),
+    true,
+  )
+  // ⑤⑥ オーナーが名指しで「今のまま」と言った2つ＝レシピの見せ方（標準のカード）と食数の±
+  eq(
+    'LN-2 ⑤レシピの見せ方は今のまま（標準のカード・place="recipePicker"）',
+    /density="standard"/.test(lnShopping) && /place="recipePicker"/.test(lnShopping),
+    true,
+  )
+  eq(
+    'LN-2 ⑥食数の±も今のまま',
+    ['pickerServingUp', 'pickerServingDown', 'pickerServingUnit'].filter(
+      (key) => !lnShopping.includes(key),
+    ),
+    [],
+  )
+  // ⑦ 選択画面は、レシピ一覧が背負っている「条件の保存・URLへの反映・復元」を持ち込まない
+  //    （便LMの申し送り）。条件は1本の useState で持ち、窓を開くたびに何も絞っていない状態へ戻す。
+  //    ここが崩れると、前に選んだ条件が残ったまま窓が開き、「レシピが出てこない」の原因が
+  //    窓の外から読めなくなる（レシピ一覧は一覧の上に条件が全部見えているので同じ形にはならない）
+  eq(
+    'LN-2 ⑦条件は RecipeFilterValues 1本で持つ',
+    /useState<RecipeFilterValues>\(EMPTY_RECIPE_FILTER_VALUES\)/.test(lnShopping),
+    true,
+  )
+  eq(
+    'LN-2 ⑦窓を開くたびに条件を初期値へ戻している',
+    (lnShopping.match(/resetPickerConditions\(\)/g) ?? []).length >= 3,
+    true,
+  )
+
+  // ⑧ 絞り込みの条件を**1つ残らず**検索へ渡している。
+  //    パネルに並ぶチップは RecipeFilterValues の項目そのものなので、渡し忘れた項目は
+  //    「押せるのに何も起きないチップ」になる（押しても品数が変わらないので、
+  //    利用者からは壊れているのか条件に合う品が無いのか区別がつかない）。
+  //    項目が増えたときも、渡し先を足すまでここが赤くなる
+  {
+    const lnPanel = readFileSync(path.join(lnRoot, 'src/components/RecipeFilterPanel.tsx'), 'utf-8')
+    const lnValuesBlock = lnPanel.match(/export type RecipeFilterValues = \{([\s\S]*?)\n\}/)?.[1] ?? ''
+    const lnFields = [...lnValuesBlock.matchAll(/^\s{2}(\w+):/gm)].map((m) => m[1])
+    eq('LN-2 ⑧前提: 絞り込みの条件を読み取れている（11項目）', lnFields.length, 11)
+    const lnCall = lnShopping.match(/searchRecipes\(visibleRecipes, \{([\s\S]*?)\n\s*\}\)/)?.[1] ?? ''
+    eq(
+      'LN-2 ⑧絞り込みの条件を1つ残らず検索へ渡している',
+      lnFields.filter((f) => !new RegExp(`\\b${f}:\\s*pickerFilters\\.${f}`).test(lnCall)),
+      [],
+    )
+    // 「使いたい食材」だけは配列を空白区切りの1文字にして渡す（searchRecipes の受け口の形）
+    eq(
+      'LN-2 ⑧「使いたい食材」は空白区切りにして渡している（searchRecipesの受け口の形）',
+      /ingredients:\s*pickerFilters\.ingredients\.join\(' '\)/.test(lnCall),
+      true,
+    )
+  }
+}

@@ -74,6 +74,27 @@ export type RecipeFilterValues = {
   pantryOnly: boolean
 }
 
+/**
+ * 何も絞っていない状態（2026-08-27 便LN）。
+ *
+ * レシピ一覧は前に見ていた条件を sessionStorage から戻すので、この値は使わない。
+ * 使うのは「レシピから追加」の選択画面のように、**開くたびに何も絞っていない状態から始める**画面。
+ * 値は logic/search.ts の defaultSearchOptions と同じ意味で、条件を1つも掛けない形をそろえてある。
+ */
+export const EMPTY_RECIPE_FILTER_VALUES: RecipeFilterValues = {
+  ingredients: [],
+  time: 'all',
+  effort: 'all',
+  tags: [],
+  keywords: [],
+  tagMatch: 'any',
+  dishTypes: [],
+  favoriteOnly: false,
+  excludeNg: false,
+  quickOnly: false,
+  pantryOnly: false,
+}
+
 /** チップの顔ぶれ（名前と、その名前で絞ったときの品数を入れた見出し） */
 export type RecipeFilterTagOption = { value: string; label: string }
 
@@ -99,9 +120,13 @@ export type RecipeFilterPanelProps = {
   tagOptions: RecipeFilterTagOption[]
   savedTagOptions: RecipeFilterTagOption[]
   onRemoveSavedSearch: (name: string) => void
-  /** 以前の版がレシピ本体に書き込んだタグ（残っているものだけ） */
-  legacyTagUsages: { tag: string; count: number }[]
-  onRemoveLegacyTag: (name: string, count: number) => void
+  /**
+   * 以前の版がレシピ本体に書き込んだタグ（残っているものだけ）。
+   * 2026-08-27 便LN で任意にした: この後始末の入口はレシピタブに1か所あればよく、
+   * 「レシピから追加」の選択画面（レシピを選ぶだけの窓）には出さない。渡さなければ欄ごと出ない
+   */
+  legacyTagUsages?: { tag: string; count: number }[]
+  onRemoveLegacyTag?: (name: string, count: number) => void
   /** タグの書き換え中は押せなくする */
   tagBusy: boolean
   /** 在庫（ある／少ない）の食材名。1件も無ければ在庫の欄を出さない */
@@ -363,7 +388,7 @@ export default function RecipeFilterPanel({
             書き込まれたタグを作り直しに合わせて黙って外すとデータを失うので、
             残したままにもできる形にして、外したいときだけ外せる道をここに置く。
             残っていなければ欄ごと出さない＝使ったことのない人には最初から出ない */}
-        {legacyTagUsages.length > 0 && (
+        {legacyTagUsages && legacyTagUsages.length > 0 && onRemoveLegacyTag && (
           <>
             <p className="mt-[var(--space-md)] text-sm font-bold text-ink-muted">
               {ja.search.legacyTagTitle}

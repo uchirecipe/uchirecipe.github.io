@@ -402,7 +402,7 @@ import './_shared.mjs'
       await ixPage.getByRole('button', { name: ja.shopping.fromRecipeTitle, exact: true }).click()
       await ixPage.waitForTimeout(400)
       // 同梱レシピを巻き込まないよう、この検証で登録した1品だけに絞ってから食数を1にする
-      await ixPage.getByPlaceholder(ja.shopping.pickerSearchPlaceholder).fill(ixTitle)
+      await ixPage.getByPlaceholder(ja.search.placeholder).fill(ixTitle)
       await ixPage.waitForTimeout(400)
       await ixPage.getByRole('button', { name: ja.shopping.pickerServingUp }).first().click()
       await ixPage.waitForTimeout(200)
@@ -480,7 +480,7 @@ import './_shared.mjs'
       await izPage.waitForTimeout(300)
       await izPage.getByRole('button', { name: ja.shopping.fromRecipeTitle, exact: true }).click()
       await izPage.waitForTimeout(400)
-      await izPage.getByPlaceholder(ja.shopping.pickerSearchPlaceholder).fill(izTitle)
+      await izPage.getByPlaceholder(ja.search.placeholder).fill(izTitle)
       await izPage.waitForTimeout(400)
       await izPage.getByRole('button', { name: ja.shopping.pickerServingUp }).first().click()
       await izPage.waitForTimeout(200)
@@ -1825,3 +1825,181 @@ import './_shared.mjs'
     }
   }
 
+
+  // --- LN-PICK-01: 「レシピから追加」の選択画面が、レシピタブと同じ探し方になっている
+  //     （2026-08-27 便LN・オーナー原文「レシピから追加のレシピ選択画面は、検索と絞り込み、
+  //     並び替えの使い勝手をレシピタブと同じにしたい。レシピの表示の仕方は今のまま、
+  //     食数増減できる状態で。」）。
+  //
+  //     直す前は、検索が料理名だけの部分一致・絞り込みが1つも無い・並び替えが4種だけだった。
+  //     測るのは利用者が確かめたいこと5つ。**どこに出ているか**ではなく
+  //     **その操作で並びが変わるか**で見る（並びやDOMの形が変わっても同じ判定になる形）:
+  //       ①料理名に無い言葉（材料）でも探せる ②「一致した場所」が読める
+  //       ③絞り込みで品数が減る ④並び替えで並びが変わる
+  //       ⑤レシピの見せ方と食数の±は今までどおり（オーナーが名指しで「今のまま」と言ったもの）
+  currentCheck = 'LN-PICK-01'
+  {
+    const lnBrowser = await chromium.launch()
+    try {
+      const lnContext = await lnBrowser.newContext({ viewport: { width: 390, height: 844 } })
+      const lnPage = await lnContext.newPage()
+      lnPage.on('dialog', (dialog) => dialog.accept())
+      lnPage.on('pageerror', (err) => {
+        if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+        errors.push(`[pageerror@LN-PICK-01] ${err.message}`)
+      })
+      const lnTitles = () =>
+        lnPage.evaluate(() =>
+          [...document.querySelectorAll('li')]
+            .filter((li) => li.querySelector('button[aria-label]'))
+            .map((li) => li.querySelector('p')?.textContent?.replace(/​/g, '').trim())
+            .filter(Boolean),
+        )
+
+      await lnPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await lnPage.waitForTimeout(1800)
+      await lnPage.goto(`${BASE}/#/shopping`, { waitUntil: 'networkidle' })
+      await lnPage.waitForTimeout(500)
+      await lnPage.getByRole('button', { name: ja.shopping.tabMemo, exact: true }).click()
+      await lnPage.waitForTimeout(300)
+      await lnPage.getByRole('button', { name: ja.shopping.fromRecipeTitle, exact: true }).click()
+      await lnPage.waitForTimeout(500)
+
+      const lnAll = await lnTitles()
+      check('LN-PICK-01 選択画面にレシピが並ぶ', lnAll.length > 0, `n=${lnAll.length}`)
+
+      // ① 料理名に無い言葉（材料名）で探せる＝レシピタブと同じ searchRecipes を使っている。
+      //    打つ言葉は同梱レシピの材料から取り、料理名に含まれない語であることを検査の中で確かめる
+      const lnWord = '鶏ひき肉'
+      await lnPage.getByPlaceholder(ja.search.placeholder).fill(lnWord)
+      await lnPage.waitForTimeout(600)
+      const lnFound = await lnTitles()
+      check(
+        `LN-PICK-01 ①材料の言葉（${lnWord}）で探せる＝料理名だけの部分一致ではない`,
+        lnFound.length > 0 && lnFound.some((t) => !t.includes(lnWord)),
+        `該当=${JSON.stringify(lnFound)}`,
+      )
+      check(
+        'LN-PICK-01 ①探した結果は全件より少ない（絞れている）',
+        lnFound.length < lnAll.length,
+        `該当=${lnFound.length} 全件=${lnAll.length}`,
+      )
+
+      // ② 「一致した場所」が読める（レシピタブと同じ窓）
+      check(
+        'LN-PICK-01 ②「一致した場所」の入口が出る',
+        (await lnPage.getByTestId('picker-match-open').count()) === 1,
+      )
+      await lnPage.getByTestId('picker-match-open').click()
+      await lnPage.waitForTimeout(400)
+      const lnMatch = ((await lnPage.getByTestId('search-match-dialog').textContent()) ?? '').replaceAll('​', '')
+      check(
+        'LN-PICK-01 ②一致した場所に、打った言葉と当たった場所が出る',
+        lnMatch.includes(lnWord) && (await lnPage.getByTestId('search-match-word').count()) > 0,
+        `窓=${lnMatch.slice(0, 120)}`,
+      )
+      await lnPage.getByTestId('search-match-close').click()
+      await lnPage.waitForTimeout(300)
+      await lnPage.getByPlaceholder(ja.search.placeholder).fill('')
+      await lnPage.waitForTimeout(500)
+
+      // ③ 絞り込みで品数が減る（レシピタブと同じパネル）
+      await lnPage.getByRole('button', { name: ja.search.filterToggle }).click()
+      await lnPage.waitForTimeout(500)
+      check(
+        'LN-PICK-01 ③レシピタブと同じ絞り込みパネルが開く',
+        (await lnPage.getByTestId('recipes-filter-panel').count()) === 1,
+      )
+      await lnPage.getByRole('button', { name: ja.dishType.side, exact: true }).click()
+      await lnPage.waitForTimeout(500)
+      await lnPage.getByTestId('filter-panel-close').click()
+      await lnPage.waitForTimeout(500)
+      const lnSide = await lnTitles()
+      check(
+        'LN-PICK-01 ③料理の種別で絞ると品数が減る',
+        lnSide.length > 0 && lnSide.length < lnAll.length,
+        `副菜=${lnSide.length} 全件=${lnAll.length}`,
+      )
+
+      // ④ 並び替えで並びが変わる（レシピタブと同じパネル。無料でも選べる並びで測る）
+      await lnPage.getByRole('button', { name: ja.search.sortToggle }).click()
+      await lnPage.waitForTimeout(500)
+      check(
+        'LN-PICK-01 ④レシピタブと同じ並び替えパネルが開く',
+        (await lnPage.getByTestId('recipes-sort-panel').count()) === 1,
+      )
+      const lnSortText = ((await lnPage.getByTestId('recipes-sort-panel').textContent()) ?? '').replaceAll('​', '')
+      check(
+        'LN-PICK-01 ④無料でも選べる並び（最近作った順・原価順）が出ている',
+        lnSortText.includes(ja.search.sortRecentCooked) && lnSortText.includes(ja.search.sortCost),
+        `パネル=${lnSortText.slice(0, 160)}`,
+      )
+      check(
+        'LN-PICK-01 ④栄養8項目の並び替えはProの線のまま（無料では案内が出る）',
+        lnSortText.includes(ja.search.sortNutritionGate),
+        `パネル=${lnSortText.slice(0, 200)}`,
+      )
+      await lnPage.getByRole('button', { name: ja.search.sortKana, exact: true }).click()
+      await lnPage.waitForTimeout(400)
+      await lnPage.getByTestId('sort-panel-close').click()
+      await lnPage.waitForTimeout(500)
+      const lnKana = await lnTitles()
+      check(
+        'LN-PICK-01 ④並び替えを変えると並びが変わる（品数は変わらない）',
+        lnKana.length === lnSide.length && JSON.stringify(lnKana) !== JSON.stringify(lnSide),
+        `五十音=${JSON.stringify(lnKana.slice(0, 3))} 直前=${JSON.stringify(lnSide.slice(0, 3))}`,
+      )
+
+      // ⑤ レシピの見せ方と食数の±は今までどおり（写真つきの標準のカード＋±のボタン）
+      const lnCard = await lnPage.evaluate((upLabel) => {
+        const plus = [...document.querySelectorAll('button')].find(
+          (b) => b.getAttribute('aria-label') === upLabel,
+        )
+        const li = plus?.closest('li')
+        return {
+          title: li?.querySelector('p')?.textContent?.replace(/​/g, '').trim() ?? '',
+          hasThumb: !!li?.querySelector('img, [class*="mask"], svg'),
+          hasMinus: !!li?.querySelector('button[aria-label]'),
+        }
+      }, ja.shopping.pickerServingUp)
+      check(
+        'LN-PICK-01 ⑤レシピの見せ方は今のまま（料理名と写真の枠がある行）',
+        lnCard.title.length > 0 && lnCard.hasThumb,
+        `カード=${JSON.stringify(lnCard)}`,
+      )
+      await lnPage.getByRole('button', { name: ja.shopping.pickerServingUp }).first().click()
+      await lnPage.waitForTimeout(300)
+      const lnAfterPlus = ((await lnPage.textContent('body')) ?? '').replaceAll('​', '')
+      check(
+        'LN-PICK-01 ⑤食数の＋が今までどおり効く（1食になる）',
+        lnAfterPlus.includes(`1${ja.shopping.pickerServingUnit}`) &&
+          !(await lnPage.getByRole('button', { name: ja.shopping.makeCandidates }).isDisabled()),
+      )
+
+      // 0品になる条件を掛けたら、その場で条件を外せる（行き止まりにしない）
+      await lnPage.getByPlaceholder(ja.search.placeholder).fill('ここにしかないことば')
+      await lnPage.waitForTimeout(600)
+      check(
+        'LN-PICK-01 0品のときは、その場で条件を外せる',
+        (await lnPage.getByTestId('picker-clear').count()) === 1,
+      )
+      await lnPage.getByTestId('picker-clear').click()
+      await lnPage.waitForTimeout(600)
+      const lnCleared = await lnTitles()
+      check(
+        'LN-PICK-01 条件をクリアすると全件に戻り、選んだ食数は残る',
+        lnCleared.length === lnAll.length &&
+          ((await lnPage.textContent('body')) ?? '').includes(`1${ja.shopping.pickerServingUnit}`),
+        `クリア後=${lnCleared.length} 全件=${lnAll.length}`,
+      )
+      // 選んだ状態のまま下書きまで作れる（探し方を変えても、この画面の目的は変わっていない）
+      await lnPage.getByRole('button', { name: ja.shopping.makeCandidates }).click()
+      await lnPage.waitForTimeout(700)
+      check(
+        'LN-PICK-01 探して選んだあと、今までどおり下書きが作れる',
+        ((await lnPage.textContent('body')) ?? '').replaceAll('​', '').includes(ja.shopping.candidateTitle),
+      )
+    } finally {
+      await lnBrowser.close()
+    }
+  }

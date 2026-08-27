@@ -34,14 +34,6 @@ import {
 import { buildBulkDeleteConfirm } from '../logic/recipeDelete'
 import { useSelectedRecipesExport } from '../components/useSelectedRecipesExport'
 import ChoiceDialog from '../components/ChoiceDialog'
-import { useScrollLock } from '../components/useScrollLock'
-import {
-  DIALOG_ACTIONS_CLS,
-  DIALOG_BACKDROP_CLS,
-  DIALOG_CANCEL_BUTTON_CLS,
-  DIALOG_CARD_CLS,
-  DIALOG_TITLE_CLS,
-} from '../components/dialogStyle'
 import { useSettings, updateSettings } from '../db/settings'
 import { addRecipesToToday, useMealPlanRange } from '../db/mealPlan'
 import { todayString } from '../logic/date'
@@ -54,11 +46,12 @@ import { isRecipeInToday } from '../logic/mealPlan'
 import { pantryAvailableNames } from '../logic/pantry'
 import {
   searchRecipes,
-  filterTagUsageCounts,
-  countRecipesMatchingKeyword,
+  tagChipOptions,
+  savedTagChipOptions,
   searchMatchSummary,
-  searchMatchRowText,
   splitTerms,
+  MATCH_WORD_LIMIT,
+  TAG_CHIP_LIMIT,
   type DishTypeFilter,
   type EffortFilter,
   type TagFilter,
@@ -103,7 +96,8 @@ import RecipeSortPanel from '../components/RecipeSortPanel'
 import RecipeFilterPanel, {
   type RecipeFilterValues,
 } from '../components/RecipeFilterPanel'
-import { usePanelMaxHeight } from '../components/recipePanelParts'
+import { usePanelMaxHeight, useOutsidePanelClose } from '../components/recipePanelParts'
+import SearchMatchDialog from '../components/SearchMatchDialog'
 import RecipeCard from '../components/RecipeCard'
 import { normalizeEffortFilter } from '../logic/effort'
 import Toast from '../components/Toast'
@@ -121,22 +115,8 @@ const LONG_PRESS_MS = 550
 const LONG_PRESS_MOVE_TOLERANCE = 10
 
 
-/**
- * タグのチップに出す最大件数（「すべて」は別枠）。
- * 2026-08-10 便FF: チップに件数を併記した分だけ1つが横に広がるので8→6に減らし、
- * スマホ縦画面（390px）で2行に収まる範囲を保つ
- */
-const TAG_CHIP_LIMIT = 6
-
-/**
- * 検索まどの下に並べる「一致した場所」の上限（2026-08-20 便IH・②）。
- *
- * 同梱109品・語彙376語で実測したところ、一致した場所が1種類で済む言葉が242語、3種類までで289語。
- * 6を超えたのは「きのこ」（7種）と、1文字だけ打ったとき（「ん」23種・「い」19種）の3語だけだった。
- * 数はキーワードのチップと同じ6にそろえる＝同じ画面に出る「多い順の並び」が、
- * 場所によって違う長さにならない。**入りきらなかった数は必ず「ほか◯件」で出す**（黙って切らない）
- */
-const MATCH_WORD_LIMIT = TAG_CHIP_LIMIT
+/* タグのチップの数（TAG_CHIP_LIMIT）と「一致した場所」の数（MATCH_WORD_LIMIT）は、
+   2026-08-27 便LN で logic/search.ts へ移した（同じチップを出す選択画面と数をそろえるため） */
 
 
 /**
@@ -325,62 +305,9 @@ export default function RecipesPage() {
   const panelOpen = sortPanelOpen || filterPanelOpen
   // パネル本体を包む入れ物。タップが「窓の中か外か」の判定に使う
   const panelWrapRef = useRef<HTMLDivElement>(null)
-  /**
-   * 窓の外をタップしたら閉じる（2026-08-19 便HU・⑰ オーナー「並び替えと絞り込みの窓は、
-   * 窓の外タップでも閉じるようにして」）。
-   *
-   * 「窓の中か外か」は**指を置いた時点（pointerdown）で決める**。押した中身が押した結果
-   * 消えることがあるため（例:「条件をクリア」は押すと条件が無くなってボタン自体が消える）、
-   * 離した後（click）に調べると「もう画面に無い＝窓の外」と誤って読み、窓が勝手に閉じる。
-   * 実際に便HUの実機確認で「条件をクリアを押すと絞り込みの窓ごと閉じる」が起きた。
-   *
-   * 閉じるのは離したとき（click）だけ: 指を滑らせて一覧をスクロールしただけでは閉じない
-   * （料理中に片手で触る画面なので、スクロールの押し始めが「閉じる」に化けないようにする）。
-   * 並び替え/絞り込みのボタン自身は自前で開閉を持っているので、ここでは触らない
-   * （両方が働くと、押した瞬間に開いてすぐ閉じる）。
-   *
-   * 【画面いっぱいの下敷き（透明な板）を置かない理由・2026-08-19 便HU】
-   * はじめは窓の外のタップを受け止めるために `fixed inset-0` の下敷きを開くときだけ
-   * 置いていた。ところがそのぶんの描き直しでブラウザが数十ミリ秒ふさがり、
-   * **折りたたみが開くときのアニメーション（Collapse）が出なくなった**
-   * （中身を置く描き直しより先に「開き切った高さ」の指示が届き、0→高さの変化が起きない。
-   * オーナー実機指摘で入った動きなので、消してはいけないもの。e2eのEO-01が捕まえた）。
-   * 下敷きを置く代わりに、いちばん外側でタップを掴み取って（capture）その1回を使い切る形にした。
-   * 画面に足すものが無いので、開くときの描き直しは元のまま＝アニメーションが戻る。
-   */
-  const pressedOutsideRef = useRef(false)
-  useEffect(() => {
-    if (!panelOpen) return
-    const isOutside = (target: EventTarget | null) => {
-      if (!(target instanceof Element)) return false
-      if (panelWrapRef.current?.contains(target)) return false
-      if (target.closest('[data-panel-toggle]')) return false
-      return true
-    }
-    const onPointerDown = (e: PointerEvent) => {
-      pressedOutsideRef.current = isOutside(e.target)
-    }
-    const onClickCapture = (e: MouseEvent) => {
-      const outside = pressedOutsideRef.current
-      // キーボード操作など、指を置いた記録が無いまま来たときは閉じない側に倒す
-      pressedOutsideRef.current = false
-      if (!outside) return
-      // 窓の外の1回目のタップは「窓を閉じる」だけに使い、その下にあるものには渡さない
-      // （レシピのカードの上で閉じたつもりが、そのレシピが開いてしまうのを防ぐ）。
-      // いちばん外側の掴み取り（capture）なので、画面側のどの操作よりも先に決められる
-      e.preventDefault()
-      e.stopPropagation()
-      closePanels()
-    }
-    document.addEventListener('pointerdown', onPointerDown, true)
-    document.addEventListener('click', onClickCapture, true)
-    return () => {
-      document.removeEventListener('pointerdown', onPointerDown, true)
-      document.removeEventListener('click', onClickCapture, true)
-      pressedOutsideRef.current = false
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [panelOpen])
+  /* 窓の外のタップで閉じる仕掛けは 2026-08-27 便LN で components/recipePanelParts.tsx へ出した
+     （「レシピから追加」の選択画面でも同じ閉じ方にするため。中身は変えていない） */
+  useOutsidePanelClose(panelOpen, panelWrapRef, closePanels)
   // 一覧の上に重ねて出すパネルの高さの上限(2026-08-10 便FF)。貼り付く検索バーの下端と
   // 下の固定バーの位置から実測する
   const topBarRef = useRef<HTMLDivElement>(null)
@@ -637,13 +564,7 @@ export default function RecipesPage() {
    * ＝「自分で登録したレシピのみ」をONにすれば、どちらの数字も同じように数え直される
    */
   const savedTagOptions = useMemo(
-    () =>
-      savedSearches.map((name) => ({
-        value: name,
-        label: ja.search.tagChip
-          .replace('{name}', name)
-          .replace('{n}', String(countRecipesMatchingKeyword(visibleRecipes ?? [], name))),
-      })),
+    () => savedTagChipOptions(visibleRecipes ?? [], savedSearches),
     [savedSearches, visibleRecipes],
   )
 
@@ -657,20 +578,10 @@ export default function RecipesPage() {
    * 自分のタグだけが数え直される。
    * 選択中のタグは、件数の変動で上位から外れても必ず残す(外す手段が消えないように)
    */
-  const tagOptions = useMemo(() => {
-    // 2026-08-19 便HU・⑮: 「高たんぱく」は候補に出さない（logic/search.ts FILTER_HIDDEN_TAGS）
-    const usages = filterTagUsageCounts(visibleRecipes ?? [], TAG_CHIP_LIMIT)
-    // 選んでいるタグは、件数の変動で上位から外れても必ず残す（外す手段が消えないように）
-    for (const name of tags) {
-      if (!usages.some((u) => u.tag === name)) {
-        usages.push({ tag: name, count: countRecipesWithTag(visibleRecipes ?? [], name) })
-      }
-    }
-    return usages.map(({ tag: value, count }) => ({
-      value,
-      label: ja.search.tagChip.replace('{name}', value).replace('{n}', String(count)),
-    }))
-  }, [visibleRecipes, tags])
+  const tagOptions = useMemo(
+    () => tagChipOptions(visibleRecipes ?? [], tags, TAG_CHIP_LIMIT),
+    [visibleRecipes, tags],
+  )
 
   const results = useMemo(() => {
     if (!visibleRecipes) return undefined
@@ -737,9 +648,8 @@ export default function RecipesPage() {
     () => searchMatchSummary(results?.map((r) => r.recipe) ?? [], queryTerms, MATCH_WORD_LIMIT),
     [results, queryTerms],
   )
-  const matchDialogTitle = ja.search.matchDialogTitle.replace('{q}', query.trim())
-  // 窓を開いているあいだ、後ろの一覧は動かさない（他の窓と同じ作法。components/useScrollLock.ts）
-  useScrollLock(matchDialogOpen)
+  // 窓を開いているあいだ後ろの一覧を動かさない仕掛けは、窓そのもの
+  // （components/SearchMatchDialog.tsx）の中に入れてある
   // 打ち直して一致した場所が変わったら窓は閉じる（開いたときと違う中身に黙って入れ替わらない）
   useEffect(() => {
     if (matchSummary.rows.length === 0) setMatchDialogOpen(false)
@@ -1858,50 +1768,11 @@ export default function RecipesPage() {
 
           並びは品数の多い順(オーナー指定)。上限を超えた分は「ほか◯件」で数を出す(黙って切らない) */}
       {matchDialogOpen && (
-        <div
-          className={DIALOG_BACKDROP_CLS}
-          onClick={() => setMatchDialogOpen(false)}
-          role="presentation"
-        >
-          <div
-            role="dialog"
-            aria-label={matchDialogTitle}
-            onClick={(e) => e.stopPropagation()}
-            data-testid="search-match-dialog"
-            className={DIALOG_CARD_CLS}
-          >
-            <p className={DIALOG_TITLE_CLS}>{matchDialogTitle}</p>
-            <p className="ja-phrase mt-[var(--space-sm)] text-sm text-ink-muted">
-              {ja.search.matchDialogHint}
-            </p>
-            <ul className="mt-[var(--space-md)] space-y-[var(--space-sm)]">
-              {matchSummary.rows.map((row) => (
-                <li
-                  key={`${row.field} ${row.word ?? ''}`}
-                  data-testid="search-match-word"
-                  className="ja-phrase rounded-sm border border-edge px-3 py-2 text-sm"
-                >
-                  {searchMatchRowText(row)}
-                </li>
-              ))}
-            </ul>
-            {matchSummary.hiddenCount > 0 && (
-              <p data-testid="search-match-more" className="mt-[var(--space-sm)] text-sm text-ink-muted">
-                {ja.search.matchMore.replace('{n}', String(matchSummary.hiddenCount))}
-              </p>
-            )}
-            <div className={DIALOG_ACTIONS_CLS}>
-              <button
-                type="button"
-                data-testid="search-match-close"
-                onClick={() => setMatchDialogOpen(false)}
-                className={DIALOG_CANCEL_BUTTON_CLS}
-              >
-                {ja.common.close}
-              </button>
-            </div>
-          </div>
-        </div>
+        <SearchMatchDialog
+          query={query}
+          summary={matchSummary}
+          onClose={() => setMatchDialogOpen(false)}
+        />
       )}
 
       {/* 選び終わったあとに出す「選んだ◯品をどうしますか？」の窓(2026-08-17 便HJ・オーナー実機

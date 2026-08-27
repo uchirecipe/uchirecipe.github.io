@@ -10,7 +10,7 @@
 // ここに置いてあるものは 2026-08-27 より前は src/pages/RecipesPage.tsx の中にあった。
 // **見た目も動きも1つも変えていない**（どのファイルに書いてあるかだけを変えた）。
 // ==========================================================================================
-import { useEffect, useState, type RefObject } from 'react'
+import { useEffect, useRef, useState, type RefObject } from 'react'
 import { ChevronDown, Square, SquareCheck } from 'lucide-react'
 
 /**
@@ -41,7 +41,19 @@ const PANEL_MIN_HEIGHT = 240
  * そのため固定値では決められず、開いている間だけ実際の位置を測って上限を入れる。
  * 下はタブナビ・タイマーの浮遊バー（`data-app-bottom-bar`）の手前で止める。
  */
-export function usePanelMaxHeight(open: boolean, barRef: RefObject<HTMLDivElement | null>) {
+export function usePanelMaxHeight(
+  open: boolean,
+  barRef: RefObject<HTMLDivElement | null>,
+  /**
+   * 下の縁を決める要素（2026-08-27 便LN）。渡さなければ従来どおり `[data-app-bottom-bar]` を測る。
+   *
+   * 「レシピから追加」の選択画面のように**画面いっぱいの窓の中**にパネルを出すときは、
+   * 下の縁がタブナビではなく**その窓自身の下のボタン**になる。窓はタブナビの上に重なっているので、
+   * `[data-app-bottom-bar]` を測ると窓の中に無い帯の高さで止めてしまい、
+   * パネルが窓の下のボタンに潜り込む（またはその手前で余計に縮む）。
+   */
+  bottomRef?: RefObject<HTMLElement | null>,
+) {
   const [maxHeight, setMaxHeight] = useState<number>()
   useEffect(() => {
     if (!open) return
@@ -50,10 +62,16 @@ export function usePanelMaxHeight(open: boolean, barRef: RefObject<HTMLDivElemen
       if (!bar) return
       const top = bar.getBoundingClientRect().bottom + PANEL_EDGE_GAP
       let bottomInset = 0
-      for (const el of document.querySelectorAll<HTMLElement>('[data-app-bottom-bar]')) {
-        const r = el.getBoundingClientRect()
-        if (r.height > 0 && r.top < window.innerHeight)
-          bottomInset = Math.max(bottomInset, window.innerHeight - r.top)
+      const ownBottom = bottomRef?.current
+      if (ownBottom) {
+        const r = ownBottom.getBoundingClientRect()
+        if (r.height > 0) bottomInset = Math.max(0, window.innerHeight - r.top)
+      } else {
+        for (const el of document.querySelectorAll<HTMLElement>('[data-app-bottom-bar]')) {
+          const r = el.getBoundingClientRect()
+          if (r.height > 0 && r.top < window.innerHeight)
+            bottomInset = Math.max(bottomInset, window.innerHeight - r.top)
+        }
       }
       const bottom = window.innerHeight - bottomInset - PANEL_EDGE_GAP
       setMaxHeight(Math.max(PANEL_MIN_HEIGHT, Math.round(bottom - top)))
@@ -65,8 +83,73 @@ export function usePanelMaxHeight(open: boolean, barRef: RefObject<HTMLDivElemen
       window.removeEventListener('scroll', update)
       window.removeEventListener('resize', update)
     }
-  }, [open, barRef])
+  }, [open, barRef, bottomRef])
   return maxHeight
+}
+
+/**
+ * 窓の外をタップしたら閉じる（2026-08-19 便HU・⑰ オーナー「並び替えと絞り込みの窓は、
+ * 窓の外タップでも閉じるようにして」。2026-08-27 便LN で src/pages/RecipesPage.tsx から
+ * ここへ出した＝「レシピから追加」の選択画面でも**同じ閉じ方**にするため。中身は変えていない）。
+ *
+ * 「窓の中か外か」は**指を置いた時点（pointerdown）で決める**。押した中身が押した結果
+ * 消えることがあるため（例:「条件をクリア」は押すと条件が無くなってボタン自体が消える）、
+ * 離した後（click）に調べると「もう画面に無い＝窓の外」と誤って読み、窓が勝手に閉じる。
+ * 実際に便HUの実機確認で「条件をクリアを押すと絞り込みの窓ごと閉じる」が起きた。
+ *
+ * 閉じるのは離したとき（click）だけ: 指を滑らせて一覧をスクロールしただけでは閉じない
+ * （料理中に片手で触る画面なので、スクロールの押し始めが「閉じる」に化けないようにする）。
+ * 並び替え/絞り込みのボタン自身は自前で開閉を持っているので、ここでは触らない
+ * （両方が働くと、押した瞬間に開いてすぐ閉じる）＝目印は `data-panel-toggle`。
+ *
+ * 【画面いっぱいの下敷き（透明な板）を置かない理由・2026-08-19 便HU】
+ * はじめは窓の外のタップを受け止めるために `fixed inset-0` の下敷きを開くときだけ
+ * 置いていた。ところがそのぶんの描き直しでブラウザが数十ミリ秒ふさがり、
+ * **折りたたみが開くときのアニメーション（Collapse）が出なくなった**
+ * （中身を置く描き直しより先に「開き切った高さ」の指示が届き、0→高さの変化が起きない。
+ * オーナー実機指摘で入った動きなので、消してはいけないもの。e2eのEO-01が捕まえた）。
+ * 下敷きを置く代わりに、いちばん外側でタップを掴み取って（capture）その1回を使い切る形にした。
+ * 画面に足すものが無いので、開くときの描き直しは元のまま＝アニメーションが戻る。
+ */
+export function useOutsidePanelClose(
+  open: boolean,
+  wrapRef: RefObject<HTMLElement | null>,
+  onClose: () => void,
+) {
+  const pressedOutsideRef = useRef(false)
+  const closeRef = useRef(onClose)
+  closeRef.current = onClose
+  useEffect(() => {
+    if (!open) return
+    const isOutside = (target: EventTarget | null) => {
+      if (!(target instanceof Element)) return false
+      if (wrapRef.current?.contains(target)) return false
+      if (target.closest('[data-panel-toggle]')) return false
+      return true
+    }
+    const onPointerDown = (e: PointerEvent) => {
+      pressedOutsideRef.current = isOutside(e.target)
+    }
+    const onClickCapture = (e: MouseEvent) => {
+      const outside = pressedOutsideRef.current
+      // キーボード操作など、指を置いた記録が無いまま来たときは閉じない側に倒す
+      pressedOutsideRef.current = false
+      if (!outside) return
+      // 窓の外の1回目のタップは「窓を閉じる」だけに使い、その下にあるものには渡さない
+      // （レシピのカードの上で閉じたつもりが、そのレシピが開いてしまうのを防ぐ）。
+      // いちばん外側の掴み取り（capture）なので、画面側のどの操作よりも先に決められる
+      e.preventDefault()
+      e.stopPropagation()
+      closeRef.current()
+    }
+    document.addEventListener('pointerdown', onPointerDown, true)
+    document.addEventListener('click', onClickCapture, true)
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown, true)
+      document.removeEventListener('click', onClickCapture, true)
+      pressedOutsideRef.current = false
+    }
+  }, [open, wrapRef])
 }
 
 

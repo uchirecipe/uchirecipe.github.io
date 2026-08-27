@@ -318,7 +318,7 @@ import './_shared.mjs'
       // ② ごはん→お米換算
       await eePage.getByRole('button', { name: ja.shopping.fromRecipeTitle, exact: true }).click()
       await eePage.waitForTimeout(400)
-      await eePage.getByPlaceholder(ja.shopping.pickerSearchPlaceholder).fill('牛丼')
+      await eePage.getByPlaceholder(ja.search.placeholder).fill('牛丼')
       await eePage.waitForTimeout(500)
       await eePage.getByRole('button', { name: ja.shopping.pickerServingUp }).first().click()
       await eePage.getByRole('button', { name: ja.shopping.pickerServingUp }).first().click()
