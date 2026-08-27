@@ -486,6 +486,7 @@ try {
   await import('./e2e/26-kd-ko.mjs')                   // 便KD〜KO（並行調理ナビ・買い物メモ・見た目）
   await import('./e2e/27-ku-kt.mjs')                   // 便KU・便KT（作った記録の行・数字の書き方）
   await import('./e2e/28-lj.mjs')                      // 便LJ（作った！のトーストの行き先・写真の未保存検知）
+  await import('./e2e/29-lu.mjs')                      // 便LU（Pro案内からの戻り先・買い物メモの下書き・在庫のスイッチ）
 } catch (err) {
   ng(`実行中断(${currentCheck})`, err.message)
 } finally {

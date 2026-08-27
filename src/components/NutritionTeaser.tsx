@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Link, useLocation } from 'react-router-dom'
+import { Link } from 'react-router-dom'
 import { Sparkles, ChevronDown, ChevronUp, Lock } from 'lucide-react'
 import {
   NUTRITION_TEASER_ENABLED,
@@ -17,7 +17,8 @@ import {
 } from '../logic/nutrition'
 import { roundVegetableGrams, vegetableGramsOf } from '../logic/nutritionBalance'
 import type { Recipe } from '../db/types'
-import { settingsLinkWithBack } from '../logic/backLink'
+import { SCREEN_PANEL } from '../logic/navMemory'
+import { useSettingsDetour } from './useScreenReturn'
 import { useSettings, updateSettings } from '../db/settings'
 import { canUseNutritionTrial } from '../logic/proTrial'
 import Collapse from './Collapse'
@@ -54,14 +55,21 @@ export default function NutritionTeaser({
   isPro,
   recipe,
   servings,
+  defaultExpanded = false,
 }: {
   isPro: boolean
   /** レシピ本体（実計算に使う。ingredients/servings と、1食に分けない品の印だけ参照） */
   recipe: Pick<Recipe, 'ingredients' | 'servings' | 'wholeBatch'>
   /** 詳細画面で現在表示中の人数（全量の表示に使う）。未指定ならレシピ登録時の人数 */
   servings?: number
+  /**
+   * 開いた状態で描き始めるか（2026-08-27 便LU）。設定の「Pro版について見る」から
+   * この画面へ帰ってきたときに、離れる前と同じ「開いている」姿で迎えるために使う
+   * （オーナー原文「折りたたみが閉じてしまう…のもやめて」）。
+   */
+  defaultExpanded?: boolean
 }) {
-  const [expanded, setExpanded] = useState(false)
+  const [expanded, setExpanded] = useState(defaultExpanded)
   // お試しで8項目を開いている状態（2026-08-08 便DZ）。この画面の中だけの状態なので、
   // 別のレシピを開けばロック表示に戻る（RecipeDetailPage側でレシピごとに作り直している）
   const [trialActive, setTrialActive] = useState(false)
@@ -482,6 +490,8 @@ function SourceNote() {
 export function ProNutrientTeaser({
   isPro,
   trialExhausted,
+  detour,
+  openPanels,
 }: {
   isPro: boolean
   /**
@@ -493,10 +503,21 @@ export function ProNutrientTeaser({
    * ここに残すのは使い切ったあとの一言だけ＝入口が消えた理由が、開いた人には読める。
    */
   trialExhausted?: boolean
+  /**
+   * 「Pro版について見る」の行き先と、押した瞬間に居場所を覚える手当て（2026-08-27 便LU）。
+   * 帰り方が画面ごとに違うので、**専用の覚え方を持つ画面（献立）だけ外から渡す**。
+   * 渡さなければ下の既定（現在地＋縦位置＋折りたたみ）で帰る。
+   */
+  detour?: { to: string; onClick?: () => void }
+  /** 既定の帰り方のときに「開いていた折りたたみ」として覚える名前（SCREEN_PANEL） */
+  openPanels?: string[]
 }) {
-  // Pro案内から設定へ飛んだあと、いま見ている画面へ帰れるようにする(2026-08-02 便DF)。
-  // この部品はレシピ詳細・献立の栄養バランスパネルの両方で使うため、戻り先は現在地から作る
-  const location = useLocation()
+  // Pro案内から設定へ飛んだあと、いま見ている画面の**同じ場所**へ帰れるようにする
+  // (2026-08-02 便DF → 2026-08-27 便LU で縦位置と折りたたみも覚えるようにした)。
+  // この部品はレシピ詳細・献立の栄養バランスパネルの両方で使う
+  const { linkTo, remember } = useSettingsDetour()
+  const proLinkTo = detour?.to ?? linkTo('/settings?section=pro')
+  const onProLinkClick = detour?.onClick ?? (() => remember(openPanels))
   const sampleLabels = [
     ja.nutrition.proteinLabel,
     ja.nutrition.fatLabel,
@@ -536,7 +557,8 @@ export function ProNutrientTeaser({
         )}
         {!isPro && (
           <Link
-            to={settingsLinkWithBack('/settings?section=pro', location.pathname + location.search)}
+            to={proLinkTo}
+            onClick={onProLinkClick}
             className="mt-1 inline-block text-sm font-bold text-accent-ink underline"
           >
             {ja.nutrition.gateLink}
@@ -580,7 +602,13 @@ function LockedBody({
       )}
       {/* Pro版で増える項目のティーザー(2026-07-28 便BY/PRO-01で blur+Lock 様式に統一)。
           詳しい提供時期の話(freeDescription系)より先に、まず「何が増えるか」を見せる */}
-      <ProNutrientTeaser isPro={isPro} trialExhausted={trialExhausted} />
+      {/* この行は「栄養価の概算」の折りたたみの中にしか出ないので、押した時点でその
+          折りたたみは必ず開いている＝帰ってきたときも開いた姿で迎える（2026-08-27 便LU） */}
+      <ProNutrientTeaser
+        isPro={isPro}
+        trialExhausted={trialExhausted}
+        openPanels={[SCREEN_PANEL.nutrition]}
+      />
       <MaterialGapNote nutrition={nutrition} />
       <AssumedBlock nutrition={nutrition} />
       <ExcludedBlock nutrition={nutrition} />

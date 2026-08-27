@@ -2401,11 +2401,12 @@ for (const [title, expected] of futureIconCases) {
     eq('JF-3 レシピ一覧の帰り道は今までどおり', resolveBackTarget('/recipes')?.label, 'レシピ一覧に戻る')
     // 案内の側: いま出ている画面のパスを載せる（決め打ちの文字列を書かない）
     const jfFormSrc = jfRead('src/pages/RecipeFormPage.tsx')
+    // 2026-08-27 便LU: 帰り道の作り方を「現在地のパスだけ」から
+    // 「現在地＋覚えた場所へ戻す印（useSettingsDetour）」へ変えた。見張る中身は同じ
+    // ＝決め打ちの文字列ではなく、いま出ている画面から帰り道を作っていること
     eq(
       'JF-3 登録上限のPro案内が、いまの画面を戻り先に載せている',
-      /settingsLinkWithBack\('\/settings\?section=pro', location\.pathname \+ location\.search\)/.test(
-        jfFormSrc,
-      ),
+      /detourLinkTo\('\/settings\?section=pro'\)/.test(jfFormSrc),
       true,
     )
     eq(

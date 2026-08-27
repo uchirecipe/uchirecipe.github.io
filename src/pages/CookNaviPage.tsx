@@ -113,6 +113,8 @@ import Toast from '../components/Toast'
 import { effectiveMealServings } from '../logic/servings'
 import type { Recipe } from '../db/types'
 import { settingsLinkWithBack } from '../logic/backLink'
+// 設定の「Pro版について見る」から帰ってきたときに、離れる前の縦位置へ戻す（2026-08-27 便LU）
+import { useScreenReturn, useSettingsDetour } from '../components/useScreenReturn'
 import {
   kitchenFromSettings,
   type ApplianceKey,
@@ -937,6 +939,15 @@ export default function CookNaviPage() {
   const [searchParams, setSearchParams] = useSearchParams()
   // Pro案内・設定への入口から飛んだあと、この画面へ帰れるようにするための現在地(2026-08-02 便DF)
   const location = useLocation()
+  /**
+   * 「Pro版について見る」から設定へ寄り道して帰ってくるときの行き先と覚え（2026-08-27 便LU）。
+   * 「台所の器具を設定する」の側は器具を変えると段取りを組み直す画面なので、
+   * 従来どおり現在地だけを帰り道に載せる（縦位置を戻すと組み直し中の画面を掴むことになる）。
+   */
+  const { linkTo: detourLinkTo, remember: rememberDetour } = useSettingsDetour()
+  const proDetourTo = detourLinkTo('/settings?section=pro')
+  // 設定から帰ってきたときに、覚えていた縦位置まで戻す（この画面で1回だけ呼ぶ）
+  useScreenReturn()
   const [highlightKey, setHighlightKey] = useState<string | null>(null)
   /**
    * すでに着地させた ?focusStep=（2026-08-10 便FC）。
@@ -1868,8 +1879,11 @@ export default function CookNaviPage() {
                 {ja.cookNavi.trialExhausted}
               </p>
             )}
+            {/* 2026-08-27 便LU: 帰り道に現在地だけを載せていたので、設定から戻ると
+                画面の先頭から開き直していた。押した瞬間の縦位置も一緒に覚える */}
             <Link
-              to={settingsLinkWithBack('/settings?section=pro', location.pathname + location.search)}
+              to={proDetourTo}
+              onClick={() => rememberDetour()}
               className="mt-[var(--space-sm)] block text-sm font-bold text-accent-ink underline"
             >
               {ja.cookNavi.gateLink}
