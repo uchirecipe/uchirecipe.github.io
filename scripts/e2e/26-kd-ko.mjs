@@ -321,8 +321,15 @@ import './_shared.mjs'
           { name: 'しょうゆ', amount: '1', unit: '大さじ' },
           { name: '白いりごま', amount: '適量', unit: '' },
         ])))
+        // ③材料だけが落ちる品（塩分を持つ調味料は落ちない）。
+        // 2026-08-27 便LO: 下の「材料の印とは差し替えになる」を**出る場面と対にして**測るために足した。
+        // 対が無いと、材料の印そのものが消えても改名されても「2つ並ばない」は緑のままになる
+        const materialGap = await P(store('recipes').add(mk('E2E材料だけ落ちる和えもの', [
+          { name: 'トマト', amount: '2', unit: '個' },
+          { name: 'E2Eふしぎな木の実', amount: '50', unit: 'g' },
+        ])))
         db.close()
-        return { saltGap, clean }
+        return { saltGap, clean, materialGap }
       })
       // 生のIndexedDBへ書いたので必ず読み込み直す（Dexieのライブ購読はDexie経由の書き込みしか見ない）
       await kfPage.goto(`${BASE}/#/recipes/${kfIds.saltGap}`)
@@ -394,6 +401,30 @@ import './_shared.mjs'
       check(
         'KFSALT-01 薬味しか落ちていない品では塩分の注意も出さない',
         (await kfPage.locator('[data-testid="nutrition-salt-gap-note"]').count()) === 0,
+      )
+
+      // ③' 材料の印が「出る場面」を同じ節で押さえておく（2026-08-27 便LO）。
+      // 上の「2つ並ばない」は count()===0 だけを見ているので、材料の印が改名されても
+      // 丸ごと消えても緑のままになる。**出る場面と出ない場面を対にして**測ると、
+      // 印そのものが失われた時にこの対の片方が必ず落ちる
+      await kfPage.goto(`${BASE}/#/recipes/${kfIds.materialGap}`)
+      await kfPage.reload({ waitUntil: 'networkidle' })
+      await kfPage.waitForTimeout(1200)
+      const kfMaterialBadge = kfPage.locator('[data-testid="nutrition-material-gap-badge"]')
+      check(
+        'KFSALT-01 材料だけが落ちる品では、材料の印のほうが出る（差し替えの相手が実在する）',
+        (await kfMaterialBadge.count()) === 1,
+      )
+      check(
+        'KFSALT-01 その品では塩分の印は出ない（差し替えは両方向に効く）',
+        (await kfPage.locator('[data-testid="nutrition-salt-gap-badge"]').count()) === 0,
+      )
+      check(
+        'KFSALT-01 材料の印の文言は「計算できない材料」',
+        ((await kfMaterialBadge.count()) === 1 ? await kfMaterialBadge.textContent() : '')
+          .replaceAll('\u200b', '')
+          .includes(ja.nutrition.materialGapBadge.replace('{n}', '1')),
+        `印=${await kfMaterialBadge.textContent().catch(() => '(無し)')}`,
       )
 
       // ④ 人数分が読み取れなかったことを、人数分のところで知らせる

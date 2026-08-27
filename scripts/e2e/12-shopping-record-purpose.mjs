@@ -1691,10 +1691,6 @@ import './_shared.mjs'
       await openAllWeekDays(p2Page) // 便ID・⑦: 畳む既定になったので、カードの中を触る前に開く
       await p2Page.waitForTimeout(400)
 
-      check(
-        'PURPOSE-02 解錠済みなら鍵付き行は出さない',
-        (await p2Page.locator('[data-testid="purpose-locked-row"]').count()) === 0,
-      )
       // 2026-08-09 便EN: 「献立を提案」グループが既定で畳んであるので先に開く
       await openWeekGroup(p2Page, ja.mealPlan.weekGroupAutoTitle)
       await p2Page.waitForTimeout(300)
@@ -1702,6 +1698,16 @@ import './_shared.mjs'
       await p2Page.waitForTimeout(400)
       const p2Picker = p2Page.locator('[data-testid="purpose-picker"]')
       check('PURPOSE-02 解錠済みの条件欄に目的の選択肢が出る', await p2Picker.isVisible())
+      // 2026-08-27 便LO: 「鍵付き行は出さない」は**条件の窓を開いたあと**で測る。
+      // 2026-08-19 便IF で鍵付き行の置き場所が条件の窓の中へ移ったので、窓を開く前は
+      // 解錠済みでも未解錠でも0件になる（PURPOSE-01 が同じ場所で0件を見ている）＝
+      // 窓の手前で測っていた間は、Proの線が壊れても必ず緑だった。
+      // 目的の選択肢が出ていること（上の行）と対にして、同じ画面で両方を見る
+      check(
+        'PURPOSE-02 解錠済みなら、条件の窓を開いても鍵付き行は出さない',
+        (await p2Page.locator('[data-testid="purpose-locked-row"]').count()) === 0,
+        `窓の中の鍵付き行=${await p2Page.locator('[data-testid="plan-conditions-modal"] [data-testid="purpose-locked-row"]').count()}件`,
+      )
       const p2PickerText = (await p2Picker.textContent()) ?? ''
       // 2026-08-19 便ID・⑤(オーナー原文「個別に『〇〇多め』『〇〇ひかえめ』とついていると
       // くどく感じる。しかし、『提案の条件：〇〇』に入れる場合は『〇〇多め』の方が見やすい」):

@@ -411,6 +411,24 @@ import './_shared.mjs'
       await s2Page.locator('[data-testid="select-card"]').first().click()
       await s2Page.waitForTimeout(400)
       const s2Picking = await s2Measure()
+      // 2026-08-27 便LO: 下の「献立から来たときは入口を出さない」と**対**にして、
+      // ふつうの選択モードでは同じ入口が出ていることを先に押さえる。
+      // 対が無いと、入口そのものが消えても改名されても「出さない」は必ず緑になる
+      check(
+        'SELECT-UI-02 ふつうの選択モードでは「選び終わる」が出ていて、押すと窓が開く（下の「出さない」と対）',
+        (await s2Page.getByTestId('selection-finish').count()) === 1,
+        `決定=${await s2Page.getByTestId('selection-finish').count()}件`,
+      )
+      await s2Page.getByTestId('selection-finish').click()
+      await s2Page.waitForTimeout(400)
+      check(
+        'SELECT-UI-02 ふつうの選択モードでは、どうするかを選ぶ窓が開く（下の「出さない」と対）',
+        (await s2Page.getByTestId('selection-actions').count()) === 1,
+        `窓=${await s2Page.getByTestId('selection-actions').count()}件`,
+      )
+      // 開いた窓は閉じて、以降の測り方（帯の高さ・カードの枚数）を変えない
+      await s2Page.keyboard.press('Escape')
+      await s2Page.waitForTimeout(300)
       check(
         'SELECT-UI-02 レシピを選んでいる最中も、下に固定した帯が画面の半分を覆わない',
         s2Picking.coveredPx * 2 < s2Picking.vh,

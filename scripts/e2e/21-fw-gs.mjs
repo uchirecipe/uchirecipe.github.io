@@ -704,6 +704,13 @@ import './_shared.mjs'
       // 以降のためにもう一度動かしておく
       await gjPage.locator('[data-testid="navi-step-down"]').nth(0).click()
       await gjPage.waitForTimeout(600)
+      // 2026-08-27 便LO: 「並べ替えの状態の欄が出ない」を見る節（GJ-07・GJ-05）に、
+      // **出る場面**を対で置く。対が無いと、欄そのものが消えても改名されても
+      // 「出さない」は必ず緑になる＝何も測っていない
+      check(
+        'GJ-01 手で動かすと、並べ替えの状態の欄が出る（GJ-07・GJ-05の「出ない」と対）',
+        (await gjPage.locator('[data-testid="navi-reorder-state"]').count()) === 1,
+      )
 
       // --- GJ-08: 何回動かしても手順は消えない ---
       currentCheck = 'GJ-08'

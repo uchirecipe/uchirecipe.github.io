@@ -553,6 +553,36 @@ import './_shared.mjs'
       await jaPage.waitForTimeout(2400) // 初回シード完了待ち
       await jaPage.getByRole('button', { name: ja.mealPlan.viewWeek, exact: true }).click()
       await jaPage.waitForTimeout(900)
+      // 2026-08-27 便LO: 下の「過ぎた日の編集モードでも献立の枠は出さない」と**対**にして、
+      // 今日以降の日を編集モードにすれば同じ枠が出ることを先に押さえる（前の週へ送ると
+      // 7日とも過ぎた日になるので、送る前のこの週で測る）。対が無いと、枠そのものが
+      // 消えても改名されても「出さない」は必ず緑になる。
+      // 通常表示の枠は「献立が入っているか鍵が掛かっている食事」だけに出るので、
+      // 空の週でも必ず出る編集モードのほうで測る
+      await openAllWeekDays(jaPage)
+      await jaPage.waitForTimeout(500)
+      const jaTodayIso = await jaPage.evaluate(() => {
+        const d = new Date()
+        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+      })
+      const jaFutureDate = await jaPage.evaluate(
+        (today) =>
+          [...document.querySelectorAll('section[data-date]')]
+            .map((el) => el.getAttribute('data-date'))
+            .find((x) => x && x >= today) ?? null,
+        jaTodayIso,
+      )
+      check('JFPAST-01 前提: 今日以降の日のカードを掴めた', jaFutureDate !== null, `date=${jaFutureDate}`)
+      const jaFutureCard = jaPage.locator(`section[data-date="${jaFutureDate}"]`)
+      await jaFutureCard.locator('[data-testid="week-day-edit"]').first().click()
+      await jaPage.waitForTimeout(600)
+      check(
+        'JFPAST-01 今日以降の日を編集モードにすると献立の枠が出る（下の「過ぎた日には出さない」と対）',
+        (await jaFutureCard.locator('[data-testid="slot-block"]').count()) > 0,
+        `枠=${await jaFutureCard.locator('[data-testid="slot-block"]').count()}件`,
+      )
+      await jaFutureCard.locator('[data-testid="week-day-edit"]').first().click()
+      await jaPage.waitForTimeout(400)
       await jaPage.getByRole('button', { name: ja.mealPlan.prevWeek, exact: true }).click()
       await openAllWeekDays(jaPage)
       await jaPage.waitForTimeout(700)
