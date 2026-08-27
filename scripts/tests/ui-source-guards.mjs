@@ -2441,6 +2441,15 @@ import { createRequire } from 'node:module'
 //                                               前提の行が受け止めていたが、便LK で -1 を渡さない形に直した
 //   ④「その要素が出ていない」count()===0 146件   うち26件は**そのセレクタを「在ること」の側で1度も使っていない**。
 //                                               7節で目印を偽の名前に変えたところ**7節すべて緑のまま**＝素通り確定
+//                                               【2026-08-27 便LO が数え直した】この26種は**数え過ぎ**だった。
+//                                               `const x = page.locator('[data-testid="…"]')` の変数と、
+//                                               `[data-testid^="safety-step-"]` の前方一致を解くと、
+//                                               e2e 全体で「在ること」を1度も見ていない目印は4種しかない。
+//                                               本当に残っているのは「**同じ節の中で**出る場面を1度も
+//                                               測っていない」形＝19箇所/15種で、これは LO-1 が数えている。
+//                                               また、便LKの壊し方（e2e 側のセレクタを偽名にする）は
+//                                               **src の改名を再現していない**。src を改名すると、同じ目印を
+//                                               positive に見ている別の節が落ちる（LK-1 とは別に受け止められる）
 //   ⑤空の並びでも通る every              264件   受け手が固定の並びのものを除くと137件。npm test 側38件を
 //                                               空配列にしたところ33件が緑のまま。うち受け手が本当に空になり
 //                                               うる7件と、e2e 側10件を便LKで直した
@@ -2761,6 +2770,240 @@ import { createRequire } from 'node:module'
       'LN-2 ⑧「使いたい食材」は空白区切りにして渡している（searchRecipesの受け口の形）',
       /ingredients:\s*pickerFilters\.ingredients\.join\(' '\)/.test(lnCall),
       true,
+    )
+  }
+}
+
+// ---------- 便LO（2026-08-27）: 「出ていないこと」の検査が、同じ節で「出ること」を1度も見ていない残り ----------
+//
+// なぜ要るか: 便LK が ④「count() === 0 の検査は目印を書き間違えても必ず緑」を実測で確かめ、
+// LK-1（目印が src に在るか）を置いた。ただし LK-1 が拾えるのは**目印が src から丸ごと消えた**ときだけで、
+// 「その節が、その目印の出る場面を1度も測っていない」ことは拾えない。
+// 出ない場面しか測っていない検査は、**画面に着けていなくても・要素が丸ごと消えても緑**になる
+// （2026-08-27 便LO の実測: PURPOSE-02 は「解錠済みなら鍵付き行は出さない」を**条件の窓を開く前**に
+//  測っていて、そこは未解錠でも0件だった＝Proの線が壊れても必ず緑だった）。
+//
+// ここで見るのは「**出る場面と対にしていない検査が増えていないこと**」。
+// 便LK の走査との違いは2つで、どちらも数え過ぎを取り除くためのもの:
+//   ①`const x = page.locator('[data-testid="…"]')` の**変数を解く**（便LKの26種はここを解かず数えていた）
+//   ②`[data-testid^="safety-step-"]` のような**前方一致**を、`safety-step-0` の positive と突き合わせる
+// 数えるのは「同じ節（ファイルのいちばん外側の { } の塊）の中で、その目印が
+// **check の判定式にも、click / textContent などの『在ることが前提の操作』にも1度も出てこない**」もの。
+//
+// 直したら scripts/data/e2e-vacuous-known.json の「件数」を下げる（下げないと次の1件が隠れる）。
+// LO-2 は、この見張り自身が0件に倒れて「違反なし＝緑」に化けないことを毎回その場で測る（LK-4 と同じ形）。
+{
+  const loRoot = path.join(path.dirname(fileURLToPath(scriptFileUrl)), '..')
+  const loRequire = createRequire(scriptFileUrl)
+  let loAcorn = null
+  try {
+    loAcorn = loRequire('acorn')
+  } catch {
+    loAcorn = null
+  }
+  eq('LO 前提: 構文解析の道具(acorn)を読める（読めないと見張りが素通りする）', loAcorn !== null, true)
+
+  const loWalk = (node, fn) => {
+    if (!node || typeof node.type !== 'string') return
+    fn(node)
+    for (const key of Object.keys(node)) {
+      if (key === 'type' || key === 'start' || key === 'end' || key === 'loc') continue
+      const value = node[key]
+      if (Array.isArray(value)) {
+        for (const child of value) if (child && typeof child.type === 'string') loWalk(child, fn)
+      } else if (value && typeof value.type === 'string') loWalk(value, fn)
+    }
+  }
+  const loParse = (code) =>
+    loAcorn.parse(code, { ecmaVersion: 'latest', sourceType: 'module', locations: true })
+
+  /** 目印の取り出し。前方一致(^=)・部分一致(*=)・テンプレートリテラルはそのことも持ち帰る */
+  const loMarksOf = (text) => {
+    const marks = []
+    for (const hit of text.matchAll(/data-testid([\^$*~|]?)="([^"]+)"/g))
+      marks.push({ op: hit[1], id: hit[2] })
+    for (const hit of text.matchAll(/getByTestId\(\s*'([^']+)'/g)) marks.push({ op: '', id: hit[1] })
+    for (const hit of text.matchAll(/data-testid="([^"$]*)\$\{/g)) marks.push({ op: '^', id: hit[1] })
+    return marks
+  }
+  /** 集めた目印の中に、この目印を受け止めるものが在るか（前方一致はどちら向きでも当てる） */
+  const loCovered = (mark, ids) =>
+    [...ids].some((id) =>
+      mark.op === '^'
+        ? id.startsWith(mark.id)
+        : mark.op === '*' || mark.op === '~'
+          ? id.includes(mark.id)
+          : mark.op === '$'
+            ? id.endsWith(mark.id)
+            : id === mark.id,
+    )
+  /** 「在ることが前提の操作」＝掴めないと例外か30秒待ちになるもの */
+  const LO_LOUD = [
+    'click', 'textContent', 'innerText', 'isVisible', 'fill', 'press', 'waitFor', 'boundingBox',
+    'hover', 'inputValue', 'tap', 'selectOption', 'getAttribute', 'isChecked', 'isEnabled',
+    'allTextContents', 'allInnerTexts', 'scrollIntoViewIfNeeded', 'first', 'nth', 'last',
+  ]
+
+  /**
+   * 1つのファイルから「同じ節で出る場面と対になっていない『出ていないこと』の検査」を拾う。
+   * 節はいちばん外側の { } の塊（scripts/e2e-part.mjs の切り出しと同じ区切り）。
+   */
+  const loFindLonelyAbsence = (code) => {
+    const ast = loParse(code)
+    const varToMarks = new Map()
+    loWalk(ast, (n) => {
+      if (n.type !== 'VariableDeclarator' || n.id.type !== 'Identifier' || !n.init) return
+      const marks = loMarksOf(code.slice(n.init.start, n.init.end))
+      if (marks.length > 0) varToMarks.set(n.id.name, marks)
+    })
+    const blocks = ast.body
+      .filter((n) => n.type === 'BlockStatement')
+      .map((n) => ({ start: n.start, end: n.end }))
+    const keyOf = (blk) => (blk ? blk.start : -1)
+    const seen = new Map() // 節 → その節で「在ること」に使われた目印
+    const add = (blk, id) => {
+      const key = keyOf(blk)
+      if (!seen.has(key)) seen.set(key, new Set())
+      seen.get(key).add(id)
+    }
+    const absence = []
+    loWalk(ast, (n) => {
+      if (n.type !== 'CallExpression' || n.callee.type !== 'Identifier' || n.callee.name !== 'check')
+        return
+      const cond = n.arguments[1]
+      if (!cond) return
+      const blk = blocks.find((b) => cond.start >= b.start && cond.end <= b.end)
+      const zeroParts = []
+      loWalk(cond, (m) => {
+        if (m.type !== 'BinaryExpression' || (m.operator !== '===' && m.operator !== '==')) return
+        const zeroSide =
+          m.right.type === 'Literal' && m.right.value === 0
+            ? m.left
+            : m.left.type === 'Literal' && m.left.value === 0
+              ? m.right
+              : null
+        if (!zeroSide) return
+        const text = code.slice(zeroSide.start, zeroSide.end)
+        if (!/\.count\(\)/.test(text)) return
+        zeroParts.push([zeroSide.start, zeroSide.end, text])
+      })
+      // 判定式のうち「出ていないこと」以外に出てくる目印は、その節の positive に数える
+      let rest = code.slice(cond.start, cond.end)
+      for (const [s, e] of [...zeroParts].sort((a, b) => b[0] - a[0]))
+        rest = rest.slice(0, s - cond.start) + ' '.repeat(e - s) + rest.slice(e - cond.start)
+      for (const mark of loMarksOf(rest)) add(blk, mark.id)
+      loWalk(cond, (m) => {
+        if (m.type !== 'Identifier' || !varToMarks.has(m.name)) return
+        if (zeroParts.some(([s, e]) => m.start >= s && m.end <= e)) return
+        for (const mark of varToMarks.get(m.name)) add(blk, mark.id)
+      })
+      for (const [s, e, text] of zeroParts) {
+        const marks = loMarksOf(text)
+        loWalk(cond, (m) => {
+          if (m.type === 'Identifier' && varToMarks.has(m.name) && m.start >= s && m.end <= e)
+            marks.push(...varToMarks.get(m.name))
+        })
+        for (const mark of marks)
+          absence.push({ mark, blk, line: n.loc.start.line, label: n.arguments[0]?.value ?? '' })
+      }
+    })
+    loWalk(ast, (n) => {
+      if (n.type !== 'CallExpression' || n.callee.type !== 'MemberExpression') return
+      if (n.callee.property.type !== 'Identifier' || !LO_LOUD.includes(n.callee.property.name)) return
+      const blk = blocks.find((b) => n.start >= b.start && n.end <= b.end)
+      const objText = code.slice(n.callee.object.start, n.callee.object.end)
+      for (const mark of loMarksOf(objText)) add(blk, mark.id)
+      loWalk(n.callee.object, (m) => {
+        if (m.type === 'Identifier' && varToMarks.has(m.name))
+          for (const mark of varToMarks.get(m.name)) add(blk, mark.id)
+      })
+    })
+    return absence.filter((a) => !loCovered(a.mark, seen.get(keyOf(a.blk)) ?? new Set()))
+  }
+
+  if (loAcorn) {
+    // ---- LO-2: 見張り自身が0件に倒れないことを、その場で確かめる ----
+    const loFakeLonely = `
+      {
+        check('架空', (await p.locator('[data-testid="lo-fake-mark"]').count()) === 0)
+      }
+    `
+    const loFakePaired = `
+      {
+        check('架空: 出る場面', (await p.locator('[data-testid="lo-fake-mark"]').count()) === 1)
+        check('架空: 出ない場面', (await p.locator('[data-testid="lo-fake-mark"]').count()) === 0)
+      }
+    `
+    const loFakeByVar = `
+      {
+        const mark = p.locator('[data-testid="lo-fake-mark"]')
+        check('架空: 掴んで読む', (await mark.textContent()).includes('あ'))
+        check('架空: 出ない場面', (await mark.count()) === 0)
+      }
+    `
+    eq(
+      'LO-2 見張り自身の確かめ: 対になっていない「出ていないこと」を1件と数える',
+      loFindLonelyAbsence(loFakeLonely).map((a) => a.mark.id),
+      ['lo-fake-mark'],
+    )
+    eq(
+      'LO-2 見張り自身の確かめ: 同じ節に「出る場面」があるものは数えない',
+      loFindLonelyAbsence(loFakePaired).length,
+      0,
+    )
+    eq(
+      'LO-2 見張り自身の確かめ: 変数に入れて掴んでいるものも「在ること」として数える',
+      loFindLonelyAbsence(loFakeByVar).length,
+      0,
+    )
+
+    // ---- LO-1: 対になっていない「出ていないこと」の検査が増えていないこと ----
+    const loKnown = JSON.parse(
+      readFileSync(path.join(loRoot, 'scripts/data/e2e-vacuous-known.json'), 'utf-8'),
+    )['同じ節で「在ること」を一度も確かめていない「出ていないこと」の検査']
+    const loE2eDir = path.join(loRoot, 'scripts/e2e')
+    const loSrcText = (() => {
+      const chunks = []
+      const read = (dir) => {
+        for (const entry of readdirSync(dir, { withFileTypes: true })) {
+          const full = path.join(dir, entry.name)
+          if (entry.isDirectory()) read(full)
+          else if (/\.(tsx?|css)$/.test(entry.name)) chunks.push(readFileSync(full, 'utf-8'))
+        }
+      }
+      read(path.join(loRoot, 'src'))
+      return chunks.join('\n')
+    })()
+    const loHits = []
+    for (const file of readdirSync(loE2eDir).filter((f) => f.endsWith('.mjs'))) {
+      for (const hit of loFindLonelyAbsence(readFileSync(path.join(loE2eDir, file), 'utf-8'))) {
+        // src から消えた目印は LK-1 の担当なので、ここでは二重に数えない
+        if (!loSrcText.includes(hit.mark.id)) continue
+        loHits.push(`${file}:${hit.line}行目 目印「${hit.mark.op}${hit.mark.id}」（${hit.label}）`)
+      }
+    }
+    const loNow = loHits.length
+    const loFloor = loKnown['件数']
+    eq(
+      `LO-1 「出る場面と対にしていない出ていないこと」の検査が増えていない（一覧は${loFloor}件）`,
+      loNow <= loFloor
+        ? []
+        : [
+            `${loFloor}→${loNow}件に増えた。新しい「出ていないこと」の検査は、同じ節で` +
+              'その目印が出る場面も1つ測ること（出る場面と出ない場面を対にする）',
+            ...loHits.slice(0, 5),
+          ],
+      [],
+    )
+    eq(
+      'LO-1 直したぶんは一覧の件数も下げる（下げないと次の1件が隠れる）',
+      loNow >= loFloor
+        ? []
+        : [
+            `${loFloor}→${loNow}件に減った。scripts/data/e2e-vacuous-known.json の` +
+              `「同じ節で「在ること」を一度も確かめていない「出ていないこと」の検査」の「件数」を ${loNow} に直してください`,
+          ],
+      [],
     )
   }
 }

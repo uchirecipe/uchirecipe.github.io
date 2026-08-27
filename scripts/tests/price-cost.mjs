@@ -2543,19 +2543,23 @@ eq('normalizeIngredientNameForPrice 前後空白除去', normalizeIngredientName
   eq('JJ-1 印は材料名には戻さない（栄養・原価の名前照合を壊さない）', jjRows[5].name, '醤油')
   eq('JJ-1 どの印だったかはメモに残る', jjRows[5].memo.includes('○'), true)
   // 行頭のただの飾り（・）は今までどおり落とす＝組にはしない
+  // 2026-08-27 便LO: 取り込みが3行とも落とすと every は中身を1回も見ずに true になるので、
+  // 行数のほうも同じ判定式で見る（落ちた状態を「組にしていない」と読まない）
+  const jjDotRows = buildImportedIngredientRows(
+    ['・豚こま切れ 150g', '・キャベツ 4枚', '・醤油 大さじ1'].map((l) => splitIngredientAmount(l)),
+  )
   eq(
     'JJ-1 中黒だけの飾りは組にしない',
-    buildImportedIngredientRows(
-      ['・豚こま切れ 150g', '・キャベツ 4枚', '・醤油 大さじ1'].map((l) => splitIngredientAmount(l)),
-    ).every((r) => r.group == null),
+    jjDotRows.length === 3 && jjDotRows.every((r) => r.group == null),
     true,
   )
   // 全部の材料に同じ印が付いているときは飾り＝組にしない（assignSeasoningGroupsByMark の規則）
+  const jjSameMarkRows = buildImportedIngredientRows(
+    ['○豚こま切れ 150g', '○キャベツ 4枚', '○醤油 大さじ1'].map((l) => splitIngredientAmount(l)),
+  )
   eq(
     'JJ-1 全部に同じ印が付いていたら飾りとみなして組にしない',
-    buildImportedIngredientRows(
-      ['○豚こま切れ 150g', '○キャベツ 4枚', '○醤油 大さじ1'].map((l) => splitIngredientAmount(l)),
-    ).every((r) => r.group == null),
+    jjSameMarkRows.length === 3 && jjSameMarkRows.every((r) => r.group == null),
     true,
   )
   eq('JJ-1 印だけの行は材料にしない', splitIngredientAmount('○').name, '')

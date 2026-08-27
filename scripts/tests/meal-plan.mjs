@@ -2088,7 +2088,10 @@ eq('rangeDayCount: 月をまたぐ計算も正しい', rangeDayCount('2026-06-28
   eq('DC-DEMO 作った記録はすべて過ぎた日', logDates.every((d) => d < DEMO_TODAY), true)
   eq(
     'DC-DEMO 登録した献立はすべて今日から先',
-    demo.entries.every((e) => e.date >= DEMO_TODAY),
+    // 2026-08-27 便LO: 献立が1件も無いと every は中身を見ずに true になる。
+    // 記録の側は下の「写真なしでも組み立てられる」が件数を固定しているが、献立の側は
+    // 誰も固定していなかった＝見本から献立が丸ごと消えても緑だった
+    demo.entries.length > 0 && demo.entries.every((e) => e.date >= DEMO_TODAY),
     true,
   )
   eq('DC-DEMO 見本は同じ月に収まっている', [...logDates, ...demo.entries.map((e) => e.date)].every((d) => d.slice(0, 7) === DEMO_TODAY.slice(0, 7)), true)

@@ -689,7 +689,11 @@ import './_shared.mjs'
     })
     check(
       'KG-A 保存した材料名に小文字の印が残らない',
-      kgSaved != null && kgSaved.names.every((name) => !/^a[.．]?\s/.test(name)),
+      // 2026-08-27 便LO: 材料が1件も保存されていないと every は中身を見ずに true になる
+      // （＝保存で材料が丸ごと落ちても緑）。件数のほうも同じ判定式で見る
+      kgSaved != null &&
+        kgSaved.names.length > 0 &&
+        kgSaved.names.every((name) => !/^a[.．]?\s/.test(name)),
       JSON.stringify(kgSaved),
     )
     check('KG-A 保存した種別が副菜になっている', kgSaved != null && kgSaved.dishType === 'side', JSON.stringify(kgSaved))

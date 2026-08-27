@@ -1209,9 +1209,12 @@ import './_shared.mjs'
             .filter(Boolean),
         }
       })
+      // 2026-08-27 便LO: 吹き出しが1つも無いと gaps も bad も空になり、下の2つは
+      // 中身を1回も見ずに緑になる（公開ページから吹き出しが消えても気づけない）。
+      // 隙間の数＝吹き出しの数−1 なので、同じ判定式で並びの長さも見る
       check(
         'FG-LP(PC) 吹き出しが上下に重なっている',
-        fgPc.gaps.every((g) => g < 0),
+        fgPc.gaps.length > 0 && fgPc.gaps.every((g) => g < 0),
         `高さ=${fgPc.ulH} 隙間=${fgPc.gaps.join(',')}`,
       )
       check('FG-LP(PC) 重ねても文字が隠れない', fgPc.bad.length === 0, fgPc.bad.join(' , '))

@@ -1762,8 +1762,21 @@ eq('端数は丸める', formatMinutesSecondsLabel(60.4), '1分')
     // 手作業が先・待ちが後ろ（タイマーは待ちの工程にしか出ない＝手を動かす前に押せない）
     const waits = mine.filter((it) => it.kind === 'wait')
     const actives = mine.filter((it) => it.kind === 'active')
-    eq('GR-5 タイマーは待ちの工程だけに出る', actives.every((it) => !showsWaitTimerButton(it)), true)
-    eq('GR-5 待ちは手作業より後ろから始まる', waits.every((w) => actives.every((a) => w.startMin >= a.startMin)), true)
+    // 2026-08-27 便LO: **割れていること**を同じ判定式で見る（受け手が空だと every は
+    // 中身を1回も見ずに true になる）。割るのをやめた瞬間、この2つは何も測らないまま緑になる
+    eq('GR-5 この手順は手作業と待ちの両方に割れている（下の2つが空振りしない前提）', waits.length > 0 && actives.length > 0, true)
+    eq(
+      'GR-5 タイマーは待ちの工程だけに出る',
+      actives.length > 0 && actives.every((it) => !showsWaitTimerButton(it)),
+      true,
+    )
+    eq(
+      'GR-5 待ちは手作業より後ろから始まる',
+      waits.length > 0 &&
+        actives.length > 0 &&
+        waits.every((w) => actives.every((a) => w.startMin >= a.startMin)),
+      true,
+    )
     // 番号は「3-1」「3-2」…（湯沸かしの切り出しと同じ見せ方）
     eq(
       'GR-5 割った工程の番号は元の手順番号から枝分かれする',
