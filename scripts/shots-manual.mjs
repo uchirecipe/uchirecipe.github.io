@@ -71,6 +71,8 @@ const sizes = []
 const failures = []
 /** manual.html の <img width height> に入れる実寸(px)。表示は半分のCSS pxにする */
 const manifest = {}
+/** 書き出した webp のバイト数（中身が痩せていないかを見るため。2026-08-27） */
+const byteSizes = {}
 
 /**
  * このスクリプトが撮るカットの名前(出力は public/about/img/manual/<名前>.webp)。
@@ -167,7 +169,30 @@ function loadPhotos() {
   }
   const missing = names.filter((n) => !out[n])
   if (missing.length) {
-    console.warn(`⚠ 料理写真が見つかりません(${missing.join(',')})。写真なしで撮影します: ${PHOTO_DIR}`)
+    /**
+     * **2026-08-27: 警告から「落とす」へ変えた。**
+     *
+     * それまでは警告を出して写真なしで撮り続けていた。ところが `.manual-photos/` は
+     * **リポジトリの外**にあるので、**worktree で撮り直すときは必ず用意されていない**
+     * （2026-08-09 便EU がこの危険をここに書き残していた）。
+     * 2026-08-27 に便LRがworktreeで撮り直したところ、**`detail-photo.webp` が 55KB→8KB**になり、
+     * 説明書が「写真が大きく出ます」と言っている図から**料理写真が消えてアイコンの絵に**なった。
+     * **それでも「✓ 撮ると宣言した40枚がすべてそろいました」は出る。**
+     * ＝**黙って劣化する道が開いていた。**
+     *
+     * 写真なしで撮りたい場面（写真つきのカットを撮らないと分かっているとき）は
+     * `ALLOW_NO_MANUAL_PHOTOS=1` を付ける。**既定では落とす。**
+     */
+    const msg =
+      `料理写真が見つかりません(${missing.join(',')}): ${PHOTO_DIR}\n` +
+      '  このまま撮ると、写真つきのカット(recipe-cards / detail-photo / plan-month-photo / search / logs)が\n' +
+      '  写真なしの絵に置き換わります。**それでも「✓ すべてそろいました」は出ます。**\n' +
+      '  写真を置くか、承知のうえなら ALLOW_NO_MANUAL_PHOTOS=1 を付けてください。'
+    if (!process.env.ALLOW_NO_MANUAL_PHOTOS) {
+      console.error(`✗ ${msg}`)
+      process.exit(1)
+    }
+    console.warn(`⚠ ${msg}`)
   }
   return out
 }
@@ -178,7 +203,10 @@ async function save(png, name) {
   const webp = await sharp(png).webp({ quality: 78, effort: 6 }).toBuffer()
   fs.writeFileSync(path.join(OUT_DIR, `${name}.webp`), webp)
   sizes.push([name, webp.length])
+  // 2026-08-27: **中身が痩せたことに気づけるように**バイト数も控える。
+  // 「✓ 何枚そろった」は枚数しか見ておらず、絵の中身が抜け落ちても緑になる
   manifest[name] = { w: meta.width, h: meta.height }
+  byteSizes[name] = webp.length
   console.log(`  ${name}.webp  ${meta.width}x${meta.height}  ${(webp.length / 1024).toFixed(1)}KB`)
   if (ONLY.size && sizes.length === ONLY.size) throw new AllRequestedDone()
 }
@@ -410,6 +438,31 @@ function report() {
   // 撮ると宣言したぶん(ONLY未指定なら SHOT_NAMES 全部)がそろっているか。
   // failures は「撮れなかった」だけでなく「撮る前提が整わなかった」(missShot)も入る＝
   // 絵は出来ていても中身が本文と食い違うものを通さない
+  /**
+   * **中身が痩せた絵を名指しする**（2026-08-27）。
+   * 「✓ 何枚そろった」は**枚数しか見ていない**ので、絵の中身が抜け落ちても緑になる。
+   * 2026-08-27 に `detail-photo.webp` が 55KB→8KB（料理写真が消えてアイコンになった）でも緑だった。
+   * バイト数が**半分以下**になったカットは、撮れていても**必ず名前を出す**（落としはしない＝
+   * 画面が本当に簡素になった場合もあるため。人が見て判断する）
+   */
+  const sizeFile = path.join(ROOT, 'scripts/data/manual-shot-bytes.json')
+  const prevBytes = fs.existsSync(sizeFile) ? JSON.parse(fs.readFileSync(sizeFile, 'utf8')) : {}
+  const shrunk = Object.entries(byteSizes)
+    .filter(([name, bytes]) => prevBytes[name] && bytes < prevBytes[name] * 0.5)
+    .map(([name, bytes]) => `${name} ${(prevBytes[name] / 1024).toFixed(1)}KB→${(bytes / 1024).toFixed(1)}KB`)
+  if (shrunk.length) {
+    console.warn(`\n⚠ 中身が半分以下になった絵(${shrunk.length}枚): ${shrunk.join(' / ')}`)
+    console.warn('  料理写真が入らなかった・掴む先を間違えた、のどちらかかもしれません。目で見て確かめてください')
+  }
+  {
+    const mergedBytes = {}
+    for (const name of SHOT_NAMES) {
+      const b = byteSizes[name] ?? prevBytes[name]
+      if (b) mergedBytes[name] = b
+    }
+    fs.writeFileSync(sizeFile, JSON.stringify(mergedBytes, null, 2) + '\n')
+  }
+
   const missing = SHOT_NAMES.filter((name) => want(name) && !manifest[name])
   const broken = [...new Set(failures)]
   if (missing.length || broken.length) {
