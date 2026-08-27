@@ -3115,3 +3115,144 @@ import { createRequire } from 'node:module'
     [true, true, true],
   )
 }
+
+// ==========================================================================================
+// 便LT（2026-08-27 オーナーの書き溜め: 献立の「週」・テンプレート・過去の献立をコピー）
+//
+// ここで見張るのは**画面のソースに残る形**だけ（見え方のpxは e2e と実測が受け持つ）。
+//  ①「現在の条件」が、すぐ上の「入れかた」と同じ形（太字の小見出し＋横いっぱい）で出ている
+//  ②テンプレートの選択が、並べる形ではなくプルダウンである（適用の窓・内容の画面の両方）
+//  ③テンプレートの内容が「確認」と「編集」で分かれている
+//  ④「過去の献立をコピー」に、この1回で入れる食事を選ぶ並びがある
+// ==========================================================================================
+{
+  const ltRoot = path.join(path.dirname(fileURLToPath(scriptFileUrl)), '..')
+  const ltRead = (rel) => readFileSync(path.join(ltRoot, rel), 'utf-8')
+  const ltPlan = ltRead('src/pages/MealPlanPage.tsx')
+  const ltTemplates = ltRead('src/pages/MealTemplatesPage.tsx')
+  const ltCopy = ltRead('src/pages/MealPlanCopyWeekPage.tsx')
+
+  // --- ① 「現在の条件」の存在感（オーナー原文「ここで設定できることに気づけない」） ---
+  // 直す前は名前と値を1つの小さな枠に詰めていた（180×38px）。すぐ上の「入れかた」は
+  // 太字の小見出し＋横いっぱいのプルダウンなので、同じ節の中で形が違い、埋もれていた。
+  // **名前を小見出しへ出し、押すところを横いっぱい・44pxにする**という形そのものを見張る
+  {
+    const ltCondBlock = ltPlan.slice(
+      ltPlan.indexOf('data-testid="plan-conditions-open"') - 800,
+      ltPlan.indexOf('data-testid="plan-conditions-open"') + 900,
+    )
+    eq(
+      'LT-1 「現在の条件」の名前が、太字の小見出しとして押すところの外に出ている',
+      /text-sm font-bold text-ink-muted[\s\S]*ja\.mealPlan\.suggestConditionsToggle/.test(
+        ltCondBlock,
+      ),
+      true,
+    )
+    eq(
+      'LT-1 押すところは横いっぱい・44px（すぐ上の「入れかた」と同じ大きさ）',
+      /min-h-11 w-full/.test(ltCondBlock),
+      true,
+    )
+    eq(
+      'LT-1 押すところに残すのは、いま効いている条件だけ（名前は小見出しが持つ）',
+      /<span className="min-w-0 flex-1 truncate">\s*\{conditionsSummary \|\| ja\.mealPlan\.suggestConditionsNone\}/.test(
+        ltCondBlock,
+      ),
+      true,
+    )
+    eq(
+      'LT-1 読み上げ名は名前と値をつないで持つ（値だけのボタンにしない）',
+      /aria-label=\{`\$\{ja\.mealPlan\.suggestConditionsToggle\}: /.test(ltCondBlock),
+      true,
+    )
+  }
+
+  // --- ② テンプレートの選択はプルダウン（オーナー原文「作成したテンプレートの選択方法は
+  //     プルダウンに。多くなったときにスクロール長くなるので。」） ---
+  {
+    eq(
+      'LT-2 「テンプレートを適用」の窓で、テンプレートをプルダウンで選ぶ',
+      ltPlan.includes('data-testid="template-apply-pick"') &&
+        /<select[\s\S]{0,200}data-testid="template-apply-pick"/.test(ltPlan),
+      true,
+    )
+    eq(
+      'LT-2 「テンプレートの内容」の画面でも、同じくプルダウンで選ぶ',
+      ltTemplates.includes('data-testid="template-pick"') &&
+        /<select[\s\S]{0,200}data-testid="template-pick"/.test(ltTemplates),
+      true,
+    )
+    eq(
+      'LT-2 保存したテンプレートを1本ずつ押して選ぶ形（aria-pressed の並び）に戻っていない',
+      /aria-pressed=\{isSelected\}/.test(ltPlan),
+      false,
+    )
+    eq(
+      'LT-2 内容の画面が、保存した全部を縦に積む形に戻っていない',
+      /\(templates \?\? \[\]\)\.map\(\(template\) => \(\s*<TemplateCard/.test(ltTemplates),
+      false,
+    )
+  }
+
+  // --- ③ 内容の「確認」と「編集」（オーナー原文「レシピ名が短すぎて読めない。
+  //     →確認と編集でモード分け？」） ---
+  {
+    eq(
+      'LT-3 内容の画面に、確認と編集の切り替えがある',
+      ltTemplates.includes('data-testid="template-edit-toggle"'),
+      true,
+    )
+    eq(
+      'LT-3 直す操作（レシピを変える・×）は、編集のあいだだけ出す',
+      /\{editing && \([\s\S]{0,800}ja\.mealTemplates\.replaceItem[\s\S]{0,600}ja\.mealTemplates\.removeItem/.test(
+        ltTemplates,
+      ),
+      true,
+    )
+    eq(
+      'LT-3 直す操作は2段目に置く（1段目を料理名だけにして、狭い画面でも幅を減らさない）',
+      /<div className="mt-1 flex items-center justify-end gap-2">/.test(ltTemplates),
+      true,
+    )
+    eq(
+      'LT-3 料理名そのものを押して差し替える形にはしない（2026-08-25 便KUのオーナー裁定）',
+      /onSelect=\{[\s\S]{0,60}onReplace/.test(ltTemplates),
+      false,
+    )
+  }
+
+  // --- ④ コピーする食事（オーナー原文「入れかたの下に、対象にする食事（朝昼夕）の
+  //     選択ボタンが欲しい。」） ---
+  {
+    eq(
+      'LT-4 「過去の献立をコピー」に、この1回で入れる食事を選ぶ並びがある',
+      ltCopy.includes('data-testid="copy-pick-slot"'),
+      true,
+    )
+    eq(
+      'LT-4 選んだ食事が、実際に入る範囲（planCopyLastWeek）にそのまま渡っている',
+      /visibleSlots: targetSlots/.test(ltCopy),
+      true,
+    )
+    eq(
+      'LT-4 選んだ食事が、上に並ぶ週の中身にも効く（見えているものと入るものを食い違わせない）',
+      /copySourceWeekView\(sourceEntries \?\? \[\], sourceDates, targetSlots\)/.test(ltCopy),
+      true,
+    )
+    eq(
+      'LT-4 「表示する食事」を二重に持たない（設定はそのまま読み、その中から絞るだけ）',
+      /\(pickedSlots \?\? visibleSlots\)\.filter\(\(s\) => visibleSlots\.includes\(s\)\)/.test(ltCopy),
+      true,
+    )
+    eq(
+      'LT-4 食事を1つも選んでいなければ実行を押せない（入る先が無いまま走らせない）',
+      /disabled=\{targetSlots\.length === 0\}/.test(ltCopy),
+      true,
+    )
+    eq(
+      'LT-4 入れかたの下にあった説明の1行は、両方の画面から消えている',
+      ltPlan.includes('data-testid="fill-hint"') || ltCopy.includes('data-testid="copy-pick-hint"'),
+      false,
+    )
+  }
+}

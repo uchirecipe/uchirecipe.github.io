@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { ChevronLeft, ChevronRight, Copy, BookmarkPlus, X } from 'lucide-react'
@@ -22,6 +22,7 @@ import {
   MEAL_SLOTS,
   copySourceWeekView,
   dowIndex,
+  isPastDate,
   maxCopySourceWeeksBack,
   planCopyLastWeek,
   shiftDate,
@@ -86,12 +87,48 @@ export default function MealPlanCopyWeekPage() {
     () => Array.from({ length: 7 }, (_, i) => shiftDate(targetStart, i)),
     [targetStart],
   )
+  /**
+   * 入れる先の7日間に過ぎた日が混ざっているか（2026-08-27 便LT）。
+   * 混ざっているときだけ「入れ替えるのは今日以降」の注記を出す
+   * ＝すべてこれからの日付なら、実装（planCopyLastWeek の isPastDate）は1日も外していない。
+   */
+  const targetHasPastDay = useMemo(
+    () => targetDates.some((d) => isPastDate(d, today)),
+    [targetDates, today],
+  )
 
   /** 表示する食事（週タブと同じ設定値を見る＝画面ごとに違う食事を出さない） */
   const visibleSlots: MealSlot[] = useMemo(
     () => sortMealSlots(settings?.visibleMealSlots ?? [...MEAL_SLOTS]),
     [settings?.visibleMealSlots],
   )
+  /**
+   * この1回のコピーで入れる食事（2026-08-27 便LT。オーナー原文
+   * 「入れかたの下に、対象にする食事（朝昼夕）の選択ボタンが欲しい。」）。
+   *
+   * **「表示する食事」とは別物なので、二重には持たない**:
+   *   表示する食事 … アプリ全体の設定。この画面もそれに従う（出ていない食事はここにも出ない）
+   *   これ        … その中から、この1回だけ入れる食事を絞る
+   * 既定は「表示する食事」と同じ範囲＝触らなければ、これまでとまったく同じところに入る。
+   * 設定が端末から届くと visibleSlots が変わるので、そのたびに全部選んだ状態へ引き直す
+   * （届く前の仮の値のまま固まらないようにする）。
+   */
+  const [pickedSlots, setPickedSlots] = useState<MealSlot[] | null>(null)
+  useEffect(() => {
+    setPickedSlots(null)
+  }, [visibleSlots])
+  /** 実際に使う食事。まだ絞っていなければ「表示する食事」ぜんぶ */
+  const targetSlots: MealSlot[] = useMemo(
+    () => (pickedSlots ?? visibleSlots).filter((s) => visibleSlots.includes(s)),
+    [pickedSlots, visibleSlots],
+  )
+  const toggleSlot = (slot: MealSlot) => {
+    setPickedSlots((prev) => {
+      const now = prev ?? visibleSlots
+      const next = now.includes(slot) ? now.filter((s) => s !== slot) : [...now, slot]
+      return sortMealSlots(next)
+    })
+  }
 
   /** いま中身を見ている週が、入れ先の何週間前か（1＝1週間前。開いた直後はここから） */
   const [weeksBack, setWeeksBack] = useState(1)
@@ -121,8 +158,10 @@ export default function MealPlanCopyWeekPage() {
 
   /** 画面に並べる「その週の中身」。実際に入るものと同じ判断で作る（logic/mealPlan.ts） */
   const view = useMemo(
-    () => copySourceWeekView(sourceEntries ?? [], sourceDates, visibleSlots),
-    [sourceEntries, sourceDates, visibleSlots],
+    // 並べるのは**入れる食事だけ**（絞ったら、その場で見えている中身も同じ範囲になる
+    // ＝画面に出ているものと入るものを食い違わせない）
+    () => copySourceWeekView(sourceEntries ?? [], sourceDates, targetSlots),
+    [sourceEntries, sourceDates, targetSlots],
   )
   const sourceCount = view.reduce(
     (sum, day) => sum + day.slots.reduce((n, s) => n + s.recipeIds.length, 0),
@@ -162,7 +201,7 @@ export default function MealPlanCopyWeekPage() {
       planCopyLastWeek({
         dates: targetDates,
         today,
-        visibleSlots,
+        visibleSlots: targetSlots,
         entries: targetEntries ?? [],
         prevEntries: sourceEntries ?? [],
         weeksBack,
@@ -206,7 +245,12 @@ export default function MealPlanCopyWeekPage() {
             text: ja.mealPlan.copyWeekReplaceAllKept,
           },
         ],
-        notes: lockNotice ? [lockNotice] : [],
+        /* 2026-08-27 便LT: 入れ先に過ぎた日が混ざっているときだけ「今日以降が対象」を
+           1行で添える（見出しの途中に埋めない。i18n/ja.ts の replaceAllPastNote 参照） */
+        notes: [
+          ...(targetHasPastDay ? [ja.mealPlan.replaceAllPastNote] : []),
+          ...(lockNotice ? [lockNotice] : []),
+        ],
         confirmLabel: ja.mealPlan.fillModeReplaceAllConfirmOk,
       })
       if (!ok) return
@@ -223,12 +267,11 @@ export default function MealPlanCopyWeekPage() {
       return
     }
     // 空いた枠だけ（非破壊）。残る品数も数えて書く（規約F: 何が残るかも件数つきで）
-    const keptCount = (targetEntries ?? []).filter(
-      (e) => e.date >= today && visibleSlots.includes(e.slot),
-    ).length
+    // 2026-08-27 便LT: 本文（旧 copyWeekConfirm「今ある献立{k}品は…そのまま残ります。」）を外した
+    // ＝規約Fの例外（2026-08-25 裁定D）。理由は i18n/ja.ts の copyWeekConfirmTitle のところ
     const ok = await confirm({
       title: withDates(ja.mealPlan.copyWeekConfirmTitle).replace('{n}', String(ops.length)),
-      body: ja.mealPlan.copyWeekConfirm.replace('{k}', String(keptCount)),
+      body: '',
       notes: lockNotice ? [lockNotice] : [],
       confirmLabel: ja.mealPlan.copyWeekConfirmOk,
     })
@@ -294,7 +337,7 @@ export default function MealPlanCopyWeekPage() {
 
       <div className="px-[var(--space-md)] pt-[var(--space-md)]">
         <p className="text-sm text-ink-muted">{ja.mealPlan.copyPickDescription}</p>
-        {/* 入れ先はこの画面に出ていないので、日付で言い切る（規約H） */}
+        {/* 入れる先はこの画面に出ていないので、日付で言い切る（規約H） */}
         <p
           data-testid="copy-pick-target"
           data-start={targetDates[0]}
@@ -413,20 +456,58 @@ export default function MealPlanCopyWeekPage() {
               <option value="replaceAll">{ja.mealPlan.fillModeReplaceAll}</option>
             </select>
           </label>
-          <p data-testid="copy-pick-hint" className="mt-1 text-xs text-ink-muted">
-            {withDates(
-              fillMode === 'replaceAll'
-                ? ja.mealPlan.copyWeekReplaceAllHint
-                : ja.mealPlan.copyWeekFillEmptyHint,
-            )}
-          </p>
+          {/* 2026-08-27 便LT: 入れかたの下にあった説明の1行を無くした
+              （理由は i18n/ja.ts の copyWeekConfirmTitle の手前に書いてある）*/}
         </div>
+
+        {/* コピーする食事（2026-08-27 便LT・オーナー指示「入れかたの下」）。
+            出すのは「表示する食事」が2つ以上あるときだけ＝選びようが無い並びを置かない。
+            形は買い物メモの範囲えらび（shopRangeSlot*）と同じ押せる並び＝
+            同じ「食事を絞る」操作を、画面ごとに違う形にしない */}
+        {visibleSlots.length > 1 && (
+          <div className="mt-[var(--space-md)]">
+            <p className="text-sm font-bold text-ink-muted">{ja.mealPlan.copyPickSlotLabel}</p>
+            <div
+              role="group"
+              aria-label={ja.mealPlan.copyPickSlotLabel}
+              className="mt-1 flex flex-wrap gap-[var(--space-sm)]"
+            >
+              {visibleSlots.map((slot) => {
+                const active = targetSlots.includes(slot)
+                return (
+                  <button
+                    key={slot}
+                    type="button"
+                    data-testid="copy-pick-slot"
+                    data-slot={slot}
+                    onClick={() => toggleSlot(slot)}
+                    aria-pressed={active}
+                    className={`tap-target rounded-sm border px-3 py-2 text-sm font-bold ${
+                      active
+                        ? 'border-accent bg-accent text-on-accent'
+                        : 'border-edge bg-surface text-ink-muted'
+                    }`}
+                  >
+                    {ja.mealPlan.slot[slot]}
+                  </button>
+                )
+              })}
+            </div>
+            {targetSlots.length === 0 && (
+              <p data-testid="copy-pick-slot-empty" className="mt-1 text-xs text-warning">
+                {ja.mealPlan.shopRangeEmptySlots}
+              </p>
+            )}
+          </div>
+        )}
 
         <button
           type="button"
           data-testid="copy-pick-run"
           onClick={() => void run()}
-          className="mt-[var(--space-md)] flex w-full items-center justify-center gap-2 rounded-md bg-accent py-3 font-bold text-on-accent shadow-sm"
+          /* 食事を1つも選んでいなければ、入る先が無いので押せなくする（理由は上の1行が言う） */
+          disabled={targetSlots.length === 0}
+          className="mt-[var(--space-md)] flex w-full items-center justify-center gap-2 rounded-md bg-accent py-3 font-bold text-on-accent shadow-sm disabled:opacity-40"
         >
           <Copy size={20} aria-hidden />
           {ja.mealPlan.copyPickRun}

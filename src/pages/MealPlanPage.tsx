@@ -1179,18 +1179,34 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
             「読み取れなかった」のか「選んでいない」のかが分かるようにする）
           何か絞り込んでいるあいだは枠と字をアクセント色にする＝窓を開かなくても
           「絞り込み中かどうか」が分かる（日タブの「条件をしぼる」と同じ言い方） */}
+      {/* 2026-08-27 便LT（オーナー原文「「現在の条件」→サブタイ「条件設定」と「指定する」ボタンに
+          分けるなどしないと、ここで設定できることに気づけない。入れかたの方が目立っているので
+          存在感がない。」）: 困りごとは「ここで設定できることに気づけない」こと。
+          **すぐ上の「入れかた」とまったく同じ形**（太字の小見出し＋横いっぱい・44pxの操作）にした。
+          直す前は、名前も値も1つのボタンの中に詰めた 180×38px の小さな枠で、
+          横いっぱいのプルダウンである「入れかた」の脇に埋もれていた。
+          名前は小見出しへ出し、ボタンには**いま効いている条件だけ**を残す＝
+          「入れかた: 空いた枠だけ」と同じ読み方（名前→値）になり、値を変えられる欄だと分かる。
+          読み上げ名は名前と値をつないで持つ（値だけのボタンは、音だけでは何の値か分からない） */}
+      <span className="block text-sm font-bold text-ink-muted">
+        {ja.mealPlan.suggestConditionsToggle}
+      </span>
       <button
         type="button"
         data-testid="plan-conditions-open"
         disabled={disabled}
         onClick={() => setSuggestConditionsOpen(true)}
-        className={`inline-flex items-center gap-1 rounded-sm border bg-surface px-3 py-2 text-sm font-bold shadow-sm ${
+        aria-label={`${ja.mealPlan.suggestConditionsToggle}: ${
+          conditionsSummary || ja.mealPlan.suggestConditionsNone
+        }`}
+        className={`mt-1 flex min-h-11 w-full items-center gap-2 rounded-sm border bg-surface px-3 py-2 text-left text-sm font-bold shadow-sm ${
           conditionsSummary ? 'border-accent text-accent-ink' : 'border-edge text-ink-muted'
         }`}
       >
-        <SlidersHorizontal size={16} aria-hidden />
-        {ja.mealPlan.suggestConditionsToggle}:{' '}
-        {conditionsSummary || ja.mealPlan.suggestConditionsNone}
+        <span className="min-w-0 flex-1 truncate">
+          {conditionsSummary || ja.mealPlan.suggestConditionsNone}
+        </span>
+        <SlidersHorizontal size={16} className="shrink-0" aria-hidden />
       </button>
 
     </div>
@@ -2868,15 +2884,9 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                   <option value="replaceAll">{ja.mealPlan.fillModeReplaceAll}</option>
                 </select>
               </label>
-              {/* 押すと何が起きるかの1行（2026-08-19 便IF・④）。
-                  同じことを2か所で言わない＝旧 fillWeekHint はここに畳んだ。
-                  2026-08-21 便IO: 別の週から入れる道はこの節から出したので、
-                  ここが言うのは「おまかせ×入れかた」の2通りだけになった */}
-              <p data-testid="fill-hint" className="mt-1 text-xs text-ink-muted">
-                {fillMode === 'replaceAll'
-                  ? ja.mealPlan.fillModeReplaceAllHint
-                  : ja.mealPlan.fillModeFillEmptyHint}
-              </p>
+              {/* 2026-08-27 便LT: 入れかたの下にあった説明の1行を無くした
+                  （理由は i18n/ja.ts の fillModeFillEmpty のところに書いてある）。
+                  押すボタンは節の見出しの行に塗りつぶしで出ており、消える側は確認の窓が言う */}
             </div>
 
             {/* 現在の条件: 時短優先・ジャンル・栄養から組む。押すと窓が開く(2026-08-19 便ID・④)。
@@ -4013,45 +4023,52 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
               </p>
             ) : (
               <>
-                <p className="mt-[var(--space-md)] text-sm font-bold text-ink-muted">
-                  {ja.mealPlan.templateApplyPick}
-                </p>
-                <ul className="mt-1 space-y-1">
-                  {(mealTemplates ?? []).map((t) => {
-                    const isSelected = selectedTemplate?.id === t.id
-                    return (
-                      <li key={t.id} className="flex items-center gap-1">
-                        <button
-                          type="button"
-                          onClick={() => setSelectedTemplateId(t.id ?? null)}
-                          aria-pressed={isSelected}
-                          className={`flex min-w-0 flex-1 items-center gap-2 rounded-sm border px-3 py-2 text-left text-sm font-bold ${
-                            isSelected
-                              ? 'border-accent bg-accent text-on-accent'
-                              : 'border-edge bg-app text-ink'
-                          }`}
-                        >
-                          <span className="min-w-0 flex-1 truncate">{t.name}</span>
-                          <span
-                            className={`shrink-0 text-xs font-normal ${
-                              isSelected ? 'text-on-accent' : 'text-ink-muted'
-                            }`}
-                          >
-                            {ja.mealPlan.templateItemCount.replace('{n}', String(t.items.length))}
-                          </span>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => void removeTemplate(t.id!, t.name, t.items.length)}
-                          aria-label={ja.mealPlan.templateDelete}
-                          className="shrink-0 rounded-full p-2 text-ink-muted"
-                        >
-                          <Trash2 size={16} aria-hidden />
-                        </button>
-                      </li>
-                    )
-                  })}
-                </ul>
+                {/* 2026-08-27 便LT（オーナー原文「「テンプレートを適用」「テンプレートの中身を
+                    見る・直す」の、作成したテンプレートの選択方法はプルダウンに。多くなったときに
+                    スクロール長くなるので。」／「プルダウンではタイトルが一括で確認できて、
+                    気になったものの中身を確認→レシピ名を一覧で確認の流れが綺麗ではないのですか？」）:
+                    1本ずつ並べる選択をやめ、プルダウン1つにした。
+                    テンプレートの名前は**利用者が自分で付けたもの**なので、名前だけで見分けられる。
+                    削除はこの窓では1つだけ置く（選んでいるテンプレートに対して効く）＝
+                    並びの行ごとにゴミ箱が並んで、選ぶ操作と消す操作が同じ幅で争う形をやめた */}
+                {/* 削除は <label> の**外**に置く（中に入れると、押したときに label が
+                    プルダウンまで一緒に動かしてしまう） */}
+                <div className="mt-[var(--space-md)] flex items-end gap-1">
+                  <label className="min-w-0 flex-1">
+                    <span className="block text-sm font-bold text-ink-muted">
+                      {ja.mealPlan.templateApplyPick}
+                    </span>
+                    <select
+                      data-testid="template-apply-pick"
+                      value={selectedTemplate?.id ?? ''}
+                      onChange={(e) => setSelectedTemplateId(Number(e.target.value))}
+                      className="select-control mt-1 w-full"
+                    >
+                      {(mealTemplates ?? []).map((t) => (
+                        <option key={t.id} value={t.id}>
+                          {`${t.name}（${ja.mealPlan.templateItemCount.replace('{n}', String(t.items.length))}）`}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <button
+                    type="button"
+                    data-testid="template-apply-delete"
+                    onClick={() =>
+                      selectedTemplate &&
+                      void removeTemplate(
+                        selectedTemplate.id!,
+                        selectedTemplate.name,
+                        selectedTemplate.items.length,
+                      )
+                    }
+                    aria-label={ja.mealPlan.templateDelete}
+                    /* tap-target: 消す操作なので、当たり判定は44pxを保つ */
+                    className="tap-target shrink-0 rounded-full p-2 text-ink-muted"
+                  >
+                    <Trash2 size={16} aria-hidden />
+                  </button>
+                </div>
 
                 {/* B-2: 入れる曜日。既定は全曜日＝1週間まるごと。絞ればその曜日だけに入る */}
                 <p className="mt-[var(--space-md)] text-sm font-bold text-ink-muted">

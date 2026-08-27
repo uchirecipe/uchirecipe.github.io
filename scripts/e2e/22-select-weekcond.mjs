@@ -1293,13 +1293,41 @@ import './_shared.mjs'
       check('WEEKCOND-01 前提: 入れかたのプルダウンが1つ出ている', (await wcFillMode.count()) === 1)
 
       // ③ 何も選んでいないときの見え方
+      // 2026-08-27 便LT: 名前は太字の小見出しへ出し、押すところにはいま効いている条件だけを残した
+      // （オーナー原文「ここで設定できることに気づけない」）。読む順は今までと同じ「名前→値」なので、
+      // 名前は小見出しで、値は押すところで、つないだ形は読み上げ名で見る
+      const wcCondLabelText = await wcConditions.evaluate(
+        (el) => el.previousElementSibling?.textContent ?? '',
+      )
       check(
-        'WEEKCOND-01(③) 条件を選んでいないときは「現在の条件: 指定なし」と出る',
-        wcStrip(await wcConditions.textContent()).includes(
-          `${ja.mealPlan.suggestConditionsToggle}: ${ja.mealPlan.suggestConditionsNone}`,
-        ),
+        'WEEKCOND-01(③・便LT) 条件の名前は、押すところの外に小見出しとして出ている',
+        wcStrip(wcCondLabelText) === ja.mealPlan.suggestConditionsToggle,
+        `小見出し=${wcStrip(wcCondLabelText)}`,
+      )
+      check(
+        'WEEKCOND-01(③) 条件を選んでいないときは、押すところに「指定なし」と出る',
+        wcStrip(await wcConditions.textContent()) === ja.mealPlan.suggestConditionsNone,
         `字=${wcStrip(await wcConditions.textContent())}`,
       )
+      check(
+        'WEEKCOND-01(③・便LT) 読み上げ名は名前と値をつないで持つ（値だけのボタンにしない）',
+        wcStrip((await wcConditions.getAttribute('aria-label')) ?? '') ===
+          `${ja.mealPlan.suggestConditionsToggle}: ${ja.mealPlan.suggestConditionsNone}`,
+        `読み上げ名=${await wcConditions.getAttribute('aria-label')}`,
+      )
+      // 「入れかた」と同じ形（横いっぱい・44px）になっていること＝存在感の直しそのもの
+      {
+        const wcCondBox = await wcConditions.boundingBox()
+        const wcFillBox = await wcPage.locator('[data-testid="fill-mode"]').boundingBox()
+        check(
+          'WEEKCOND-01(便LT) 条件を押すところは、すぐ上の「入れかた」と同じ幅・同じ高さ',
+          wcCondBox != null &&
+            wcFillBox != null &&
+            Math.abs(wcCondBox.width - wcFillBox.width) <= 1 &&
+            wcCondBox.height >= 44,
+          `条件=${JSON.stringify(wcCondBox)} 入れかた=${JSON.stringify(wcFillBox)}`,
+        )
+      }
 
       // ① 並び順（入れかたが先・現在の条件が後）
       const wcFillTitlePos = await wcDocPos(
@@ -1458,8 +1486,7 @@ import './_shared.mjs'
       // 閉じたあと、選んだ条件がボタンの字に出ている（③の「現在の条件」の意味）
       check(
         'WEEKCOND-01(③) 選んだあとのボタンには、いま効いている条件が並ぶ',
-        wcStrip(await wcConditions.textContent()) !==
-          `${ja.mealPlan.suggestConditionsToggle}: ${ja.mealPlan.suggestConditionsNone}`,
+        wcStrip(await wcConditions.textContent()) !== ja.mealPlan.suggestConditionsNone,
         `字=${wcStrip(await wcConditions.textContent())}`,
       )
 

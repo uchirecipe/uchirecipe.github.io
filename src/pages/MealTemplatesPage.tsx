@@ -53,6 +53,28 @@ export default function MealTemplatesPage() {
     currentTitle: string
   } | null>(null)
   const [pickerQuery, setPickerQuery] = useState('')
+  /**
+   * どのテンプレートの内容を出すか（2026-08-27 便LT）。
+   * 直す前は保存した全部を縦に積んでいたので、10件で7,071pxのスクロールになっていた（実測）。
+   * 選ぶのはプルダウン1つ＝名前は利用者が自分で付けたもので、名前だけで見分けがつく。
+   * 選んだテンプレートを削除したときは、id が一覧から消えるので先頭へ落ちる
+   */
+  const [selectedId, setSelectedId] = useState<number | null>(null)
+  const selected = useMemo(() => {
+    const list = templates ?? []
+    return list.find((t) => t.id === selectedId) ?? list[0]
+  }, [templates, selectedId])
+  /**
+   * 内容の「確認」と「編集」の切り替え（2026-08-27 便LT。オーナー原文
+   * 「献立テンプレートの中身のレシピ名が短すぎて読めない。→確認と編集でモード分け？」）。
+   *
+   * 確認のときは料理名の右にある操作（レシピを変える・×）を出さない＝その幅が料理名に回る。
+   * 直す前は 390px の画面で料理名に 76px しか無く、全角3文字しか読めなかった（実測）。
+   * **料理名そのものを押して差し替える形にはしない**——2026-08-25 便KU のオーナー裁定
+   * 「他はレシピカードから必ずレシピ詳細に行くので揃えるべきでは」に反するため。
+   * 切り替えの言葉と場所は、週の曜日カード・月の日の窓（便JN）と同じものを使う。
+   */
+  const [editing, setEditing] = useState(false)
 
   const recipeById = useMemo(() => {
     const map = new Map<number, Recipe>()
@@ -161,20 +183,43 @@ export default function MealTemplatesPage() {
             </Link>
           </div>
         ) : (
-          <div className="mt-[var(--space-md)] space-y-[var(--space-md)]">
-            {(templates ?? []).map((template) => (
-              <TemplateCard
-                key={template.id}
-                template={template}
-                recipeById={recipeById}
-                onSaveName={(name) => void saveName(template, name)}
-                onReplace={(index, currentTitle) =>
-                  setReplaceTarget({ templateId: template.id!, index, currentTitle })
-                }
-                onRemoveItem={(index, title) => void removeItem(template, index, title)}
-                onDelete={() => void removeTemplate(template)}
-              />
-            ))}
+          <div className="mt-[var(--space-md)]">
+            {/* どのテンプレートを見るか（2026-08-27 便LT・オーナー指示でプルダウンに）。
+                1件しか無いときも同じ形で出す＝件数で画面の作りが変わらないようにする */}
+            <label className="block">
+              <span className="block text-sm font-bold text-ink-muted">
+                {ja.mealTemplates.pickLabel}
+              </span>
+              <select
+                data-testid="template-pick"
+                value={selected?.id ?? ''}
+                onChange={(e) => setSelectedId(Number(e.target.value))}
+                className="select-control mt-1 w-full"
+              >
+                {(templates ?? []).map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {`${t.name}（${ja.mealPlan.templateItemCount.replace('{n}', String(t.items.length))}）`}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {selected && (
+              <div className="mt-[var(--space-md)]">
+                <TemplateCard
+                  key={selected.id}
+                  template={selected}
+                  recipeById={recipeById}
+                  editing={editing}
+                  onToggleEdit={() => setEditing((v) => !v)}
+                  onSaveName={(name) => void saveName(selected, name)}
+                  onReplace={(index, currentTitle) =>
+                    setReplaceTarget({ templateId: selected.id!, index, currentTitle })
+                  }
+                  onRemoveItem={(index, title) => void removeItem(selected, index, title)}
+                  onDelete={() => void removeTemplate(selected)}
+                />
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -244,6 +289,8 @@ export default function MealTemplatesPage() {
 function TemplateCard({
   template,
   recipeById,
+  editing,
+  onToggleEdit,
   onSaveName,
   onReplace,
   onRemoveItem,
@@ -251,6 +298,9 @@ function TemplateCard({
 }: {
   template: MealTemplate
   recipeById: Map<number, Recipe>
+  /** 内容を直せる状態か（確認のあいだは料理名の右の操作を出さない＝その幅を料理名に回す） */
+  editing: boolean
+  onToggleEdit: () => void
   onSaveName: (name: string) => void
   onReplace: (index: number, currentTitle: string) => void
   onRemoveItem: (index: number, title: string) => void
@@ -287,6 +337,23 @@ function TemplateCard({
         <span className="text-sm text-ink-muted">
           {ja.mealPlan.templateItemCount.replace('{n}', String(template.items.length))}
         </span>
+        {/* 確認／編集の切り替え（2026-08-27 便LT）。押している間は塗りつぶし・名前は「完了」に変わる
+            ＝週の曜日カード・月の日の窓とまったく同じ見た目と言葉（便JN） */}
+        {template.items.length > 0 && (
+          <button
+            type="button"
+            data-testid="template-edit-toggle"
+            onClick={onToggleEdit}
+            aria-pressed={editing}
+            className={`tap-target ml-auto shrink-0 rounded-sm border px-3 py-2 text-sm font-bold ${
+              editing
+                ? 'border-accent bg-accent text-on-accent'
+                : 'border-edge bg-app text-accent-ink'
+            }`}
+          >
+            {editing ? ja.mealTemplates.editItemsDone : ja.mealTemplates.editItems}
+          </button>
+        )}
       </div>
 
       {template.items.length === 0 ? (
@@ -306,39 +373,57 @@ function TemplateCard({
                       const recipe = recipeById.get(item.recipeId)
                       const title = recipe?.title ?? ja.mealTemplates.missingRecipe
                       return (
-                        <li key={index} className="flex items-center gap-2">
+                        <li key={index}>
                           {/* 2026-08-19 便HW: 献立の「週」「月」の枠とまったく同じ形
                               （役割の列＋「小」のカード＋その行の操作）にそろえた。
                               雛形の中身も献立の1品なので、同じ情報は同じ形で出す。
                               レシピが端末から消えている行だけは、カードにする絵も
-                              押す先も無いので、断りの1行として文字で残す */}
+                              押す先も無いので、断りの1行として文字で残す。
+
+                              2026-08-27 便LT: 直す操作は**2段目**へ移した（献立の「週」の枠が
+                              2026-08-22 便IZ でやったのと同じ形）。1段目を料理名だけにすると、
+                              画面が狭いときでも料理名の幅が減らない
+                              ＝編集のあいだも「短すぎて読めない」に戻らない */}
+                          <div className="flex items-center gap-2">
                           <span className="w-10 shrink-0 text-xs font-bold text-ink-muted">
                             {ja.mealPlan.role[item.role]}
                           </span>
                           {recipe ? (
                             <span className="min-w-0 flex-1">
-                              <RecipeCard recipe={recipe} density="small" place="planSlot" readOnly />
+                              <RecipeCard
+                                recipe={recipe}
+                                density="small"
+                                place="planSlot"
+                                readOnly
+                                titleTestId="template-item-title"
+                              />
                             </span>
                           ) : (
                             <span className="min-w-0 flex-1 truncate text-sm font-bold text-ink-muted">
                               {title}
                             </span>
                           )}
-                          <button
-                            type="button"
-                            onClick={() => onReplace(index, title)}
-                            className="shrink-0 rounded-sm border border-edge bg-app px-2 py-1 text-xs font-bold text-accent-ink"
-                          >
-                            {ja.mealTemplates.replaceItem}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => onRemoveItem(index, title)}
-                            aria-label={ja.mealTemplates.removeItem}
-                            className="tap-target shrink-0 rounded-full p-2 text-ink-muted"
-                          >
-                            <X size={16} aria-hidden />
-                          </button>
+                          </div>
+                          {/* 直す操作は「編集」のあいだだけ、2段目に出す（2026-08-27 便LT） */}
+                          {editing && (
+                            <div className="mt-1 flex items-center justify-end gap-2">
+                              <button
+                                type="button"
+                                onClick={() => onReplace(index, title)}
+                                className="shrink-0 rounded-sm border border-edge bg-app px-2 py-1 text-xs font-bold text-accent-ink"
+                              >
+                                {ja.mealTemplates.replaceItem}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => onRemoveItem(index, title)}
+                                aria-label={ja.mealTemplates.removeItem}
+                                className="tap-target shrink-0 rounded-full p-2 text-ink-muted"
+                              >
+                                <X size={16} aria-hidden />
+                              </button>
+                            </div>
+                          )}
                         </li>
                       )
                     })}
