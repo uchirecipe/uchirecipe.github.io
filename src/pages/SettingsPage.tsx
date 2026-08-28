@@ -286,6 +286,10 @@ const sectionDeepLinks: Record<string, string> = {
   // updateは2026-08-09 便ER: 新設した「アプリの更新」カードへ名前で飛べる値(?section=update)。
   // 画面下の更新のお知らせを閉じたあとでも、設定から最新にできる場所へ辿り着けるようにする
   update: 'app-update-section',
+  // archiveは2026-08-28 便LW: 「古い記録の書き出し」カードへ名前で飛べる値(?section=archive)。
+  // このカードの「詳しい説明を見る」から使い方ページへ移ったあと、元の場所へ帰るために要る
+  // (?section=backup で帰すと、畳んである別のカードの位置に着いて元の場所が分からない)
+  archive: 'archive-section',
 }
 
 // 各節の見出し(パーソナライズ/レシピ/バックアップ/Pro)の共通スタイル。節の区切りとして本文カードより一回り
@@ -2503,10 +2507,12 @@ export default function SettingsPage() {
             </button>
             <p className="mt-1 text-xs text-ink-muted">{ja.settings.archiveViewNote}</p>
 
-            {/* 詳しい説明は使い方ページに任せる(2026-08-12 便FW) */}
+            {/* 詳しい説明は使い方ページに任せる(2026-08-12 便FW)。
+                2026-08-28 便LW: 便LSがバックアップ側だけに入れた帰り道を、ここにも入れた
+                （受け取り側は public/about/app-return.js） */}
             <p className="mt-[var(--space-md)]">
               <a
-                href="/about/manual.html#archive"
+                href={aboutLinkWithReturn('/about/manual.html#archive', '/settings?section=archive')}
                 data-testid="archive-detail-link"
                 className="text-sm font-bold text-accent-ink underline"
               >
@@ -2753,6 +2759,13 @@ export default function SettingsPage() {
                   </div>
                   {/* 機能紹介の一番下に、詳しい説明への入口を1本置く(2026-08-12 便FW・オーナー指示)。
                       行き先は使い方ページの「無料で使える範囲とPro版」 */}
+                  {/* 2026-08-28 便LW: この3本（機能の詳しい説明・Pro版の説明・特商法表記）だけは
+                      別窓（target="_blank"）なので、?from= の帰り道を載せない。
+                      別窓は元の画面をそのまま残すので、閉じれば元の場所に戻る＝帰り道はもうある。
+                      さらに、ホーム画面に追加したアプリの別窓はブラウザ側で開き、
+                      iOSではアプリ本体とデータの置き場所が別になる（この画面の他のリンクを
+                      別窓にしていない理由と同じ）。そこから「うちレシピに戻る」を押すと、
+                      レシピが1件も入っていない別のうちレシピが開いてしまう */}
                   <p className="mt-[var(--space-md)] border-t border-edge pt-[var(--space-sm)]">
                     <a
                       href="/about/manual.html#pro"
@@ -2834,7 +2847,10 @@ export default function SettingsPage() {
 
                 <p className="mt-[var(--space-sm)] text-xs text-ink-muted">{ja.settings.proBuyNote}</p>
 
-                {/* 説明リンク1本と特商法表記(特商法表記は購入ボタンと同じ枠内に置く) */}
+                {/* 説明リンク1本と特商法表記(特商法表記は購入ボタンと同じ枠内に置く)。
+                    2026-08-28 便LW: どちらも別窓なので ?from= の帰り道は載せない
+                    （理由は上の「詳しい説明」と同じ。加えてここは解錠コードの入力欄の真下で、
+                    同じ窓で移ると打ちかけのコードが消える） */}
                 <div className="mt-[var(--space-sm)] flex flex-wrap items-center gap-x-[var(--space-md)] gap-y-1">
                   <a
                     href="/about/manual.html#pro"
@@ -2934,9 +2950,10 @@ export default function SettingsPage() {
                   .replace('{r}', String(dataCounts.recipes))
                   .replace('{c}', String(dataCounts.cookedLogs))}
           </p>
-          {/* 別窓(target="_blank")にしない: iOSのホーム画面追加アプリはSafariとストレージが別のため */}
+          {/* 別窓(target="_blank")にしない: iOSのホーム画面追加アプリはSafariとストレージが別のため。
+              2026-08-28 便LW: 同じ画面へ帰れるように ?from= を載せる */}
           <a
-            href="/about/"
+            href={aboutLinkWithReturn('/about/', '/settings?section=about')}
             className="mt-[var(--space-sm)] flex w-full items-center justify-center gap-2 rounded-md border border-edge bg-surface py-3 font-bold text-accent-ink shadow-sm"
           >
             <Info size={18} aria-hidden />
@@ -2948,7 +2965,7 @@ export default function SettingsPage() {
           {!launchedFromHomeScreen && (
             <>
               <a
-                href="/about/install.html"
+                href={aboutLinkWithReturn('/about/install.html', '/settings?section=about')}
                 data-testid="settings-install-link"
                 className="mt-[var(--space-sm)] flex w-full items-center justify-center gap-2 rounded-md border border-edge bg-surface py-3 font-bold text-accent-ink shadow-sm"
               >
@@ -2961,7 +2978,7 @@ export default function SettingsPage() {
             </>
           )}
           <a
-            href="/about/terms.html"
+            href={aboutLinkWithReturn('/about/terms.html', '/settings?section=about')}
             className="mt-[var(--space-sm)] block text-center text-sm font-bold text-accent-ink underline"
           >
             {ja.settings.termsLink}

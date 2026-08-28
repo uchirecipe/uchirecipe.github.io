@@ -297,8 +297,18 @@ import './_shared.mjs'
       const fwArchiveHref =
         (await fwArchiveLink.count()) > 0 ? await fwArchiveLink.getAttribute('href') : null
       check(
+        // 2026-08-28 便LW: このリンクにも帰り先（?from=）が載ったので、FW-02 と同じく
+        // 行き先そのもの（パスと見出しの目印）で見る
         'FW-03 詳しい説明のリンクが使い方ページの「古い記録の書き出し」を指す',
-        fwArchiveHref === '/about/manual.html#archive',
+        typeof fwArchiveHref === 'string' &&
+          fwArchiveHref.startsWith('/about/manual.html') &&
+          fwArchiveHref.endsWith('#archive'),
+        String(fwArchiveHref),
+      )
+      check(
+        'FW-03 詳しい説明のリンクが、アプリへの帰り先を持っている（便LW）',
+        typeof fwArchiveHref === 'string' &&
+          fwArchiveHref.includes(`from=${encodeURIComponent('/settings?section=archive')}`),
         String(fwArchiveHref),
       )
       check(

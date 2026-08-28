@@ -1,5 +1,7 @@
+import { useLocation } from 'react-router-dom'
 import { ja } from '../i18n/ja'
 import { markHomeScreenNoticeSeen } from '../logic/homeScreenNotice'
+import { aboutLinkWithReturn } from '../logic/backLink'
 import NoticeDialog from './NoticeDialog'
 
 /**
@@ -17,8 +19,12 @@ import NoticeDialog from './NoticeDialog'
  *    後片付けと画面遷移が同時に走る）
  *  - 別窓(target="_blank")にしない: iOSのホーム画面追加アプリはSafariとストレージが別
  *    （SettingsPageの /about/ 配下へのリンクと同じ理由）
+ *  - 2026-08-28 便LW: 同じ窓で移るので、手順ページから元の画面へ帰れるように ?from= を載せる
+ *    （受け取り側は public/about/app-return.js）。この窓は献立の「日」から出るが、
+ *    出る場所が変わっても帰り先が合うように、決め打ちではなく現在地を載せる
  */
 export default function HomeScreenNotice({ onClose }: { onClose: () => void }) {
+  const location = useLocation()
   const close = () => {
     markHomeScreenNoticeSeen()
     onClose()
@@ -40,7 +46,7 @@ export default function HomeScreenNotice({ onClose }: { onClose: () => void }) {
       />
 
       <a
-        href="/about/install.html"
+        href={aboutLinkWithReturn('/about/install.html', location.pathname + location.search)}
         onClick={markHomeScreenNoticeSeen}
         data-testid="home-screen-notice-guide"
         className="mt-[var(--space-md)] block rounded-md bg-accent py-3 text-center font-bold text-on-accent shadow-sm"

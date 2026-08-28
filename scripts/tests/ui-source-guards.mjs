@@ -3225,20 +3225,14 @@ import { createRequire } from 'node:module'
       ),
       [],
     )
-    // 受け取り側: 説明ページが ?from= を読んで帰り道を出す
+    // 受け取り側は 2026-08-28 便LW が public/about/app-return.js へ切り出したので、
+    // 中身の見張りは下の LW-1 が持つ（ここでは「読み込んでいること」だけを見る）
     for (const rel of ['public/about/manual.html', 'public/about/multi-device.html']) {
-      const page = lsRead(rel)
-      eq(`LS-3 ${rel} に帰り道の場所がある`, /id="appReturn"/.test(page), true)
-      eq(`LS-3 ${rel} が ?from= を読んでいる`, /URLSearchParams\(window\.location\.search\)/.test(page), true)
-      eq(`LS-3 ${rel} が帰り道をアプリのURL（\/#…）に組み立てている`, /'\/#' \+ from/.test(page), true)
-      // 外部サイトへ飛ばす踏み台にしない（アプリ内のパスだけを受ける＝backLink.ts と同じ規則）
       eq(
-        `LS-3 ${rel} がアプリ内のパス以外を受け付けない`,
-        /from\.charAt\(0\) !== '\/'/.test(page) && /from\.slice\(0, 2\) === '\/\/'/.test(page),
+        `LS-3 ${rel} が帰り道の部品を読み込んでいる`,
+        /<script defer src="\/about\/app-return\.js"><\/script>/.test(lsRead(rel)),
         true,
       )
-      // アプリから来ていない人には出さない（初期状態は hidden）
-      eq(`LS-3 ${rel} の帰り道が、既定では隠れている`, /id="appReturn" href="\/" hidden/.test(page), true)
     }
   }
 
@@ -3440,5 +3434,144 @@ import { createRequire } from 'node:module'
       ltPlan.includes('data-testid="fill-hint"') || ltCopy.includes('data-testid="copy-pick-hint"'),
       false,
     )
+  }
+}
+
+// ==========================================================================================
+// 便LW（2026-08-28）: 説明ページの帰り道を全部に ／ タイマー音の説明を3行に
+// ==========================================================================================
+{
+  const lwRoot = path.join(path.dirname(fileURLToPath(scriptFileUrl)), '..')
+  const lwRead = (rel) => readFileSync(path.join(lwRoot, rel), 'utf-8')
+
+  // ---- LW-1: 帰り道の部品が1本にまとまっていて、全部の説明ページが読み込んでいる ----------
+  // オーナー原文（2026-08-27）「アプリではなくHPへ飛ばされるので、アプリを開きなおしたり、
+  // 『アプリを開く』をHPから探さないといけない」。便LSは manual.html と multi-device.html の
+  // 2枚だけを直したので、他の説明ページへ飛ばされると同じ行き止まりになっていた。
+  // /about/ は素のHTMLでビルドを通っていないため、共通化の手段は「1本のスクリプトを各ページから
+  // 読み込む」形しかない。ここでは (a) 部品の中身 (b) 全ページが読み込んでいること
+  // (c) 書き写しが復活していないこと の3つを見る。
+  {
+    const lwShared = lwRead('public/about/app-return.js')
+    // (a) 部品の中身。判定の規則は src/logic/backLink.ts の isInAppPath と同じにそろえる
+    eq('LW-1 帰り道の部品が ?from= を読んでいる', /URLSearchParams\(window\.location\.search\)/.test(lwShared), true)
+    eq('LW-1 帰り道をアプリのURL（/#…）に組み立てている', /'\/#' \+ from/.test(lwShared), true)
+    eq(
+      'LW-1 アプリ内のパス以外は受け付けない（外部サイトへの踏み台にしない）',
+      /from\.charAt\(0\) !== '\/'/.test(lwShared) && /from\.slice\(0, 2\) === '\/\/'/.test(lwShared),
+      true,
+    )
+    eq(
+      'LW-1 アプリから来ていないときは何も作らない（判定より前に要素を作らない）',
+      lwShared.indexOf("from.charAt(0) !== '/'") < lwShared.indexOf("createElement('a')"),
+      true,
+    )
+    // 帰り先を次のページへ引き継ぐ。書き替えるのは href が /about/ で始まるものだけ
+    // （同じページ内の目印を書き替えると、その場で飛ぶはずが読み込み直しになる）
+    eq(
+      'LW-1 帰り先を、説明ページどうしのリンクにも引き継ぐ',
+      /querySelectorAll\('a\[href\^="\/about\/"\]'\)/.test(lwShared),
+      true,
+    )
+    eq(
+      'LW-1 引き継ぐときも目印（#…）を末尾に置き直す（backLink.ts と同じ組み立て）',
+      /base \+ separator \+ 'from=' \+ encodeURIComponent\(from\) \+ hash/.test(lwShared),
+      true,
+    )
+
+    // (b) 説明ページを1枚も取りこぼしていない。並べた一覧ではなく**実在するファイルを数え上げて**
+    //     見るので、ページが増えても勝手に守られる（増やした人が読み込みを忘れたら赤になる）
+    const lwAboutDir = path.join(lwRoot, 'public/about')
+    const lwPages = [
+      ...readdirSync(lwAboutDir).filter((f) => f.endsWith('.html')).map((f) => `public/about/${f}`),
+      ...readdirSync(path.join(lwAboutDir, 'column'))
+        .filter((f) => f.endsWith('.html'))
+        .map((f) => `public/about/column/${f}`),
+    ].sort()
+    eq('LW-1 説明ページを数えられている（0枚なら見張りが壊れている）', lwPages.length >= 11, true)
+    const lwNoLoad = lwPages.filter(
+      (rel) => !/<script defer src="\/about\/app-return\.js"><\/script>/.test(lwRead(rel)),
+    )
+    eq('LW-1 説明ページ全部が帰り道の部品を読み込んでいる', lwNoLoad, [])
+
+    // (c) 書き写しが復活していない。11枚に同じCSSと同じ関数を貼る形に戻ると、
+    //     色や形を直すときに必ず取りこぼす（規約E-③と同じ事故）
+    const lwCopied = lwPages.filter((rel) => {
+      const page = lwRead(rel)
+      return /\.app-return\s*\{/.test(page) || /getElementById\('appReturn'\)/.test(page)
+    })
+    eq('LW-1 帰り道の見た目と処理を各ページへ書き写していない', lwCopied, [])
+
+    // foods.html は機械生成なので、直す先は生成スクリプト側（手で直すと次の生成で消える）
+    eq(
+      'LW-1 生成ページ（foods.html）は生成スクリプト側にも読み込みが入っている',
+      /<script defer src="\/about\/app-return\.js"><\/script>/.test(
+        lwRead('scripts/gen-food-price-page.mjs'),
+      ),
+      true,
+    )
+  }
+
+  // ---- LW-2: 出す側。同じ窓で移るリンクは全部が帰り先を持つ -------------------------------
+  // 別窓（target="_blank"）のリンクには載せない。別窓は元の画面をそのまま残すので帰り道が
+  // すでにあり、しかもホーム画面に追加したアプリの別窓はブラウザ側で開く＝iOSではデータの
+  // 置き場所が別になるため、そこから「うちレシピに戻る」と空のうちレシピが開いてしまう。
+  {
+    const lwSettings = lwRead('src/pages/SettingsPage.tsx')
+    const lwNotice = lwRead('src/components/HomeScreenNotice.tsx')
+    // 同じ窓で移る5本（バックアップ・古い記録・紹介ページ・ホーム画面への追加・利用規約）
+    for (const [name, re] of [
+      ['バックアップの詳しい説明', /aboutLinkWithReturn\('\/about\/manual\.html#backup', '\/settings\?section=backup'\)/],
+      ['古い記録の書き出しの詳しい説明', /aboutLinkWithReturn\('\/about\/manual\.html#archive', '\/settings\?section=archive'\)/],
+      ['複数の端末で使う方法', /aboutLinkWithReturn\(\s*'\/about\/multi-device\.html',/],
+      ['紹介ページ', /aboutLinkWithReturn\('\/about\/', '\/settings\?section=about'\)/],
+      ['ホーム画面に追加する方法', /aboutLinkWithReturn\('\/about\/install\.html', '\/settings\?section=about'\)/],
+      ['利用規約', /aboutLinkWithReturn\('\/about\/terms\.html', '\/settings\?section=about'\)/],
+    ]) {
+      eq(`LW-2 設定の「${name}」が帰り先を持っている`, re.test(lwSettings), true)
+    }
+    eq(
+      'LW-2 ホーム画面追加のお知らせの手順ページも帰り先を持つ（出る場所を決め打ちにしない）',
+      /aboutLinkWithReturn\('\/about\/install\.html', location\.pathname \+ location\.search\)/.test(lwNotice),
+      true,
+    )
+    // 帰り先の行き先（?section=archive）が実在すること＝空振りで設定の先頭に着かない
+    eq(
+      'LW-2 ?section=archive の着地点が用意されている',
+      /archive: 'archive-section'/.test(lwSettings) && /id="archive-section"/.test(lwSettings),
+      true,
+    )
+    // 裸のリンクに戻っていないこと。**同じ窓で移るもの**だけを見るので、
+    // target="_blank" の3本（Pro版の説明2本・特商法表記）は数に入れない
+    const lwBare = [...lwSettings.matchAll(/href="(\/about\/[^"]*)"/g)].map((m) => m[1])
+    const lwBareSameWindow = lwBare.filter((href) => {
+      const at = lwSettings.indexOf(`href="${href}"`)
+      // リンクの終わりまでの間に target="_blank" があるかどうかで見分ける
+      const tag = lwSettings.slice(at, lwSettings.indexOf('>', lwSettings.indexOf('className', at)))
+      return !tag.includes('target="_blank"')
+    })
+    eq('LW-2 同じ窓で移るのに帰り先を持たない裸のリンクが無い', lwBareSameWindow, [])
+    eq(
+      'LW-2 見分けの前提: 別窓の裸のリンクは3本ある（0本なら見張りが空振りしている）',
+      lwBare.length,
+      3,
+    )
+  }
+
+  // ---- LW-3: タイマー音の説明が担う2つの事実 -----------------------------------------------
+  // 390pxで4行になっていたので詰めた（実測 73字4行 → 70字3行）。短くするために事実を落とすと
+  // 害のほうが大きいので、**2つの事実が残っていること**を見張る。
+  // 行数そのものの実測は e2e の LW-01 が持つ（折り返しは字数では決まらないため）。
+  {
+    const lwDesc = ja.settings.timerSoundDescription.replace(/​/g, '')
+    eq('LW-3 タイマーごとの消音が常駐バーの🔔でできることが残っている', /タイマーごとの消音/.test(lwDesc) && /常駐バーの🔔/.test(lwDesc), true)
+    eq(
+      'LW-3 音を消しても振動対応の端末は振動で知らせることが残っている',
+      /音を消しても/.test(lwDesc) && /振動に対応した端末/.test(lwDesc) && /振動でお知らせ/.test(lwDesc),
+      true,
+    )
+    // 字数は行数の代わりにならない（同じ70字でも切れ目の位置で3行にも4行にもなる）。
+    // ここは**書き足して元の長さに戻る**ことだけを止める保険で、合否は e2e LW-01 の行数が決める
+    eq('LW-3 保険: 直す前の長さ（73字）に戻っていない', lwDesc.length <= 70, true)
   }
 }

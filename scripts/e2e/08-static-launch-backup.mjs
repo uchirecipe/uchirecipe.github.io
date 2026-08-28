@@ -1937,3 +1937,168 @@ import './_shared.mjs'
       await cmbBrowser.close()
     }
   }
+
+  // --- LW-01(2026-08-28 便LW): 説明ページからアプリへ帰れること ---------------------------
+  // オーナー原文（2026-08-27）「アプリではなくHPへ飛ばされるので、アプリを開きなおしたり、
+  // 『アプリを開く』をHPから探さないといけない」。便LSが2枚だけ直したので、他の説明ページへ
+  // 飛ばされると同じ行き止まりになっていた。ここで見るのは**実際のブラウザでの見え方**:
+  //   (a) アプリから来たら帰り道が見えて、押すと元の画面に着く
+  //   (b) アプリから来ていない人（検索から来た人）には出ない
+  //   (c) 外部サイトへ飛ばす踏み台にならない
+  //   (d) 説明ページを渡り歩いても帰り道が消えない
+  // 文言は掴まない（禁じ手②）。要素は id、行き先は**パス**で見る。
+  currentCheck = 'LW-01'
+  {
+    const lwBrowser = await chromium.launch()
+    const lwContext = await lwBrowser.newContext({ viewport: { width: 390, height: 844 } })
+    const lwPage = await lwContext.newPage()
+    try {
+      const LW_FROM = '/settings?section=backup'
+      const lwQuery = `?from=${encodeURIComponent(LW_FROM)}`
+      // 説明ページは増えるものなので、一覧に無いページを作られたら気づけるよう
+      // **紹介ページから辿れる説明ページも合わせて**数える（上限ではなく下限で見る）
+      const lwPages = [
+        '/about/',
+        '/about/manual.html',
+        '/about/multi-device.html',
+        '/about/install.html',
+        '/about/terms.html',
+        '/about/tokushoho.html',
+        '/about/unlock.html',
+        '/about/foods.html',
+        '/about/column/',
+        '/about/column/kondate-kimaranai.html',
+        '/about/column/recipe-screenshot-seiri.html',
+      ]
+      const lwMissing = []
+      const lwTooSmall = []
+      const lwShownWithoutApp = []
+      const lwShownForOutside = []
+      for (const p of lwPages) {
+        await lwPage.goto(`${BASE}${p}${lwQuery}`, { waitUntil: 'networkidle' })
+        const lwLink = lwPage.locator('#appReturn')
+        const lwHref = (await lwLink.count()) === 1 ? await lwLink.getAttribute('href') : null
+        const lwBox = (await lwLink.count()) === 1 ? await lwLink.boundingBox() : null
+        if (lwHref !== `/#${LW_FROM}` || !(await lwLink.isVisible().catch(() => false))) {
+          lwMissing.push(`${p}(href=${lwHref})`)
+        }
+        // 料理中に押すボタンなので、押せる大きさ（44px）を下回らないこと
+        if (!lwBox || lwBox.height < 44) lwTooSmall.push(`${p}(高さ=${lwBox?.height ?? 'なし'})`)
+
+        await lwPage.goto(`${BASE}${p}`, { waitUntil: 'networkidle' })
+        if ((await lwPage.locator('#appReturn').count()) !== 0) lwShownWithoutApp.push(p)
+
+        for (const outside of ['https://example.com/', '//example.com/']) {
+          await lwPage.goto(`${BASE}${p}?from=${encodeURIComponent(outside)}`, {
+            waitUntil: 'networkidle',
+          })
+          if ((await lwPage.locator('#appReturn').count()) !== 0) lwShownForOutside.push(`${p}(${outside})`)
+        }
+      }
+      check(
+        'LW-01 前提: 説明ページを数えられている（0枚なら見張りが空振りしている）',
+        lwPages.length >= 11,
+        `見た枚数=${lwPages.length}`,
+      )
+      check(
+        'LW-01 アプリから来たら、どの説明ページにも帰り道が出る',
+        lwMissing.length === 0,
+        `出ない=${JSON.stringify(lwMissing)}`,
+      )
+      check(
+        'LW-01 帰り道が料理中でも押せる大きさ（44px以上）',
+        lwTooSmall.length === 0,
+        `小さい=${JSON.stringify(lwTooSmall)}`,
+      )
+      check(
+        'LW-01 アプリから来ていない人には帰り道を出さない',
+        lwShownWithoutApp.length === 0,
+        `出てしまう=${JSON.stringify(lwShownWithoutApp)}`,
+      )
+      check(
+        'LW-01 外部サイトへ飛ばす踏み台にならない',
+        lwShownForOutside.length === 0,
+        `受けてしまう=${JSON.stringify(lwShownForOutside)}`,
+      )
+
+      // (d) 説明ページを渡り歩いても帰り道が消えない。
+      // 使い方ページは解錠コードの使い方・食品と目安価格の一覧・コラムへリンクしているので、
+      // 1歩進んだだけで帰り道が消えると、報告された行き止まりにそのまま戻る
+      await lwPage.goto(`${BASE}/about/manual.html${lwQuery}`, { waitUntil: 'networkidle' })
+      const lwHandover = await lwPage.evaluate(() => {
+        const out = { about: [], sameFile: [] }
+        for (const a of document.querySelectorAll('a[href]')) {
+          const raw = a.getAttribute('href')
+          if (!raw) continue
+          if (raw.startsWith('/about/')) out.about.push(raw)
+          if (raw.startsWith('#')) out.sameFile.push(raw)
+        }
+        return out
+      })
+      check(
+        'LW-01 前提: 使い方ページから他の説明ページへのリンクを掴めている',
+        lwHandover.about.length > 0,
+        `本数=${lwHandover.about.length}`,
+      )
+      check(
+        'LW-01 説明ページどうしのリンクが帰り先を引き継いでいる',
+        lwHandover.about.length > 0 &&
+          lwHandover.about.every((h) => h.includes(`from=${encodeURIComponent(LW_FROM)}`)),
+        `引き継いでいない=${JSON.stringify(lwHandover.about.filter((h) => !h.includes('from=')).slice(0, 5))}`,
+      )
+      check(
+        'LW-01 同じページ内の目印（#…）は書き替えない（その場で飛ぶ動きを壊さない）',
+        lwHandover.sameFile.length > 0 && lwHandover.sameFile.every((h) => !h.includes('from=')),
+        `目印=${lwHandover.sameFile.length}本`,
+      )
+      // 進んだ先でも帰り先は同じ（行き先はパスで見る＝文言は掴まない）
+      await lwPage.locator('a[href^="/about/unlock.html"]').first().click()
+      await lwPage.waitForLoadState('networkidle')
+      const lwDeepHref = await lwPage.locator('#appReturn').getAttribute('href').catch(() => null)
+      check(
+        'LW-01 説明ページを1歩進んでも、帰り先は元の画面のまま',
+        lwPage.url().split('?')[0].endsWith('/about/unlock.html') && lwDeepHref === `/#${LW_FROM}`,
+        `いる場所=${lwPage.url().split('?')[0]} 帰り先=${lwDeepHref}`,
+      )
+
+      // (a) 実際に押して、アプリの元の画面に着くこと
+      await lwPage.goto(`${BASE}/about/manual.html${lwQuery}#backup`, { waitUntil: 'networkidle' })
+      await lwPage.locator('#appReturn').click()
+      await lwPage.waitForLoadState('networkidle')
+      await lwPage.waitForTimeout(1500)
+      check(
+        'LW-01 帰り道を押すと、アプリの元の画面に着く',
+        lwPage.url().includes(`/#${LW_FROM}`),
+        `着いた先=${lwPage.url()}`,
+      )
+      check(
+        'LW-01 着いた先がアプリの中（静的ページのままではない）',
+        (await lwPage.locator('[data-testid="setting-timer-sound"]').count()) === 1,
+        `title=${await lwPage.title()}`,
+      )
+
+      // --- LW-01(2) タイマー音の説明が390pxで3行以内 ---
+      // 便LSが幅を256→324pxに広げてもなお4行だった（根っこは文の長さ）。
+      // 字数ではなく**描かれた高さ÷行の高さ**で数える（折り返しは字数では決まらない）
+      const lwDesc = lwPage.locator('[data-testid="setting-timer-sound"] p').first()
+      const lwLines = await lwDesc.evaluate((el) => {
+        const lineHeight = parseFloat(getComputedStyle(el).lineHeight)
+        const rect = el.getBoundingClientRect()
+        return { lines: Math.round(rect.height / lineHeight), width: rect.width, lineHeight }
+      })
+      check(
+        'LW-01 タイマー音の説明が390pxで3行以内',
+        lwLines.lines <= 3 && lwLines.lineHeight > 0,
+        `${lwLines.lines}行（折り返し幅=${lwLines.width}px・行の高さ=${lwLines.lineHeight}px）`,
+      )
+      // 短くするために事実を落としていないこと（文言は ja.ts から読む＝書き写さない）
+      const lwDescText = (await lwDesc.innerText()).replace(/​/g, '')
+      check(
+        'LW-01 短くしても、タイマーごとの消音と振動の2つが画面に残っている',
+        lwDescText === ja.settings.timerSoundDescription.replace(/​/g, ''),
+        `画面=${lwDescText}`,
+      )
+    } finally {
+      await lwBrowser.close()
+    }
+  }
