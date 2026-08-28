@@ -55,6 +55,7 @@ export default function NutritionBalancePanel({
   riceServings = 0,
   slotBreakdown,
   proDetour,
+  dishLink,
   expanded: expandedProp,
   onExpandedChange,
 }: {
@@ -97,6 +98,15 @@ export default function NutritionBalancePanel({
    * 献立が持っている覚え方（見ていたタブ・週・縦位置・折りたたみ）をここへ渡す。
    */
   proDetour?: { to: string; onClick?: () => void }
+  /**
+   * 「計算できなかった料理」の名前を押したときの帰り道（2026-08-28 便MA）。
+   *
+   * オーナー原文「選んだ期間の栄養など、計算できなかった材料があるレシピ名をタップした後の
+   * レシピ詳細から、戻るで同じ画面に戻るようにして。レシピ一覧に飛んでしまう。」。
+   * 名前のリンクは出所を載せていなかったので、押して開いた詳細の「戻る」が必ず
+   * レシピ一覧へ行っていた。上の proDetour と同じ形で、呼び出し側から帰り道を渡す。
+   */
+  dishLink?: { linkState?: { from: string; fromPath: string }; onNavigate?: () => void }
   /**
    * 開いているか（2026-08-28 便LV）。**呼び出し側が持つときだけ渡す**。
    * 献立の画面は「設定へ寄り道して帰ってきたら開いていた折りたたみを開き直す」を
@@ -270,7 +280,7 @@ export default function NutritionBalancePanel({
                     String(sum.excludedDishCount),
                   )}
                 </p>
-                <NutritionGapDishes sum={sum} kind="excluded" />
+                <NutritionGapDishes sum={sum} kind="excluded" {...dishLink} />
               </>
             )}
             {sum.partialDishCount > 0 && (
@@ -281,7 +291,7 @@ export default function NutritionBalancePanel({
                     String(sum.partialDishCount),
                   )}
                 </p>
-                <NutritionGapDishes sum={sum} kind="partial" />
+                <NutritionGapDishes sum={sum} kind="partial" {...dishLink} />
               </>
             )}
             {/* 2026-08-02 便DE-12(オーナー指示): 「何が入っていないか」の行だけ太字にする。

@@ -3769,3 +3769,149 @@ import { createRequire } from 'node:module'
     true,
   )
 }
+
+// ==========================================================================================
+// 便MA（2026-08-28）: オーナーが実機で見つけた3つの穴を、ソースの側から固定する
+//  MA-2 説明ページの絵の貯め方（先読みは増やさない・貯めたものが古いまま残らない）
+//  MA-3 栄養の「計算できなかった料理」の名前が、押した画面へ帰る出所を持っている
+//  MA-4 テンプレートの内容の画面が、帰り先を書き切っていない
+//
+// どれも「片方だけ直すと黙って効かなくなる」形（渡す側と受け取る側が離れている）なので、
+// **両側が居ること**を見る。並び順・行数には依らない書き方にする（禁じ手③④）。
+// ==========================================================================================
+{
+  const maRoot = path.join(path.dirname(fileURLToPath(scriptFileUrl)), '..')
+  const maRead = (rel) => readFileSync(path.join(maRoot, rel), 'utf-8')
+
+  // ---- MA-2: 説明ページの絵（オーナー原文「献立を提案の画像がでない」） ---------------------
+  //
+  // 直す前の実測（2026-08-28）: 説明ページのHTMLは先読みに入っているのに、絵は globIgnores で
+  // 先読みから外され、貯める規則も無かった＝**毎回ネットワーク頼み**。通信を切って開き直すと
+  // 14枚中10枚が出なかった。`loading="lazy"` の絵は取りそこねても自分で拾い直さない。
+  //
+  // 直しかた: 先読みには入れず（50ファイル・約1.4MB。いまの先読み57件・約3.0MBが1.5倍になる）、
+  // **一度読めたものを貯める規則（runtimeCaching）**を `/about/img/` の下だけに足した。
+  {
+    const maVite = maRead('vite.config.ts')
+    eq(
+      'MA-2 説明ページの絵は、いまも先読み（precache）に入れていない',
+      /globIgnores:\s*\['about\/img\/\*\*'\]/.test(maVite),
+      true,
+    )
+    eq(
+      'MA-2 一度読めた絵を貯める規則がある（runtimeCaching）',
+      /runtimeCaching:\s*\[/.test(maVite),
+      true,
+    )
+    eq(
+      'MA-2 貯める対象は /about/img/ の下だけ（アプリ本体のバンドルには当てない）',
+      /urlPattern:\s*\/\\\/about\\\/img\\\/\//.test(maVite),
+      true,
+    )
+    // 貯めたものが古いまま残らない貯め方であること。CacheFirst は期限が切れるまで
+    // 撮り直した絵が出ないので使わない（実測: StaleWhileRevalidate なら次に開いたときに新しくなる）
+    eq(
+      'MA-2 貯め方は「出しながら裏で取り直す」（撮り直した絵が次に開いたとき出る）',
+      /handler:\s*'StaleWhileRevalidate'/.test(maVite),
+      true,
+    )
+    eq('MA-2 期限の切れない貯め方（CacheFirst）にしていない', /handler:\s*'CacheFirst'/.test(maVite), false)
+    // 端末の容量を食い潰さない上限（枚数と日数）
+    eq('MA-2 貯める枚数に上限がある', /maxEntries:\s*\d+/.test(maVite), true)
+    eq('MA-2 貯める日数に上限がある', /maxAgeSeconds:/.test(maVite), true)
+    // 失敗した応答を貯めない（貯めると、出ない絵が居座る）
+    eq('MA-2 うまく取れた応答だけを貯める', /cacheableResponse:\s*\{\s*statuses:\s*\[200\]\s*\}/.test(maVite), true)
+  }
+
+  // ---- MA-3: 栄養の「計算できなかった料理」の名前の帰り道 ------------------------------------
+  //
+  // オーナー原文「選んだ期間の栄養など、計算できなかった材料があるレシピ名をタップした後の
+  // レシピ詳細から、戻るで同じ画面に戻るようにして。レシピ一覧に飛んでしまう。」
+  // 直す前は名前のリンクが出所（location.state）を1つも載せていなかったので、
+  // レシピ詳細の「戻る」は必ずレシピ一覧へ着地していた（実測: 戻ると /#/recipes）。
+  {
+    const maGap = maRead('src/components/NutritionGapDishes.tsx')
+    const maPanel = maRead('src/components/NutritionBalancePanel.tsx')
+    const maIntake = maRead('src/pages/mealPlan/IntakeParts.tsx')
+    const maPage = maRead('src/pages/MealPlanPage.tsx')
+    eq(
+      'MA-3 料理名のリンクが、押した画面の出所を載せる',
+      /state=\{linkState\}/.test(maGap) && /onClick=\{onNavigate\}/.test(maGap),
+      true,
+    )
+    // 出所を渡す先は3か所（週まとめ・曜日カード・月/期間のカード）。どこも同じ名前で渡す
+    eq(
+      'MA-3 栄養バランスのパネルが、受け取った帰り道を料理名へ渡す',
+      (maPanel.match(/<NutritionGapDishes sum=\{sum\} kind="\w+" \{\.\.\.dishLink\} \/>/g) ?? []).length,
+      2,
+    )
+    eq(
+      'MA-3 期間・月の栄養のパネルも、受け取った帰り道を料理名へ渡す',
+      (maIntake.match(/<NutritionGapDishes[\s\S]{0,80}?\{\.\.\.dishLink\} \/>/g) ?? []).length,
+      2,
+    )
+    // 献立の画面が「見ていたタブへ帰す出所」と「居場所を覚える手当て」を対で渡していること。
+    // 片方だけだと、帰れてもタブや縦位置が落ちる（便LU・便LVが直したのと同じ形の穴）
+    eq(
+      'MA-3 献立が、見ていたタブへ帰す出所と居場所の覚えを対で渡す',
+      /const gapDishLink = \{\s*\n\s*linkState: logDetailLinkState,\s*\n\s*onNavigate: rememberLogDetailReturn,\s*\n\s*\}/.test(
+        maPage,
+      ),
+      true,
+    )
+    eq(
+      'MA-3 渡し先は3か所（週まとめ・曜日カード・月/期間のカード）',
+      (maPage.match(/dishLink=\{gapDishLink\}/g) ?? []).length,
+      3,
+    )
+    // 月タブは「期間で絞る」で読んでいたカードごと帰す＝期間も覚えに載せる
+    const maState = maRead('src/pages/mealPlan/useMealPlanState.ts')
+    eq(
+      'MA-3 月タブは、選んでいた期間も一緒に覚える',
+      /range:\s*\n?\s*costMode && rangeStart != null && rangeEnd != null/.test(maState),
+      true,
+    )
+    eq(
+      'MA-3 帰ってきたら、その期間で絞り直す',
+      /if \(monthPoint\.range\) \{[\s\S]{0,200}?setCostMode\(true\)/.test(maState),
+      true,
+    )
+  }
+
+  // ---- MA-4: テンプレートの内容の画面の帰り先 -------------------------------------------------
+  //
+  // オーナー原文「テンプレートをこの月に入れる→テンプレートの中身を見る→ここから戻るで
+  // 週に飛んでしまう。」。帰り先が `'/meal-plan?focus=week'` と書き切ってあり、
+  // 月から入っても必ず週へ着いていた（実測: 押されているタブが「週」）。
+  {
+    const maTpl = maRead('src/pages/MealTemplatesPage.tsx')
+    const maPage = maRead('src/pages/MealPlanPage.tsx')
+    const maHistory = maRead('src/pages/HistoryPage.tsx')
+    eq(
+      'MA-4 テンプレートの画面の戻る先が、来たタブから決まる（週と書き切っていない）',
+      /fallback=\{backTo\}/.test(maTpl) && /mealPlanTabBackPath\(backParams\.get\('back'\)\)/.test(maTpl),
+      true,
+    )
+    eq(
+      'MA-4 呼び出し側が、開いたタブを ?back= で運ぶ（週の入口・窓の中の入口の2か所）',
+      (maPage.match(/to=[{"]`?\/meal-templates\?back=/g) ?? []).length,
+      2,
+    )
+    eq(
+      'MA-4 窓の中の入口は、窓を開いたタブ（週／月）で行き先を変える',
+      /\/meal-templates\?back=\$\{templateApplyScope === 'month' \? 'month' : 'week'\}/.test(maPage),
+      true,
+    )
+    // 帰り先の変換は1か所（記録の一覧と共有）。書き写しが復活していないこと
+    eq(
+      'MA-4 タブの帰り先の変換は logic/backLink.ts の1か所だけ',
+      /function backTargetOf/.test(maHistory) || /function backTargetOf/.test(maTpl),
+      false,
+    )
+    eq(
+      'MA-4 記録の一覧も同じ変換を使っている',
+      /mealPlanTabBackPath\(searchParams\.get\('back'\)\)/.test(maHistory),
+      true,
+    )
+  }
+}

@@ -1504,3 +1504,69 @@ import { readFileSync } from 'node:fs'
   )
 }
 
+
+// ---------- 便MA（2026-08-28）: ひき肉の「挽き」の書き分けを、絞り込みが同じ1件に寄せる ----------
+//
+// オーナー原文: 「『合い挽き肉』で絞り込みしても『合いびき肉』が出せなかった。」
+//
+// 直した中身: 読み仮名の辞書（src/logic/ingredientReadings.ts）は「挽肉」（送り仮名なし）と
+// 「ひき肉」（かな）は持っていたのに、**「挽き肉」（送り仮名あり）を1つも持っていなかった**。
+// 置換は辞書のキーの1パスなので「合い挽き肉」はどのキーにも当たらず素通しになり、
+// マスタ側の「合いびき肉」（→あいびきにく）と1文字も重ならなかった（実測: 213件のマスタで0件）。
+//
+// ここで見るのは2つ。①同じ肉の書き分けが同じキーに寄ること ②**絞り込みが緩くなっていないこと**
+// （マスタの213語を1つずつ検索語にしたとき、当たる行が増えていないこと。増えると
+//  「関係ない食材が出る」という別の不満に化ける）。
+{
+  const { PRICE_DEFAULTS } = await import('../../src/data/priceDefaults.ts')
+  const masterNames = PRICE_DEFAULTS.map((e) => e.name)
+  /** 「食材と価格」の絞り込みと同じ当て方（src/pages/IngredientPricesPage.tsx） */
+  const filterMaster = (query) => {
+    const q = toHiragana(query.trim())
+    return masterNames.filter((name) => toHiragana(name).includes(q))
+  }
+
+  // ① オーナーが打った書き方で、マスタの書き方が出る
+  eq('MA-1 「合い挽き肉」で絞り込むと「合いびき肉」が出る', filterMaster('合い挽き肉'), ['合いびき肉'])
+  eq('MA-1 もとの「合いびき肉」でも今までどおり出る', filterMaster('合いびき肉'), ['合いびき肉'])
+  // 同じ肉の書き分けは、どれも同じ照合キーへ寄る（片方だけ当たる形にしない）
+  for (const spelling of ['合い挽き肉', '合挽き肉', '合い挽肉', '合挽肉', 'あいびき肉']) {
+    eq(
+      `MA-1 「${spelling}」の照合キーが「合いびき肉」と同じ`,
+      toHiragana(spelling) === toHiragana('合いびき肉'),
+      true,
+    )
+  }
+  eq('MA-1 「鶏挽き肉」は「鶏ひき肉」と同じキー', toHiragana('鶏挽き肉'), toHiragana('鶏ひき肉'))
+  eq('MA-1 「豚挽き肉」は「豚ひき肉」と同じキー', toHiragana('豚挽き肉'), toHiragana('豚ひき肉'))
+  eq('MA-1 送り仮名ありの「挽き肉」も「ひき肉」と同じキー', toHiragana('挽き肉'), toHiragana('ひき肉'))
+
+  // ② 広げすぎていないこと。**別の肉に当たるようにはしない**
+  eq('MA-1 合いびきの絞り込みに、鶏や豚のひき肉は混ざらない', filterMaster('合い挽き肉').length, 1)
+  eq('MA-1 「ひき肉」で当たるのは、いままでと同じ2件のまま', filterMaster('ひき肉').length, 2)
+  eq(
+    'MA-1 マスタの名前で絞ると、必ずその名前自身が出る（辞書を足して自分を落とさない）',
+    masterNames.filter((name) => !filterMaster(name).includes(name)).length,
+    0,
+  )
+  /*
+   * 「絞り込みが緩くなっていないか」を数で押さえる（2026-08-28 便MA の実測）。
+   *
+   * マスタの名前を1つずつ検索語にすると、のべ266件が当たる＝**自分以外に当たる余分は53件**
+   * （「ねぎ」で「長ねぎ」も出る類の、意図した前方一致・部分一致）。辞書に語を足しすぎて
+   * 別の食材まで同じキーへ潰すと、この余分が増える。
+   * 片側だけ（増えたら赤）にしてあるのは、マスタに食材を足すと自分ぶんは両辺に1つずつ乗って
+   * 動かないため。**もし理由があって増えるなら、その理由を書いてこの数を上げること。**
+   */
+  const extraHits =
+    masterNames.reduce((sum, name) => sum + filterMaster(name).length, 0) - masterNames.length
+  eq('MA-1 同じ語で当たる「自分以外の行」が53件を超えない（絞り込みが緩くなっていない）', extraHits <= 53, true)
+  // 別の食材が同じ照合キーへ潰れていないこと（潰れると、片方を探しても両方が出る）
+  eq(
+    'MA-1 213件の照合キーが213通りある（別の食材が同じキーに潰れていない）',
+    new Set(masterNames.map((name) => toHiragana(name))).size,
+    masterNames.length,
+  )
+  // 辞書を足したら READINGS_VERSION を上げる決まり（既存レシピの索引を作り直す引き金）
+  eq('MA-1 読み仮名の版が9以上（辞書に足したら上げる決まり）', READINGS_VERSION >= 9, true)
+}

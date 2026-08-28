@@ -1554,6 +1554,13 @@ export function useMealPlanState(demo?: MonthDemoData) {
         // 2026-08-10 便FD: 離れる前に日の窓を開いていたなら、その窓ごと戻す
         // （開き直すのは月の献立が届いてから。下の pendingDayModal の効果が待つ）
         if (monthPoint.openDate) setPendingDayModal(monthPoint.openDate)
+        // 2026-08-28 便MA: 「期間で絞る」で絞っていたなら、その期間ごと戻す＝
+        // 読んでいた「選んだ期間の栄養」のカードがそのまま出る
+        if (monthPoint.range) {
+          setCostMode(true)
+          setRangeStart(monthPoint.range.start)
+          setRangeEnd(monthPoint.range.end)
+        }
       } else {
         window.scrollTo(0, 0)
       }
@@ -4095,6 +4102,13 @@ export function useMealPlanState(demo?: MonthDemoData) {
         // 2026-08-10 便FD: 月タブの「レシピを見る」は日の窓の中にあるので、
         // どの日の窓を開いていたかも覚える＝戻ったときに同じ窓へ帰れる
         openDate: dayModalDate ?? undefined,
+        // 2026-08-28 便MA: 「期間で絞る」で選んでいた期間も覚える。
+        // これが無いと、月タブへは帰れても「選んだ期間の栄養・食費」のカードが消えていた
+        // （実測: 帰り着いたときカードが0件）。絞っていなければ覚えない
+        range:
+          costMode && rangeStart != null && rangeEnd != null
+            ? { start: rangeStart, end: rangeEnd }
+            : undefined,
       }),
     )
   }

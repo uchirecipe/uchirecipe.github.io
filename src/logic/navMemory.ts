@@ -371,6 +371,17 @@ export interface ViewReturnPoint {
    * 戻ったときに同じ日の窓を開き直せる。窓を開いていなければ入れない。
    */
   openDate?: string
+  /**
+   * 離れたときに「期間で絞る」で選んでいた期間（任意・2026-08-28 便MA）。
+   *
+   * オーナー原文「選んだ期間の栄養など、計算できなかった材料があるレシピ名をタップした後の
+   * レシピ詳細から、戻るで同じ画面に戻るようにして。レシピ一覧に飛んでしまう。」。
+   * 月と縦位置だけを戻すと、**月タブには帰れても「選んだ期間の栄養」のカードが消えている**
+   * （期間は画面の中だけの状態で、URLにも覚えにも載っていなかった。実測: 帰り着いたとき
+   * 期間のカードが0件）。読んでいたカードごと戻すために、期間もここに一緒に載せる。
+   * 絞っていなければ入れない＝以前の版と同じ形のまま。
+   */
+  range?: { start: string; end: string }
 }
 
 /** 献立の月タブが居場所を覚えるキー */
@@ -384,7 +395,21 @@ export function serializeViewReturn(point: ViewReturnPoint): string {
     scrollY: Math.max(0, Math.round(point.scrollY)),
     // 開いていた窓が無いときは書かない＝以前の版と同じ形のまま
     ...(point.openDate ? { openDate: point.openDate } : {}),
+    // 期間で絞っていなければ書かない（2026-08-28 便MA）
+    ...(point.range ? { range: { start: point.range.start, end: point.range.end } } : {}),
   })
+}
+
+/** 覚えから期間を読み出す。日付の形（YYYY-MM-DD）が2つそろっていなければ「絞っていなかった」 */
+function pickViewReturnRange(raw: unknown): { start: string; end: string } | undefined {
+  if (typeof raw !== 'object' || raw === null) return undefined
+  const { start, end } = raw as { start?: unknown; end?: unknown }
+  const isDate = (v: unknown): v is string => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v)
+  if (!isDate(start) || !isDate(end)) return undefined
+  // 開始が終了より後の値は、画面側が normalizeDateRange で必ず直してから覚えるので有り得ない。
+  // 壊れた値を読んだときも「絞っていなかった」に倒す（復元できないときは何もしないのが正しい）
+  if (start > end) return undefined
+  return { start, end }
 }
 
 /**
@@ -400,17 +425,24 @@ export function parseViewReturn(raw: string | null | undefined): ViewReturnPoint
     return null
   }
   if (typeof parsed !== 'object' || parsed === null) return null
-  const { anchor, scrollY, openDate } = parsed as {
+  const { anchor, scrollY, openDate, range } = parsed as {
     anchor?: unknown
     scrollY?: unknown
     openDate?: unknown
+    range?: unknown
   }
   if (typeof anchor !== 'string') return null
   if (typeof scrollY !== 'number' || !Number.isFinite(scrollY) || scrollY < 0) return null
   // 開いていた窓の目印は任意。形が違えば「窓は開いていなかった」として扱う（復元をあきらめる）
   const validOpenDate =
     typeof openDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(openDate) ? openDate : undefined
-  return { anchor, scrollY: Math.round(scrollY), ...(validOpenDate ? { openDate: validOpenDate } : {}) }
+  const validRange = pickViewReturnRange(range)
+  return {
+    anchor,
+    scrollY: Math.round(scrollY),
+    ...(validOpenDate ? { openDate: validOpenDate } : {}),
+    ...(validRange ? { range: validRange } : {}),
+  }
 }
 
 // ---------- ④ 買い物メモの「食材の窓」へ帰るための居場所 ----------

@@ -403,6 +403,20 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
   } = useMealPlanState(demo)
 
   /**
+   * 「計算できなかった料理」の名前から開いたレシピ詳細の帰り道（2026-08-28 便MA）。
+   *
+   * オーナー原文「選んだ期間の栄養など、計算できなかった材料があるレシピ名をタップした後の
+   * レシピ詳細から、戻るで同じ画面に戻るようにして。レシピ一覧に飛んでしまう。」。
+   * 献立の中の他のレシピへの入口（曜日カード・日の窓・記録の小窓）がすでに使っている
+   * 2つ（見ていたタブへ帰す出所 logDetailLinkState ／ 押した瞬間に居場所を覚える
+   * rememberLogDetailReturn）を、そのまま栄養のパネルにも渡す＝新しい仕組みを増やさない。
+   */
+  const gapDishLink = {
+    linkState: logDetailLinkState,
+    onNavigate: rememberLogDetailReturn,
+  }
+
+  /**
    * 献立表の折りたたみ（週タブ・月タブで同じものを使う）。開いている間だけ .plan-sheet が
    * 画面とDOMに存在し、その状態で「印刷する」を押す＝紙に出るのは必ず今見えている1枚になる。
    *
@@ -2513,7 +2527,13 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                   <Collapse open={monthNutritionCardOpen}>
                   <>
                   <div className="mt-[var(--space-sm)]" data-testid="month-nutrition-panel">
-                    <IntakeNutritionPanel summary={monthIntakeSummary} notes="brief" />
+                    <IntakeNutritionPanel
+                      summary={monthIntakeSummary}
+                      notes="brief"
+                      /* 2026-08-28 便MA: 計算できなかった料理の名前から開いた詳細を、
+                         この月タブ（期間で絞っていればその期間）へ帰す */
+                      dishLink={gapDishLink}
+                    />
                   </div>
 
                   {/* 目的モードの「答え合わせ」(旧「この月の『栄養から組む』」・2026-08-02 便CP-2・
@@ -3029,9 +3049,12 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
               {ja.mealPlan.templateSaveDescription}
             </p>
             {/* テンプレートの中身を見る・直す画面への入口(2026-08-02 便DE-9・オーナー指示)。
-                保存したあと中身を確かめる手段が無く、直すには保存し直すしかなかった */}
+                保存したあと中身を確かめる手段が無く、直すには保存し直すしかなかった。
+                2026-08-28 便MA: どのタブから開いたかを ?back= で運ぶ＝戻るでこの週へ帰る
+                （記録の一覧の入口と同じ作法） */}
             <Link
-              to="/meal-templates"
+              to="/meal-templates?back=week"
+              onClick={rememberWeekReturn}
               className="mt-[var(--space-sm)] inline-block text-sm font-bold text-accent-ink underline"
             >
               {ja.mealPlan.templateManageLink}
@@ -3508,6 +3531,8 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                     // 2026-08-27 便LU: パネルの中の「Pro版について見る」も、
                     // 見ていたタブ・週・場所ごと帰す
                     proDetour={proGateDetour}
+                    // 2026-08-28 便MA: 計算できなかった料理の名前も、押した場所へ帰す
+                    dishLink={gapDishLink}
                     /* 2026-08-28 便LV: 開閉はこの画面が持つ（帰ってきたときに開き直すため）。
                        名前はその日の日付＝並び順ではなく中身で覚える */
                     expanded={nutritionPanelOpen[nutritionPanelName(date)] === true}
@@ -3578,6 +3603,8 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
               riceServings={weekBalance.riceServings}
               // 2026-08-27 便LU: 上の日カードと同じ帰り道にそろえる
               proDetour={proGateDetour}
+              // 2026-08-28 便MA: 計算できなかった料理の名前も、押した場所へ帰す
+              dishLink={gapDishLink}
               /* 2026-08-28 便LV: 曜日カードのパネルと同じ扱い。週まとめの名前は 'week' */
               expanded={nutritionPanelOpen[nutritionPanelName('week')] === true}
               onExpandedChange={(next) =>
@@ -4200,9 +4227,15 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                 >
                   {ja.mealPlan.templateApplyButton}
                 </button>
-                {/* 入れる前に中身を確かめたいときの入口(2026-08-02 便DE-9) */}
+                {/* 入れる前に中身を確かめたいときの入口(2026-08-02 便DE-9)。
+                    2026-08-28 便MA（オーナー原文「テンプレートをこの月に入れる→テンプレートの
+                    中身を見る→ここから戻るで週に飛んでしまう。」）: この窓は週からも月からも
+                    開くので、**開いたタブ**を ?back= で運ぶ。戻るはそのタブへ帰る */}
                 <Link
-                  to="/meal-templates"
+                  to={`/meal-templates?back=${templateApplyScope === 'month' ? 'month' : 'week'}`}
+                  onClick={
+                    templateApplyScope === 'month' ? rememberMonthReturn : rememberWeekReturn
+                  }
                   className="mt-[var(--space-sm)] block text-center text-sm font-bold text-accent-ink underline"
                 >
                   {ja.mealPlan.templateManageLink}
