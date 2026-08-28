@@ -4740,6 +4740,12 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs'
 // 見るのは「サイトに対応」の形だけ。「対応しているブラウザ」「対応しているサイトなら写真も」の
 // ように、**相手の作りしだいであることを言っている書き方は残してよい**（そこは保証ではない）。
 // コメントは落としてから見る（利用者は読まないので、直した経緯を書き残せる）。
+//
+// 2026-08-28 便MC（司令部の追指示）: 同じ言い方が**3か所**にあった
+// （紹介ページ・使い方ページ・アプリのURL取り込みの説明）。
+// **オーナーが引っかかったのは言い方そのもの**なので、1か所だけ直しても同じ指摘が繰り返される。
+// ここでは「3か所ぜんぶが同じ言い方であること」と「古い言い方が1か所も残っていないこと」を
+// 対で見張る（片方だけだと、文を消して黙って通す形が作れてしまう）。
 {
   const mcRoot = path.join(path.dirname(fileURLToPath(scriptFileUrl)), '..')
   const mcBlank = (s) => s.replace(/[^\n]/g, ' ')
@@ -4775,12 +4781,42 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs'
       .map(({ rel }) => rel),
     [],
   )
-  // 直した先が実在すること（言い換えを消して黙って通す形にしない）
-  const mcLp = mcPages.find((p) => p.rel === 'public/about/index.html')
-  eq('MC-3 前提: 紹介ページを読めている', mcLp != null, true)
+  // アプリの中の説明（ja.ts）も同じ言い方でなければ意味がないので、一緒に見る。
+  // ここもコメントは落とす（直した経緯を ja.ts のコメントに書き残せるようにする）
+  const mcJa = readFileSync(path.join(mcRoot, 'src/i18n/ja.ts'), 'utf-8')
+    .replace(/\/\*[\s\S]*?\*\//g, mcBlank)
+    .replace(/(^|[^:])\/\/[^\n]*/g, (m, p1) => p1 + mcBlank(m.slice(p1.length)))
   eq(
-    'MC-3 紹介ページは「多くのレシピサイトのページから取り込めます」と言っている',
-    (mcLp?.text ?? '').includes('多くのレシピサイトのページから取り込めます'),
+    'MC-3 アプリの説明も「サイトに対応しています」と保証を名乗っていない',
+    /レシピサイト[にへ]\s*対応/.test(mcJa),
+    false,
+  )
+
+  // 直した先が実在すること（言い換えを消して黙って通す形にしない）＝3か所そろっていること
+  const MC_SAY = '多くのレシピサイトのページから取り込めます'
+  const mcWhere = [
+    ['紹介ページ', mcPages.find((p) => p.rel === 'public/about/index.html')?.text],
+    ['使い方ページ', mcPages.find((p) => p.rel === 'public/about/manual.html')?.text],
+    ['アプリのURL取り込みの説明', ja.urlImport.description],
+  ]
+  eq(
+    'MC-3 前提: 3か所とも読めている（読めていないと下の照合が素通りする）',
+    mcWhere.filter(([, text]) => typeof text !== 'string' || text.length === 0).map(([name]) => name),
+    [],
+  )
+  eq(
+    `MC-3 取り込みの言い方が3か所でそろっている（「${MC_SAY}」）`,
+    mcWhere.length === 3 && mcWhere.every(([, text]) => (text ?? '').includes(MC_SAY)),
     true,
+  )
+  // 古い言い方（オーナーが引っかかった形）が1か所も残っていない
+  const MC_OLD = 'レシピのページなら多くのサイトで取り込めます'
+  eq(
+    'MC-3 古い言い方がどこにも残っていない（1か所直して他が残る形にしない）',
+    [
+      ...mcPages.filter(({ text }) => text.includes(MC_OLD)).map(({ rel }) => rel),
+      ...(mcJa.includes(MC_OLD) ? ['src/i18n/ja.ts'] : []),
+    ],
+    [],
   )
 }
