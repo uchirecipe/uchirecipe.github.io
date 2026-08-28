@@ -1262,7 +1262,7 @@ import './_shared.mjs'
       check(
         'FT-03 入口のボタンが「続きから見る」になっている',
         (await ftPage2.locator('[data-testid="cook-session-start"]').innerText()).trim() ===
-          '調理中モードの続きから見る',
+          ja.cookNavi.sessionResume,
       )
       const ftHint = await ftPage2.locator('[data-testid="cook-session-start-hint"]').innerText()
       check(

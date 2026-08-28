@@ -812,10 +812,9 @@ import './_shared.mjs'
       // 2026-08-09 便EK: 今日を含む週は「今日の数え方」も必ず添える(期間カードと同じ文)。
       // 週タブの既定表示は当週なので、この画面には必ず今日が入っている
       check(
+        // 2026-08-28 便MB: 文言を書き写していたのを ja から読む形にした（禁じ手②）
         'NUTRI-WEEK-01(便EK) 今日を含む週は今日の数え方も出す(期間カードと同じ言い方)',
-        nbWeekOpenText.includes(
-          '今日は、作った記録があるものは記録、まだのものは登録した献立で計算しています',
-        ),
+        stripZwspText(nbWeekOpenText).includes(ja.nutritionBalance.basisNoteToday),
       )
 
       // --- 2026-08-02 便CW-10: 「ごはんを含めて計算する」(無料・既定OFF)。

@@ -950,9 +950,9 @@ try {
     name: /^この日（.+）の栄養の概算を詳しく見る$/,
   })
   const richDayToggles = dayToggles.filter({ hasText: /野菜約\d{3}g/ })
-  // 「今日」以外の日を選ぶ(2026-08-09 便EU)。今日の栄養には
-  // 「今日は、作った記録があるものは記録、まだのものは登録した献立で計算しています」の
-  // 1行が足され、開いたときの高さが日によって変わる。図の下が1行ぶん切れるのを避ける
+  // 「今日」以外の日を選ぶ(2026-08-09 便EU)。今日の栄養には「今日の数え方」の
+  // 1行(ja.nutritionBalance.basisNoteToday)が足され、開いたときの高さが日によって変わる。
+  // 図の下が1行ぶん切れるのを避ける
   const candidates = (await richDayToggles.count()) ? richDayToggles : dayToggles
   let dayIndex = 0
   if (await candidates.count()) {
@@ -1126,12 +1126,15 @@ try {
   }
   // 2026-08-08 便DW(オーナー指摘「献立月ページサンプルが実際の画面と違う」): カレンダーの
   // マスだけを切り出していたため、月タブのどこを見ているのか実機と結び付かなかった。
-  // 2026-08-07 便DUでカレンダーが月タブの先頭に上がったので、「カレンダーに出す情報」から
-  // カレンダーの最終行までを1枚に収める(画面を開いたときに最初に見える範囲そのもの)
-  const monthCellModeLabel = page.getByText('カレンダーに出す情報', { exact: true }).first()
+  // 2026-08-07 便DUでカレンダーが月タブの先頭に上がったので、表示の名札から
+  // カレンダーの最終行までを1枚に収める(画面を開いたときに最初に見える範囲そのもの)。
+  // 2026-08-28: 名札の文言が変わっても掴めるよう、書き写しをやめて ja から読む
+  const monthCellModeLabel = page
+    .getByText(ja.mealPlan.monthCellModeLabel, { exact: true })
+    .first()
   const lastCell = page.locator('button[data-date]').last()
   // 2026-08-10 便FJ: 「日」「週」「月」の帯が上部に貼り付く(2026-08-09 便ET)ようになり、
-  // 上端16pxでは「カレンダーに出す情報」と写真・栄養・食費のボタンが帯の下に隠れていた
+  // 上端16pxでは表示の名札と写真・栄養・食費のボタンが帯の下に隠れていた
   await cropRange(page, 'plan-month', monthCellModeLabel, lastCell, {
     top: 64,
     padTop: 10,

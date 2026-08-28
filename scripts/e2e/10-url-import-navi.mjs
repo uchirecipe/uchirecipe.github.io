@@ -731,9 +731,7 @@ import './_shared.mjs'
         // 2026-08-02 オーナー指示(便DF→司令部差し替え): 取り込めたときだけ合わせ調味料の案内1行を出す
         check(
           'URLIMPORT-02(司令部差替) 取り込み成功時に合わせ調味料の案内1行が出る',
-          importedText.includes(
-            '合わせ調味料は、材料の丸ボタンで色分けしておくと、調理中モードでまとめて表示されます',
-          ),
+          importedText.includes(ja.form.importSeasoningGuide),
         )
         check(
           'URLIMPORT-02(2026-08-03改定) URL取り込み後の編集画面にも「食材と価格」への案内・リンクを置かない',
@@ -798,9 +796,7 @@ import './_shared.mjs'
         // 別ページなら取り込めることと、貼り付け欄への導線の両方を伝える
         check(
           'URLIMPORT-03 no_recipe時はページ単位の言い回し+貼り付け欄への案内が出る',
-          (await uiPage.textContent('body')).includes(
-            'このページからはレシピを読み取れませんでした。同じサイトの別のページなら取り込めることがあります。ページの文章をコピーして、下の貼り付け欄をお使いいただくこともできます',
-          ),
+          (await uiPage.textContent('body')).includes(ja.urlImport.errorNoRecipe),
         )
 
         // --- fetch_failedパス ---
@@ -814,9 +810,7 @@ import './_shared.mjs'
         await uiPage.waitForTimeout(500)
         check(
           'URLIMPORT-04 fetch_failed(一時障害)時は待ち時間の目安つきで再試行を促す',
-          (await uiPage.textContent('body')).includes(
-            '読み込めませんでした。数分おいてからもう一度お試しください。急ぐときは下の貼り付け欄もお使いいただけます',
-          ),
+          (await uiPage.textContent('body')).includes(ja.urlImport.errorFetchFailed),
         )
 
         // --- URLIMPORT-04b(便BX/C04・C05): 404・403・形式不正でそれぞれ違う案内が出る ---
@@ -840,9 +834,7 @@ import './_shared.mjs'
         const blockedBody = await uiPage.textContent('body')
         check(
           'URLIMPORT-04b 上流403は再試行を勧めず貼り付けへ案内する',
-          blockedBody.includes(
-            'このページは自動での読み込みを受け付けていませんでした。ページの文章をコピーして、下の貼り付け欄をお使いください',
-          ) && !blockedBody.includes('数分おいてから'),
+          blockedBody.includes(ja.urlImport.errorBlocked) && !blockedBody.includes('数分おいてから'),
         )
         await uiPage.locator('input[type="url"]').first().fill('https://example.com/invalid-url-marker')
         await uiPage.getByRole('button', { name: '読み込む' }).click()
@@ -1315,9 +1307,7 @@ import './_shared.mjs'
         )
         check(
           'URLIMPORT-16 押せない理由をその場に書く',
-          (await uiPage.textContent('body')).includes(
-            'URLの読み込み中です。読み込みが終わるまで保存・キャンセルは押せません',
-          ),
+          (await uiPage.textContent('body')).includes(ja.form.urlImportBlocksSave),
         )
         // 下部ナビ等で画面を離れた場合の「幽霊確認ダイアログ」の根絶
         // 画面を離れたあとに開いた側で確認の窓が出ていないこと(遷移で貯め口は空に戻る)

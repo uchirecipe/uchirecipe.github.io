@@ -52,12 +52,8 @@ import './_shared.mjs'
       )
       check(
         'NAVI-KITCHEN 持っていない器具の扱いと、変えると段取りが組み直されることが書いてある',
-        ((await kcPage.textContent('body')) ?? '').includes(
-          '持っていない器具の工程は、フライパンや鍋で作るものとして、コンロを1口使うと数えます。',
-        ) &&
-          ((await kcPage.textContent('body')) ?? '').includes(
-            '変えると、並行調理ナビの段取りが組み直されます。',
-          ),
+        ((await kcPage.textContent('body')) ?? '').includes(ja.settings.kitchenMissingNote) &&
+          ((await kcPage.textContent('body')) ?? '').includes(ja.settings.kitchenChangeNote),
       )
       await kcBurners.selectOption('1')
       await kcPage.getByTestId('kitchen-kitchenNoGrill').click()
@@ -321,9 +317,7 @@ import './_shared.mjs'
       await mePage.waitForTimeout(300)
       check(
         'MEALPLAN-A3B3(B-3) 記録も予定も無い月は、数字の代わりに空の案内を出す',
-        ((await mePage.textContent('body')) ?? '').includes(
-          'この月には、作った記録も登録した献立もまだありません',
-        ),
+        ((await mePage.textContent('body')) ?? '').includes(ja.mealPlan.monthSummaryEmpty),
       )
       await mePage.locator(`button[data-date="${meDate}"]`).click()
       await mePage.waitForTimeout(400)
@@ -466,9 +460,14 @@ import './_shared.mjs'
           /1日あたりの平均[^約]{0,20}約[\d,]+円/.test(meCostTableText),
         `表=${meCostTableText.slice(0, 240)}`,
       )
+      // 2026-08-28 便MB（オーナー「内訳の中にも同じ内容の文があるため」）: 表のすぐ下に置いていた
+      // 「食材の目安価格をもとに自動計算した概算の数値です」(旧 intakeCostEstimateNote) は消した。
+      // 同じ中身は内訳の中の weekCostNote が言っているので、**外には出さない**ことを見張る
+      // （内訳を開いたときに出ることは、この節の後ろの「常設サマリーも〜」が見ている）
       check(
-        'MEALPLAN-A3B3(便CH/C12) 数字の前提(何をもとにした概算か)を常設で出す',
-        meBodyAfter.includes(ja.mealPlan.intakeCostEstimateNote),
+        'MEALPLAN-A3B3(便MB) 概算の但し書きを内訳の外にもう1つ置いていない',
+        !meBodyAfter.includes(ja.mealPlan.weekCostNote),
+        `外=${meBodyAfter.slice(0, 200)}`,
       )
       // 2026-08-03 便DQ: 栄養は別カード(見出しは「◯月の栄養（1人分）」)。
       // 2026-08-07 便DU: そのカード自体が折りたたみになり、開けば8項目がまとめて出る
@@ -539,7 +538,7 @@ import './_shared.mjs'
   //  ⑥ その日に写真の候補が複数あるとき、カレンダーに出す1枚を日ごとに選べる
   //  ⑦ 日の窓の下に「閉じる」を置く
   //  ⑧ この画面で献立を変えたら「キャンセル」で開いたときの状態へ戻せる(確認文は規約F)
-  //  ⑨ 「カレンダーに出す情報」の切り替えに見出しと説明を付ける
+  //  ⑨ 「カレンダーの表示のしかた」の切り替えに見出しと説明を付ける
   // 月タブはPro機能のためIndexedDB直書きで解錠する(MEALPLAN-07と同手法)。 ---
   currentCheck = 'MEALPLAN-DU'
   {
@@ -663,7 +662,7 @@ import './_shared.mjs'
 
       // ⑨ 表示の切り替えに見出しと説明が付く
       check(
-        'MEALPLAN-DU(⑨) 「カレンダーに出す情報」の見出しが画面に出る',
+        'MEALPLAN-DU(⑨) 「カレンダーの表示のしかた」の見出しが画面に出る',
         duBody0.includes(ja.mealPlan.monthCellModeLabel),
       )
       check(
@@ -690,9 +689,16 @@ import './_shared.mjs'
       // ⑤ 「レシピの写真は使わない」
       const duHideBtn = duPage.locator('[data-testid="month-hide-recipe-photo"]')
       check('MEALPLAN-DU(⑤) 写真モードに「レシピの写真は使わない」が出る', (await duHideBtn.count()) === 1)
+      // 2026-08-28 便MB（オーナー「ONOFFするタイプのボタンはスイッチにしてください」）:
+      // 設定に残る入切なのでスイッチ（role="switch" + aria-checked）になった
       check(
-        'MEALPLAN-DU(⑤) 既定は「使う」(押されていない)',
-        (await duHideBtn.getAttribute('aria-pressed')) === 'false',
+        'MEALPLAN-DU(便MB) 「レシピの写真は使わない」はスイッチ(role=switch)',
+        (await duHideBtn.getAttribute('role')) === 'switch',
+        `role=${await duHideBtn.getAttribute('role')}`,
+      )
+      check(
+        'MEALPLAN-DU(⑤) 既定は「使う」(入っていない)',
+        (await duHideBtn.getAttribute('aria-checked')) === 'false',
       )
       await duHideBtn.click()
       await duPage.waitForTimeout(500)
@@ -712,8 +718,9 @@ import './_shared.mjs'
       await duPage.waitForTimeout(500)
       check(
         'MEALPLAN-DU(⑤) 「レシピの写真は使わない」は設定に記憶される',
-        (await duPage.locator('[data-testid="month-hide-recipe-photo"]').getAttribute('aria-pressed')) ===
-          'true',
+        (await duPage
+          .locator('[data-testid="month-hide-recipe-photo"]')
+          .getAttribute('aria-checked')) === 'true',
       )
       await duPage.locator('[data-testid="month-hide-recipe-photo"]').click()
       await duPage.waitForTimeout(400)
@@ -833,9 +840,7 @@ import './_shared.mjs'
       )
       check(
         'MEALPLAN-DU(⑧) 変更がすでに入っていることを窓の中で正直に書く',
-        ((await duModal.textContent()) ?? '').includes(
-          'この画面での変更は、すでにこの日の献立に入っています',
-        ),
+        ((await duModal.textContent()) ?? '').includes(ja.mealPlan.monthDayModalDirtyNote),
       )
       const duBeforeCancel = await duPage.evaluate(
         (date) =>

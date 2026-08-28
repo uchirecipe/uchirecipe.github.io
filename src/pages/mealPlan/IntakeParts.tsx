@@ -250,7 +250,13 @@ function IntakeDisclosureButton({
       type="button"
       onClick={onToggle}
       aria-expanded={open}
-      className="mt-[var(--space-sm)] inline-flex items-center gap-1 rounded-sm border border-edge bg-app px-3 py-2 text-sm font-bold text-accent-ink shadow-sm"
+      /* 2026-08-28 オーナー原文「主役のはずの内訳の文字が小さくて見つけにくい。
+         文字をちょっぴり大きくして」: 字の大きさの段を1つ上げた（text-sm 14px → text-base 16px）。
+         色（text-accent-ink）と太さ（font-bold）は動かしていない＝大きさだけの話。
+         このボタンは「内訳を見る」と「注記と出典」で共用しており、2つの見え方を1か所で
+         そろえるために置いてある部品なので、片方だけ別の大きさにはしない
+         （同じ操作が2つの大きさで並ぶほうが読みにくい）。見張りは MB-8 */
+      className="mt-[var(--space-sm)] inline-flex items-center gap-1 rounded-sm border border-edge bg-app px-3 py-2 text-base font-bold text-accent-ink shadow-sm"
     >
       {/* 「内訳を見る」⇔「内訳を閉じる」で文字数が変わってもボタンの幅は動かさない（便EO） */}
       <SwapLabel current={open ? closeLabel : openLabel} labels={[openLabel, closeLabel]} />

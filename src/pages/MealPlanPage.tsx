@@ -2090,7 +2090,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                 {ja.mealPlan.monthTrialActiveNote}
               </p>
             )}
-            {/* カレンダーに出す情報の切り替え(2026-07-28 便CA・タスク2・オーナー指示)。
+            {/* カレンダーの表示のしかたの切り替え(2026-07-28 便CA・タスク2・オーナー指示)。
                 既定は写真＞献立プレビュー。栄養/食費に切り替えると各セルにその日の1人分の数字が出る。
                 選択は設定に記憶する(次に月タブを開いても同じ表示)。
                 2026-08-07 便DU(オーナー指示): ①月タブを開いてすぐカレンダーが見えるように、
@@ -2099,7 +2099,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                 選んだモードでカレンダーに何が出るのかをボタンのすぐ下に1行で添える
                 (従来はカレンダーの下に、数字モードのときだけ凡例を出していた) */}
             {/* 2026-08-22 便JE・②（オーナー確定「①：面でまとめる。月も同じように。」）:
-                月の設定パート（カレンダーに出す情報の選択／レシピの写真は使わない／期間で絞る）を
+                月の設定パート（カレンダーの表示のしかたの選択／レシピの写真は使わない／期間で絞る）を
                 1枚の面（.setup-panel）にまとめ、中は仕切り線で分ける。
                 直す前は入れ物が無く、操作が地の上に直接並んでいたので、どこまでが設定で
                 どこからがカレンダーなのかが読み取れなかった。
@@ -2112,7 +2112,13 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
               <p id="month-cell-mode-label" className="text-xs font-bold text-ink-muted">
                 {ja.mealPlan.monthCellModeLabel}
               </p>
-              <div role="group" aria-labelledby="month-cell-mode-label" className="mt-1 flex gap-1">
+              {/* 2026-08-28 オーナー原文「週の『表示のしかた』に合わせた表記への修正でした。」:
+                  名札（月の「カレンダーの表示のしかた」）が受け持つ範囲を、週タブの節と同じく
+                  **この面の表示の設定ぜんぶ**にした。直す前は名札の下（role="group"）に
+                  3つのモードのボタンしか入っておらず、同じ表示の設定である
+                  「レシピの写真は使わない」と「マスに出す栄養」が名札の外に落ちていた */}
+              <div role="group" aria-labelledby="month-cell-mode-label">
+              <div className="mt-1 flex gap-1">
                 {MONTH_CELL_MODES.filter(
                   (m) => m.value !== 'nutrition' || isNutritionUnlocked(monthUnlocked),
                 ).map((m) => (
@@ -2179,26 +2185,43 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                   カレンダーの写真は「作った記録の写真 ＞ レシピに登録した写真」の順で選ぶが、
                   レシピの写真を代用に使いたくない人のために、使わない選択肢を置く。
                   写真モードのときだけ出す(栄養/食費モードでは写真を敷かないため) */}
+              {/* 2026-08-28 オーナー原文「『レシピの写真は使わない』など、ONOFFするタイプの
+                  ボタンはスイッチ（またはチェック入れるタイプ）にしてください。（アプリ全体）」:
+                  押すと settings に残る入切なのでスイッチにした。作りはアプリに既にある
+                  ON/OFFスイッチ（設定の「ごはんを含める」・レシピ一覧の「すべてのタグを含む」等）と
+                  同じ作法にそろえる——role="switch" + aria-checked、名前の右にスイッチ、
+                  押せる面は tap-target。**新しい形は作らない**。
+                  絞り込みのチップ（複数選べる・その場だけのもの）はチップのまま残す */}
               {monthCellMode === 'photo' && (
                 <div className="mt-[var(--space-sm)]">
-                  <button
-                    type="button"
-                    data-testid="month-hide-recipe-photo"
-                    onClick={() => saveSettings({ monthHideRecipePhoto: !monthHideRecipePhoto })}
-                    aria-pressed={monthHideRecipePhoto}
-                    className={`rounded-sm border px-3 py-2 text-sm font-bold ${
-                      monthHideRecipePhoto
-                        ? 'border-accent bg-accent text-on-accent'
-                        : 'border-edge bg-surface text-ink-muted'
-                    }`}
-                  >
-                    {ja.mealPlan.monthHideRecipePhotoToggle}
-                  </button>
+                  <label className="flex items-center justify-between gap-3">
+                    <span className="min-w-0 text-sm font-bold text-ink-muted">
+                      {ja.mealPlan.monthHideRecipePhotoToggle}
+                    </span>
+                    <button
+                      type="button"
+                      role="switch"
+                      data-testid="month-hide-recipe-photo"
+                      aria-checked={monthHideRecipePhoto}
+                      aria-label={ja.mealPlan.monthHideRecipePhotoToggle}
+                      onClick={() => saveSettings({ monthHideRecipePhoto: !monthHideRecipePhoto })}
+                      className={`tap-target relative h-8 w-14 shrink-0 rounded-full transition-colors ${
+                        monthHideRecipePhoto ? 'bg-accent' : 'bg-edge'
+                      }`}
+                    >
+                      <span
+                        className={`absolute top-1 h-6 w-6 rounded-full bg-surface shadow-sm transition-all ${
+                          monthHideRecipePhoto ? 'left-7' : 'left-1'
+                        }`}
+                      />
+                    </button>
+                  </label>
                   <p className="mt-1 text-xs text-ink-muted">
                     {ja.mealPlan.monthHideRecipePhotoNote}
                   </p>
                 </div>
               )}
+              </div>
             </div>
             </div>
 
@@ -2474,10 +2497,9 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                       {intakeBasisText(monthIntakeSummary)}
                     </p>
                   )}
-                  {/* 数字の前提(何をもとにした概算か)も同じ場所に置く(2026-07-30 便CH/C12) */}
-                  <p className="mt-0.5 text-xs text-ink-muted">
-                    {ja.mealPlan.intakeCostEstimateNote}
-                  </p>
+                  {/* 数字の前提（食材の目安価格で自動計算していること）は、折りたたみの中の
+                      weekCostNote が同じ中身を言っているので、外にもう1行置かない
+                      （2026-08-28 オーナー「内訳の中にも同じ内容の文があるため」） */}
                   <IntakeDisclosureButton
                     open={monthCostDetailsOpen}
                     onToggle={() =>

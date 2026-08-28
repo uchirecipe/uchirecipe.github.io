@@ -235,7 +235,7 @@ import './_shared.mjs'
 
   // --- DEMO-01: 月間画面のサンプルデモ（2026-08-02 便DC）。
   // 未解錠・記録0件（＝1回だけのお試しの入口がまだ出ない状態）でも「サンプルで見る」は常時出て、
-  // 押すと見本の1か月分が入った本物の月タブが開くこと。写真つきのセル・カレンダーに出す情報の
+  // 押すと見本の1か月分が入った本物の月タブが開くこと。写真つきのセル・カレンダーの表示のしかたの
   // 切り替え・日の窓が実際に触れること。そしてデモを触っても端末のIndexedDBが1バイトも変わらず、
   // 1回だけのお試し（settings.monthTrialUsed）も消費しないこと。---
   currentCheck = 'DEMO-01'
@@ -293,9 +293,7 @@ import './_shared.mjs'
       await dmPage.waitForTimeout(1500)
       check(
         'DEMO-01 サンプルであることを帯で言い切る',
-        ((await dmPage.locator('[data-testid="month-demo-banner"]').textContent()) ?? '').includes(
-          'サンプルデータを表示中',
-        ),
+        ((await dmPage.locator('[data-testid="month-demo-banner"]').textContent()) ?? '').includes(ja.mealPlan.monthDemoBannerTitle),
       )
       // 2026-08-07 便DU: 食費・栄養のカードは折りたたみになった(既定は畳む)ので、中身を読む前に開く
       await dmPage.getByRole('button', { name: /月の食費/ }).click()
@@ -338,7 +336,7 @@ import './_shared.mjs'
         'DEMO-01 デモには献立を書き換える操作を出さない',
         !dmBody.includes('献立をまとめて提案') && !dmBody.includes('テンプレートを適用'),
       )
-      // カレンダーに出す情報（写真⇄栄養⇄食費）が実際に切り替わる
+      // カレンダーの表示のしかた（写真⇄栄養⇄食費）が実際に切り替わる
       await dmPage.getByRole('button', { name: '食費', exact: true }).click()
       await dmPage.waitForTimeout(500)
       check(

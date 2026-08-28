@@ -710,9 +710,7 @@ import './_shared.mjs'
       const sortPanelText = await w1Page.textContent('body')
       check(
         'WORD-CI1-01/C13 並び替えパネルに「よく使う順」が何を数えた順かの説明が出る',
-        sortPanelText.includes(
-          '「よく使う順」は「作った！」の記録が多い順、「最近作った順」は記録がいちばん新しい順です',
-        ),
+        sortPanelText.includes(ja.search.sortCookedHint),
       )
       await w1Page.locator('[data-testid="sort-panel-close"]').click()
       await w1Page.waitForTimeout(300)

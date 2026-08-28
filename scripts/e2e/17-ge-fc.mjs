@@ -1867,9 +1867,7 @@ import './_shared.mjs'
       )
       check(
         'FC-04 入口のボタンが「続きから」に変わる',
-        (await fcPage.locator('[data-testid="cook-session-start"]').innerText()).includes(
-          '調理中モードの続きから見る',
-        ),
+        (await fcPage.locator('[data-testid="cook-session-start"]').innerText()).includes(ja.cookNavi.sessionResume),
         await fcPage.locator('[data-testid="cook-session-start"]').innerText(),
       )
       const fcResumeHint = await fcPage.locator('[data-testid="cook-session-start-hint"]').innerText()

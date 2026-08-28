@@ -178,12 +178,10 @@ import './_shared.mjs'
       await rsPage.waitForTimeout(600)
       check(
         'RECIPESET-01(修正4) 存在しないURLの結果が読み込み欄の上部にテキストで出る',
-        (await rsPage.textContent('body')).includes(
-          '指定されたURLにレシピセットが見つかりませんでした',
-        ),
+        (await rsPage.textContent('body')).includes(ja.settings.recipeSetNotFound),
       )
       const errorMsgBox = await rsPage
-        .getByText('指定されたURLにレシピセットが見つかりませんでした', { exact: false })
+        .getByText(ja.settings.recipeSetNotFound, { exact: false })
         .first()
         .boundingBox()
       const urlInputBox = await urlInput.boundingBox()
@@ -194,7 +192,7 @@ import './_shared.mjs'
       check(
         'RECIPESET-01(修正4) 下部トースト(押して閉じるボタン)としては出ない(二重表示しない)',
         (await rsPage
-          .getByRole('button', { name: '指定されたURLにレシピセットが見つかりませんでした', exact: false })
+          .getByRole('button', { name: ja.settings.recipeSetNotFound, exact: false })
           .count()) === 0,
       )
 
@@ -234,7 +232,7 @@ import './_shared.mjs'
       )
       check(
         'RECIPESET-01(修正4) 直前のエラーメッセージは成功後には残らない',
-        !afterSuccessText.includes('指定されたURLにレシピセットが見つかりませんでした'),
+        !afterSuccessText.includes(ja.settings.recipeSetNotFound),
       )
 
       // 基本レシピバッジの確認: setId/setName付きで取り込んでもカードは「基本レシピ」バッジに統一され、

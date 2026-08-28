@@ -283,9 +283,7 @@ import './_shared.mjs'
       )
       check(
         'DY-03 押せない理由が書かれている(無言で灰色にしない)',
-        ((await dtPage.textContent('body')) ?? '').includes(
-          '「タイマー音」をオンにすると、音量と鳴る長さを選べます',
-        ),
+        ((await dtPage.textContent('body')) ?? '').includes(ja.settings.timerSoundOffNote),
       )
     } finally {
       await dtBrowser.close()
@@ -495,9 +493,7 @@ import './_shared.mjs'
       // 献立も記録も無い月なので数値は出ないが、畳んだ側にも理由が書かれている
       check(
         'EE-01(①) 数字が無い月は、畳んだままでも理由が読める',
-        ((await eePage.textContent('body')) ?? '').includes(
-          'この月には、作った記録も登録した献立もまだありません',
-        ),
+        ((await eePage.textContent('body')) ?? '').includes(ja.mealPlan.monthSummaryEmpty),
       )
       // 献立を1枠入れると、畳んだままでも金額が出る
       await eePage.evaluate(async () => {
@@ -1313,9 +1309,7 @@ import './_shared.mjs'
       await roPage.waitForTimeout(1300)
       check(
         'EN-02 回しただけでは残らないことを画面で伝える（規約H）',
-        ((await roPage.textContent('body')) ?? '').includes(
-          '回した向きは「保存する」を押すと残ります',
-        ),
+        ((await roPage.textContent('body')) ?? '').includes(ja.detail.cookedLogPhotoRotateUnsaved),
       )
       await roPage.getByRole('button', { name: '保存する', exact: true }).first().click()
       await roPage.waitForTimeout(1800)

@@ -1368,7 +1368,7 @@ import './_shared.mjs'
       await sbPage.locator('button[aria-label="並び替え"]').click()
       await sbPage.waitForTimeout(300)
       // 2026-08-19 便HU・⑯でティーザーの文言が変わった（顔ぶれを栄養表示と同じ8項目にそろえた）
-      await sbPage.getByText('エネルギー以外の7項目で並び替え').click()
+      await sbPage.getByText(ja.search.sortNutritionGate).click()
       await sbPage.waitForTimeout(800)
       check(
         'SETBACK-01 Pro案内のリンクに戻り先(?back=)が載っている',
@@ -1878,9 +1878,7 @@ import './_shared.mjs'
           .locator('#aisle-section')
           .getByRole('button', { name: ja.settings.aisleOrderReset })
           .isVisible()) &&
-          !((await aiPage.locator('#aisle-section').textContent()) ?? '').includes(
-            'いまは初期設定の順番です',
-          ),
+          !((await aiPage.locator('#aisle-section').textContent()) ?? '').includes(ja.settings.aisleOrderDefaultNote),
       )
 
       await aiPage.goto(`${BASE}/#/shopping`, { waitUntil: 'networkidle' })

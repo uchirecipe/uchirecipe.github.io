@@ -848,9 +848,7 @@ import './_shared.mjs'
       check(
         'FL-03 調理中モードの待ち工程に「この間に、次の手作業を進められます」が出る',
         (await flPage.locator('[data-testid="cook-session-fill-hint"]').count()) === 1 &&
-          ((await flPage.textContent('[data-testid="cook-session-fill-hint"]')) ?? '').includes(
-            'この間に、次の手作業を進められます',
-          ),
+          ((await flPage.textContent('[data-testid="cook-session-fill-hint"]')) ?? '').includes(ja.cookNavi.waitFillHint),
       )
       // 長い待ちの手順まで進めて、調理中モードでも同じ扱いになることを見る
       let reachedLong = false
