@@ -515,7 +515,36 @@ export const SCREEN_RETURN_KEY = 'screen:return'
 export const SCREEN_PANEL = {
   /** レシピ詳細の「栄養価の概算」 */
   nutrition: 'nutrition',
+  /**
+   * 献立・週タブの操作の節（表示のしかた／献立を提案／過去の献立・テンプレートから入れる／
+   * 栄養／食費／買い物メモ）。節ごとに `screenPanelName` で名前を作る
+   * ＝節が増えても、名前の付け方は1つのまま（2026-08-28 便LV）。
+   */
+  mealPlanWeekGroup: 'mealPlanWeekGroup',
+  /** 献立・月タブの「献立の入れかた」 */
+  mealPlanMonthGroup: 'mealPlanMonthGroup',
+  /** 献立・月タブの「◯月の栄養」 */
+  mealPlanMonthNutrition: 'mealPlanMonthNutrition',
+  /** 献立・月タブの「◯月の食費」 */
+  mealPlanMonthCost: 'mealPlanMonthCost',
+  /**
+   * 献立の栄養バランスのパネル（NutritionBalancePanel）。同じパネルが週まとめに1つ、
+   * 曜日カードに7つ出るので、`screenPanelName` で「どれか」まで名前に入れる
+   * （週まとめは 'week'、曜日カードはその日の日付）。
+   */
+  mealPlanNutritionPanel: 'mealPlanNutritionPanel',
 } as const
+
+/**
+ * 同じ種類の折りたたみが1画面に複数あるときの名前（2026-08-28 便LV）。
+ *
+ * 曜日カードの栄養パネルのように「7つ並ぶうちのどれを開いていたか」を覚える必要がある場所は、
+ * 並び順ではなく**中身を指す文字**（日付・節の名前）で区別する
+ * ＝並びが変わっても、節が増えても、同じ折りたたみが同じ名前で戻る。
+ */
+export function screenPanelName(panel: string, id: string): string {
+  return `${panel}:${id}`
+}
 
 export function serializeScreenReturn(point: ScreenReturnPoint): string {
   const openPanels = point.openPanels ?? []

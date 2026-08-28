@@ -393,6 +393,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
     setAllDaysFolded, allDaysCollapsed, allDaysLocked, rememberWeekReturn, rememberMonthReturn,
     rememberDayReturn, logDetailLinkState, rememberLogDetailReturn, proGateDetour, historyToastActive,
     openHistoryFromToast, weekGroupOpen, setWeekGroupOpen, fillMode, setFillMode, clearSlotTargets,
+    nutritionPanelOpen, nutritionPanelName, setNutritionPanelExpanded,
     toggleClearSlotTarget, clearSlotLabel, clearWeekSlot, includeRice, weekCostEstimate, riceYen,
     riceCostServings, weekCost, weekMealCount, weekPricelessCount, weekBalanceByDate, weekBalance,
     weekSlotBalanceByDate, weeklyBudget, budgetDiff, hasPricedRecipe, shopSelectableDates,
@@ -3439,6 +3440,12 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                     // 2026-08-27 便LU: パネルの中の「Pro版について見る」も、
                     // 見ていたタブ・週・場所ごと帰す
                     proDetour={proGateDetour}
+                    /* 2026-08-28 便LV: 開閉はこの画面が持つ（帰ってきたときに開き直すため）。
+                       名前はその日の日付＝並び順ではなく中身で覚える */
+                    expanded={nutritionPanelOpen[nutritionPanelName(date)] === true}
+                    onExpandedChange={(next) =>
+                      setNutritionPanelExpanded(nutritionPanelName(date), next)
+                    }
                   />
                 </div>
               )
@@ -3503,6 +3510,11 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
               riceServings={weekBalance.riceServings}
               // 2026-08-27 便LU: 上の日カードと同じ帰り道にそろえる
               proDetour={proGateDetour}
+              /* 2026-08-28 便LV: 曜日カードのパネルと同じ扱い。週まとめの名前は 'week' */
+              expanded={nutritionPanelOpen[nutritionPanelName('week')] === true}
+              onExpandedChange={(next) =>
+                setNutritionPanelExpanded(nutritionPanelName('week'), next)
+              }
             />
           </div>
         </Collapse>

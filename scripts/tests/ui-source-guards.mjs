@@ -620,8 +620,9 @@ import { createRequire } from 'node:module'
     ['週タブ・まとめて献立を入力の説明', ja.mealPlan.fillModeReplaceAllHint],
     ['月タブ・献立をまとめて提案', ja.mealPlan.fillMonthConfirm],
     ['月タブ・献立をまとめて提案（残る献立が無いとき）', ja.mealPlan.fillMonthConfirmNoKept],
-    // 2026-08-26 便LH: 残る献立の有無で文を分けるのをやめ、1つにまとめた
-    ['テンプレートを入れる', ja.mealPlan.templateApplyConfirm],
+    // 2026-08-26 便LH: 残る献立の有無で文を分けるのをやめ、1つにまとめた。
+    // 2026-08-28 便LV: 本文そのものを無くしたので、残った見出しを見る
+    ['テンプレートを入れる', ja.mealPlan.templateApplyConfirmTitle],
   ]
   for (const [where, text] of planOnlyTexts) {
     eq(
@@ -3441,4 +3442,101 @@ import { createRequire } from 'node:module'
       false,
     )
   }
+}
+
+// ==========================================================================================
+// 便LV（2026-08-28）
+//  LV-3 献立の折りたたみが、寄り道の覚え（ScreenReturnPoint）に**配線されている**
+//
+// 直したこと: 便LUで「どのタブ・どの週・どの縦位置」までは帰るようになったが、
+// **折りたたみは畳まれたまま**だった（実測 2026-08-28: 週タブで6つの節と栄養パネルを開いて
+// Pro案内へ出て帰ると、6つとも畳まれ、縦位置も 2407 → 1331 とずれていた）。
+//
+// ここで見るのは「覚える側」と「戻す側」の両方が居ること。**片方だけ直すと黙って戻らなくなる**
+// （覚えているのに読まない／読んでいるのに覚えない、はどちらも画面には何も出ない）。
+// 節の数・並び順には依らない書き方にする（禁じ手③④）。
+// ==========================================================================================
+{
+  const lvRoot = path.join(path.dirname(fileURLToPath(scriptFileUrl)), '..')
+  const lvRead = (rel) => readFileSync(path.join(lvRoot, rel), 'utf-8')
+  const lvState = lvRead('src/pages/mealPlan/useMealPlanState.ts')
+  const lvPage = lvRead('src/pages/MealPlanPage.tsx')
+  const lvPanel = lvRead('src/components/NutritionBalancePanel.tsx')
+
+  // --- 覚える側: この画面を離れる道（週・月・日）が全部、折りたたみも一緒に覚える ---
+  const lvRememberFns = ['rememberWeekReturn', 'rememberMonthReturn', 'rememberDayReturn']
+  for (const fn of lvRememberFns) {
+    const at = lvState.indexOf(`const ${fn} = () => {`)
+    const body = at < 0 ? '' : lvState.slice(at, at + 400)
+    eq(
+      `LV-3 ${fn} が、開いていた折りたたみも覚える`,
+      body.includes('rememberOpenPanels()'),
+      true,
+    )
+  }
+  eq(
+    'LV-3 覚えは共通の形（ScreenReturnPoint）に載せる（この画面だけの覚え方を作らない）',
+    /const rememberOpenPanels = \(\) => \{[\s\S]*?serializeScreenReturn\(\{ path: location\.pathname, scrollY: 0, openPanels: open \}\)/.test(
+      lvState,
+    ),
+    true,
+  )
+
+  // --- 戻す側: 最初の描画から開いた形にする（あとから開き直すと一瞬畳まれて見える） ---
+  eq(
+    'LV-3 覚えを読むのは最初の描画のとき1回だけ（効果ではなく状態の初期値）',
+    /const \[restoredPanels\] = useState<string\[\]>\(\(\) =>[\s\S]{0,300}?parseScreenReturn\(readSessionItem\(SCREEN_RETURN_KEY\), location\.pathname\)/.test(
+      lvState,
+    ),
+    true,
+  )
+  eq(
+    'LV-3 読んだ覚えは捨てる（次にこの画面を素で開いたときに蘇らない）',
+    /if \(searchParams\.get\(WEEK_RETURN_PARAM\) === '1'\) removeSessionItem\(SCREEN_RETURN_KEY\)/.test(
+      lvState,
+    ),
+    true,
+  )
+  // 週タブの節は「節の名前」でひとつずつ戻す＝節が増えても書き足しが要らない
+  eq(
+    'LV-3 週タブの節が、節の名前で開き直される',
+    /wasPanelOpen\(screenPanelName\(SCREEN_PANEL\.mealPlanWeekGroup, key\)\)/.test(lvState),
+    true,
+  )
+  for (const [name, panel] of [
+    ['月タブの「献立の入れかた」', 'mealPlanMonthGroup'],
+    ['月タブの栄養のカード', 'mealPlanMonthNutrition'],
+    ['月タブの食費のカード', 'mealPlanMonthCost'],
+  ]) {
+    eq(
+      `LV-3 ${name}が開き直される`,
+      lvState.includes(`wasPanelOpen(SCREEN_PANEL.${panel})`),
+      true,
+    )
+  }
+
+  // --- 栄養バランスのパネル: 開閉を画面が持ち、パネルはそれを受け取る ---
+  eq(
+    'LV-3 栄養バランスのパネルは、渡されたときだけ外の開閉に従う（渡さない画面は今までどおり）',
+    lvPanel.includes('const expanded = expandedProp ?? selfExpanded'),
+    true,
+  )
+  eq(
+    'LV-3 献立が、栄養バランスのパネルの開閉を持っている（週まとめも曜日カードも）',
+    (lvPage.match(/expanded=\{nutritionPanelOpen\[nutritionPanelName\(/g) ?? []).length >= 2 &&
+      (lvPage.match(/onExpandedChange=\{\(next\) =>/g) ?? []).length >= 2,
+    true,
+  )
+  eq(
+    'LV-3 曜日カードのパネルは、その日の日付で覚える（並び順で覚えない）',
+    /expanded=\{nutritionPanelOpen\[nutritionPanelName\(date\)\] === true\}/.test(lvPage),
+    true,
+  )
+  eq(
+    'LV-3 覚えた名前をそのまま鍵に使う（覚える側と戻す側で名前の作り方が食い違わない）',
+    /restoredPanels\s*\n?\s*\.filter\(\(name\) => name\.startsWith\(`\$\{SCREEN_PANEL\.mealPlanNutritionPanel\}:`\)\)/.test(
+      lvState,
+    ),
+    true,
+  )
 }

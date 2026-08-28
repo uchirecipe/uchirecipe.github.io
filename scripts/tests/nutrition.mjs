@@ -2037,7 +2037,7 @@ const NUTRITION_DB_VERSION_FOR_KP = NUTRITION_DATA_FOR_KP.dbVersion
       [ja.mealPlan.fillWeekKeptManual, ja.mealPlan.fillWeekNoRoom,
        ja.mealPlan.fillMonthKeptManual, ja.mealPlan.fillMonthNoRoom,
        ja.mealPlan.fillMonthConfirm, ja.mealPlan.fillMonthConfirmTitle,
-       ja.mealPlan.templateApplyConfirm, ja.mealPlan.templateApplyConfirmTitle,
+       ja.mealPlan.templateApplyConfirmTitle,
        ja.mealPlan.fillMonthRangeConfirmTitle,
        ja.mealPlan.templateApplyNoRoom].filter((t) => t.includes('食分')),
       [],

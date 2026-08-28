@@ -55,6 +55,8 @@ export default function NutritionBalancePanel({
   riceServings = 0,
   slotBreakdown,
   proDetour,
+  expanded: expandedProp,
+  onExpandedChange,
 }: {
   /** 'day' = 週タブの各日カード / 'week' = 週まとめ */
   scope: 'day' | 'week'
@@ -95,8 +97,22 @@ export default function NutritionBalancePanel({
    * 献立が持っている覚え方（見ていたタブ・週・縦位置・折りたたみ）をここへ渡す。
    */
   proDetour?: { to: string; onClick?: () => void }
+  /**
+   * 開いているか（2026-08-28 便LV）。**呼び出し側が持つときだけ渡す**。
+   * 献立の画面は「設定へ寄り道して帰ってきたら開いていた折りたたみを開き直す」を
+   * 画面ごと1つの覚え（logic/navMemory.ts の ScreenReturnPoint）で受け持っているので、
+   * このパネルの開閉もそちらに預ける。渡さなければ従来どおり自分で覚える。
+   */
+  expanded?: boolean
+  /** 同上。渡したときは開閉のたびに呼ばれる */
+  onExpandedChange?: (next: boolean) => void
 }) {
-  const [expanded, setExpanded] = useState(false)
+  const [selfExpanded, setSelfExpanded] = useState(false)
+  const expanded = expandedProp ?? selfExpanded
+  const setExpanded = (next: boolean) => {
+    if (onExpandedChange) onExpandedChange(next)
+    else setSelfExpanded(next)
+  }
   // 但し書きと出典の折りたたみ（2026-08-09 便EN）。既定は畳む
   const [notesOpen, setNotesOpen] = useState(false)
   // 週まとめは「この週ぜんぶを振り返る主役の数字」なので、日カードより大きく組む
@@ -170,7 +186,7 @@ export default function NutritionBalancePanel({
     <div className="rounded-md border border-edge bg-app">
       <button
         type="button"
-        onClick={() => setExpanded((v) => !v)}
+        onClick={() => setExpanded(!expanded)}
         aria-expanded={expanded}
         aria-label={toggleLabel}
         className={`flex w-full items-center justify-between gap-2 text-left ${
