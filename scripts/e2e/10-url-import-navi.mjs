@@ -375,7 +375,7 @@ import './_shared.mjs'
       await pbPage.waitForTimeout(300)
       check(
         'PANTRY-BULK-01 整理モードに入ると案内文が出る',
-        (await pbPage.textContent('body')).includes('タップして選択'),
+        (await pbPage.textContent('body')).includes(ja.pantry.organizeSelect),
       )
 
       const bulkButton = (label) => pbPage.getByRole('button', { name: label, exact: true })
