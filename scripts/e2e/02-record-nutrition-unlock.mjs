@@ -801,9 +801,19 @@ import './_shared.mjs'
       check('NUT-02 Pro解錠済みで食物繊維が表示される', unlockedText.includes('食物繊維'))
       check('NUT-02 Pro解錠済みで鉄がmg単位で表示される', /鉄\s*[\d,.]+\s*mg/.test(unlockedText))
       check('NUT-02 Pro解錠済みでカルシウムがmg単位で表示される', /カルシウム\s*[\d,.]+\s*mg/.test(unlockedText))
+      // 2026-08-28 便MC: 説明・注記・出典は「注記と出典」の折りたたみへ入れた
+      // （オーナー原文「栄養の説明と注記は折りたたみにしてコンパクトに」）。
+      // 畳んでいるあいだ中身はDOMに無いので、開く前・開いた後の両方を測る
+      check(
+        'NUT-02(便MC) 説明と注記・出典は畳んである(開くまでビタミンの注記は出ない)',
+        !unlockedText.includes('ビタミンは調理による損失が大きく'),
+      )
+      await nutPage.getByRole('button', { name: ja.nutritionBalance.notesToggle }).first().click()
+      await nutPage.waitForTimeout(400)
+      const unlockedNotesText = (await nutPage.textContent('body')) ?? ''
       check(
         'NUT-02 ビタミン非表示の注記が出る(文面はオーナー確定・一字一句)',
-        unlockedText.includes('ビタミンは調理による損失が大きく、材料からの計算では実際と大きくズレやすいため表示していません'),
+        unlockedNotesText.includes('ビタミンは調理による損失が大きく、材料からの計算では実際と大きくズレやすいため表示していません'),
       )
       check('NUT-02 断定しない「概算」バッジが出る', unlockedText.includes('概算'))
       check('NUT-02 「1人分」の内訳がある', unlockedText.includes('1人分'))

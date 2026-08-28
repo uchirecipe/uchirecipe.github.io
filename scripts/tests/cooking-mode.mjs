@@ -107,10 +107,19 @@ import { notSplittableReason, isMixedStep } from '../audit-cook-navi.mjs'
     ja.settings.timerSoundPreviewNote.includes('音量と鳴る長さのボタンでは音は鳴りません'),
     true,
   )
+  // 2026-08-28 便MC・オーナー原文「タイマー音：「「音を鳴らして確かめる」を押すと〜」削除。
+  // ボタン名でわかるため。」＝**音が鳴るボタンの説明は書かない**。ボタンの名前がその説明。
+  // 残すのは1文目だけ（押しても鳴らないことは、ボタンの名前からは読めない非自明な事実）。
+  // それまでの「音の鳴るボタンを名前で挙げている」の見張りは、この指示で逆向きになった
   eq(
-    'EE-7 注意書きが音の鳴るボタンを名前で挙げている',
+    'EE-7(便MC) 注意書きに「音を鳴らして確かめる」の説明を書き戻していない（ボタン名で分かる）',
     ja.settings.timerSoundPreviewNote.includes(ja.settings.timerSoundPreview),
-    true,
+    false,
+  )
+  eq(
+    'EE-7(便MC) 注意書きは1文だけ',
+    ja.settings.timerSoundPreviewNote.split('。').filter((s) => s.trim() !== '').length,
+    1,
   )
   // 規約H: 説明文で「ここ」「これ」等の指示語で場所を示さない
   eq(

@@ -460,10 +460,13 @@ import './_shared.mjs'
       // ⑦ 設定のタイマー音: 音が鳴るボタンの注意書き
       await eePage.goto(`${BASE}/#/settings`, { waitUntil: 'networkidle' })
       await eePage.waitForTimeout(1500)
+      // 2026-08-28 便MC: 文言を書き写していたので ja.ts から読む形にした（禁じ手②）。
+      // オーナー指示で2文目（「音を鳴らして確かめる」の説明）を消したときに、
+      // 書き写しのままだとここが赤くなるだけで、何を見張っていたのかが分からなくなる
       check(
-        'EE-01(⑦) 音量・鳴る長さでは鳴らず試聴で鳴る、という注意書きが出ている',
-        ((await eePage.textContent('body')) ?? '').includes(
-          '音量と鳴る長さのボタンでは音は鳴りません。「音を鳴らして確かめる」を押すと、選んでいる音量と鳴る長さで音が鳴ります',
+        'EE-01(⑦) 音量・鳴る長さのボタンでは鳴らない、という注意書きが出ている',
+        stripZwspText((await eePage.textContent('body')) ?? '').includes(
+          ja.settings.timerSoundPreviewNote,
         ),
       )
 

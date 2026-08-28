@@ -210,7 +210,18 @@ import './_shared.mjs'
   await page.waitForTimeout(300)
   const nutExpandedText = await page.textContent('body')
   check('NUT-01 展開すると断定しない「概算」表記の注記が出る', nutExpandedText.includes('概算'))
-  check('NUT-01 出典表記がある', nutExpandedText.includes('出典'))
+  // 2026-08-28 便MC（オーナー原文「栄養の説明と注記は折りたたみにしてコンパクトに。
+  // 他に個所でやってる「注記と出典」と同じように」）: 説明・注記・出典は
+  // 献立の栄養パネルと同じ「注記と出典」の折りたたみへ入れた。
+  // 畳んでいるあいだは中身をDOMに置かない作法なので、開く前・開いた後の両方を測る
+  check(
+    'NUT-01(便MC) 説明と注記・出典は畳んである（開くまで出典は出ない）',
+    !nutExpandedText.includes(ja.nutrition.sourcePrefix),
+  )
+  await page.getByRole('button', { name: ja.nutritionBalance.notesToggle }).first().click()
+  await page.waitForTimeout(400)
+  const nutNotesOpenText = await page.textContent('body')
+  check('NUT-01 出典表記がある', nutNotesOpenText.includes('出典'))
   check(
     'NUT-01 未解錠には月間献立と同じ「Pro版について見る」リンクが出る',
     nutExpandedText.includes('Pro版について見る'),
@@ -235,7 +246,7 @@ import './_shared.mjs'
   )
   check(
     "NUT-01(B') 野菜量の数え方の注記が出る",
-    nutExpandedText.includes('食品成分表の「野菜類」に名寄せできた材料'),
+    nutNotesOpenText.includes('食品成分表の「野菜類」に名寄せできた材料'),
   )
   // PRO-01(2026-07-28 便BY): 未解錠のティーザーを、月間献立ゲートと同じ blur+Lockバッジ+見出しの
   // 様式に揃える(同じPro導線なのに画面ごとに表現が3種類あった状態の解消)

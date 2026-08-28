@@ -3915,3 +3915,73 @@ import { createRequire } from 'node:module'
     )
   }
 }
+
+
+// ---------- 便MC: レシピ詳細の栄養の「説明と注記」を折りたたみへ（MC-2） ----------
+// オーナー原文:
+//   「栄養の説明と注記は折りたたみにしてコンパクトに。他に個所でやってる「注記と出典」と
+//     同じように」
+//
+// 見張るのは3つ:
+//   ① **新しい形を作っていない**＝開閉の言い方は献立の栄養バランスパネルと同じものを使う
+//      （同じものを2つの名前で呼ばない。文言そのものは書き写さず、キーで測る）
+//   ② 折りたたみは `Collapse` で作る＝**閉じているあいだ中身をDOMに置かない**
+//      （読み上げソフトとページ内検索に畳んだ中身が残らないようにする作法）
+//   ③ **⚠の注意と材料の一覧は中に入れない**。⚠は「いま出ている数字が実際より小さい」という
+//      数字の読み方そのもので、畳んだ1行の印（materialGapBadge / saltGapBadge）と対になっている。
+//      材料の一覧は logic/nutrition.ts 冒頭の決めごと
+//      「計算できなかった材料は隠さず必ず表示に含めること」に当たる。
+//   画面での見え方（畳んでいる間は出ない／開くと出る）は e2e の NUT-01・NUT-02 で測る。
+{
+  const mcRoot = path.join(path.dirname(fileURLToPath(scriptFileUrl)), '..')
+  const mcTeaser = readFileSync(path.join(mcRoot, 'src/components/NutritionTeaser.tsx'), 'utf-8')
+  const mcPanel = readFileSync(path.join(mcRoot, 'src/components/NutritionBalancePanel.tsx'), 'utf-8')
+
+  eq(
+    'MC-2 レシピ詳細の栄養に、注記と出典の折りたたみがある',
+    /function NutritionNotes\(/.test(mcTeaser),
+    true,
+  )
+  eq(
+    'MC-2 開閉の言い方は献立の栄養パネルと同じものを使う（新しい形を作らない）',
+    mcTeaser.includes('ja.nutritionBalance.notesToggle') &&
+      mcPanel.includes('ja.nutritionBalance.notesToggle'),
+    true,
+  )
+  // NutritionNotes の中身だけを切り出して、何が畳まれるのかを見る
+  const mcNotesBody = mcTeaser.slice(
+    mcTeaser.indexOf('function NutritionNotes('),
+    mcTeaser.indexOf('function SourceNote('),
+  )
+  eq('MC-2 前提: 折りたたみの中身を切り出せている', mcNotesBody.length > 200, true)
+  eq(
+    'MC-2 折りたたみは Collapse で作る（閉じているあいだ中身をDOMに置かない）',
+    /<Collapse open=\{notesOpen\}>/.test(mcNotesBody),
+    true,
+  )
+  // 折りたたみへ渡している中身（<NutritionNotes> … </NutritionNotes>）を全部取り出す
+  const mcInside = [...mcTeaser.matchAll(/<NutritionNotes>([\s\S]*?)<\/NutritionNotes>/g)].map(
+    (m) => m[1],
+  )
+  eq('MC-2 前提: 折りたたみに渡している中身を拾えている（無料・Proの2か所）', mcInside.length, 2)
+  eq(
+    'MC-2 どのレシピでも同じことを言う説明・注記・出典が中に入っている',
+    mcInside.length === 2 &&
+      mcInside.every(
+        (body) =>
+          body.includes('ja.nutrition.estimateNote') &&
+          body.includes('<VegetableCountNote />') &&
+          body.includes('<SourceNote />'),
+      ),
+    true,
+  )
+  eq(
+    'MC-2 ⚠の注意と材料の一覧は折りたたみの外に残す（数字の読み方と、隠さない決めごと）',
+    mcInside.filter((body) =>
+      ['<MaterialGapNote', '<SaltGapNote', '<AssumedBlock', '<ExcludedBlock'].some((tag) =>
+        body.includes(tag),
+      ),
+    ),
+    [],
+  )
+}
