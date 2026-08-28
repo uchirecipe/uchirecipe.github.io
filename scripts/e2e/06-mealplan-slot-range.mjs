@@ -2628,7 +2628,15 @@ import './_shared.mjs'
       check('MKSLOT-01(覚えない) 前提: 読み込み直す前は絞れている', (await mkPressed()) === 2)
       await mkPage.reload({ waitUntil: 'networkidle' })
       await mkPage.waitForTimeout(2000)
+      // 読み込み直すと開くタブは覚えのとおりなので、週タブに居ることを確かめてから数える
+      // （掴めないまま0件を「既定に戻った」と読み違えない）
+      await mkPage.getByRole('button', { name: ja.mealPlan.viewWeek, exact: true }).click()
+      await mkPage.waitForTimeout(900)
       await openWeekGroup(mkPage, ja.mealPlan.weekGroupAutoTitle)
+      check(
+        'MKSLOT-01(覚えない) 前提: 読み込み直したあとも「入れる食事」のボタンが出ている',
+        (await mkPage.getByTestId('week-fill-slot').count()) === 3,
+      )
       check(
         // 覚える器は設定「表示する食事」が持っている。同じことを2か所で覚えると
         // 「なぜ朝食が出ないのか」の答えが2か所に分かれる
