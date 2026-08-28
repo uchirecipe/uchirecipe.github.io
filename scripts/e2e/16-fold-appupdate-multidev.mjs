@@ -1891,10 +1891,18 @@ import './_shared.mjs'
           ewNote === ja.homeScreenNotice.laterNote,
           ewNote,
         )
+        // 2026-08-28 便LW: 説明ページへのリンクに帰り先（?from=）を載せたので、
+        // 行き先は**パスで**見る（クエリまで込みの完全一致は、帰り先が付いた瞬間に落ちる＝禁じ手②）
+        const ewGuidePath = (info?.guideHref ?? '').split('?')[0]
         check(
           'EW-01(a) 手順ページへのリンクは別窓(target=_blank)にしていない',
-          info?.guideHref === '/about/install.html' && info?.guideTarget === null,
+          ewGuidePath === '/about/install.html' && info?.guideTarget === null,
           JSON.stringify({ href: info?.guideHref, target: info?.guideTarget }),
+        )
+        check(
+          'EW-01(a) そのリンクは帰り先を連れている（説明ページから戻れる・2026-08-28 便LW）',
+          (info?.guideHref ?? '').includes('from='),
+          String(info?.guideHref),
         )
         // (b-1) 「このまま使う」で閉じたら、開き直しても出ない
         await page1.locator('[data-testid="home-screen-notice-dismiss"]').click()
@@ -2110,7 +2118,12 @@ import './_shared.mjs'
         )
         check(
           'EW-01(g) そのリンクが手順ページを指している',
-          ewHref === '/about/install.html',
+          (ewHref ?? '').split('?')[0] === '/about/install.html',
+          String(ewHref),
+        )
+        check(
+          'EW-01(g) 設定のリンクも帰り先を連れている（2026-08-28 便LW）',
+          (ewHref ?? '').includes('from='),
           String(ewHref),
         )
         await ewLink.scrollIntoViewIfNeeded()
