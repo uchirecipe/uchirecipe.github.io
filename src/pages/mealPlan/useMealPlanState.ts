@@ -3928,7 +3928,8 @@ export function useMealPlanState(demo?: MonthDemoData) {
         titleOf: sheetTitleOf,
         notes: monthTargetNotes,
         includeEmptyDays: planSheetIncludeEmptyDays,
-        slotsNarrowed: sheetTargetSlots.length < visibleSlots.length,
+        // 紙の名乗り（basisNote）は、この sheetTargetSlots だけを見て planSheet.ts が決める
+        // ＝チップで絞っても、設定「表示する食事」で絞っていても、同じ規則で名乗る
       }),
     [
       monthRangeActive,
@@ -3936,7 +3937,8 @@ export function useMealPlanState(demo?: MonthDemoData) {
       rangeEnd,
       monthAnchor,
       monthTargetDates,
-      visibleSlots,
+      // 「表示する食事」そのものは見ない。sheetTargetSlots が visibleSlots から作られており、
+      // 設定が変われば必ずこちらも変わる（同じものを2つ数えない）
       sheetTargetSlots,
       monthTargetEntries,
       sheetTitleOf,

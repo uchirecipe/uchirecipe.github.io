@@ -4111,7 +4111,7 @@ eq('rangeDayCount: 月をまたぐ計算も正しい', rangeDayCount('2026-06-28
     notes: new Map(),
   }
   const mdAll = buildPlanSheet({ ...mdArgs, visibleSlots: ['breakfast', 'lunch', 'dinner'] })
-  const mdDinner = buildPlanSheet({ ...mdArgs, visibleSlots: ['dinner'], slotsNarrowed: true })
+  const mdDinner = buildPlanSheet({ ...mdArgs, visibleSlots: ['dinner'] })
   eq(
     'MD-1 絞らなければ今までどおり朝昼夕がそろって載る（既定は変えない）',
     mdAll.days.map((d) => d.slots.map((s) => s.label)),
@@ -4138,33 +4138,52 @@ eq('rangeDayCount: 月をまたぐ計算も正しい', rangeDayCount('2026-06-28
     ja.mealPlan.planSheetBasisNotePicked.replace('{slots}', ja.mealPlan.slot.dinner),
   )
   eq(
-    'MD-1 名乗りは選んだ食事を並べる（2つ選べば2つとも出る）',
-    buildPlanSheet({
-      ...mdArgs,
-      visibleSlots: ['breakfast', 'dinner'],
-      slotsNarrowed: true,
-    }).basisNote,
+    'MD-1 名乗りは載っている食事を並べる（2つなら2つとも出る）',
+    buildPlanSheet({ ...mdArgs, visibleSlots: ['breakfast', 'dinner'] }).basisNote,
     ja.mealPlan.planSheetBasisNotePicked.replace(
       '{slots}',
       `${ja.mealPlan.slot.breakfast}・${ja.mealPlan.slot.dinner}`,
     ),
   )
   eq(
-    // 設定「表示する食事」でもともと夕食だけにしている端末は、絞ったわけではない。
-    // visibleSlots の中身から推し量ると、その端末の紙の名乗りまで勝手に変わってしまう
-    'MD-1 設定でもともと夕食だけの端末は、今までどおりの名乗りのまま（絞りと取り違えない）',
+    'MD-1 絞った結果、載せるものが1つも無ければ白紙と分かる（呼び出し側が案内を出す）',
+    buildPlanSheet({ ...mdArgs, dates: ['2026-09-02'], visibleSlots: ['dinner'] }).isEmpty,
+    true,
+  )
+  // ------------------------------------------------------------------------------------------
+  // MD-4（便MDの2手目・司令部の指示「紙に嘘が印刷されるから直す」）:
+  // 名乗りは「実際に載る食事」だけで決める。**絞った場所がチップでも設定でも同じ**。
+  //
+  // 1手目は「載せる食事のチップで絞ったときだけ」名乗りを変えていたので、設定
+  // 「表示する食事」でもともと夕食だけにしている端末（新規ユーザーの既定）では、
+  // 夕食しか載っていない紙に「朝食・昼食・夕食の順に載せています」と嘘が出続けていた。
+  // しかもそちらは毎回そうなるので、嘘が出る回数はチップの絞りより多い。
+  // ------------------------------------------------------------------------------------------
+  eq(
+    'MD-4 設定「表示する食事」で夕食だけにしている端末も、紙は載っているとおりに名乗る',
     buildPlanSheet({ ...mdArgs, visibleSlots: ['dinner'] }).basisNote,
+    ja.mealPlan.planSheetBasisNotePicked.replace('{slots}', ja.mealPlan.slot.dinner),
+  )
+  eq(
+    // ここが変わると、絞っていない人にまで影響が出る（1文字も変えない）
+    'MD-4 朝昼夕がそろっている端末の名乗りは、今までの文と1文字も同じ',
+    buildPlanSheet({ ...mdArgs, visibleSlots: ['breakfast', 'lunch', 'dinner'] }).basisNote,
     ja.mealPlan.planSheetBasisNote,
   )
   eq(
-    'MD-1 絞った結果、載せるものが1つも無ければ白紙と分かる（呼び出し側が案内を出す）',
-    buildPlanSheet({
-      ...mdArgs,
-      dates: ['2026-09-02'],
-      visibleSlots: ['dinner'],
-      slotsNarrowed: true,
-    }).isEmpty,
-    true,
+    // 押した順で配列が来ても名乗りは変わらない（並びは MEAL_SLOTS で決まる）
+    'MD-4 名乗りは朝食→昼食→夕食の順で並べる（渡された配列の順に引きずられない）',
+    [
+      buildPlanSheet({ ...mdArgs, visibleSlots: ['dinner', 'breakfast', 'lunch'] }).basisNote,
+      buildPlanSheet({ ...mdArgs, visibleSlots: ['dinner', 'breakfast'] }).basisNote,
+    ],
+    [
+      ja.mealPlan.planSheetBasisNote,
+      ja.mealPlan.planSheetBasisNotePicked.replace(
+        '{slots}',
+        `${ja.mealPlan.slot.breakfast}・${ja.mealPlan.slot.dinner}`,
+      ),
+    ],
   )
 }
 {
@@ -4178,12 +4197,15 @@ eq('rangeDayCount: 月をまたぐ計算も正しい', rangeDayCount('2026-06-28
     true,
   )
   eq(
-    'MD-2 献立表が載せる食事は「載せる食事」で決まり、絞ったかどうかも一緒に渡す',
-    [
-      /visibleSlots: sheetTargetSlots,/.test(mdState),
-      /slotsNarrowed: sheetTargetSlots\.length < visibleSlots\.length,/.test(mdState),
-    ],
-    [true, true],
+    'MD-2 献立表が載せる食事は「載せる食事」で決まる（表示する食事の直読みに戻っていない）',
+    /visibleSlots: sheetTargetSlots,/.test(mdState),
+    true,
+  )
+  eq(
+    // 旗で受け取ると、チップの絞りと設定の絞りで名乗りが食い違う持ち方が復活する
+    'MD-4 紙の名乗りは「絞ったか」の旗で受け取らない（載る食事だけで決める）',
+    /slotsNarrowed/.test(mdState) || /slotsNarrowed/.test(mdRead('src/logic/planSheet.ts')),
+    false,
   )
   eq(
     // 「全部外す」＝まとめて提案は1品も入れられず、献立表は白紙の紙が出る＝行き止まり。

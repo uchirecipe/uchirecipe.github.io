@@ -1251,9 +1251,19 @@ import './_shared.mjs'
       check(
         // 2026-08-26 便LH: 載せるのは登録した献立だけになったので、紙の上の名乗りも変わった。
         // 文言は ja.ts から読む（書き写さない・禁じ手②）
-        'MEALPLAN-A4(便LH) 何を載せた表なのかを紙の上でも明記する',
-        stripZwspText(psSheetText).includes(stripZwspText(ja.mealPlan.planSheetBasisNote)),
-        `note=${ja.mealPlan.planSheetBasisNote}`,
+        //
+        // 2026-08-28 便MD（2手目）: この入れ物は朝食・昼食の献立を1件も持たないので、
+        // 設定「表示する食事」は夕食だけ（新規ユーザーの既定・db/settings.ts の
+        // resolveVisibleMealSlotsIfNeeded）。**紙に実際に載るのは夕食だけ**なので、
+        // 名乗りも夕食だけを名乗る。直す前はここで「朝食・昼食・夕食の順に載せています」と
+        // 嘘が印刷されていた（絞った場所が設定でも、紙の上で起きていることはチップと同じ）
+        'MEALPLAN-A4(便MD) 何を載せた表なのかを紙の上でも明記する(載っている食事のとおりに名乗る)',
+        stripZwspText(psSheetText).includes(
+          stripZwspText(
+            ja.mealPlan.planSheetBasisNotePicked.replace('{slots}', ja.mealPlan.slot.dinner),
+          ),
+        ),
+        `note=${stripZwspText(psSheetText).slice(0, 160)}`,
       )
       check(
         'MEALPLAN-A4(便LH) 食事のラベル(朝食・昼食・夕食)は太字にする',

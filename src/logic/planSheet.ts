@@ -58,9 +58,18 @@ export interface PlanSheet {
    * 紙・画面の見出しの下に置く、何を載せた1枚かの名乗り（2026-08-28 便MD で
    * ja.mealPlan.planSheetBasisNote の直書きから、この結果の一部へ移した）。
    *
-   * 「載せる食事」で絞ったときに名乗りが変わる＝紙を受け取った人が、朝食と昼食が
-   * 載っていないのは「登録が無いから」ではなく「絞ったから」だと読める。
-   * 絞っていないときの文は今までと1文字も同じ（押さなければ今までと同じ1枚が出る）。
+   * **この1枚に実際に載る食事だけを見て決める。**朝食・昼食・夕食がそろっていれば
+   * 今までの文のまま、欠けていれば「〜だけを載せています」と名乗り直す＝
+   * 紙を受け取った人が、朝食と昼食が無いのは「登録漏れ」ではなく
+   * 「その紙が夕食の紙だから」だと読める。
+   *
+   * **なぜ「絞ったか」を旗で受け取らないか（2026-08-28 便MDの2手目）**:
+   * 1手目は「載せる食事のチップで絞ったときだけ」名乗りを変えていたが、
+   * 設定「表示する食事」でもともと夕食だけにしている端末（新規ユーザーの既定）では、
+   * 実際は夕食しか載っていない紙に「朝食・昼食・夕食の順に載せています」と
+   * **嘘が印刷され続けていた**。しかもそちらは毎回そうなるので、嘘が出る回数は多い。
+   * 絞った場所がチップでも設定でも、紙の上で起きていることは同じなので、
+   * 旗を捨てて「実際に載る食事」1つだけで決める＝食い違う持ち方をそもそも作らない。
    */
   basisNote: string
 }
@@ -90,26 +99,8 @@ export function buildPlanSheet(options: {
    * 既定で省き、抜けも一覧したいときのために呼び出し側（献立表のチェック）で戻せるようにする。
    */
   includeEmptyDays?: boolean
-  /**
-   * 「載せる食事」で絞っているか（2026-08-28 便MD・オーナー原文「夕食だけの献立表を
-   * 作成などできるように。」）。
-   *
-   * 絞ったかどうかを visibleSlots の中身から推し量らないのは、**設定「表示する食事」で
-   * もともと夕食だけにしている端末**と区別が付かないため（そちらは今までどおり、
-   * 今までと同じ名乗りの紙が出る＝押さなければ何も変わらない）。
-   */
-  slotsNarrowed?: boolean
 }): PlanSheet {
-  const {
-    title,
-    dates,
-    visibleSlots,
-    entries,
-    titleOf,
-    notes,
-    includeEmptyDays = false,
-    slotsNarrowed = false,
-  } = options
+  const { title, dates, visibleSlots, entries, titleOf, notes, includeEmptyDays = false } = options
   const byDateSlot = new Map<string, Pick<MealPlanEntry, 'date' | 'slot' | 'role' | 'recipeId'>[]>()
   for (const e of entries) {
     const key = `${e.date}|${e.slot}`
@@ -142,12 +133,15 @@ export function buildPlanSheet(options: {
     title,
     days: includeEmptyDays ? days : days.filter((d) => !isPlanSheetDayEmpty(d)),
     isEmpty,
-    basisNote: slotsNarrowed
-      ? ja.mealPlan.planSheetBasisNotePicked.replace(
-          '{slots}',
-          slotOrder.map((s) => ja.mealPlan.slot[s]).join('・'),
-        )
-      : ja.mealPlan.planSheetBasisNote,
+    // 朝食・昼食・夕食がそろっていれば今までの文のまま（1文字も変えない）。
+    // 欠けていれば、載っている食事を並べて名乗り直す（絞った場所がチップでも設定でも同じ）
+    basisNote:
+      slotOrder.length === MEAL_SLOTS.length
+        ? ja.mealPlan.planSheetBasisNote
+        : ja.mealPlan.planSheetBasisNotePicked.replace(
+            '{slots}',
+            slotOrder.map((s) => ja.mealPlan.slot[s]).join('・'),
+          ),
   }
 }
 
