@@ -77,7 +77,7 @@
   },
   "plan-month": {
     "w": 780,
-    "h": 1170
+    "h": 1158
   },
   "plan-month-photo": {
     "w": 780,
@@ -145,7 +145,7 @@
   },
   "backup-export": {
     "w": 780,
-    "h": 344
+    "h": 312
   },
   "backup-import": {
     "w": 780,
