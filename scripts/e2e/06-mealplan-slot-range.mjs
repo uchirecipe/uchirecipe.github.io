@@ -10,7 +10,7 @@
 // 走る順番と、どの節がどのファイルに居るかは scripts/e2e-smoke.mjs が持っている。
 // **節どうしは前の節が残した画面の状態を引き継ぐので、順番も、この区切りも動かさないこと。**
 //
-// この中の節: MEALPLAN-09, SLOTWIN-01, PASTLOG-01, MEALPLAN-07, RANGE-EA, MEALPLAN-S1S2, MEALPLAN-S3, MEALPLAN-SERV, SHOPRANGE-EA, MEALPLAN-HOUSE, MDSLOT-01
+// この中の節: MEALPLAN-09, SLOTWIN-01, PASTLOG-01, MEALPLAN-07, RANGE-EA, MEALPLAN-S1S2, MEALPLAN-S3, MEALPLAN-SERV, SHOPRANGE-EA, MEALPLAN-HOUSE, MDSLOT-01, MKSLOT-01
 // ==========================================================================================
 import './_shared.mjs'
 
@@ -2414,5 +2414,228 @@ import './_shared.mjs'
       )
     } finally {
       await mdBrowser.close()
+    }
+  }
+
+  // --- MKSLOT-01: 週タブの「入れる食事」(2026-08-29 便MK・司令部の裁定)。
+  //
+  // 便MDは月タブの2か所にだけ絞りを足し、週は「7日ぶんの曜日カードが目の前にあるので
+  // 絞る必然が弱い」として見送っていた。司令部は**月で測った数字が週にもそのまま当てはまる**
+  // として足すことを決めた（朝昼夕を出している端末では月で1回押すと158品／30日。
+  // 週は7日ぶんなので比率は同じで、朝と昼が要らない人には毎回30品前後が入る）。
+  //
+  // 再発防止の要点（月の MDSLOT-01 と同じ形で測る）:
+  //  ①押さなければ今までと同じ（既定は表示する食事ぜんぶが選ばれている・3つとも入る）
+  //  ②夕食だけを選べば、入るのは夕食だけ（朝食・昼食は1品も増えない）
+  //  ③最後の1つは外せない（外すと1品も入らない行き止まりになる）
+  //  ④覚えない（読み込み直すと既定へ戻る）
+  //  ⑤総入れ替えでも、選んでいない食事の献立は消えない＝そのことを確認の窓が言う（規約F） ---
+  currentCheck = 'MKSLOT-01'
+  {
+    const mkBrowser = await chromium.launch()
+    const mkContext = await mkBrowser.newContext({ viewport: { width: 390, height: 844 } })
+    const mkPage = await mkContext.newPage()
+    let mkConfirmMsg = ''
+    await collectConfirms(mkPage, (text) => {
+      mkConfirmMsg = text
+    })
+    mkPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@MKSLOT-01] ${err.message}`)
+    })
+    try {
+      await mkPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await mkPage.waitForTimeout(2400) // 初回シード完了待ち
+      // 朝昼夕を出している端末にする（新規ユーザーの既定は夕食のみ）
+      await mkPage.evaluate(
+        () =>
+          new Promise((resolve, reject) => {
+            const req = indexedDB.open('uchi-recipe')
+            req.onsuccess = () => {
+              const tx = req.result.transaction('settings', 'readwrite')
+              const store = tx.objectStore('settings')
+              const get = store.get(1)
+              get.onsuccess = () => {
+                store.put({
+                  ...(get.result || { id: 1 }),
+                  id: 1,
+                  visibleMealSlots: ['breakfast', 'lunch', 'dinner'],
+                })
+              }
+              tx.oncomplete = () => resolve(undefined)
+              tx.onerror = () => reject(tx.error)
+            }
+            req.onerror = () => reject(req.error)
+          }),
+      )
+      await mkPage.goto(`${BASE}/#/meal-plan?focus=week`, { waitUntil: 'networkidle' })
+      // 生のIndexedDBへ書いたので読み込み直す（Dexieのライブ購読はDexie経由しか見ていない・禁じ手⑥）
+      await mkPage.reload({ waitUntil: 'networkidle' })
+      await mkPage.waitForTimeout(2000)
+      // 次の週へ送る＝7日とも今日より先になる（週の始まりは月曜なので、今日が何曜日でも成り立つ）。
+      // 過ぎた日が混ざらないので、実行した曜日で入る枠の数が変わらない（禁じ手①）
+      await mkPage.getByRole('button', { name: ja.mealPlan.nextWeek }).click()
+      await mkPage.waitForTimeout(900)
+      /** いま入っている献立を食事ごとに数える（DBの実データで見る） */
+      const mkCountBySlot = async () => {
+        const rows = await mkPage.evaluate(
+          () =>
+            new Promise((resolve, reject) => {
+              const req = indexedDB.open('uchi-recipe')
+              req.onsuccess = () => {
+                const tx = req.result.transaction('mealPlans', 'readonly')
+                const g = tx.objectStore('mealPlans').getAll()
+                g.onsuccess = () => resolve(g.result.map((e) => e.slot))
+                g.onerror = () => reject(g.error)
+              }
+              req.onerror = () => reject(req.error)
+            }),
+        )
+        const counts = { breakfast: 0, lunch: 0, dinner: 0 }
+        for (const slot of rows) counts[slot] = (counts[slot] ?? 0) + 1
+        return counts
+      }
+      // 結果の知らせが出るまで待つ（決め打ちの秒数では足りない。文言は ja.ts から作る・禁じ手②③）
+      const mkTail = (text) => text.slice(text.lastIndexOf('}') + 1)
+      const mkWaitFilled = async () => {
+        const needles = [
+          mkTail(ja.mealPlan.fillWeekDone),
+          mkTail(ja.mealPlan.fillWeekKeptManual),
+          mkTail(ja.mealPlan.fillWeekNoRoom),
+          ja.mealPlan.fillWeekNoAdded,
+          mkTail(ja.mealPlan.fillModeReplaceAllDone),
+          ja.mealPlan.fillModeReplaceAllNothing,
+        ]
+        try {
+          await mkPage.waitForFunction(
+            (list) =>
+              list.some((n) => (document.body.innerText ?? '').replaceAll('​', '').includes(n)),
+            needles,
+            { timeout: 30000 },
+          )
+        } catch {
+          /* 出なかったことは、次の判定（DBの中身）が数で示す */
+        }
+        await mkPage.waitForTimeout(1500)
+      }
+      const mkChip = (slot) => mkPage.locator(`[data-testid="week-fill-slot"][data-slot="${slot}"]`)
+      const mkPressed = () =>
+        mkPage.locator('[data-testid="week-fill-slot"][aria-pressed="true"]').count()
+
+      // ---------- ①既定: 押さなければ今までと同じ（3つとも選ばれている） ----------
+      // すでに開いていれば押さない共通の手順を使う（押す回数を決め打ちしない・禁じ手③）
+      await openWeekGroup(mkPage, ja.mealPlan.weekGroupAutoTitle)
+      const mkChipCount = await mkPage.getByTestId('week-fill-slot').count()
+      check(
+        'MKSLOT-01(既定) 「入れる食事」に、表示している食事のぶんだけボタンが出る',
+        mkChipCount === 3,
+        `chips=${mkChipCount}`,
+      )
+      check(
+        'MKSLOT-01(既定) 開いた直後は全部選ばれている（押さなければ今までと同じ相手）',
+        (await mkPressed()) === mkChipCount,
+      )
+
+      // ---------- ③最後の1つは外せない ----------
+      await mkChip('breakfast').click()
+      await mkPage.waitForTimeout(250)
+      await mkChip('lunch').click()
+      await mkPage.waitForTimeout(400)
+      await mkChip('dinner').click()
+      await mkPage.waitForTimeout(600)
+      check(
+        'MKSLOT-01(全部外す) 最後の1つは外れない（1品も入らない状態を作らせない）',
+        (await mkChip('dinner').getAttribute('aria-pressed')) === 'true',
+      )
+      check(
+        'MKSLOT-01(全部外す) 外れない理由をその場で伝える（無反応にしない）',
+        stripZwspText(await mkPage.textContent('body')).includes(ja.mealPlan.slotPickKeepOne),
+      )
+
+      // ---------- ②夕食だけを選んでまとめて献立を入力 ----------
+      const mkBefore = await mkCountBySlot()
+      await mkPage.locator('[data-testid="week-fill-run"]').click()
+      await mkWaitFilled()
+      const mkAfterDinner = await mkCountBySlot()
+      check(
+        'MKSLOT-01(絞る) 夕食だけを選んだら、入るのは夕食だけ（朝食・昼食は1品も増えない）',
+        mkAfterDinner.dinner > mkBefore.dinner &&
+          mkAfterDinner.breakfast === mkBefore.breakfast &&
+          mkAfterDinner.lunch === mkBefore.lunch,
+        `before=${JSON.stringify(mkBefore)} after=${JSON.stringify(mkAfterDinner)}`,
+      )
+
+      // ---------- ①戻せる: 3つに戻して押せば、今までどおり朝食・昼食にも入る ----------
+      await mkChip('breakfast').click()
+      await mkPage.waitForTimeout(250)
+      await mkChip('lunch').click()
+      await mkPage.waitForTimeout(400)
+      check('MKSLOT-01(戻す) 3つとも選び直せる', (await mkPressed()) === 3)
+      await mkPage.locator('[data-testid="week-fill-run"]').click()
+      await mkWaitFilled()
+      const mkAfterAll = await mkCountBySlot()
+      check(
+        'MKSLOT-01(戻す) 絞りを戻して押せば、今までどおり朝食・昼食にも入る（可逆）',
+        mkAfterAll.breakfast > mkAfterDinner.breakfast &&
+          mkAfterAll.lunch > mkAfterDinner.lunch &&
+          mkAfterAll.dinner >= mkAfterDinner.dinner,
+        `narrow=${JSON.stringify(mkAfterDinner)} all=${JSON.stringify(mkAfterAll)}`,
+      )
+
+      // ---------- ⑤総入れ替え: 選んでいない食事は消えない。そのことを確認の窓が言う（規約F） ----------
+      await mkChip('breakfast').click()
+      await mkPage.waitForTimeout(250)
+      await mkChip('lunch').click()
+      await mkPage.waitForTimeout(400)
+      await mkPage.selectOption('[data-testid="fill-mode"]', 'replaceAll')
+      await mkPage.waitForTimeout(400)
+      mkConfirmMsg = ''
+      await mkPage.locator('[data-testid="week-fill-run"]').click()
+      await mkWaitFilled()
+      check(
+        'MKSLOT-01(総入れ替え・絞る) 何を入れ替えて何が変わらないかを、消す前に言う（規約F）',
+        stripZwspText(mkConfirmMsg).includes(
+          ja.mealPlan.fillWeekSlotNarrowedNote.replace('{slots}', ja.mealPlan.slot.dinner),
+        ),
+        `confirm=${mkConfirmMsg}`,
+      )
+      const mkAfterReplace = await mkCountBySlot()
+      check(
+        'MKSLOT-01(総入れ替え・絞る) 選んでいない食事の献立は1品も消えない',
+        mkAfterReplace.breakfast === mkAfterAll.breakfast &&
+          mkAfterReplace.lunch === mkAfterAll.lunch,
+        `before=${JSON.stringify(mkAfterAll)} after=${JSON.stringify(mkAfterReplace)}`,
+      )
+
+      // ---------- ①絞っていないときの確認文は、今までと1文字も変わらない ----------
+      await mkChip('breakfast').click()
+      await mkPage.waitForTimeout(250)
+      await mkChip('lunch').click()
+      await mkPage.waitForTimeout(400)
+      mkConfirmMsg = ''
+      await mkPage.locator('[data-testid="week-fill-run"]').click()
+      await mkWaitFilled()
+      check(
+        'MKSLOT-01(絞らない) 絞っていないときは、確認文にその一行を足さない（今までと同じ文）',
+        mkConfirmMsg.length > 0 &&
+          !stripZwspText(mkConfirmMsg).includes(mkTail(ja.mealPlan.fillWeekSlotNarrowedNote)),
+        `confirm=${mkConfirmMsg}`,
+      )
+
+      // ---------- ④覚えない ----------
+      await mkChip('breakfast').click()
+      await mkPage.waitForTimeout(500)
+      check('MKSLOT-01(覚えない) 前提: 読み込み直す前は絞れている', (await mkPressed()) === 2)
+      await mkPage.reload({ waitUntil: 'networkidle' })
+      await mkPage.waitForTimeout(2000)
+      await openWeekGroup(mkPage, ja.mealPlan.weekGroupAutoTitle)
+      check(
+        // 覚える器は設定「表示する食事」が持っている。同じことを2か所で覚えると
+        // 「なぜ朝食が出ないのか」の答えが2か所に分かれる
+        'MKSLOT-01(覚えない) 読み込み直すと選び直しは既定（表示する食事ぜんぶ）に戻る',
+        (await mkPressed()) === 3,
+      )
+    } finally {
+      await mkBrowser.close()
     }
   }

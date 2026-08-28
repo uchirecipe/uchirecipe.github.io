@@ -886,12 +886,27 @@ export function useMealPlanState(demo?: MonthDemoData) {
      同じ面の絞りだけが覚えている状態も作らない。 */
   const [fillSlots, setFillSlots] = useState<MealSlot[] | null>(null)
   const [sheetSlots, setSheetSlots] = useState<MealSlot[] | null>(null)
+  /* ---- 週の「入れる食事」（2026-08-29 便MK・司令部の裁定）----
+     便MDは週に絞りを足さず「7日ぶんの曜日カードが目の前にあるので絞る必然が弱い」と申し送ったが、
+     **月で測った数字が週にもそのまま当てはまる**ため足した。便MDの実測では、朝昼夕すべてを
+     表示している端末で月を1回押すと158品／30日（夕食だけなら50品）が入る。週は7日ぶんなので
+     比率は同じで、朝と昼が要らない人には毎回30品前後の要らない献立が入る。
+     「カードが目の前にある」は**入ったあとに消す手間**の話で、入らないほうがよいという話とは別。
+
+     持ち方は月とまったく同じ（null＝絞っていない＝visibleSlots ぜんぶ・覚えない・最後の1つは
+     外せない）。押し引きも同じ toggleMonthSlot を通す＝週だけ違う決まりを作らない。 */
+  const [weekFillSlots, setWeekFillSlots] = useState<MealSlot[] | null>(null)
   // 「表示する食事」を変えたら選び直しは白紙に戻す（表示していない食事を選んだまま残さない）。
   // 見るのは中身を並べた文字列＝設定の読み直しで配列の実体だけが変わったときに巻き戻さないため
   const monthSlotPickKey = visibleSlots.join(',')
   useEffect(() => {
     setFillSlots(null)
     setSheetSlots(null)
+  }, [monthSlotPickKey])
+  // 週の選び直しも同じ決まりで白紙に戻す。上の1つに書き足さず別にしているのは、
+  // 上の形をそのまま写した見張り（MD-2）が在るため＝月の見張りを壊さずに同じ決まりを足す
+  useEffect(() => {
+    setWeekFillSlots(null)
   }, [monthSlotPickKey])
   /** まとめて提案が入れる先の食事（絞っていなければ「表示する食事」ぜんぶ） */
   const fillTargetSlots = useMemo(
@@ -902,6 +917,11 @@ export function useMealPlanState(demo?: MonthDemoData) {
   const sheetTargetSlots = useMemo(
     () => (sheetSlots ?? visibleSlots).filter((s) => visibleSlots.includes(s)),
     [sheetSlots, visibleSlots],
+  )
+  /** 週の「まとめて献立を入力」が入れる先の食事（絞っていなければ「表示する食事」ぜんぶ） */
+  const weekFillTargetSlots = useMemo(
+    () => (weekFillSlots ?? visibleSlots).filter((s) => visibleSlots.includes(s)),
+    [weekFillSlots, visibleSlots],
   )
   /**
    * チップ1つの押し引き。最後の1つは外せない（外すと何も出ないため）。
@@ -923,6 +943,8 @@ export function useMealPlanState(demo?: MonthDemoData) {
   }
   const toggleFillSlot = (slot: MealSlot) => toggleMonthSlot(slot, fillTargetSlots, setFillSlots)
   const toggleSheetSlot = (slot: MealSlot) => toggleMonthSlot(slot, sheetTargetSlots, setSheetSlots)
+  const toggleWeekFillSlot = (slot: MealSlot) =>
+    toggleMonthSlot(slot, weekFillTargetSlots, setWeekFillSlots)
   /** 選んだ食事の名前を並べたもの（確認文・紙の名乗りに差し込む） */
   const slotNamesOf = (slots: MealSlot[]) => slots.map((s) => ja.mealPlan.slot[s]).join('・')
   /**
@@ -3488,12 +3510,23 @@ export function useMealPlanState(demo?: MonthDemoData) {
     //  replaceAll … これからの献立を消してから入れ直す。消す前に必ず確認を出す(規約F)
     const replaceAll = fillMode === 'replaceAll'
     // 2026-08-08 便DX(オーナー指示): 鍵の掛かった食事は、総入れ替えでも触らない
-    const plan = planWeekFill(entries ?? [], dates, visibleSlots, today, {
+    // 2026-08-29 便MK: 入れる先は「入れる食事」で決まる（設定「表示する食事」の直読みをやめた）。
+    // 押さなければ weekFillTargetSlots は visibleSlots と同じ中身なので、今までと1つも変わらない
+    const plan = planWeekFill(entries ?? [], dates, weekFillTargetSlots, today, {
       keepAuto: !replaceAll,
       replaceAll,
       lockedKeys,
     })
     const lockNotice = lockNoticeOf(plan.lockedSlotCount)
+    // 絞っているときだけ、確認の窓に足す1行（絞っていなければ今までと1文字も変わらない）。
+    // 見出しには差し込まず補足の行へ置く＝月タブ（MD-3）と同じ置き場所
+    const weekSlotNarrowedNotice =
+      weekFillTargetSlots.length < visibleSlots.length
+        ? ja.mealPlan.fillWeekSlotNarrowedNote.replace(
+            '{slots}',
+            slotNamesOf(weekFillTargetSlots),
+          )
+        : ''
     if (replaceAll) {
       const removeCount = plan.entryIdsToRemove.length
       const targetSlotCount = plan.slotsToFill.length + plan.partialFills.length
@@ -3521,6 +3554,7 @@ export function useMealPlanState(demo?: MonthDemoData) {
              実装（isPastDate）は1日も外していないので、書くと余計な条件になる */
           notes: [
             ...(isPastDate(dates[0], today) ? [ja.mealPlan.replaceAllPastNote] : []),
+            ...(weekSlotNarrowedNotice ? [weekSlotNarrowedNotice] : []),
             ...(lockNotice ? [lockNotice] : []),
           ],
           confirmLabel: ja.mealPlan.fillModeReplaceAllConfirmOk,
@@ -4778,6 +4812,7 @@ export function useMealPlanState(demo?: MonthDemoData) {
     planSheetOpen, setPlanSheetOpen, planSheetIncludeEmptyDays, setPlanSheetIncludeEmptyDays,
     // 月の「入れる食事」「載せる食事」（2026-08-28 便MD）
     fillTargetSlots, sheetTargetSlots, toggleFillSlot, toggleSheetSlot,
+    weekFillTargetSlots, toggleWeekFillSlot,
     monthPlanSheet, savePlanSheetImage, servingsEditor, setServingsEditor, submitServings,
     setDayFoldOverrides, weekEditDate, setWeekEditDate, datesWithPlan, isDayFolded,
     setAllDaysFolded, allDaysCollapsed, allDaysLocked, rememberWeekReturn, rememberMonthReturn,

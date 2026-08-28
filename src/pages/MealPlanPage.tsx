@@ -389,6 +389,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
     openTemplateApply, selectedTemplate, toggleTemplateDow, applyTemplate, removeTemplate,
     planSheetOpen, setPlanSheetOpen, planSheetIncludeEmptyDays, setPlanSheetIncludeEmptyDays,
     fillTargetSlots, sheetTargetSlots, toggleFillSlot, toggleSheetSlot,
+    weekFillTargetSlots, toggleWeekFillSlot,
     monthPlanSheet, savePlanSheetImage, servingsEditor, setServingsEditor, submitServings,
     setDayFoldOverrides, weekEditDate, setWeekEditDate, datesWithPlan, isDayFolded,
     setAllDaysFolded, allDaysCollapsed, allDaysLocked, rememberWeekReturn, rememberMonthReturn,
@@ -444,7 +445,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
           {/* 載せる食事（2026-08-28 便MD）。押さなければ表示する食事ぜんぶ＝今までと同じ1枚。
               **白紙のときも必ず出す**＝絞ったせいで空になった人が、同じ場所で絞りを戻せる
               （中身のある側にだけ置くと、空にした瞬間にチップごと消えて行き止まりになる） */}
-          {renderMonthSlotPicker(
+          {renderSlotPicker(
             ja.mealPlan.sheetSlotPickLabel,
             ja.mealPlan.sheetSlotPickAria,
             'plan-sheet-slot',
@@ -1573,9 +1574,10 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
   )
 
   /**
-   * 月タブの「入れる食事」「載せる食事」（2026-08-28 便MD。オーナー原文2件
+   * 食事を選ぶチップ（2026-08-28 便MD。オーナー原文2件
    * 「献立をまとめて提案に、朝昼夕の選択がない」「献立表：… 朝昼夕の選択がない。
    * 夕食だけの献立表を作成などできるように。」）。
+   * 月タブの「入れる食事」「載せる食事」と、週タブの「入れる食事」（2026-08-29 便MK）で使う。
    *
    * 形は**アプリに既にある選び方に合わせる**: 複数を選ぶものはチップ（表示する食事・
    * 買い物メモの範囲えらび）、1つだけ選ぶものはプルダウン（週の区切り）という
@@ -1588,8 +1590,9 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
    * 2つの絞りを分けて持つのは、片方が「どこへ入れるか」（書き込む操作）で、
    * もう片方が「どこを載せるか」（読むだけの操作）だから。1つにまとめると
    * 「夕食だけの紙を作りたい」が「夕食にだけ献立を入れる」まで変えてしまう。
+   * 週と月を分けて持つのも同じ理由で、週の絞りは表示している7日間だけに効く。
    */
-  const renderMonthSlotPicker = (
+  const renderSlotPicker = (
     label: string,
     aria: string,
     testId: string,
@@ -2632,7 +2635,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                           : ja.mealPlan.fillMonthHint}
                       </p>
                       {/* 入れる先の食事（2026-08-28 便MD）。押さなければ表示する食事ぜんぶ＝今までと同じ */}
-                      {renderMonthSlotPicker(
+                      {renderSlotPicker(
                         ja.mealPlan.fillSlotPickLabel,
                         ja.mealPlan.fillSlotPickAria,
                         'month-fill-slot',
@@ -3003,6 +3006,17 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                   （理由は i18n/ja.ts の fillModeFillEmpty のところに書いてある）。
                   押すボタンは節の見出しの行に塗りつぶしで出ており、消える側は確認の窓が言う */}
             </div>
+
+            {/* 入れる先の食事(2026-08-29 便MK・司令部の裁定)。押さなければ表示する食事ぜんぶ＝
+                今までと同じものが入る。置き場所は月タブと同じ「実行の説明→入れる食事→現在の条件」で、
+                週だけ並びを変えない（便ID・①の「入れ方＞条件」もそのまま。入れかたの次に来る） */}
+            {renderSlotPicker(
+              ja.mealPlan.fillSlotPickLabel,
+              ja.mealPlan.fillSlotPickAria,
+              'week-fill-slot',
+              weekFillTargetSlots,
+              toggleWeekFillSlot,
+            )}
 
             {/* 現在の条件: 時短優先・ジャンル・栄養から組む。押すと窓が開く(2026-08-19 便ID・④)。
                 2026-07-30 便CH/C11: 同じ部品を月タブにも出す(renderSuggestConditions)。

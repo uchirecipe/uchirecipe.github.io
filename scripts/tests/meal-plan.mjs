@@ -4320,3 +4320,143 @@ eq('rangeDayCount: 月をまたぐ計算も正しい', rangeDayCount('2026-06-28
     42,
   )
 }
+
+
+// ---------- 便MK（2026-08-29）: 週タブの「まとめて献立を入力」にも「入れる食事」 ----------
+//
+// 便MDは月タブの2か所（まとめて提案・献立表）にだけ絞りを足し、週は
+// 「7日ぶんの曜日カードが目の前にあるので絞る必然が弱い」として見送っていた。
+// 司令部の裁定で足した。理由は**月で測った数字が週にもそのまま当てはまる**から
+// （朝昼夕すべてを表示している端末では、月で1回押すと158品／30日。週は7日ぶんなので比率は同じで、
+//  朝と昼が要らない人には毎回30品前後の要らない献立が入る）。
+//
+// ここで測るのは3つ:
+//  ①押さなければ今までと同じものが入る（既定＝表示する食事ぜんぶ）
+//  ②絞れば、入る先も総入れ替えで消える先も、選んだ食事だけになる
+//  ③持ち方・押し引き・確認文の置き場所は月とまったく同じ（週だけ別の決まりを作らない）
+{
+  const mkDates = [
+    '2026-09-07',
+    '2026-09-08',
+    '2026-09-09',
+    '2026-09-10',
+    '2026-09-11',
+    '2026-09-12',
+    '2026-09-13',
+  ]
+  const mkToday = '2026-09-07'
+  const mkSlots = ['breakfast', 'lunch', 'dinner']
+  // ①絞らないときの埋め先＝7日×3食（便MDが月で測った比率が、そのまま週にも出る形）
+  const mkAll = planWeekFill([], mkDates, mkSlots, mkToday, { keepAuto: true })
+  eq('MK-1 絞らなければ、埋め先は7日×3食のまま（今までと同じ）', mkAll.slotsToFill.length, 21)
+  const mkDinner = planWeekFill([], mkDates, ['dinner'], mkToday, { keepAuto: true })
+  eq(
+    'MK-1 夕食だけに絞ると、埋め先は7日ぶんの夕食だけになる（朝食・昼食の枠が残らない）',
+    [mkDinner.slotsToFill.length, [...new Set(mkDinner.slotsToFill.map((s) => s.slot))]],
+    [7, ['dinner']],
+  )
+  // ②総入れ替えでも、選んでいない食事は消えない＝確認文の「残るもの」が事実になる（規約F）
+  const mkExisting = mkDates.flatMap((date, i) =>
+    mkSlots.map((slot, j) => ({
+      id: i * 3 + j + 1,
+      date,
+      slot,
+      recipeId: 100 + j,
+      role: 'main',
+      auto: false,
+    })),
+  )
+  const mkReplaceDinner = planWeekFill(mkExisting, mkDates, ['dinner'], mkToday, {
+    replaceAll: true,
+  })
+  eq(
+    'MK-2 総入れ替えで消えるのは、選んだ食事の献立だけ（朝食・昼食は1品も消えない）',
+    [
+      [
+        ...new Set(
+          mkExisting
+            .filter((e) => mkReplaceDinner.entryIdsToRemove.includes(e.id))
+            .map((e) => e.slot),
+        ),
+      ],
+      mkReplaceDinner.entryIdsToRemove.length,
+    ],
+    [['dinner'], 7],
+  )
+  const mkReplaceAll = planWeekFill(mkExisting, mkDates, mkSlots, mkToday, { replaceAll: true })
+  eq(
+    'MK-2 絞らなければ総入れ替えは今までどおり21品ぜんぶを入れ替える',
+    mkReplaceAll.entryIdsToRemove.length,
+    21,
+  )
+}
+{
+  const mkRead = (rel) =>
+    readFileSync(path.join(path.dirname(fileURLToPath(scriptFileUrl)), '..', rel), 'utf-8')
+  const mkState = mkRead('src/pages/mealPlan/useMealPlanState.ts')
+  const mkPageSrc = mkRead('src/pages/MealPlanPage.tsx')
+  eq(
+    // 直読みに戻ると、絞っても朝昼夕ぜんぶに入る形へ静かに戻る（画面のチップだけが残る）
+    'MK-3 週のまとめて入力が入れる先は「入れる食事」で決まる（表示する食事の直読みに戻っていない）',
+    /planWeekFill\(entries \?\? \[\], dates, weekFillTargetSlots, today/.test(mkState),
+    true,
+  )
+  eq(
+    // 覚える器は設定「表示する食事」が持っている。同じことを2か所で覚えない（月と同じ線）
+    'MK-3 週の選び直しも覚えない（設定に保存せず、画面の中だけで持つ）',
+    /const \[weekFillSlots, setWeekFillSlots\] = useState<MealSlot\[\] \| null>\(null\)/.test(
+      mkState,
+    ),
+    true,
+  )
+  eq(
+    'MK-3 「表示する食事」を変えたら週の選び直しも白紙に戻す',
+    /useEffect\(\(\) => \{\s*setWeekFillSlots\(null\)\s*\}, \[monthSlotPickKey\]\)/.test(mkState),
+    true,
+  )
+  eq(
+    // 週だけ別の押し引きを書くと、「最後の1つは外せない」が片方だけ直る形が生まれる
+    'MK-3 押し引きは月と同じ仕掛け（toggleMonthSlot）を通す',
+    /toggleMonthSlot\(slot, weekFillTargetSlots, setWeekFillSlots\)/.test(mkState),
+    true,
+  )
+  eq(
+    'MK-4 絞ったときだけ、確認の窓に一行を足す（絞っていなければ今までと1文字も変わらない）',
+    /weekFillTargetSlots\.length < visibleSlots\.length\s*\?\s*ja\.mealPlan\.fillWeekSlotNarrowedNote/.test(
+      mkState,
+    ),
+    true,
+  )
+  eq(
+    // 見出し（fillModeReplaceAllConfirmTitle）に差し込むと、絞っていない人の文まで変わる
+    'MK-4 絞ったことは補足の行に置く（見出しの文には差し込まない）',
+    [
+      /\.\.\.\(weekSlotNarrowedNotice \? \[weekSlotNarrowedNotice\] : \[\]\),/.test(mkState),
+      ja.mealPlan.fillModeReplaceAllConfirmTitle.includes('{slots}'),
+    ],
+    [true, false],
+  )
+  eq(
+    'MK-4 足す一行には、入れる食事の差し込み口{slots}がある',
+    ja.mealPlan.fillWeekSlotNarrowedNote.includes('{slots}'),
+    true,
+  )
+  eq(
+    // 「献立を提案」の節の中＝押すボタンと同じ囲みに置く。別の節へ流れると
+    // 「どの食事に入るのか」を押す前に読めない場所へ移る
+    'MK-5 週のチップは「献立を提案」の節の中にある（押すボタンと同じ囲み）',
+    mkPageSrc.indexOf("'week-fill-slot'") > mkPageSrc.indexOf("'week-fill-run'") &&
+      mkPageSrc.indexOf("'week-fill-slot'") <
+        mkPageSrc.indexOf('ja.mealPlan.weekGroupTemplateTitle'),
+    true,
+  )
+  eq(
+    // 同じ役目のものを2つの言い方で呼ばない（月と同じ名前をそのまま使う）
+    'MK-5 週のチップの名前は月と同じものを使う（同じ文字を2か所で書かない）',
+    /'week-fill-slot',\s*weekFillTargetSlots,/.test(mkPageSrc) &&
+      /ja\.mealPlan\.fillSlotPickLabel,\s*ja\.mealPlan\.fillSlotPickAria,\s*'week-fill-slot',/.test(
+        mkPageSrc,
+      ),
+    true,
+  )
+}
