@@ -293,9 +293,7 @@ import './_shared.mjs'
       await dmPage.waitForTimeout(1500)
       check(
         'DEMO-01 サンプルであることを帯で言い切る',
-        ((await dmPage.locator('[data-testid="month-demo-banner"]').textContent()) ?? '').includes(
-          'サンプルデータを表示中',
-        ),
+        ((await dmPage.locator('[data-testid="month-demo-banner"]').textContent()) ?? '').includes(ja.mealPlan.monthDemoBannerTitle),
       )
       // 2026-08-07 便DU: 食費・栄養のカードは折りたたみになった(既定は畳む)ので、中身を読む前に開く
       await dmPage.getByRole('button', { name: /月の食費/ }).click()

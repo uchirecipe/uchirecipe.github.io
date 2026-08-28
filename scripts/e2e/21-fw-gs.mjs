@@ -673,7 +673,7 @@ import './_shared.mjs'
       check(
         'GJ-07 順番を変えられることは、動かす前から書いてある',
         noZw(await gjPage.locator('[data-testid="navi-reorder-hint"]').innerText()) ===
-          '各手順の「上へ」「下へ」で順番を変えられます。変えた順番のまま調理中モードが進みます。',
+          ja.cookNavi.reorderHint,
         noZw(await gjPage.locator('[data-testid="navi-reorder-hint"]').innerText()),
       )
 
@@ -1032,7 +1032,7 @@ import './_shared.mjs'
       check(
         'GL-01 並べ替えたあとは「全体の目安」と同じ枠の中に印が出る',
         noZw(await glPage.locator('[data-testid="navi-total-estimate-stale"]').innerText()) ===
-          '自動で組んだ並びで計算した数字です。並びを変えたあとの時間ではありません。',
+          ja.cookNavi.estimateStaleNote,
         noZw(await glPage.locator('[data-testid="navi-total-estimate-stale"]').innerText()),
       )
       // 2026-08-25 便KT: 「できあがりの目安」の枠はオーナー指示で消したので、その枠の中の

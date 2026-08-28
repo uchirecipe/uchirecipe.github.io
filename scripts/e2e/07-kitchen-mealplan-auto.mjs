@@ -52,12 +52,8 @@ import './_shared.mjs'
       )
       check(
         'NAVI-KITCHEN 持っていない器具の扱いと、変えると段取りが組み直されることが書いてある',
-        ((await kcPage.textContent('body')) ?? '').includes(
-          '持っていない器具の工程は、フライパンや鍋で作るものとして、コンロを1口使うと数えます。',
-        ) &&
-          ((await kcPage.textContent('body')) ?? '').includes(
-            '変えると、並行調理ナビの段取りが組み直されます。',
-          ),
+        ((await kcPage.textContent('body')) ?? '').includes(ja.settings.kitchenMissingNote) &&
+          ((await kcPage.textContent('body')) ?? '').includes(ja.settings.kitchenChangeNote),
       )
       await kcBurners.selectOption('1')
       await kcPage.getByTestId('kitchen-kitchenNoGrill').click()
@@ -321,9 +317,7 @@ import './_shared.mjs'
       await mePage.waitForTimeout(300)
       check(
         'MEALPLAN-A3B3(B-3) 記録も予定も無い月は、数字の代わりに空の案内を出す',
-        ((await mePage.textContent('body')) ?? '').includes(
-          'この月には、作った記録も登録した献立もまだありません',
-        ),
+        ((await mePage.textContent('body')) ?? '').includes(ja.mealPlan.monthSummaryEmpty),
       )
       await mePage.locator(`button[data-date="${meDate}"]`).click()
       await mePage.waitForTimeout(400)
@@ -846,9 +840,7 @@ import './_shared.mjs'
       )
       check(
         'MEALPLAN-DU(⑧) 変更がすでに入っていることを窓の中で正直に書く',
-        ((await duModal.textContent()) ?? '').includes(
-          'この画面での変更は、すでにこの日の献立に入っています',
-        ),
+        ((await duModal.textContent()) ?? '').includes(ja.mealPlan.monthDayModalDirtyNote),
       )
       const duBeforeCancel = await duPage.evaluate(
         (date) =>

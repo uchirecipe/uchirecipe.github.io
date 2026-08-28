@@ -1632,9 +1632,7 @@ import './_shared.mjs'
       )
       check(
         'TODAYUNDO-01(便DP-3) 「作った！」が何をするかの1行説明が添えてある',
-        ((await tuPage.textContent('body')) ?? '').includes(
-          '「作った！」を押すと、その料理に今日の日付で作った記録がつきます',
-        ),
+        ((await tuPage.textContent('body')) ?? '').includes(ja.mealPlan.todayMarkCookedHint),
       )
       await tuCookedBtn.click()
       await tuPage.waitForTimeout(700)

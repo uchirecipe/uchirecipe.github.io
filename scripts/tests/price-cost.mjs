@@ -3074,6 +3074,26 @@ eq('normalizeIngredientNameForPrice 前後空白除去', normalizeIngredientName
       .map((f) => path.join(jmRoot, 'scripts/e2e', f)),
   ]
   const jmSrc = jmFiles.flatMap((f) => readFileSync(f, 'utf-8').split('\n'))
+  /**
+   * 2026-08-28 便MB: **行ごとに見ていたので、行をまたいだ書き写しを1つも数えていなかった。**
+   * Prettier が長い行を折り返すと `.includes(` と文言が別の行に分かれ、
+   *   nbWeekOpenText.includes(
+   *     '今日は、…',
+   *   )
+   * の形になる。この形は行ごとの正規表現では絶対に当たらない。2026-08-28 に
+   * 便MBが2か所（06・05）、便MCが1か所（15）を**別々に踏んで**気づいた。実測すると
+   * 判定側だけで26か所が隠れていた（掴む側は0か所＝全部1行に収まっていた）。
+   * コメント行を空行に落としたうえでファイルごとに1本につなぎ、行をまたいでも当たる形で数える。
+   */
+  const jmComment = (line) => /^\s*\/\//.test(line) || /^\s*\*/.test(line)
+  const jmJoined = jmFiles
+    .map((f) =>
+      readFileSync(f, 'utf-8')
+        .split('\n')
+        .map((l) => (jmComment(l) ? '' : l))
+        .join('\n'),
+    )
+    .join('\n')
 
   /** ja.ts に出てくる文言（値）を全部集める */
   const jmValues = new Set()
@@ -3087,38 +3107,67 @@ eq('normalizeIngredientNameForPrice 前後空白除去', normalizeIngredientName
   eq('JM-1 前提: ja.ts の文言を読めている（0件なら見張りが壊れている）', jmValues.size > 500, true)
 
   // 掴む側＝これで要素を探している書き方。ここが外れると**実行が中断**する
+  /**
+   * 2026-08-28 便MB: 引用符は3種とも数える。直す前は `'…'` しか見ておらず、`"…"` と
+   * バッククォート（差し込みの無いもの）で書き写すと**1つも数えられなかった**。
+   * 実測ではいま0か所だったが（＝この形の取りこぼしは現時点では無い）、書けてしまう以上は塞ぐ。
+   * 差し込み（${…}）のあるテンプレート文字列は、そもそも ja.ts の値と丸ごと一致しないので対象外。
+   */
+  const JM_Q =
+    String.raw`(?:'((?:[^'\\\n])*)'|"((?:[^"\\\n])*)"|` + '`((?:[^`\\\\\\n$])*)`' + String.raw`)`
+  const jmRe = (template) => new RegExp(template.replaceAll('QUOTE', JM_Q), 'g')
+  /** 3種の引用符のうち当たったものを取り出す */
+  const jmText = (m) => m[1] ?? m[2] ?? m[3]
+
   const JM_GRAB = [
-    /getByRole\(\s*'[^']*'\s*,\s*\{[^}]*?name:\s*'((?:[^'\\])*)'/g,
-    /getBy(?:Text|Label|Placeholder|Title)\(\s*'((?:[^'\\])*)'/g,
-    /hasText:\s*'((?:[^'\\])*)'/g,
+    jmRe(String.raw`getByRole\(\s*['"][^'"]*['"]\s*,\s*\{[^}]*?name:\s*QUOTE`),
+    jmRe(String.raw`getBy(?:Text|Label|Placeholder|Title)\(\s*QUOTE`),
+    jmRe(String.raw`hasText:\s*QUOTE`),
     // 画面の名前を受け取って掴みにいく道具（中で getByRole / selectOption に渡している）。
     // 呼び出し側に書き写すと、道具の中を直しても外れる＝同じ穴なので一緒に数える
-    /(?:selectWeekLayout|openWeekGroup)\([^,]*,\s*'((?:[^'\\])*)'/g,
-    /selectOption\(\s*\{\s*label:\s*'((?:[^'\\])*)'/g,
+    jmRe(String.raw`(?:selectWeekLayout|openWeekGroup)\([^,]*,\s*QUOTE`),
+    jmRe(String.raw`selectOption\(\s*\{\s*label:\s*QUOTE`),
   ]
   // 判定側＝出ている文字と見比べている書き方。外れても中断はしないが赤になる
   const JM_JUDGE = [
-    /\.(?:includes|startsWith|endsWith)\(\s*'((?:[^'\\])*)'/g,
-    /(?:===|!==)\s*'((?:[^'\\])*)'/g,
+    jmRe(String.raw`\.(?:includes|startsWith|endsWith)\(\s*QUOTE`),
+    jmRe(String.raw`(?:===|!==)\s*QUOTE`),
   ]
-  /** 短い語は言い換えが起きにくく、ja.ts のどのキーか決めにくいので判定側は10文字以上だけ見る */
+  /**
+   * 短い語は言い換えが起きにくく、ja.ts のどのキーか決めにくいので判定側は10文字以上だけ見る。
+   * （2026-08-28 便MB: この線引きは司令部から「意図的な設計かもしれない」と問われて読み直したが、
+   *   理由がここに書いてあるとおり成り立っているので動かしていない）
+   */
   const JM_JUDGE_MIN = 10
+  /** 一部だけの書き写しは、テストが自分で作った名前（「肉じゃが」4字・「玉ねぎ」3字）を
+   *  巻き込まない長さで切る。6字にすると実測でその類は1つも入らなくなる */
+  const JM_PART_MIN = 6
   const jmHasJa = (s) => /[぀-ヿ一-鿿]/.test(s)
 
-  const jmCount = (patterns, minLength) => {
+  /**
+   * 書き写しを数える。`kind` で「丸ごと ja.ts の値と同じもの」と「ja.ts の値の**一部**を
+   * 写したもの」を数え分ける（2026-08-28 便MB）。一部だけの書き写しも、写した側の文言が
+   * 変われば同じように外れる＝同じ穴。丸ごと一致だけを見ていた直す前は、
+   * この形が**永久に見えなかった**（jmValues.has() を通らないため）。
+   */
+  const jmCount = (patterns, minLength, kind = 'whole') => {
     const out = {}
-    for (const line of jmSrc) {
-      if (/^\s*\/\//.test(line) || /^\s*\*/.test(line)) continue // コメント行は数えない
-      for (const re of patterns) {
-        re.lastIndex = 0
-        let m
-        while ((m = re.exec(line))) {
-          const text = m[1]
-          if (!jmHasJa(text)) continue
-          if (!jmValues.has(text)) continue // 画面に出る文言でないもの（テストが作った名前）は対象外
-          if ([...text].length < minLength) continue
-          out[text] = (out[text] ?? 0) + 1
+    for (const re of patterns) {
+      re.lastIndex = 0
+      let m
+      while ((m = re.exec(jmJoined))) {
+        const text = jmText(m)
+        if (text == null) continue
+        if (!jmHasJa(text)) continue
+        if ([...text].length < minLength) continue
+        const whole = jmValues.has(text)
+        if (kind === 'whole') {
+          if (!whole) continue // 画面に出る文言でないもの（テストが作った名前）は対象外
+        } else {
+          if (whole) continue // 丸ごと一致は JM-1 / JM-2 が数えている
+          if (![...jmValues].some((v) => v.includes(text))) continue
         }
+        out[text] = (out[text] ?? 0) + 1
       }
     }
     return out
@@ -3175,6 +3224,28 @@ eq('normalizeIngredientNameForPrice 前後空白除去', normalizeIngredientName
       'JM-2 判定側の残りは一覧どおり（数え方が変わったら気づけるようにする）',
       total,
       Object.values(jmKnownRaw['判定側'] ?? {}).reduce((a, b) => a + b, 0),
+    )
+  }
+
+  // ---- JM-6: 文言の**一部だけ**を写したものの見張り（2026-08-28 便MB） ----
+  //
+  // 直す前の JM-1 / JM-2 は `jmValues.has(text)` ＝ ja.ts の値と**丸ごと一致**したときだけ数えていた。
+  // 長い文の頭だけ・途中だけを写したものは1つも通らず、**永久に見えなかった**。
+  // 写した側が変われば同じように外れるので、穴としては丸ごと一致と同じ重さがある。
+  //
+  // 実測（2026-08-28）: 掴む側 3か所／判定側 140か所（116種）。
+  // **掴む側だけをここで止める。**外れると要素を掴めず30秒待って**実行が中断**し、
+  // 以降が丸ごと走らないまま「合格◯件」で終わる（いちばん重い壊れ方）。3か所とも
+  // ja.ts から読む形へ寄せたので、いま0か所＝**1つでも増えたら赤**にできる。
+  // 判定側の140か所は今回入れていない（理由は e2e-ja-copy-known.json の
+  //「_一部だけの書き写しについて」に書いた。数が多く、1件ずつ理由を書くと形だけになるため、
+  // 分けて片付ける）。
+  {
+    const partGrab = jmCount(JM_GRAB, JM_PART_MIN, 'part')
+    eq(
+      'JM-6 掴む側に、文言の一部だけを書き写したものが無い（外れると実行が中断する側）',
+      Object.entries(partGrab).map(([t, n]) => `掴む側「${t}」が${n}か所（ja.ts から読む形にすること）`),
+      [],
     )
   }
 

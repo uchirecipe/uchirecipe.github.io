@@ -632,9 +632,7 @@ import './_shared.mjs'
       )
       check(
         'PANTRYFILTER-01(便DF) 押せない理由が1行で出る',
-        (await pfPage.textContent('body')).includes(
-          '食材の在庫で「ある」「少ない」にした食材が、使いたい食材に入ります',
-        ),
+        (await pfPage.textContent('body')).includes(ja.search.pantryToIngredientsEmpty),
       )
       // パネルを閉じる
       await pfPage.locator('[data-testid="filter-panel-close"]').click()

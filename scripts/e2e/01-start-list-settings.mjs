@@ -1011,9 +1011,7 @@ import './_shared.mjs'
   )
   check(
     'NUTSORT-01(便HU⑯) ティーザーにPro側の項目名が並ぶ',
-    nutSortPanelText.includes(
-      'たんぱく質・脂質・炭水化物・食物繊維・鉄・カルシウム・塩分相当量で並び替えられます',
-    ),
+    nutSortPanelText.includes(ja.search.sortNutritionGateHint),
   )
   // 2026-08-19 便HZ・①(オーナー「並び替え『たんぱく質が多い順〜探せます』削除。
   // タイトルのみで目的がわかるため」)。無料・Proの両方とも消したので、無料側でも出ない

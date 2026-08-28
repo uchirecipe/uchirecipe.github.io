@@ -883,9 +883,7 @@ import './_shared.mjs'
       await rcOpenCards()
       check(
         'MEALPLAN-07(便CA) 記録も予定も無い期間は空案内を出す',
-        ((await rcPage.textContent('body')) ?? '').includes(
-          'この期間には、作った記録も登録した献立もありません',
-        ),
+        ((await rcPage.textContent('body')) ?? '').includes(ja.mealPlan.rangeIntakeEmpty),
       )
 
       // ===== C: 混在(当月。1日に記録・末日に予定) =====
@@ -1988,9 +1986,7 @@ import './_shared.mjs'
       )
       check(
         'MEALPLAN-HOUSE 説明は効く先(買い物の分量・食費)と効かない先(栄養の1人分)を両方書く',
-        ((await hhPage.textContent('body')) ?? '').includes(
-          'レシピの表示や、献立の買い物の分量・食費を計算するときの基準として扱います。栄養の「1人分」の表示は変わりません',
-        ),
+        ((await hhPage.textContent('body')) ?? '').includes(ja.settings.householdServingsDescription),
       )
       await hhSelect.selectOption('4')
       await hhPage.waitForTimeout(600)
