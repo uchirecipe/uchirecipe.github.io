@@ -162,7 +162,7 @@ import './_shared.mjs'
       const fwBackupText = ((await fwPage.textContent('body')) ?? '').replace(/\u200B/g, '')
       check(
         'FW-02 バックアップの説明が「何が入るファイルか」を1文で言っている',
-        fwBackupText.includes('レシピ・作った記録・設定を1つのファイルに保存します'),
+        fwBackupText.includes(ja.settings.backupDescription),
       )
       check(
         'FW-02 「今のデータに追加」のボタンは残っている',
@@ -174,7 +174,7 @@ import './_shared.mjs'
       )
       check(
         'FW-02 短くしても事実は落としていない: 解錠コードが含まれる注意は残っている（規約F）',
-        fwBackupText.includes('バックアップファイルにはPro版の解錠コードが含まれます'),
+        fwBackupText.includes(ja.settings.backupContainsCodeNotice),
       )
       check(
         // 2026-08-20 便IJ・③: 文字を書き写していたので ja から読む形にした（注記を
@@ -260,14 +260,14 @@ import './_shared.mjs'
       )
       check(
         'FW-03(疑問②) 範囲を選んだあとに押すボタンの名前が書いてある',
-        (fwSteps[0] ?? '').includes('「書き出す範囲」を選ぶ') &&
-          (fwSteps[1] ?? '').includes('「古い記録をファイルに書き出す」を押して') &&
-          (fwSteps[2] ?? '').includes('「書き出した記録を端末から消す」を押す'),
+        (fwSteps[0] ?? '').includes(ja.settings.archiveSteps[0]) &&
+          (fwSteps[1] ?? '').includes(ja.settings.archiveSteps[1]) &&
+          (fwSteps[2] ?? '').includes(ja.settings.archiveSteps[2]),
         JSON.stringify(fwSteps),
       )
       check(
         'FW-03(疑問②) 削除のボタンが最初は出ていない理由（②を済ませると出る）も書いてある',
-        (fwSteps[2] ?? '').includes('②を済ませると出るボタンです'),
+        (fwSteps[2] ?? '').includes(ja.settings.archiveSteps[2].split('（')[1].replace('）', '')),
         fwSteps[2] ?? '',
       )
       // 疑問④「どこに保存されているのか」。
@@ -377,8 +377,7 @@ import './_shared.mjs'
       const fpBoardText = ((await fpPage.textContent('body')) ?? '').replace(/\u200B/g, '')
       check(
         'FW-04 何がどう減るのかがスイッチのそばに書いてある（規約F）',
-        fpBoardText.includes('「ある→少ない→ない」の順に1つ下がります') &&
-          fpBoardText.includes('調味料と、在庫に登録していない食材は変わりません'),
+        fpBoardText.includes(ja.pantry.cookedReflectHint),
       )
       check(
         'FW-04 どの「作った！」にも効くこと・レシピ詳細のスイッチと同じ設定であることが書いてある',
@@ -454,7 +453,7 @@ import './_shared.mjs'
       await fpPage.waitForTimeout(1200)
       check(
         'FW-04 「全て作った！」の確認文が、どの設定で在庫が減るのかを名前で言う',
-        fpDialogs.some((m) => m.includes('「作った！」で在庫を減らす設定がONのため') && m.includes('「ある→少ない→ない」の順に1つ下がります')),
+        fpDialogs.some((m) => m.includes(ja.mealPlan.todayMarkAllCookedConfirmPantry)),
         fpDialogs.join(' | ').slice(0, 200),
       )
       check(
@@ -777,11 +776,11 @@ import './_shared.mjs'
       check(
         'GJ-06 印の文は理由を名指しする（レシピの順／コンロ・レンジ・グリル・トースター／火にかけたまま）',
         gjIssues.every((t) =>
-          t.includes('レシピに書いた順番より前に出ています。') ||
-          t.includes('コンロの口が空いていません。') ||
-          t.includes('電子レンジが空いていません。') ||
-          t.includes('魚焼きグリルが空いていません。') ||
-          t.includes('トースターが空いていません。') ||
+          t.includes(ja.cookNavi.reorderIssueRecipeOrder) ||
+          t.includes(ja.cookNavi.reorderIssueStove) ||
+          t.includes(ja.cookNavi.reorderIssueMicrowave) ||
+          t.includes(ja.cookNavi.reorderIssueGrill) ||
+          t.includes(ja.cookNavi.reorderIssueToaster) ||
           t.includes(ja.cookNavi.reorderIssueUnattended),
         ),
         gjIssues.join(' / '),
@@ -789,7 +788,7 @@ import './_shared.mjs'
       const gjIssueNote = noZw(await gjPage.locator('[data-testid="navi-reorder-issue-note"]').innerText())
       check(
         'GJ-06 まとめの行に、そのまま進めることもできると書いてある（止めない）',
-        gjIssueNote.includes('並べ直すことも、そのまま進めることもできます。'),
+        gjIssueNote.includes(ja.cookNavi.reorderIssueNote.split('。')[1]),
         gjIssueNote,
       )
       check(
@@ -801,7 +800,7 @@ import './_shared.mjs'
       check(
         'GJ-06 目安の分数が何の数字かを書いてある',
         noZw(await gjPage.locator('[data-testid="navi-total-estimate-stale"]').innerText()).includes(
-          '自動で組んだ並びで計算した数字です。',
+          ja.cookNavi.estimateStaleNote,
         ),
         noZw(await gjPage.locator('[data-testid="navi-total-estimate-stale"]').innerText()),
       )
@@ -873,7 +872,7 @@ import './_shared.mjs'
         'GJ-05 「自動の並びに戻す」の確認は、何が消えて何が残るかを両方書く（規約F）',
         gjResetModal.includes('手で動かした') &&
           gjResetModal.includes('取り消します') &&
-          gjResetModal.includes('作った記録はそのまま残ります'),
+          gjResetModal.includes(ja.cookNavi.reorderUndoAllConfirm.split('{m}品')[1]),
         gjResetModal,
       )
       await gjPage.locator('[data-testid="navi-reorder-reset-modal-cancel"]').click()
@@ -919,7 +918,7 @@ import './_shared.mjs'
         'GJ-04 捨てたことは黙らない（理由と、何が残るかを1行で出す）',
         gjExpired.includes('日付が変わったため') &&
           gjExpired.includes('残していません') &&
-          gjExpired.includes('レシピと作った記録はそのままです。'),
+          gjExpired.includes(ja.cookNavi.restoreExpiredByDate.split('。')[1]),
         gjExpired,
       )
       // 組み直すと、自動で組んだ並びから始まる（昨日の並びを当てにいかない）
@@ -1128,7 +1127,7 @@ import './_shared.mjs'
         'GL-02 窓の中に、何が消えて何が残るかが件数つきで書いてある（規約F）',
         glResetText.includes('手で動かした1回ぶんを取り消します') &&
           glResetText.includes('選んでいる3品') &&
-          glResetText.includes('動いているタイマー・作った記録はそのまま残ります'),
+          glResetText.includes(ja.cookNavi.reorderUndoAllConfirm.split('{m}品')[1]),
         glResetText,
       )
       check(
@@ -1166,7 +1165,7 @@ import './_shared.mjs'
       )
       check(
         'GL-07 沸くまでの時間そのものは言い切らない（火力と量で変わる）',
-        glBoilNote.includes('実際に沸くまでの時間は、火力と量で変わります'),
+        glBoilNote.includes(noZw(ja.cookNavi.waitBlockBoilNote).split('。')[2]),
         glBoilNote,
       )
       // 測りたいのは「押す前に目に入る」こと。ボタンからの距離をpxで決め打ちすると、
@@ -1223,7 +1222,8 @@ import './_shared.mjs'
       )
       check(
         'GL-05 タイマーを押さずに次へ進めると、その場で伝える（止めはしない）',
-        glNotice.includes('タイマーを始めていません') && glNotice.includes(noZw(glTimerRecipe)),
+        glNotice.includes(ja.cookNavi.sessionTimerNotStarted.replace('{title}の「{wait}」は、', '')) &&
+          glNotice.includes(noZw(glTimerRecipe)),
         glNotice,
       )
       check(
@@ -1340,7 +1340,7 @@ import './_shared.mjs'
       check(
         'GL-06 消さない側の結果が書いてある（規約F）',
         noZw(await glPage.locator('[data-testid="cook-finish-timers-note"]').innerText()).includes(
-          '片づけの間も鳴ります',
+          ja.cookNavi.sessionFinishTimersKeepNote,
         ),
         noZw(await glPage.locator('[data-testid="cook-finish-timers-note"]').innerText()),
       )
@@ -1349,7 +1349,7 @@ import './_shared.mjs'
       check(
         'GL-06 消す側を選ぶと、消したときの結果に書き替わる（規約F）',
         noZw(await glPage.locator('[data-testid="cook-finish-timers-note"]').innerText()).includes(
-          '残り時間はなくなります',
+          ja.cookNavi.sessionFinishTimersStopNote,
         ),
         noZw(await glPage.locator('[data-testid="cook-finish-timers-note"]').innerText()),
       )
@@ -1457,7 +1457,7 @@ import './_shared.mjs'
       )
       check(
         'GS-03 1品の画面には色の言い方を出さない（色が無い画面なので）',
-        !(await gsBody()).includes('「青」「緑」「ピンク」'),
+        !(await gsBody()).includes(ja.cookNavi.sessionMicColorHint),
       )
       await gsPage.locator('button[aria-label="声の操作をやめる"]').click()
       await gsPage.waitForTimeout(500)
@@ -1536,7 +1536,7 @@ import './_shared.mjs'
       )
       check(
         'GS-02 どのタイマーを止めたかを名前で返す',
-        (await gsBody()).includes('のタイマーを一時停止しました'),
+        (await gsBody()).includes(ja.focus.micTimerPaused.replace('{label}', '')),
         (await gsBody()).slice(0, 200),
       )
 

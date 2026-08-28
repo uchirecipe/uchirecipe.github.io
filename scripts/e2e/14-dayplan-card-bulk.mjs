@@ -213,14 +213,16 @@ import './_shared.mjs'
         // 2026-08-19 便HY: 押すまでは組み直さないので、0件の知らせもここでは出ない
         check(
           'DAYPLANFILTER-01 条件を変えただけでは「組める献立がありませんでした」と先に言わない',
-          !((await pfPage.textContent('body')) ?? '').replaceAll('​', '').includes('組める献立がありませんでした'),
+          !((await pfPage.textContent('body')) ?? '')
+            .replaceAll('​', '')
+            .includes(ja.mealPlan.todaySuggestNoPair),
         )
         await pfPage.locator('[data-testid="day-suggest-draw"]').click()
         await pfPage.waitForTimeout(1600)
         const pfBody0 = ((await pfPage.textContent('body')) ?? '').replaceAll('​', '')
         check(
           'DAYPLANFILTER-01 条件に合う品が無いときは、条件を無視した献立を黙って出さない',
-          (await pfTitles()).length === 0 && pfBody0.includes('組める献立がありませんでした'),
+          (await pfTitles()).length === 0 && pfBody0.includes(ja.mealPlan.todaySuggestNoPair),
           `組=${JSON.stringify(await pfTitles())}`,
         )
       }
@@ -1595,8 +1597,7 @@ import './_shared.mjs'
       )
       check(
         'BULKDEL-01 基本レシピは入れ直しで戻せることを区別して書く',
-        /基本レシピ2品は、設定画面の「基本レシピを入れ直す」で戻せます/.test(bdDialogMsg) &&
-          bdDialogMsg.includes('作った記録もつながり直します'),
+        bdDialogMsg.includes(ja.recipes.bulkDeleteConfirmStarter.replace('{s}', '2')),
         `dialog=${bdDialogMsg}`,
       )
       check('BULKDEL-01 「よろしいですか？」で終わらせない', !bdDialogMsg.includes('よろしいですか'))

@@ -1141,7 +1141,7 @@ import './_shared.mjs'
         )
         check(
           'URLIMPORT-14 写真を守る方法(チェックを外す)も同じ確認文で伝える',
-          ckDialogs[0]?.includes('写真を残したいときは「写真も取り込む」のチェックを外してください'),
+          ckDialogs[0]?.includes(ja.urlImport.confirmPhotoNote),
         )
         // 2026-08-25 便KS・⑦: 料理名・ひとこと説明・メモは「残るもの」から「消えるもの」へ移った。
         // 規約Fの「何が残るか」は、取り込みが触らない項目（タグ・季節・時間帯・種別）で書く
@@ -1620,7 +1620,10 @@ import './_shared.mjs'
         'NAVI-05 加熱で仕上げる温かい品を最後にまわす',
         cards5[cards5.length - 1].includes('E2Eナビ炒めもの'),
       )
-      check('NAVI-05 番号の意味も1品ずつ作る場合の説明に切り替わる', body5.includes('番号は作る順番です。'))
+      check(
+        'NAVI-05 番号の意味も1品ずつ作る場合の説明に切り替わる',
+        body5.includes(ja.cookNavi.sequentialOrderNote),
+      )
     } finally {
       await nav5Browser.close()
     }
@@ -1891,7 +1894,7 @@ import './_shared.mjs'
         'NAVI-09 確認文に数・料理名・何が変わるかが書かれている(規約F)',
         hasCount(confirmText, 2) &&
           confirmText.includes('E2E保持煮物') &&
-          confirmText.includes('今日の献立から外れます') &&
+          confirmText.includes(ja.cookNavi.markAllCookedConfirm.split('。')[0].replace('{n}', '2')) &&
           confirmText.includes('記録をつける'),
         confirmText.slice(0, 200),
       )
@@ -1899,7 +1902,7 @@ import './_shared.mjs'
       // 記録一覧から個別に編集できることをひとこと添えて」
       check(
         'FX-06 「まとめて作った！」の確認にも、あとから1件ずつ編集できることが書いてある',
-        confirmText.includes('「作った記録の一覧」で1件ずつ編集できます'),
+        confirmText.includes(ja.cookNavi.markAllCookedConfirmEdit.trim()),
         confirmText.slice(0, 300),
       )
       const afterCooked = await nav7Page.textContent('body')

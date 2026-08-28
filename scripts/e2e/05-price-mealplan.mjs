@@ -75,7 +75,7 @@ import './_shared.mjs'
   // 2026-08-04 便DV-9: 「目安です」から「何を基準にした価格か」を書く形に変えた
   check(
     'PRICE-01 はじめから入っている価格の根拠が表示される',
-    priceListBefore.includes('一般的なスーパーで売られている標準的な商品の価格を基準に設定しています'),
+    priceListBefore.includes(ja.priceMaster.disclaimer),
   )
 
   // --- INLINE-01: 一覧の行内編集(2026-07-12 UX改修)。玉ねぎの行を名前で特定し、
@@ -756,11 +756,11 @@ import './_shared.mjs'
       )
       check(
         'NUTRI-DAY-01(docs/60 §1-3-4) 除外分で下限側に出ることの但し書きが出る',
-        nbDayOpenText.includes('実際の値はこの概算より大きくなります'),
+        nbDayOpenText.includes(ja.nutrition.excludedDirectionNoteTotal),
       )
       check(
         'NUTRI-DAY-01 野菜の数え方(いも・豆・きのこ・海藻・果物を含まない)を明示する',
-        nbDayOpenText.includes('いも・豆・きのこ・海藻・果物は入っていません'),
+        nbDayOpenText.includes(ja.nutritionBalance.vegetableCountNote),
       )
       check(
         'NUTRI-DAY-01(docs/60 §1-1) 成分値の出典と「目安の出典」を別行で出す',
@@ -769,7 +769,7 @@ import './_shared.mjs'
       )
       check(
         'NUTRI-DAY-01 目安の適用範囲(治療中・妊娠中は主治医の指示)を1行置く',
-        nbDayOpenText.includes('治療中の方・妊娠中の方は、主治医や管理栄養士の指示に従ってください'),
+        nbDayOpenText.includes(ja.nutritionBalance.guideScopeNote),
       )
       check(
         'NUTRI-DAY-01(便CW-6) 食事ごとの内訳は無料では出さない(Pro限定)',
@@ -828,7 +828,7 @@ import './_shared.mjs'
       )
       check(
         'NUTRI-DAY-10(便CW-10) 何が起きるかの説明(足す食事・足さない食事)を添える',
-        nbWeekOpenText.includes('丼・麺・カレー・鍋のように主食を含む料理が主菜の食事には足しません'),
+        nbWeekOpenText.includes(ja.nutritionBalance.includeRiceHint),
       )
       const kcalNumbers = (text) =>
         Array.from(text.matchAll(/約([\d,]+)kcal/g)).map((m) => Number(m[1].replace(/,/g, '')))

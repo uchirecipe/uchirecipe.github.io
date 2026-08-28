@@ -1398,7 +1398,9 @@ import './_shared.mjs'
       ).trim()
       check(
         'FT-05 捨てたことを黙らない（理由と、何が残っているかを画面に書く）',
-        ftExpired.includes('日付が変わったため') && ftExpired.includes('レシピと作った記録はそのままです'),
+        ftExpired.includes('日付が変わったため') &&
+          // 3通り（日付・調理中・アプリ更新）の文面が同じ一文で終わるので、日付の回のキーから読む
+          ftExpired.includes(ja.cookNavi.restoreExpiredByDate.split('。')[1]),
         ftExpired || '(知らせが出ていない)',
       )
       // 知らせたあとは、その覚え書きを引きずらない
@@ -1843,7 +1845,7 @@ import './_shared.mjs'
       )
       check(
         'FU-03 何を置き換えたかを結果に書く（URL取り込みと同じ）',
-        fuPasteBody.includes('も貼り付けた内容に合わせました'),
+        fuPasteBody.includes(ja.paste.alsoApplied.replace('{items}', '')),
         fuPasteBody.slice(fuPasteBody.indexOf('読み取りました'), fuPasteBody.indexOf('読み取りました') + 200),
       )
       // 調理時間が書かれていない文章では、欄が空のままである理由を書く。
@@ -2015,7 +2017,7 @@ import './_shared.mjs'
       )
       check(
         'FX-11 沸くまでの時間は言い切らない（火力と量で変わると書く）',
-        fxBoilBlock.includes('火力と量で変わります'),
+        fxBoilBlock.includes(fxBoilNote.split('。')[2]),
         fxBoilBlock,
       )
       check(
@@ -2126,7 +2128,7 @@ import './_shared.mjs'
       currentCheck = 'FX-03'
       check(
         'FX-03 色の案内は「青」「緑」「ピンク」の3つとも書いてある',
-        fxHintText.includes('「青」「緑」「ピンク」と言うと'),
+        fxHintText.includes(ja.cookNavi.sessionMicColorHint),
         fxHintText,
       )
       check(
@@ -2216,7 +2218,7 @@ import './_shared.mjs'
       check(
         'FX-05 読み上げを使うと、読み方の直し方を案内する',
         fxReadingHint.includes(ja.focus.readingHintTitle) &&
-          fxReadingHint.includes('端末の設定で声を切り替える') &&
+          fxReadingHint.includes(ja.focus.readingHintBody) &&
           fxReadingHint.includes('iPhone') &&
           fxReadingHint.includes('Android'),
         fxReadingHint,

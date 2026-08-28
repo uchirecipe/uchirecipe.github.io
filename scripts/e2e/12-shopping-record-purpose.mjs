@@ -726,7 +726,7 @@ import './_shared.mjs'
       check(
         'WORD-CI1-01/C20 絞り込みで0件のとき「＋から登録」ではなく条件を外す案内が出る',
         emptyText.includes('条件に合うレシピが見つかりません') &&
-          emptyText.includes('条件を外すと、他のレシピが出てきます') &&
+          emptyText.includes(ja.search.noResultFilteredHint) &&
           !emptyText.includes(ja.search.noResultHint),
         emptyText.slice(0, 400),
       )
@@ -757,7 +757,7 @@ import './_shared.mjs'
         (await w1Page.getByRole('dialog', { name: ja.detail.cookedDialogTitle }).textContent()) ?? ''
       check(
         'WORD-CI1-01/C06 在庫スイッチの説明が「ある→少ない→ない」の3段階で閉じている',
-        logDialogText.includes('「ある→少ない→ない」の順に1つ下げます') &&
+        logDialogText.includes(ja.detail.cookedReflectPantryHint) &&
           !logDialogText.includes('在庫を1段階下げます'),
         logDialogText,
       )
@@ -987,7 +987,9 @@ import './_shared.mjs'
       await l2Page.waitForTimeout(600)
       check(
         'LOG-CI2-01/C03 「すべての記録を見る」で絞り込みが外れる',
-        !(await l2Page.textContent('body')).includes('の記録だけを表示しています'),
+        !(await l2Page.textContent('body')).includes(
+        ja.history.filteredBy.replace('「{title}」', ''),
+      ),
       )
 
       // --- C02: 作った記録を1件だけ削除できる。確認文は規約F ---
@@ -1438,7 +1440,7 @@ import './_shared.mjs'
     await page.waitForTimeout(1200)
     check(
       'EDITMISSING-01 レシピが見つからないことを保存前に画面で伝える',
-      (await page.textContent('body')).includes('このレシピは見つかりませんでした'),
+      (await page.textContent('body')).includes(ja.form.recipeNotFound),
     )
     await page.locator('input[placeholder="例: 肉じゃが"]').fill('存在しないIDの編集テスト')
     await page.waitForTimeout(600)
@@ -1459,7 +1461,7 @@ import './_shared.mjs'
     )
     check(
       'EDITMISSING-01 保存できない理由が画面に出る',
-      (await page.textContent('body')).includes('このレシピは見つかりませんでした'),
+      (await page.textContent('body')).includes(ja.form.recipeNotFound),
     )
     // キャンセル確認が復活していること(dirtyRefが効いている)＝確認を経て下書きも片付く
     await page.getByRole('button', { name: 'キャンセル' }).click()

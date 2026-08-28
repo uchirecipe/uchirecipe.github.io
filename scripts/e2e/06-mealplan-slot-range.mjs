@@ -787,13 +787,13 @@ import './_shared.mjs'
       // 便DR: 栄養の長い但し書きと出典も月タブと同じく折りたたみの中
       check(
         'MEALPLAN-07(便DR) 栄養の長い但し書きと出典は既定では出さない',
-        !rcFutureOpenText.includes('調理による変化などは反映しておらず'),
+        !rcFutureOpenText.includes(ja.nutrition.estimateNote),
       )
       await rcCard.getByRole('button', { name: '注記と出典' }).click()
       await rcPage.waitForTimeout(200)
       check(
         'MEALPLAN-07(便DR) 「注記と出典」で概算の但し書きと成分表の出典が出る',
-        ((await rcCard.textContent()) ?? '').includes('調理による変化などは反映しておらず') &&
+        ((await rcCard.textContent()) ?? '').includes(ja.nutrition.estimateNote) &&
           ((await rcCard.textContent()) ?? '').includes('出典: '),
       )
 
@@ -1018,7 +1018,7 @@ import './_shared.mjs'
         'MEALPLAN-07(便EA・便HV) 食費モードの凡例も「何の数字か」を言う(食費(円))',
         ((await rcPage.textContent('body')) ?? '')
           .replaceAll('\u200b', '')
-          .includes('食費（円）の概算です'),
+          .includes(ja.mealPlan.monthCellCostLegend),
       )
 
       // 選択は設定に記憶され、再読み込みしても食費モードのまま
@@ -1509,7 +1509,7 @@ import './_shared.mjs'
         'MEALPLAN-S3(便LT) 確認文が「入る品数」と「入る先」を明示する（規約F準拠）',
         /入れます/.test(cwDialogMsg) &&
           /\d+品/.test(cwDialogMsg) &&
-          cwDialogMsg.includes('まだ決まっていないところ'),
+          cwDialogMsg.includes(ja.mealPlan.copyWeekConfirmTitle.split('{toEnd}')[1]),
         `dialog=${cwDialogMsg}`,
       )
       check(

@@ -538,7 +538,7 @@ import './_shared.mjs'
         )
         check(
           'APPUPDATE-01 帯に、あとから設定でも更新できることが書いてある',
-          upBannerText.includes('設定の「アプリの更新」'),
+          upBannerText.includes(ja.settings.appUpdateBannerNote),
         )
 
         // ③閉じられる・そのセッションでは出し直さない
@@ -570,7 +570,7 @@ import './_shared.mjs'
         await upPage.waitForTimeout(500)
         check(
           'APPUPDATE-01 更新がある状態で押すと「新しいバージョンにしました」と伝える',
-          (await upPage.textContent('body')).includes('新しいバージョンにしました'),
+          (await upPage.textContent('body')).includes(ja.settings.appUpdateResultFound),
         )
         // 知らせを読ませてから画面を読み込み直す
         await upPage.waitForTimeout(3000)
@@ -1169,6 +1169,10 @@ import './_shared.mjs'
               evRow('消えるもの')?.[2],
             )
             check(
+              // 2026-08-29 便MI: ここは静的ページ public/about/multi-device.html の見くらべの表を
+              // 読んでいる。ja.settings.backupImportReplaceKept から読む形に直したら落ちた
+              // （表のます目は「Pro版の解錠コード」だけで、ja.ts の「〜は残ります。…」とは別の文）。
+              // 静的ページの文言が正なので書き写しのまま残す＝JM-7 の一覧に理由つきで載せてある
               'MULTIDEV-01(g-2) 上書きでもPro版の解錠コードは残る',
               evRow('残るもの')?.[2]?.includes('Pro版の解錠コード'),
               evRow('残るもの')?.[2],
@@ -1768,7 +1772,7 @@ import './_shared.mjs'
       const etmText = (await etmPage.textContent('body')) ?? ''
       check(
         'ET-03 案内文も同じページ名を指している',
-        etmText.includes('「複数の端末で使う方法」のページに載せています'),
+        etmText.includes(ja.settings.moveGuideTransferNote),
         etmText.includes('使い方ページに載せています') ? '案内文が旧「使い方ページ」のまま' : '',
       )
     } finally {

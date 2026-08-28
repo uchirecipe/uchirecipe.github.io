@@ -3249,6 +3249,42 @@ eq('normalizeIngredientNameForPrice 前後空白除去', normalizeIngredientName
     )
   }
 
+  // ---- JM-7: 判定側の「一部だけの書き写し」も総数で固定する（2026-08-29 便MI） ----
+  //
+  // 便MB が JM-6 を入れたとき、判定側の 138か所（115種）は「1件ずつ理由を書くと形だけになる」
+  // 「4つの便が同時に e2e を触っていて数字合わせが仕事になる」の2つを理由に外していた。
+  // 便が同時に走る問題が解消したので、便MI が 1件ずつ画面を確かめて 137か所（114種・便MHの
+  // 直しで1か所減っていた）を 10か所（8種）まで ja.ts から読む形へ寄せ、残りをここで固定した。
+  //
+  // 残す10か所は、どれも「ja.ts の文言を見ているのではない」ものだけ:
+  //   ・静的ページ（public/about/*.html）の見出し・本文を見ている（ja.ts に同じ字があるだけ）
+  //   ・同じ語を含む文言が9種あり、「どれも出ていない」ことを見る網になっている
+  //   ・ja.ts の値そのものが要件を満たすかを見ている（ja から読むと x.includes(x) になる）
+  // 理由は scripts/data/e2e-ja-copy-known.json の「判定側（一部だけ）」に1件ずつ書いてある。
+  // **理由が空のものがあると赤にする**（形だけの一覧にしないため）。
+  {
+    const partJudge = jmCount(JM_JUDGE, JM_JUDGE_MIN, 'part')
+    const partKnown = jmKnownRaw['判定側（一部だけ）'] ?? {}
+    const partKnownCount = Object.fromEntries(
+      Object.entries(partKnown).map(([text, v]) => [text, v['か所'] ?? 0]),
+    )
+    const { grew, shrank } = jmDiff(partJudge, partKnownCount, '判定側（一部だけ）')
+    eq('JM-7 判定側に、文言の一部だけを書き写したものが増えていない', grew, [])
+    eq('JM-7 判定側（一部だけ）の一覧に、もう書き写していないものが残っていない', shrank, [])
+    eq(
+      'JM-7 判定側（一部だけ）の残りは一覧どおり（数え方が変わったら気づけるようにする）',
+      Object.values(partJudge).reduce((a, b) => a + b, 0),
+      Object.values(partKnownCount).reduce((a, b) => a + b, 0),
+    )
+    eq(
+      'JM-7 残す1件ずつに理由が書いてある（形だけの一覧にしない）',
+      Object.entries(partKnown)
+        .filter(([, v]) => typeof v['理由'] !== 'string' || v['理由'].trim().length < 20)
+        .map(([text]) => `判定側（一部だけ）「${text}」に理由が書かれていない`),
+      [],
+    )
+  }
+
   // ---- JM-3: 照合の前にゼロ幅スペースを外す道具が e2e にあること（禁じ手②の後半） ----
   // BudouX（logic/jaWrap.ts）が折返しのために U+200B を差し込むので、素の includes は
   // 同じ文なのに外れる。しかも「出ていないこと」を測る向きでは外れたまま素通りで合格になる。

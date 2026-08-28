@@ -348,7 +348,7 @@ import './_shared.mjs'
       check('WEEKLOCK(便EA) 前提: 操作を測る日を編集モードにできた（便IV）', lkEditForCtl === true)
       const lkControls = () =>
         // 文言は ja.ts から読むが、evaluate の中はブラウザ側なので引数で渡す（便JM）
-        lkPage.evaluate(({ date, suggestAria }) => {
+        lkPage.evaluate(({ date, suggestAria, servingsAria }) => {
           const section = document.querySelector(`section[data-date="${date}"]`)
           const block = section?.querySelector('[data-testid="slot-block"]')
           if (!block) return null
@@ -362,7 +362,7 @@ import './_shared.mjs'
           // 見つからなければ null のまま＝下の判定(=== true / === false)はどちらも不合格になる
           const name = block.querySelector('[data-testid="slot-change-recipe"]')
           const servings = buttons.find((b) =>
-            (b.getAttribute('aria-label') ?? '').includes('この行の食数を変える'),
+            (b.getAttribute('aria-label') ?? '').includes(servingsAria),
           )
           const dice = buttons.find((b) => b.getAttribute('aria-label') === suggestAria)
           return {
@@ -376,7 +376,13 @@ import './_shared.mjs'
               (b) => b.textContent?.trim() === '＋料理を追加',
             ),
           }
-        }, { date: lkDate, suggestAria: ja.mealPlan.suggestAria })
+        },
+        {
+          date: lkDate,
+          suggestAria: ja.mealPlan.suggestAria,
+          // 食数のボタンの aria-label には人数が入る（「（いま{n}人分）」）ので、その手前までを渡す
+          servingsAria: ja.mealPlan.servingsEditAria.split('（')[0],
+        })
       const lkLockedCtl = await lkControls()
       check(
         'WEEKLOCK(便EA→便KU) ロック中は ×(削除)・レシピを変更・食数 が押せない',
@@ -1291,16 +1297,17 @@ import './_shared.mjs'
   )
   // 2026-07-28 機能④診断C10: 0まで減って終わったあとの±は「押しても何も起きない死にボタン」に
   // していた。押せないと見て分かる状態にし、理由の一言を出す(「タイマーを消す」は引き続き押せる)
-  const floorButtons = await customAdjustDialog.evaluate((dlg) => {
+  // 文言は ja.ts から読むが、evaluate の中はブラウザ側なので引数で渡す（JM-4）
+  const floorButtons = await customAdjustDialog.evaluate((dlg, finishedHint) => {
     const btns = Array.from(dlg.querySelectorAll('button'))
     const find = (t) => btns.find((b) => b.textContent.trim() === t)
     return {
       minus: find('−30秒')?.disabled,
       plus: find('+1分')?.disabled,
       stop: find('タイマーを消す')?.disabled,
-      hasReason: dlg.textContent.includes('終わったタイマーの時間は変えられません'),
+      hasReason: dlg.textContent.includes(finishedHint),
     }
-  })
+  }, ja.timer.adjustFinishedHint)
   check(
     'TIMER-CUSTOM-01 0まで減らして終わったら「−30秒」「+1分」は押せない状態になる(死にボタンにしない)',
     floorButtons.minus === true && floorButtons.plus === true,
@@ -1345,7 +1352,7 @@ import './_shared.mjs'
       // (2) 初回の注意書きが、実態に合わせた文言になっている
       check(
         'TIMER-KEEP-01 初回の注意書きが「残り時間は続く／音と通知は開いている間だけ」になっている',
-        (await tkPage.textContent('body')).includes('残り時間はアプリを閉じても続きます'),
+        (await tkPage.textContent('body')).includes(ja.timer.notice),
       )
       // (1) リロードしても残る
       await tkPage.reload({ waitUntil: 'networkidle' })
@@ -1489,7 +1496,7 @@ import './_shared.mjs'
       )
       check(
         'TIMER-ADJ-02 窓の中でも終わったことが分かり、理由の一言が出る',
-        zeroState != null && zeroState.text.includes('終わったタイマーの時間は変えられません'),
+        zeroState != null && zeroState.text.includes(ja.timer.adjustFinishedHint),
       )
       check(
         'TIMER-ADJ-02 「タイマーを消す」は引き続き押せる(この窓から片付けられる)',
@@ -1663,16 +1670,17 @@ import './_shared.mjs'
       }
       await fnFocus.getByRole('button', { name: '15分 タイマー開始' }).click()
       await fnPage.waitForTimeout(500)
-      const noticeSeen = await fnPage.evaluate(() => {
+      // 文言は ja.ts から読むが、evaluate の中はブラウザ側なので引数で渡す（JM-4）
+      const noticeSeen = await fnPage.evaluate((timerNotice) => {
         const overlay = document.querySelector('.fixed.inset-0.z-50')
         const span = Array.from(overlay.querySelectorAll('span')).find((s) =>
-          s.textContent.includes('残り時間はアプリを閉じても続きます'),
+          s.textContent.includes(timerNotice),
         )
         if (!span) return { found: false }
         const r = span.getBoundingClientRect()
         const top = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2)
         return { found: true, covered: !(span === top || span.contains(top) || top?.contains(span)) }
-      })
+      }, ja.timer.notice)
       check(
         'FOCUS-NOTICE-01 調理中モードから初めてタイマーを起動しても注意書きが出る',
         noticeSeen.found,
@@ -2078,7 +2086,7 @@ import './_shared.mjs'
         check(
           'DS-MIC-01 断られている状態で押すと、原因と直し方の案内が出る(無反応にしない)',
           guide.includes(ja.focus.micDeniedTitle) &&
-            guide.includes('ブラウザの設定でマイクの使用を許可すると'),
+            guide.includes(ja.focus.micDeniedBody),
         )
         check(
           'DS-MIC-01 端末ごとの開き方が1行ずつ添えられている(iPhone/Android)',

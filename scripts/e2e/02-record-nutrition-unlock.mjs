@@ -755,7 +755,7 @@ import './_shared.mjs'
         check(
           'DISC-01 解錠後の「使えるようになった機能」に8項目表の見つけ方が書かれている',
           proSectionText.includes('栄養価の8項目表示') &&
-            proSectionText.includes('レシピを開いて「栄養価の概算」をタップする'),
+            proSectionText.includes(ja.settings.proActivatedFeatureGroups[0].features[1].hint),
         )
         check(
           // 2026-07-28 便CA → 2026-08-03 便DR: 月タブのボタン名を変えたため、案内文の期待値も更新
@@ -763,7 +763,7 @@ import './_shared.mjs'
           'DISC-01 解錠後の案内に期間の集計(期間の食費と栄養)への行き方が書かれている',
           proSectionText.includes('期間の食費と栄養') &&
             // 2026-08-19 便HV・⑦: ボタン名が「期間で絞る」に変わったので道順の名前もそろえる
-            proSectionText.includes('献立の画面 →「月」→「期間で絞る」'),
+            proSectionText.includes(ja.settings.proActivatedFeatureGroups[1].features[1].hint),
         )
         const discLinks = await nutPage.evaluate(() => {
           const hrefs = Array.from(document.querySelectorAll('#pro-section a')).map((a) =>
@@ -806,14 +806,14 @@ import './_shared.mjs'
       // 畳んでいるあいだ中身はDOMに無いので、開く前・開いた後の両方を測る
       check(
         'NUT-02(便MC) 説明と注記・出典は畳んである(開くまでビタミンの注記は出ない)',
-        !unlockedText.includes('ビタミンは調理による損失が大きく'),
+        !unlockedText.includes(ja.nutrition.vitaminNote),
       )
       await nutPage.getByRole('button', { name: ja.nutritionBalance.notesToggle }).first().click()
       await nutPage.waitForTimeout(400)
       const unlockedNotesText = (await nutPage.textContent('body')) ?? ''
       check(
         'NUT-02 ビタミン非表示の注記が出る(文面はオーナー確定・一字一句)',
-        unlockedNotesText.includes('ビタミンは調理による損失が大きく、材料からの計算では実際と大きくズレやすいため表示していません'),
+        unlockedNotesText.includes(ja.nutrition.vitaminNote),
       )
       check('NUT-02 断定しない「概算」バッジが出る', unlockedText.includes('概算'))
       check('NUT-02 「1人分」の内訳がある', unlockedText.includes('1人分'))
@@ -1089,7 +1089,7 @@ import './_shared.mjs'
       )
       check(
         'UNLOCK-01(a) 未解錠のときは解錠のお礼文言が出ない',
-        !(await ulPage.textContent('body')).includes('ご利用いただきありがとうございます'),
+        !(await ulPage.textContent('body')).includes(ja.settings.proActivatedTitle),
       )
       // オーナー指示(2026-08-03)の核: 購入ボタンとコード入力欄を隣り合わせにする。
       // DOM上で購入ボタンの次の要素が入力欄の行であること＝間に他の要素を挟んでいないこと
@@ -1119,7 +1119,7 @@ import './_shared.mjs'
       await ulPage.waitForTimeout(500)
       check(
         'UNLOCK-01(a) UR-以外のprefixはコード形式エラーになる',
-        (await ulPage.textContent('body')).includes('コードの形式が正しくありません'),
+        (await ulPage.textContent('body')).includes(ja.settings.unlockUnknownCode),
       )
 
       // 廃止したUP-パックコードももう受け付けない(2026-07-22全無料化・パック製品廃止でコード形式エラー扱い)
@@ -1129,11 +1129,11 @@ import './_shared.mjs'
       const afterPackText = await ulPage.textContent('body')
       check(
         'UNLOCK-01(a) 廃止したUP-パックコードは受け付けない(コード形式エラー)',
-        afterPackText.includes('コードの形式が正しくありません'),
+        afterPackText.includes(ja.settings.unlockUnknownCode),
       )
       check(
         'UNLOCK-01(a) UP-では解錠されない(解錠のお礼文言は出ない)',
-        !afterPackText.includes('ご利用いただきありがとうございます'),
+        !afterPackText.includes(ja.settings.proActivatedTitle),
       )
 
       // UR-コードでPro版が解錠される
@@ -1520,7 +1520,7 @@ import './_shared.mjs'
         'TODAYALL-01(便DP-1) 確認文に「消えるもの」と「残るもの」が件数つきで両方ある(規約F)',
         taConfirmText.includes('消えるもの: 今日の献立の2品') &&
           taConfirmText.includes('残るもの: 作った記録2件') &&
-          taConfirmText.includes('レシピそのものは消えません'),
+          taConfirmText.includes(ja.mealPlan.todayMarkAllCookedKept.split('。')[1]),
         `confirm=${JSON.stringify(taConfirmText)}`,
       )
       const afterText = await taPage.textContent('body')
@@ -1774,7 +1774,9 @@ import './_shared.mjs'
       )
       check(
         'PLANUNDO-01 外したことをトーストで伝える',
-        ((await puPage.textContent('body')) ?? '').includes('を今日と今週の献立から外しました'),
+        ((await puPage.textContent('body')) ?? '').includes(
+          ja.mealPlan.todayPlannedRemovedToast.replace('「{title}」', ''),
+        ),
       )
       const puUndo = puPage.getByRole('button', { name: '元に戻す' })
       check('PLANUNDO-01 そのトーストに「元に戻す」が出る', (await puUndo.count()) > 0)

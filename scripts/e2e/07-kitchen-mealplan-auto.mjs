@@ -479,13 +479,13 @@ import './_shared.mjs'
       )
       check(
         'MEALPLAN-A3B3(便DQ) 栄養の長い但し書きと出典は折りたたみの中(既定では出さない)',
-        !meBodyAfter.includes('調理による変化などは反映しておらず') && !meBodyAfter.includes('出典: '),
+        !meBodyAfter.includes(ja.nutrition.estimateNote) && !meBodyAfter.includes('出典: '),
       )
       await mePage.getByRole('button', { name: '注記と出典' }).click()
       await mePage.waitForTimeout(300)
       check(
         'MEALPLAN-A3B3(便DQ) 「注記と出典」で概算の但し書きと成分表の出典が出る',
-        ((await mePage.textContent('body')) ?? '').includes('調理による変化などは反映しておらず') &&
+        ((await mePage.textContent('body')) ?? '').includes(ja.nutrition.estimateNote) &&
           ((await mePage.textContent('body')) ?? '').includes('出典: '),
       )
       await mePage.getByRole('button', { name: ja.mealPlan.intakeCostDetailsOpen }).click()
@@ -499,7 +499,7 @@ import './_shared.mjs'
         'MEALPLAN-A3B3(B-3) 常設サマリーも「概算・目安」の但し書きを外さない',
         // 2026-07-30 便CH/C2: 注記の文言を実装どおり(目安価格で自動計算している)に直した
         meBodyOpen.includes('概算') &&
-          meBodyOpen.includes('食材の目安価格で自動計算しています'),
+          meBodyOpen.includes(ja.mealPlan.weekCostNote),
       )
       // A-3: 月の窓から削除もできる(データごと消える)。2026-08-23 便JN: 外すのは編集モードの中
       await mePage.locator(`button[data-date="${meDate}"]`).click()
@@ -667,7 +667,7 @@ import './_shared.mjs'
       )
       check(
         'MEALPLAN-DU(⑨) 写真モードでは「何が出るのか」の説明が切り替えのすぐ下に出る',
-        duBody0.includes('その日の「作った記録」の写真を出します'),
+        duBody0.includes(ja.mealPlan.monthCellModePhotoLegend),
       )
       // ① カレンダーが月タブの先頭側にある(食費・栄養のカードより前に描かれる)
       const duCalendarIndex = duBody0.indexOf('月火水木金土日')
@@ -864,7 +864,7 @@ import './_shared.mjs'
         'MEALPLAN-DU(⑧・規約F) キャンセルの確認文が「取り消すもの」と「戻るもの」を両方件数つきで書く',
         duDialog.includes('取り消すもの: 追加した1品') &&
           duDialog.includes('戻るもの: この画面を開いたときの献立0品') &&
-          duDialog.includes('作った記録と写真、他の日の献立は変わりません'),
+          duDialog.includes(ja.mealPlan.monthDayCancelNote),
         `確認文=${duDialog}`,
       )
       const duAfterCancel = await duPage.evaluate(

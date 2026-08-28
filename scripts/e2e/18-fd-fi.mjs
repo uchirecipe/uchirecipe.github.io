@@ -321,14 +321,19 @@ import './_shared.mjs'
       )
       // 数え方の一致: 料理が入っている食事は朝食・昼食・夕食の3つだが、昼食は一品もの（カレー）
       // なので足さない＝2杯。「1食につきごはん1杯」の仕組みと同じ数になっている
-      const fdRiceBasis = await fdPage.evaluate((today) => {
-        const section = document.querySelector(`section[data-date="${today}"]`)
-        const text = section?.textContent ?? ''
-        return {
-          slots: [...(section?.querySelectorAll('[data-testid="slot-block"]') ?? [])].length,
-          hasRule: text.includes('1食につきごはん1杯'),
-        }
-      }, fdSeed.today)
+      // 文言は ja.ts から読むが、evaluate の中はブラウザ側なので引数で渡す（JM-4）。
+      // ラベルには杯数のgが入る（「（{g}g）」）ので、その手前までを渡す
+      const fdRiceBasis = await fdPage.evaluate(
+        ({ today, riceRule }) => {
+          const section = document.querySelector(`section[data-date="${today}"]`)
+          const text = section?.textContent ?? ''
+          return {
+            slots: [...(section?.querySelectorAll('[data-testid="slot-block"]') ?? [])].length,
+            hasRule: text.includes(riceRule),
+          }
+        },
+        { today: fdSeed.today, riceRule: ja.nutritionBalance.includeRiceLabel.split('（')[0] },
+      )
       check(
         'FD-02 杯数は「料理が入っている食事の数」と同じ（一品ものの食事には足さない）',
         fdRiceNote.includes('2杯分') && fdRiceBasis.hasRule,
@@ -1816,7 +1821,7 @@ import './_shared.mjs'
       const fiHintText = await fiHint()
       check(
         'FI-02 案内に「色を言うとその色の品の手順を先にする」が載っている',
-        fiHintText.includes('「青」「緑」「ピンク」と言うとその色の品の手順を先にする'),
+        fiHintText.includes(ja.cookNavi.sessionMicColorHint),
         fiHintText,
       )
       check(

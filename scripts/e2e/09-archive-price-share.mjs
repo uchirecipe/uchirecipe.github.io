@@ -239,7 +239,7 @@ import './_shared.mjs'
       check(
         // 便FWと同じ理由でボタンの数で見る（説明文にはボタン名が書いてある）
         'ARCHIVE-01 削除後は対象0件になり書き出しボタンが消える',
-        arAfterText.includes('より前の記録はありません') &&
+        new RegExp(ja.settings.archiveTargetNone.replace('{n}', '\\d+')).test(arAfterText) &&
           (await arPage.getByRole('button', { name: ja.settings.archiveExportButton }).count()) === 0,
       )
 
@@ -322,7 +322,7 @@ import './_shared.mjs'
       await arPage.waitForTimeout(600)
       check(
         'ARCHIVE-01 バックアップファイルを選んだときは「バックアップファイルです」と案内する',
-        (await arPage.textContent('body')).includes('選んだファイルはバックアップファイルです'),
+        (await arPage.textContent('body')).includes(ja.settings.archiveFileErrorBackup),
       )
     } finally {
       await arBrowser.close()
@@ -436,7 +436,7 @@ import './_shared.mjs'
         (await a2Note.count()) > 0 ? (await a2Note.textContent()).replace(/​/g, '') : ''
       check(
         'ARCHIVE-02 そのうち残った記録が何件かを画面に出す',
-        a2NoteText.includes('2件') && a2NoteText.includes('レシピを削除したあとに残っている記録'),
+        a2NoteText.includes(ja.settings.archiveTargetDetachedNote.replace('{d}', '2')),
         a2NoteText || '(出ていない)',
       )
 
@@ -499,7 +499,7 @@ import './_shared.mjs'
       check(
         'ARCHIVE-02 残った記録が混じるときは内訳を補足に出す',
         (a2Confirm?.notes ?? []).some(
-          (t) => t.includes('2件') && t.includes('レシピを削除したあとに残っていた記録'),
+          (t) => t.includes(ja.settings.archiveDeleteConfirmDetachedNote.replace('{d}', '2')),
         ),
         JSON.stringify(a2Confirm?.notes ?? []),
       )
@@ -554,7 +554,9 @@ import './_shared.mjs'
       )
       check(
         'ARCHIVE-02 消したあとは対象0件になる',
-        (await a2Page.textContent('body')).includes('より前の記録はありません'),
+        new RegExp(ja.settings.archiveTargetNone.replace('{n}', '\\d+')).test(
+          await a2Page.textContent('body'),
+        ),
       )
 
       // 「アーカイブを見る」: 残った記録も読める(端末には書き戻さない)
@@ -1329,7 +1331,7 @@ import './_shared.mjs'
         check(
           'PRO-FALLBACK-01 crypto.subtle無効でも純JSフォールバックでPro解錠が通る',
           fbText.includes(ja.settings.proActivatedTitle),
-          fbText.includes('コードが正しくありません')
+          fbText.includes(ja.settings.proInvalidCode)
             ? 'コード検証が失敗した(フォールバック不一致の疑い)'
             : `本文に成功メッセージなし: ${fbText.slice(0, 200)}`,
         )
@@ -1669,7 +1671,7 @@ import './_shared.mjs'
       const jgBeforeBody = (await jgPage.textContent('body')) ?? ''
       check(
         'JGCOST-01 価格が全部そろっている品には「価格が分からない材料」の説明が出ない',
-        !jgBeforeBody.includes('価格が分からない材料'),
+        !new RegExp(ja.detail.costPricelessNote.replace('{n}', '\\d+')).test(jgBeforeBody),
       )
       check(
         'JGCOST-01 そのときは金額のうしろに印も付かない',
@@ -1747,12 +1749,12 @@ import './_shared.mjs'
       // (generateShareCardは手順を描かない)。テキストにだけ作り方が入ることを明記した文言に変更
       check(
         'SHARE-01 固定項目の説明文言(料理名・人数分・材料8件)が出る',
-        dialogText.includes('料理名・人数分・材料（最初の8件）が入ります'),
+        dialogText.includes(ja.share.alwaysIncluded.split('。')[0]),
         dialogText,
       )
       check(
         'SHARE-01/C10 「作り方が入るのはテキストだけ」と明記されている(画像カードに手順は入らない)',
-        dialogText.includes('作り方が入るのはテキストだけです') &&
+        dialogText.includes(ja.share.alwaysIncluded.split('。')[1]) &&
           !dialogText.includes('作り方は常に入ります'),
         dialogText,
       )

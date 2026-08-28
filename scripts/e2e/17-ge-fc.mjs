@@ -1460,7 +1460,7 @@ import './_shared.mjs'
       const fa4Text = (await fa4Confirm.innerText()) ?? ''
       check(
         'FA-3 書き出しの確認に人へ渡すときの一言が出る',
-        fa4Text.includes('人に渡す・公開するときは中身をご確認ください'),
+        fa4Text.includes(ja.recipes.exportSelectedConfirmNoteShare),
         fa4Text,
       )
       check(

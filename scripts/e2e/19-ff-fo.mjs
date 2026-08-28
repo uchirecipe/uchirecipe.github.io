@@ -771,7 +771,7 @@ import './_shared.mjs'
       )
       check(
         'FL-01 「手順に時間の記載がないため、この分数は目安です」も出さない(分数自体を出さないため)',
-        !longText.includes('手順に時間の記載がないため'),
+        !longText.includes(ja.cookNavi.waitEstimatedNote),
         `カード=${longText.replace(/\n/g, ' / ')}`,
       )
 
@@ -1200,7 +1200,7 @@ import './_shared.mjs'
         await p.waitForTimeout(900)
         check(
           'FN-01 確認文に「週の献立に残る」ことが書いてある(規約F)',
-          confirmText.includes('今週の献立に入れた分は「作った」の表示で残り'),
+          confirmText.includes(ja.mealPlan.todayMarkAllCookedKept.split('。')[1]),
           `confirm=${JSON.stringify(confirmText)}`,
         )
         const afterAll = (await p.textContent('body')) ?? ''
@@ -1682,7 +1682,7 @@ import './_shared.mjs'
       check(
         'FO-03 「声で操作」を押すと言葉の一覧が出る（使う人だけが読む）',
         (await foSessionText()).includes('声で操作:') &&
-          (await foSessionText()).includes('「青」「緑」「ピンク」と言うとその色の品の手順を先にする'),
+          (await foSessionText()).includes(ja.cookNavi.sessionMicColorHint),
       )
       await foPage.locator('button[aria-label="声の操作をやめる"]').click()
       await foPage.waitForTimeout(500)
@@ -1992,7 +1992,8 @@ import './_shared.mjs'
       const foFinishBody = await foPage.locator('[data-testid="cook-finish-modal"]').innerText()
       check(
         'FO-09 「完成！」を押すと、その場で作った記録の確認が出る',
-        foFinishBody.includes('作った記録をつけます') && foFinishBody.includes('記録をつける'),
+        foFinishBody.includes(ja.cookNavi.markAllCookedConfirmTitle.split('{n}品')[1]) &&
+          foFinishBody.includes('記録をつける'),
         foFinishBody.slice(0, 200),
       )
       check(
@@ -2024,7 +2025,7 @@ import './_shared.mjs'
       // FX-06: まとめて付けた記録も、あとから1件ずつ直せることを添える
       check(
         'FX-06 記録の確認に「あとから1件ずつ編集できる」が書いてある',
-        foFinishBody.includes('「作った記録の一覧」で1件ずつ編集できます'),
+        foFinishBody.includes(ja.cookNavi.markAllCookedConfirmEdit.trim()),
         foFinishBody.slice(0, 300),
       )
       // FX-07: 3つ目の行き先＝手順の画面へ帰る（押しても記録は付かず、全画面も閉じない）
@@ -2123,13 +2124,13 @@ import './_shared.mjs'
       )
       check(
         'GF-A 作り終えた状態を「今日の献立にレシピがありません」と言わない',
-        !gfaBody.includes('今日の献立にレシピがありません'),
+        !gfaBody.includes(ja.cookNavi.emptyToday),
         gfaBody.slice(0, 300),
       )
       check(
         'GF-A 作り終えたことと、次にできることを画面に書く',
-        gfaBody.includes('作った記録が付いています') &&
-          gfaBody.includes('「今日の献立に追加」'),
+        new RegExp(ja.cookNavi.emptyTodayCooked.split('。')[1].replace('{n}', '\\d+')).test(gfaBody) &&
+          gfaBody.includes(ja.cookNavi.emptyTodayCooked.split('。')[2]),
         gfaBody.slice(0, 300),
       )
 

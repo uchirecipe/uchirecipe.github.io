@@ -190,7 +190,7 @@ import './_shared.mjs'
       check(
         'EG-01 「全て作った！」の確認文に、段取りも終わることが書いてある(規約F)',
         egConfirmText.includes('並行調理ナビ') &&
-          egConfirmText.includes('作りかけの段取りも終わります'),
+          egConfirmText.includes(ja.mealPlan.todayMarkAllCookedConfirmNavi),
         egConfirmText.slice(0, 240),
       )
       check(
@@ -569,7 +569,7 @@ import './_shared.mjs'
       check('PANTRY-GROUP-01 グループ見出し「肉・魚介」が表示される', body.includes('肉・魚介'))
       check('PANTRY-GROUP-01 グループ見出し「調味料」が表示される', body.includes('調味料'))
       // ざっくり3段階の説明の一言(#12)も同じ画面に出る
-      check('PANTRY-GROUP-01 在庫のざっくり3段階の一言(#12)が出る', body.includes('ざっくり3段階で記録'))
+      check('PANTRY-GROUP-01 在庫のざっくり3段階の一言(#12)が出る', body.includes(ja.pantry.omakeNote))
 
       // 整理モードに入り、玉ねぎを選んで「調味料」グループへ移動する
       await grPage.getByRole('button', { name: '整理', exact: true }).click()

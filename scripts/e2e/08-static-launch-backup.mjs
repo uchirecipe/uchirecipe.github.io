@@ -556,7 +556,7 @@ import './_shared.mjs'
       )
       check(
         'LAUNCH-02 購入ボタンの上に精度開示が出ている(docs/62 決定④)',
-        settingsText.includes('治療中の方・妊娠中の方の食事管理には使えません'),
+        settingsText.includes(ja.settings.unlockAccuracyNotice),
       )
       check(
         'LAUNCH-02 購入ボタンのそばに特商法表記へのリンクがある',
@@ -736,11 +736,11 @@ import './_shared.mjs'
       listText = await openRecipeList()
       check(
         'LAUNCH-02(便DZ) 30件目の登録完了で上限到達の案内が出る',
-        listText.includes('無料で登録できるレシピ30品に達しました'),
+        listText.includes(ja.recipes.freeLimitReachedNotice.split('。')[0]),
       )
       check(
         'LAUNCH-02(便DZ) 上限到達の案内に「残るもの」(閲覧・編集・削除・復元)が書いてある(規約F)',
-        listText.includes('見る・編集する・削除する・バックアップから戻すことができます'),
+        listText.includes(ja.recipes.freeLimitReachedNotice.split('これまでどおり')[1]),
       )
       check(
         'LAUNCH-02(便DZ) 上限到達の案内から購入導線に進める(規約H)',
@@ -754,11 +754,11 @@ import './_shared.mjs'
       const blockedText = (await l2Page.textContent('body')) ?? ''
       check(
         'LAUNCH-02 30件に達したら新規追加はブロックされる',
-        blockedText.includes('無料で登録できるレシピは30品までです'),
+        blockedText.includes(ja.form.freeLimitBlocked.split('。')[0]),
       )
       check(
         'LAUNCH-02 ブロックの案内に「残るもの」(閲覧・編集・削除・復元)が書いてある(規約F)',
-        blockedText.includes('見る・編集する・削除する・バックアップから戻すことができます'),
+        blockedText.includes(ja.form.freeLimitBlocked.split('これまでどおり')[1]),
       )
       check(
         'LAUNCH-02 ブロックの案内から購入導線に進める(規約H)',
@@ -830,7 +830,7 @@ import './_shared.mjs'
       check(
         'NUTTRIAL-01 お試しで表示中であることが画面に出る',
         (await ntPage.locator('[data-testid="nutrition-trial-active"]').count()) > 0 &&
-          nutText.includes('いまお試しで表示しています'),
+          nutText.includes(ja.nutrition.trialActiveNote),
       )
 
       // 別のレシピではロック表示に戻る(開けるのは1品だけ)＝Proの表示ゲートは変えていない
@@ -1355,8 +1355,14 @@ import './_shared.mjs'
       })
       await dstPage.waitForTimeout(800)
       const dstMessage = await dstPage.textContent('body')
-      check('BACKUP-01 復元後に成功メッセージが出る(エラーにならない)', dstMessage.includes('品のレシピを読み込みました'))
-      check('BACKUP-01 復元後にエラーメッセージは出ない', !dstMessage.includes('ファイルを読み込めませんでした'))
+      check(
+        'BACKUP-01 復元後に成功メッセージが出る(エラーにならない)',
+        dstMessage.includes(ja.settings.backupImportDone.replace('{n}', '')),
+      )
+      check(
+        'BACKUP-01 復元後にエラーメッセージは出ない',
+        !dstMessage.includes(ja.settings.backupImportError),
+      )
 
       // 価格が実際に復元されたことをUIで確認する(玉ねぎ888円)
       await dstPage.goto(`${BASE}/#/prices`, { waitUntil: 'networkidle' })
@@ -1464,7 +1470,7 @@ import './_shared.mjs'
           mergeBody.includes('「作った記録」'),
         `body抜粋=${mergeBody.slice(mergeBody.indexOf(mergeLead), mergeBody.indexOf(mergeLead) + 200)}`,
       )
-      check('MERGE-01 エラーメッセージは出ない', !mergeBody.includes('ファイルを読み込めませんでした'))
+      check('MERGE-01 エラーメッセージは出ない', !mergeBody.includes(ja.settings.backupImportError))
       const mergedData = await mergePage.evaluate(async (recipeId) => {
         const req = indexedDB.open('uchi-recipe')
         const idb = await new Promise((resolve, reject) => {
@@ -1600,7 +1606,7 @@ import './_shared.mjs'
       await compatPage.waitForTimeout(800)
       check(
         'BACKUP-01 旧形式(新5テーブル項目なし)のバックアップを読み込んでもエラーにならない',
-        !(await compatPage.textContent('body')).includes('ファイルを読み込めませんでした'),
+        !(await compatPage.textContent('body')).includes(ja.settings.backupImportError),
       )
 
       const afterCompat = await compatPage.evaluate(async () => {
@@ -1910,7 +1916,7 @@ import './_shared.mjs'
       await cmbPage.waitForTimeout(800)
       check(
         'CODEMERGE-01(b) 旧形式バックアップのmerge復元でもエラーにならない',
-        !(await cmbPage.textContent('body')).includes('ファイルを読み込めませんでした'),
+        !(await cmbPage.textContent('body')).includes(ja.settings.backupImportError),
       )
       const cmbProCode = await cmbPage.evaluate(async () => {
         const req = indexedDB.open('uchi-recipe')

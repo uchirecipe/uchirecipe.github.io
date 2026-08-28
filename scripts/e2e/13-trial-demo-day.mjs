@@ -107,7 +107,7 @@ import './_shared.mjs'
       check(
         'TRIAL-01 使い切ったら「お試しは終了しました。続きはPro版で」を出す',
         ((await t1Page.locator('[data-testid="cook-navi-trial-exhausted"]').textContent()) ?? '').includes(
-          'お試しは終了しました',
+          ja.cookNavi.trialExhausted,
         ),
       )
       check(
@@ -210,7 +210,7 @@ import './_shared.mjs'
       check(
         'TRIAL-02 表示中に「この画面がいつでも見られるようになります」を控えめに添える',
         ((await t2Page.locator('[data-testid="month-trial-active"]').textContent()) ?? '').includes(
-          'いつでも見られるようになります',
+          ja.mealPlan.monthTrialActiveNote,
         ),
       )
       // 閉じる（別タブへ移って戻る）とロックへ戻り、2回目は出せない
@@ -1270,7 +1270,7 @@ import './_shared.mjs'
         // 規約F: 押す前に「何が外れて何が残るか」が読める
         check(
           'DAYFLOW-01(c) ×の前に「今週の献立からも外れる」が読める',
-          (await dfBody()).includes('今週の献立からも外れます'),
+          (await dfBody()).includes(ja.mealPlan.todayPlannedRemoveHint),
         )
         const dfRemove = planned.getByRole('button', { name: ja.mealPlan.todayPlannedRemove })
         check('DAYFLOW-01(c) 「今週の献立の予定」の行に×がある', (await dfRemove.count()) === 1)
@@ -1295,7 +1295,7 @@ import './_shared.mjs'
         )
         check(
           'DAYFLOW-01(c) 外したあと、何が外れたかを知らせる（規約F）',
-          afterBody.includes('今日と今週の献立から外しました'),
+          afterBody.includes(ja.mealPlan.todayPlannedRemovedToast.replace('「{title}」', '')),
         )
         // 2026-08-18 便HM（オーナー「作った記録もするということ？消すだけですよね。嘘書かないで。」）:
         // この×は献立の予定しか消さない。触らないものを「残ります」と書くと、

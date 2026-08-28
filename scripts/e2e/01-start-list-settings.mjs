@@ -228,9 +228,7 @@ import './_shared.mjs'
   )
   check(
     'NUT-01 未解錠案内にPro版で増える項目が明記される(2026-07-13 UIペルソナQA・2026-08-01で塩分相当量を追加)',
-    nutExpandedText.includes(
-      'Pro版では、たんぱく質・脂質・炭水化物・食物繊維・鉄・カルシウム・塩分相当量の概算も表示されます',
-    ),
+    nutExpandedText.includes(ja.nutrition.proNutrientHighlight),
   )
   // 2026-08-01 線引きB': 無料の展開部はエネルギーと野菜量だけ。塩分の数値は出さない
   // (「塩分相当量」の語自体はPro案内のティーザーに出るので、語ではなく「値が続いているか」で判定する)
@@ -246,7 +244,7 @@ import './_shared.mjs'
   )
   check(
     "NUT-01(B') 野菜量の数え方の注記が出る",
-    nutNotesOpenText.includes('食品成分表の「野菜類」に名寄せできた材料'),
+    nutNotesOpenText.includes(ja.nutritionBalance.vegetableCountNote),
   )
   // PRO-01(2026-07-28 便BY): 未解錠のティーザーを、月間献立ゲートと同じ blur+Lockバッジ+見出しの
   // 様式に揃える(同じPro導線なのに画面ごとに表現が3種類あった状態の解消)
@@ -316,7 +314,7 @@ import './_shared.mjs'
   check(
     'ZENKAKU-01 全角で入力した「アサリ 300ｇ」が栄養計算対象外にならない(単位「ｇ」がgとして解釈される回帰)',
     // ラベルは2026-07-28 便BY/NUT-02で「計算対象外 n件」→「計算に含めていない材料 n件」に変更
-    !zenkakuNutritionText.includes('計算に含めていない材料'),
+    !new RegExp(ja.nutrition.excludedLabel.replace('{n}', '\\d+')).test(zenkakuNutritionText),
   )
   await page.getByRole('button', { name: ja.nutrition.toggleCollapse }).click()
   await page.waitForTimeout(200)
@@ -1448,7 +1446,7 @@ import './_shared.mjs'
       })
       check(
         'FOCUS-COPY-01 押す前は、いま効かない言葉を並べない',
-        !focusBody.includes('「次へ」「戻って」で手順の移動'),
+        !focusBody.includes(ja.focus.micHintMove),
       )
       const fsMic = fsPage.getByRole('button', { name: ja.focus.micLabel })
       if (await fsMic.count()) {
@@ -1458,7 +1456,7 @@ import './_shared.mjs'
       const focusListeningBody = await fsPage.textContent('body')
       check(
         'FOCUS-COPY-01 声のコマンドに「何が起きるか」が添えられている（押している間）',
-        focusListeningBody.includes('「次へ」「戻って」で手順の移動') &&
+        focusListeningBody.includes(ja.focus.micHintMove) &&
           focusListeningBody.includes(ja.focus.micHintTimer),
       )
       const iconLabels = await fsPage.evaluate(() =>
@@ -1479,7 +1477,7 @@ import './_shared.mjs'
       check(
         'FOCUS-COPY-01 タイマーの窓に用途の説明がある',
         (await fsPage.getByRole('dialog', { name: 'タイマー', exact: true }).textContent()).includes(
-          'レシピの手順とは関係なく、好きな時間ではかれます',
+          ja.timer.customHint,
         ),
       )
     } finally {
@@ -1938,7 +1936,7 @@ import './_shared.mjs'
   )
   check(
     'BACKUPCARDS-01 修正1: バックアップに解錠コードが含まれる旨の注意文が見える(呼称は便CJ/C9で統一)',
-    (await page.textContent('body')).includes('バックアップファイルにはPro版の解錠コードが含まれます'),
+    (await page.textContent('body')).includes(ja.settings.backupContainsCodeNotice),
   )
   // REFRESH-APP-01: 「アプリの表示を修復する」ボタン(2026-07-16新設・2026-07-17修正4で文言全面改訂。
   // SWとキャッシュだけ消してリロードする安全機能)が③困ったときカードに存在し、消えるもの/残るものの

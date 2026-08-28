@@ -389,7 +389,7 @@ import './_shared.mjs'
       // （ボタンの名前で意味が分かる＝規約Fの例外）。在庫に入るほうの結果だけを行で書く
       check(
         'EE-01(③) 確認は「反映する」を押したときの結果を行で書く',
-        eeDialogText.includes('「反映する」を押すと'),
+        eeDialogText.includes(ja.shopping.completeConfirmLines[0].split('、')[0]),
         `本文=${eeDialogText.slice(0, 200)}`,
       )
       check(
@@ -656,9 +656,7 @@ import './_shared.mjs'
       )
       check(
         'EI-01(d) 先に追加したほうがよい理由(iOSでデータが分かれる)が添えてある',
-        ((await eiPage.textContent('body')) ?? '').includes(
-          'iPhone・iPadでは、Safariで登録したレシピと、ホーム画面のアイコンから開いたときのレシピが別々に保存されます',
-        ),
+        ((await eiPage.textContent('body')) ?? '').includes(ja.settings.installPageNote),
       )
       const installRes = await eiPage.request.get(`${BASE}/about/install.html`)
       check('EI-01(d) リンク先の手順ページが開ける', installRes.status() === 200, `status=${installRes.status()}`)
@@ -1086,7 +1084,7 @@ import './_shared.mjs'
       // 便II・①の要: 説明は「優先」ではなく実際の動き（外れる側）を言う
       check(
         'EN-01(便II・①) 説明は、調理時間を入れていないレシピが外れることまで言う',
-        (await enBody()).includes('調理時間を入れていないレシピは選ばれません'),
+        (await enBody()).includes(enQuickHint.split('。')[1]),
       )
       // 項目1（2026-08-09 便EN「選んでいる条件のチップが実行ボタンと見分けが付かない」）は、
       // 条件がプルダウンになったことで**チップそのものが無くなった**＝塗りの見比べは要らない。
@@ -1432,8 +1430,8 @@ import './_shared.mjs'
       )
       check(
         'RECIPEEXPORT-EM(a) 確認に端末のレシピが減らないことと戻し方が書いてある',
-        reConfirmText.includes('端末のレシピは減りません') &&
-          reConfirmText.includes('設定の「バックアップを読み込む」の「今のデータに追加」'),
+        reConfirmText.includes(ja.recipes.exportSelectedConfirmNoteKept) &&
+          reConfirmText.includes(ja.recipes.exportSelectedConfirmNoteRestore),
         reConfirmText,
       )
       // 2026-08-15 便GV(オーナー実機「ファイルのサイズも書いてあると親切」)。
@@ -1539,7 +1537,7 @@ import './_shared.mjs'
       await rePage.waitForTimeout(1400)
       check(
         'RECIPEEXPORT-EM(d) 既存の読み込み経路でエラーにならない',
-        !((await rePage.textContent('body')) ?? '').includes('ファイルを読み込めませんでした'),
+        !((await rePage.textContent('body')) ?? '').includes(ja.settings.backupImportError),
       )
       await rePage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
       await rePage.waitForTimeout(1200)
