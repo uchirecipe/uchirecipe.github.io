@@ -4692,3 +4692,88 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs'
     )
   }
 }
+
+// ---------- 便MB: 「画面に出る」の言い方を「表示します」でそろえる（2026-08-28 オーナー裁定） ----------
+// オーナー原文（献立の月の書き溜め）:「『出ます』→『表示します』」。2か所だけ直すと
+// そこだけ言い方が割れるので、ja.ts の文言ぜんぶ（10か所・うち1か所は消した文言を引いた
+// コメントなので対象外）をまとめてそろえた。
+// 「出ます」を1つでも書き戻したら赤になる＝次に書く人が同じ揺れを作れない。
+// 主語がアプリでない画面（決済ページ）だけは受け身「表示されます」にしてある＝
+// アプリが出すと言い切らない。どちらも「表示」で統一されているので言い方は割れない。
+{
+  const mbStrings = []
+  const mbWalk = (obj, prefix) => {
+    for (const [key, value] of Object.entries(obj)) {
+      const full = prefix ? `${prefix}.${key}` : key
+      if (typeof value === 'string') mbStrings.push({ key: full, value })
+      else if (value && typeof value === 'object') mbWalk(value, full)
+    }
+  }
+  mbWalk(ja, '')
+  eq('MB-1 前提: ja.ts の文言を読めている（0件なら見張りが壊れている）', mbStrings.length > 1000, true)
+  eq(
+    'MB-1 画面の文言に「出ます」が残っていない（言い方は「表示します」にそろえる）',
+    mbStrings.filter(({ value }) => value.includes('出ます')).map(({ key }) => key),
+    [],
+  )
+  // そろえた先が本当に「表示」になっていること（「出ます」を消しただけで意味が落ちていないか）
+  eq('MB-1 献立表の注記がメモの出方を言っている', ja.mealPlan.planSheetBasisNote.includes('メモがあれば一緒に表示します'), true)
+  eq('MB-1 ひとこと説明の説明が出る場所を言っている', ja.form.introDescription.includes('表示します'), true)
+
+  // ---- MB-2: 月の名札を、週の節の名前と同じ形にそろえた ----
+  // オーナー原文:「週の『表示のしかた』に合わせた表記への修正でした。」
+  eq(
+    'MB-2 月の名札が、週の節の名前（表示のしかた）と同じ言い方で終わる',
+    ja.mealPlan.monthCellModeLabel.endsWith(ja.mealPlan.weekGroupDisplayTitle),
+    true,
+  )
+  eq(
+    'MB-2 月の名札は、何の表示なのかを頭で名乗る（カレンダー）',
+    ja.mealPlan.monthCellModeLabel.startsWith('カレンダー'),
+    true,
+  )
+
+  // ---- MB-3: 一括提案の確認文。月と期間で同じ形にし、件数の{d}を落とさない ----
+  // オーナー原文:「この月の、まだ献立が決まっていない日（{d}日）に主菜と副菜を入れます」。
+  // 最初に書かれた「1日分」は**見たときに d=1 だった**だけで固定の言葉ではない＝{d}を消さない。
+  for (const [name, text] of [
+    ['月', ja.mealPlan.fillMonthConfirmTitle],
+    ['期間', ja.mealPlan.fillMonthRangeConfirmTitle],
+  ]) {
+    eq(`MB-3 ${name}の確認文が件数の{d}を持っている`, text.includes('{d}'), true)
+    eq(
+      `MB-3 ${name}の確認文が、決まっていない先を「献立が決まっていない日」と言っている`,
+      text.includes('まだ献立が決まっていない日（{d}日）'),
+      true,
+    )
+  }
+  eq(
+    'MB-3 月と期間の確認文が、入る先の名乗りだけ違う同じ形（隣り合う2つで言い方が割れない）',
+    ja.mealPlan.fillMonthConfirmTitle.replace('この月の、', ''),
+    ja.mealPlan.fillMonthRangeConfirmTitle.replace('選んだ期間の、', ''),
+  )
+
+  // ---- MB-4: 内訳と重なっていた但し書きは消した（書き戻し防止） ----
+  // オーナー原文:「内訳の中にも同じ内容の文があるため」。内訳（IntakeCostDetails）が常に出す
+  // weekCostNote が「食材の目安価格で自動計算しています」と同じ中身を言っている。
+  eq('MB-4 消した但し書き(intakeCostEstimateNote)を書き戻していない', 'intakeCostEstimateNote' in ja.mealPlan, false)
+  eq(
+    'MB-4 同じ中身は内訳の中の1行が持っている',
+    ja.mealPlan.weekCostNote.includes('食材の目安価格で自動計算しています'),
+    true,
+  )
+
+  // ---- MB-5: 今日の数え方の1行を縮めても、呼び名は上下の行と同じものを使う ----
+  // オーナー「大前提のため」で縮めた。丸ごとは消さない（今日の額が日中に動く理由が読めなくなる）。
+  eq(
+    'MB-5 今日の1行が、作った記録と登録した献立の両方を使う日だと言っている',
+    ja.mealPlan.rangeBasisToday.includes('作った記録') &&
+      ja.mealPlan.rangeBasisToday.includes('登録した献立'),
+    true,
+  )
+  eq(
+    'MB-5 縮めた1行が、縮める前より短い（大前提まで書かない）',
+    ja.mealPlan.rangeBasisToday.length < 30,
+    true,
+  )
+}

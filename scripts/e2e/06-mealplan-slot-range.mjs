@@ -909,10 +909,10 @@ import './_shared.mjs'
           `本文=${rcMixedText.match(/.{0,40}計算しています/)?.[0]}`,
         )
         check(
-          'MEALPLAN-07(便EA) 混在期間には「今日は、作った記録があるものは記録…」の1文も出る',
-          rcMixedText.includes(
-            '今日は、作った記録があるものは記録、まだのものは登録した献立で計算しています',
-          ),
+          // 2026-08-28 便MB: 文言を書き写していたため、1行縮めただけで落ちた（禁じ手②）。ja から読む
+          'MEALPLAN-07(便EA) 混在期間には「今日の数え方」の1文も出る',
+          stripZwspText(rcMixedText).includes(ja.mealPlan.rangeBasisToday),
+          `本文=${rcMixedText.match(/今日は[^。]{0,40}/)?.[0]}`,
         )
         check(
           'MEALPLAN-07(便CA③) 混在期間の内訳は実績1品と予定1品の両方が出る',
@@ -1218,7 +1218,7 @@ import './_shared.mjs'
       check(
         // 2026-08-26 便LH: 数え方の1行は、数字より先に読めるようカレンダーの下（選んだ期間の1行の
         // すぐ下）へ移した。カードの中ではなく画面全体から読む
-        'RANGE-EA(便EA-3) 基準行が「今日は、作った記録があるものは記録…」と言う',
+        'RANGE-EA(便EA-3) 基準行が「今日の数え方」を言う',
         ((await eaPage.textContent('body')) ?? '')
           .replaceAll('\u200b', '')
           .includes(ja.mealPlan.rangeBasisToday),

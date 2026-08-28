@@ -3769,3 +3769,85 @@ import { createRequire } from 'node:module'
     true,
   )
 }
+
+// ---------- 便MB: ON/OFFの入切はスイッチ・名札の下・内訳の文字（2026-08-28 オーナー） ----------
+// オーナー原文:
+//   「『レシピの写真は使わない』など、ONOFFするタイプのボタンはスイッチ
+//     （またはチェック入れるタイプ）にしてください。（アプリ全体）」
+//   「週の『表示のしかた』に合わせた表記への修正でした。」
+//   「主役のはずの内訳の文字が小さくて見つけにくい。文字をちょっぴり大きくして」
+// 司令部裁定: **設定の入切（押すと状態が残るもの）だけ**をスイッチにする。
+// 絞り込みのチップ（複数選べる・その場だけ）はチップのまま＝全部スイッチにすると縦に伸びる。
+{
+  const mbRoot = path.join(path.dirname(fileURLToPath(scriptFileUrl)), '..')
+  const mbPage = readFileSync(path.join(mbRoot, 'src/pages/MealPlanPage.tsx'), 'utf-8')
+  const mbParts = readFileSync(path.join(mbRoot, 'src/pages/mealPlan/IntakeParts.tsx'), 'utf-8')
+
+  // ---- MB-6: 「レシピの写真は使わない」は設定に残る入切なのでスイッチ ----
+  // 押されているかどうかの伝え方も、アプリの他のスイッチと同じ aria-checked にそろえる
+  // （aria-pressed のままだと、同じ形のスイッチが2通りの読み上げ方をすることになる）
+  const mbToggleStart = mbPage.indexOf('data-testid="month-hide-recipe-photo"')
+  eq('MB-6 前提: 「レシピの写真は使わない」の切り替えが画面にある', mbToggleStart > 0, true)
+  {
+    // その切り替えを書いている <button ...> の中だけを見る
+    const mbBtnOpen = mbPage.lastIndexOf('<button', mbToggleStart)
+    const mbBtnAttrs = mbPage.slice(mbBtnOpen, mbPage.indexOf('>', mbToggleStart))
+    eq('MB-6 「レシピの写真は使わない」がスイッチ（role="switch"）', mbBtnAttrs.includes('role="switch"'), true)
+    eq('MB-6 入切の伝え方が他のスイッチと同じ（aria-checked）', mbBtnAttrs.includes('aria-checked='), true)
+    eq('MB-6 押した状態を aria-pressed で二重に言っていない', mbBtnAttrs.includes('aria-pressed'), false)
+  }
+
+  // ---- MB-7: その切り替えが、名札「カレンダーの表示のしかた」の内側にある ----
+  // 名前だけ変えると、**表示の設定なのに名札の外にあるもの**が残る（司令部裁定）。
+  // 入れ子は数えて確かめる（前後の並びだけを見ると、外に出したのに気づけない）
+  {
+    const mbGroupTag = 'role="group" aria-labelledby="month-cell-mode-label"'
+    const mbGroupAt = mbPage.indexOf(mbGroupTag)
+    eq('MB-7 前提: 名札(month-cell-mode-label)の囲みがある', mbGroupAt > 0, true)
+    let depth = 0
+    let end = -1
+    const mbRe = /<div\b|<\/div>/g
+    mbRe.lastIndex = mbPage.lastIndexOf('<div', mbGroupAt)
+    for (let m = mbRe.exec(mbPage); m; m = mbRe.exec(mbPage)) {
+      depth += m[0] === '</div>' ? -1 : 1
+      if (depth === 0) {
+        end = m.index
+        break
+      }
+    }
+    eq('MB-7 前提: 名札の囲みの終わりを数えられている', end > mbGroupAt, true)
+    eq(
+      'MB-7 「レシピの写真は使わない」が名札の囲みの中にある',
+      mbToggleStart > mbGroupAt && mbToggleStart < end,
+      true,
+    )
+    // 同じく表示の設定である「マスに出す栄養の項目」も名札の中に入っていること
+    const mbNutrientAt = mbPage.indexOf('data-testid="month-cell-nutrient"')
+    eq(
+      'MB-7 「マスに出す栄養の項目」も名札の囲みの中にある',
+      mbNutrientAt > mbGroupAt && mbNutrientAt < end,
+      true,
+    )
+  }
+
+  // ---- MB-8: 内訳の開閉ボタンの字を1段上げた（大きさだけ・色と太さは動かさない） ----
+  {
+    const mbDiscAt = mbParts.indexOf('function IntakeDisclosureButton')
+    eq('MB-8 前提: 内訳の開閉ボタンの部品がある', mbDiscAt > 0, true)
+    const mbDisc = mbParts.slice(mbDiscAt, mbDiscAt + 2400)
+    eq('MB-8 内訳の開閉ボタンの字が1段上（text-base）', /className="[^"]*\btext-base\b/.test(mbDisc), true)
+    eq('MB-8 元の大きさ（text-sm）に戻っていない', /className="[^"]*\btext-sm\b/.test(mbDisc), false)
+    eq('MB-8 色は変えていない（text-accent-ink のまま）', mbDisc.includes('text-accent-ink'), true)
+    eq('MB-8 太さは変えていない（font-bold のまま）', mbDisc.includes('font-bold'), true)
+  }
+
+  // ---- MB-9: 概算の但し書きを、内訳の外にもう1行置かない ----
+  // オーナー「内訳の中にも同じ内容の文があるため」。内訳（IntakeCostDetails）の weekCostNote が
+  // 同じ中身を言っているので、表のすぐ下には置かない
+  eq(
+    'MB-9 消した但し書き(intakeCostEstimateNote)を画面が呼び出していない',
+    mbPage.includes('intakeCostEstimateNote'),
+    false,
+  )
+  eq('MB-9 同じ中身は内訳の中の1行が持っている', mbParts.includes('ja.mealPlan.weekCostNote'), true)
+}
