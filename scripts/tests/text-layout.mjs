@@ -3822,6 +3822,42 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs'
     eq('KV-1 枠の見出しも同じ語（同じものを2つの名前で呼ばない）', ja.safety.title, ja.settings.safetyTitle)
   }
 
+  // ---- MC-1: レシピに添える注意の「説明」の作法（2026-08-28 便MC・オーナー裁定） ----
+  // オーナー原文（司令部が「6つだけ知らせます」と数を名乗る案を出したのに対し）:
+  //   「何故この６つ？しかも少ないし。という感想です。６つだけなら数でお知らせは逆に不信感が湧く。」
+  // ＝**件数は名乗らない**。決まりは増えていくもので、数を書くと増減のたびに文言も直す必要が出る。
+  // あわせてオーナー原文:
+  //   「対応していない組み合わせは無限にあるので、〜入れないとユーザーの期待より下回ってしまう。」
+  // ＝**出なかったからといって安全とはかぎらない**ことは書く。ただし「※対応があるもののみ」とは
+  // 書かない（出ている注意まで「一部だけの話」と読まれ、**注意書き自体の信頼が下がる**）。
+  {
+    // 数を名乗っていないかを見るのは「仕組みの説明」だけ。注意の本文には
+    // 「1歳未満」「1分ずつ」のように**中身として要る数**が入る
+    const mcExplain = {
+      'ja.settings.safetyDescription': ja.settings.safetyDescription,
+      'ja.safety.source': ja.safety.source,
+    }
+    eq(
+      'MC-1 注意の説明が、決まりの数（6つ・9つ など）を名乗っていない',
+      Object.entries(mcExplain)
+        .filter(([, text]) => /[0-9０-９一二三四五六七八九十]\s*(つ|個|件|種類|項目|通り)/.test(text))
+        .map(([key]) => key),
+      [],
+    )
+    eq(
+      'MC-1 注意の説明が「対応があるものだけ」の言い方をしていない（注意書きの信頼を下げる）',
+      Object.entries(mcExplain)
+        .filter(([, text]) => /対応(が|の)あるもの|対応しているもののみ/.test(text))
+        .map(([key]) => key),
+      [],
+    )
+    eq(
+      'MC-1 設定の説明に「出なくても安全とはかぎらない」の一言がある',
+      /安全/.test(ja.settings.safetyDescription) && /限りません/.test(ja.settings.safetyDescription),
+      true,
+    )
+  }
+
   // ---- KV-2: 数で表せないものに「目安」を付けていない ----
   // 「◯◯が数で表せるか」は機械では決められないので、**実際に事故になった語と、
   // 同じ形で書きたくなる語**を表で持つ。表から語を落とすときは理由を残すこと。
@@ -4691,4 +4727,60 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs'
       true,
     )
   }
+}
+
+// ---------- 便MC: 取り込みで「対応しています」と保証を名乗らない（MC-3） ----------
+// オーナー原文「「レシピのページなら多くのサイトで取り込めます」→「多くのレシピサイトに
+// 対応しています」」に対する司令部の裁定（オーナー了承済み）:
+//   採るのは「多くのレシピサイトのページから取り込めます」。
+// 理由: **「対応しています」は保証を名乗る言葉**で、動かないサイトがあったときに約束違反になる。
+// 取り込みは相手サイトの作りに依存するので保証できず、しかも**販売中の有料機能**を
+// **購入前に読まれる文書**（紹介ページ・使い方ページ）で説明する場所である。
+//
+// 見るのは「サイトに対応」の形だけ。「対応しているブラウザ」「対応しているサイトなら写真も」の
+// ように、**相手の作りしだいであることを言っている書き方は残してよい**（そこは保証ではない）。
+// コメントは落としてから見る（利用者は読まないので、直した経緯を書き残せる）。
+{
+  const mcRoot = path.join(path.dirname(fileURLToPath(scriptFileUrl)), '..')
+  const mcBlank = (s) => s.replace(/[^\n]/g, ' ')
+  const mcBody = (src) =>
+    src
+      .replace(/<script[\s\S]*?<\/script>/gi, mcBlank)
+      .replace(/<style[\s\S]*?<\/style>/gi, mcBlank)
+      .replace(/<!--[\s\S]*?-->/g, mcBlank)
+      .replace(/<[^>]+>/g, mcBlank)
+
+  const mcAboutDir = path.join(mcRoot, 'public/about')
+  const mcPages = []
+  for (const e of readdirSync(mcAboutDir, { withFileTypes: true }).sort((a, b) => (a.name < b.name ? -1 : 1))) {
+    const files = e.isDirectory()
+      ? readdirSync(path.join(mcAboutDir, e.name))
+          .filter((f) => f.endsWith('.html'))
+          .sort()
+          .map((f) => `${e.name}/${f}`)
+      : e.name.endsWith('.html')
+        ? [e.name]
+        : []
+    for (const f of files)
+      mcPages.push({
+        rel: `public/about/${f}`,
+        text: mcBody(readFileSync(path.join(mcAboutDir, f), 'utf-8')),
+      })
+  }
+  eq('MC-3 前提: 公開ページを読めている（0件なら見張りが壊れている）', mcPages.length > 5, true)
+  eq(
+    'MC-3 公開ページが「サイトに対応しています」と保証を名乗っていない',
+    mcPages
+      .filter(({ text }) => /サイト[にへ]\s*対応/.test(text))
+      .map(({ rel }) => rel),
+    [],
+  )
+  // 直した先が実在すること（言い換えを消して黙って通す形にしない）
+  const mcLp = mcPages.find((p) => p.rel === 'public/about/index.html')
+  eq('MC-3 前提: 紹介ページを読めている', mcLp != null, true)
+  eq(
+    'MC-3 紹介ページは「多くのレシピサイトのページから取り込めます」と言っている',
+    (mcLp?.text ?? '').includes('多くのレシピサイトのページから取り込めます'),
+    true,
+  )
 }

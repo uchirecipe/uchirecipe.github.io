@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import { Sparkles, ChevronDown, ChevronUp, Lock } from 'lucide-react'
 import {
@@ -460,6 +460,41 @@ function NutrientTable({
   )
 }
 
+/**
+ * 説明と注記・出典の折りたたみ（2026-08-28 便MC）。
+ *
+ * オーナー原文「栄養の説明と注記は折りたたみにしてコンパクトに。他に個所でやってる
+ * 「注記と出典」と同じように」。**献立の栄養バランスパネル（NutritionBalancePanel）と
+ * 同じ文言・同じ見た目・同じ開閉**にそろえる（新しい形を作らない）。
+ * 開閉の言い方も `ja.nutritionBalance.notesToggle` をそのまま使う
+ * ＝同じものを2つの名前で呼ばないため、ここで文言を作り直さない。
+ *
+ * **中へ入れるのは「どのレシピでも同じことを言う説明・注記・出典」だけ**。
+ * このレシピ固有の話（⚠の注意・仮の量で計算した材料・計算に含めていない材料）は外に残す。
+ * 理由は下の LockedBody / UnlockedBody のコメントに書いた。
+ */
+function NutritionNotes({ children }: { children: ReactNode }) {
+  const [notesOpen, setNotesOpen] = useState(false)
+  return (
+    <div>
+      <button
+        type="button"
+        onClick={() => setNotesOpen((v) => !v)}
+        aria-expanded={notesOpen}
+        className="inline-flex items-center gap-1 rounded-sm border border-edge bg-surface px-3 py-2 text-xs font-bold text-accent-ink shadow-sm"
+      >
+        {ja.nutritionBalance.notesToggle}
+        {notesOpen ? <ChevronUp size={14} aria-hidden /> : <ChevronDown size={14} aria-hidden />}
+      </button>
+      {/* 閉じているあいだ中身をDOMに置かない（Collapse の作法）。
+          読み上げソフトとページ内検索に畳んだ中身が残らないようにするため */}
+      <Collapse open={notesOpen}>
+        <div className="mt-[var(--space-sm)] space-y-0.5 text-xs text-ink-muted">{children}</div>
+      </Collapse>
+    </div>
+  )
+}
+
 /** 出典表記（両状態で共通・2026-07-28 便BY/NUT-05で内訳と精度感を明記） */
 function SourceNote() {
   return (
@@ -609,12 +644,21 @@ function LockedBody({
         trialExhausted={trialExhausted}
         openPanels={[SCREEN_PANEL.nutrition]}
       />
+      {/* ⚠の注意・材料の一覧は**折りたたみの外に残す**（2026-08-28 便MC）。
+          ・⚠は「いま出ている数字が実際より小さい」という**数字の読み方そのもの**で、
+            折りたたんだ1行の印（materialGapBadge / saltGapBadge）と対になっている。
+            中へ入れると、印だけ出ていて理由が読めない状態になる
+          ・材料の一覧は logic/nutrition.ts 冒頭の決めごと
+            「計算できなかった材料は隠さず必ず表示に含めること」に当たる */}
       <MaterialGapNote nutrition={nutrition} />
       <AssumedBlock nutrition={nutrition} />
       <ExcludedBlock nutrition={nutrition} />
-      <p className="text-xs text-ink-muted">{ja.nutrition.estimateNote}</p>
-      <VegetableCountNote />
-      <SourceNote />
+      {/* どのレシピでも同じことを言う説明・注記・出典は折りたたみの中へ（オーナー指示） */}
+      <NutritionNotes>
+        <p>{ja.nutrition.estimateNote}</p>
+        <VegetableCountNote />
+        <SourceNote />
+      </NutritionNotes>
       {/* Pro未解錠のユーザーには、これらの目安が買い切りのPro版で表示されること
           (設定のProタブから解錠できること)を伝える。isProの分岐は栄養フル版の公開フラグを
           落としたとき用の保険(通常は未解錠=非ProなのでfreeDescription側が出る) */}
@@ -663,16 +707,20 @@ function UnlockedBody({
         unlocked
       />
 
+      {/* ⚠の注意・材料の一覧は折りたたみの外に残す（理由は LockedBody 側のコメント） */}
       <MaterialGapNote nutrition={nutrition} />
       <AssumedBlock nutrition={nutrition} />
       <ExcludedBlock nutrition={nutrition} />
 
-      <p className="text-xs text-ink-muted">{ja.nutrition.estimateNote}</p>
-      {/* ビタミン非表示の理由(2026-07-13オーナー指示)。Pro解錠時のみ表示(無料側は栄養の内訳が
-          見えていないので注記も不要) */}
-      <p className="text-xs text-ink-muted">{ja.nutrition.vitaminNote}</p>
-      <VegetableCountNote />
-      <SourceNote />
+      {/* どのレシピでも同じことを言う説明・注記・出典は折りたたみの中へ（2026-08-28 便MC） */}
+      <NutritionNotes>
+        <p>{ja.nutrition.estimateNote}</p>
+        {/* ビタミン非表示の理由(2026-07-13オーナー指示)。Pro解錠時のみ表示(無料側は栄養の内訳が
+            見えていないので注記も不要) */}
+        <p>{ja.nutrition.vitaminNote}</p>
+        <VegetableCountNote />
+        <SourceNote />
+      </NutritionNotes>
     </div>
   )
 }
