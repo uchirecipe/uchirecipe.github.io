@@ -363,6 +363,14 @@ import './_shared.mjs'
       // 続きの検証のため、日モーダル→編集モード→ピッカーを開き直す
       await mePage.locator(`button[data-date="${meDate}"]`).click()
       await mePage.waitForTimeout(400)
+      /* 2026-08-29 便MK: 下の「便DU」の判定は `day-modal-close` の count()===0 を見ているのに、
+         同じ節では一度も「在る」側を測っていなかった＝目印が変わっても必ず緑になる
+         （便LOの走査で 07:416 として残っていた1件）。開き直した直後＝まだ何も変えていない窓は
+         「閉じる」1つだけなので、その場で対にする。 */
+      check(
+        'MEALPLAN-A3B3(便DU) 前提: 開き直した直後の窓の下は「閉じる」1つだけ（目印が生きている）',
+        (await meModal.locator('[data-testid="day-modal-close"]').count()) === 1,
+      )
       const meEditOn2 = await openMonthDayEdit(mePage)
       check('MEALPLAN-A3B3(便JN) 前提: 開き直した窓も編集モードにできた', meEditOn2 === true, `結果=${meEditOn2}`)
       await meModal.getByRole('button', { name: ja.mealPlan.emptyAssign }).first().click()

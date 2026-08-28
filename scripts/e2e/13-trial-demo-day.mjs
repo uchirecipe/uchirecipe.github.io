@@ -417,6 +417,50 @@ import './_shared.mjs'
         ((await dmPage.textContent('body')) ?? '').includes('購入と解錠'),
         `url=${dmPage.url()}`,
       )
+
+      /* 2026-08-29 便MK: この節の頭の判定は `month-trial-start` の count()===0（お試しの入口が
+         まだ出ない状態）を見ているのに、同じ節では一度も「出る」側を測っていなかった
+         ＝目印が変わっても必ず緑になる（便LOの走査で 13:285 として残っていた1件）。
+         **いちばん最後に**、記録を5件入れて入口が出るところまで作って対にする
+         （端末のデータを見比べる判定はすでに終わっているので、増やしても巻き添えにしない）。 */
+      await dmPage.evaluate(
+        (n) =>
+          new Promise((resolve, reject) => {
+            const req = indexedDB.open('uchi-recipe')
+            req.onsuccess = () => {
+              const idb = req.result
+              const g = idb.transaction('recipes', 'readonly').objectStore('recipes').getAll()
+              g.onsuccess = () => {
+                const targets = g.result.slice(0, n)
+                const wtx = idb.transaction('recipes', 'readwrite')
+                const store = wtx.objectStore('recipes')
+                for (const r of targets) {
+                  store.put({ ...r, cookedLogs: [{ date: '2026-07-20' }] })
+                }
+                wtx.oncomplete = () => resolve(undefined)
+                wtx.onerror = () => reject(wtx.error)
+              }
+              g.onerror = () => reject(g.error)
+            }
+            req.onerror = () => reject(req.error)
+          }),
+        5,
+      )
+      // 生のIndexedDBへ書いたので読み込み直す（Dexieのライブ購読はDexie経由しか見ていない・禁じ手⑥）
+      await dmPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+      await dmPage.reload({ waitUntil: 'networkidle' })
+      await dmPage.waitForTimeout(1500)
+      // タブの名前は ja.ts から読む（画面の日本語を書き写さない・禁じ手②）
+      await dmPage.getByRole('button', { name: ja.mealPlan.viewMonth, exact: true }).click()
+      await dmPage.waitForTimeout(700)
+      check(
+        'DEMO-01 前提: 記録が5件たまればお試しの入口は出る（目印が生きている）',
+        await dmPage.locator('[data-testid="month-trial-start"]').isVisible(),
+      )
+      check(
+        'DEMO-01 入口が出たあとも、サンプルの入口は並んで出続ける（お試しとは別の道）',
+        await dmPage.locator('[data-testid="month-demo-link"]').isVisible(),
+      )
     } finally {
       await dmBrowser.close()
     }
