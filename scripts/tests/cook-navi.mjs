@@ -1827,7 +1827,11 @@ import { existsSync, readFileSync } from 'node:fs'
     .sort((a, b) => a.startMin - b.startMin)
   eq(
     'ナビ詰め込み(3品): 手作業どうしが時間で重ならない（1人で作れる段取りになっている）',
-    activeSpans.every((it, i) => i === 0 || it.startMin >= activeSpans[i - 1].endMin),
+    // 2026-08-28 便LX: 手作業が1つも無いと every は中身を見ずに true になる。
+    // 3品の段取りに手作業が0件は在りえないので、件数の下限（1件以上）を同じ判定式で見る
+    // （実測: activeSpans を空にしても、この節も他のどの検査も赤くならなかった）
+    activeSpans.length > 0 &&
+      activeSpans.every((it, i) => i === 0 || it.startMin >= activeSpans[i - 1].endMin),
     true,
   )
 

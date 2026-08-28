@@ -2641,6 +2641,53 @@ import { createRequire } from 'node:module'
     })()
     eq('LK-1 前提: 画面のソースを読めている（0文字なら見張りが壊れている）', lkSrcText.length > 100000, true)
 
+    /**
+     * 目印が src に**そのものとして**在るか。
+     *
+     * **2026-08-28 便LX の実測でここを直した。**それまでは `lkSrcText.includes(id)` の
+     * 部分一致で見ており、**目印の後ろに文字を足す形の改名を1件も拾えなかった**
+     * （`data-testid="purpose-picker"` → `"purpose-pickerZZ"` にすると、
+     * `includes('purpose-picker')` は**当たったまま**なので「src に在る」と判定される）。
+     * 実測: `day-modal-close` `purpose-picker` `month-trial-start` `navi-selection-dropped`
+     * `search-match-word` の5つを src で改名して `npm test` を走らせたところ、
+     * **LK-1 は5件とも取り逃した**（赤くなったのは別の見張り KJ-3 の1件だけ）。
+     *
+     * 直した形は「**引用符で囲まれた1つの語として在るか**」で見る。
+     * `data-testid="x"` / `testId="x"` / `testId={'x'}` / `testId: 'x'` のどれでも当たり、
+     * `"xZZ"` には当たらない。`data-testid={`safety-step-${i}`}` のように組み立てるものは
+     * 前方一致の頭（`safety-step-`）を別に集めて受け止める。
+     */
+    const lkMarkPrefixes = (text) =>
+      [...text.matchAll(/[`"']([A-Za-z][\w-]*-)\$\{/g)].map((m) => m[1])
+    const lkHasMarkIn = (text, id, prefixes) =>
+      new RegExp(`(["'\`])${id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\1`).test(text) ||
+      prefixes.some((prefix) => id.startsWith(prefix))
+    const lkSrcTemplatePrefixes = lkMarkPrefixes(lkSrcText)
+    const lkSrcHasMark = (id) => lkHasMarkIn(lkSrcText, id, lkSrcTemplatePrefixes)
+
+    // この当て方そのものが素通りしないことを、その場で確かめる（LK-4 と同じ形）。
+    // 実物の目印ではなく**架空のソース**で測る（実物を使うと、その目印を直した日に
+    // 見張り自身が赤くなって、何が壊れたのか分からなくなる）
+    {
+      const lkFakeSrc = '<div data-testid="lx-fake-mark" />\n<Row testId={`lx-row-${i}`} />'
+      const lkFakePrefixes = lkMarkPrefixes(lkFakeSrc)
+      eq(
+        'LK-1 見張り自身の確かめ: 引用符で囲まれた目印は「在る」と読める',
+        lkHasMarkIn(lkFakeSrc, 'lx-fake-mark', lkFakePrefixes),
+        true,
+      )
+      eq(
+        'LK-1 見張り自身の確かめ: 後ろに文字を足した名前は「在る」と読まない（部分一致で見逃さない）',
+        lkHasMarkIn(lkFakeSrc, 'lx-fake-mar', lkFakePrefixes),
+        false,
+      )
+      eq(
+        'LK-1 見張り自身の確かめ: 組み立てる目印は前方一致で受け止める',
+        lkHasMarkIn(lkFakeSrc, 'lx-row-3', lkFakePrefixes),
+        true,
+      )
+    }
+
     const lkE2eDir = path.join(lkRoot, 'scripts/e2e')
     const lkAbsence = []
     for (const file of readdirSync(lkE2eDir).filter((f) => f.endsWith('.mjs'))) {
@@ -2658,7 +2705,7 @@ import { createRequire } from 'node:module'
     const lkKnownAbsent = lkKnown['画面に無い目印を見ている「出ていないこと」の検査'] ?? {}
     const lkMissing = new Map()
     for (const { id, at } of lkAbsence) {
-      if (lkSrcText.includes(id)) continue
+      if (lkSrcHasMark(id)) continue
       if (!lkMissing.has(id)) lkMissing.set(id, [])
       lkMissing.get(id).push(at)
     }

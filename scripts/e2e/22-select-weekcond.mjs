@@ -1211,6 +1211,10 @@ import './_shared.mjs'
       check(
         'HV-01(⑥) 無料のままでは、カレンダーの栄養の選択欄もPro側の栄養の名前も出ない',
         (await hvFreePage.locator('[data-testid="month-cell-nutrient"]').count()) === 0 &&
+          // 2026-08-28 便LX: 見る名前が1つも無いと every は中身を見ずに true になり、
+          // **Proの線が壊れても必ず緑**になる（PURPOSE-02 と同じ形）。
+          // 名前の数の下限を同じ判定式で見る（決め打ちはしない＝禁じ手③）
+          hvProOnlyNutrients.length > 0 &&
           hvProOnlyNutrients.every((label) => !hvFreeBody.includes(label)),
         `出ていた項目=${hvProOnlyNutrients.filter((label) => hvFreeBody.includes(label)).join('/') || 'なし'}`,
       )

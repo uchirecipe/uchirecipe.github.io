@@ -2039,6 +2039,22 @@ import './_shared.mjs'
         'DAYSUGGEST-01 今日の献立を空に戻すと「今日なに作る？」がまた出る',
         ((await dhPage.textContent('body')) ?? '').replaceAll('​', '').includes('おまかせで1品出す'),
       )
+      // 2026-08-28 便LX: 上の「1品でも決まると候補は出ていない」（day-suggest-result が0件）は、
+      // **出る場面をこの節で1度も測っていなかった**ので、目印を変えても・候補のカードが丸ごと
+      // 消えても緑のままだった（src で `day-suggest-result` を改名して実測）。
+      // 空に戻したここで1品出させ、「出る場面」と対にする。件数は下限だけ見る（禁じ手③）
+      {
+        const dhDraw = dhPage.getByRole('button', { name: ja.dayStart.shuffle })
+        if ((await dhDraw.count()) >= 1) {
+          await dhDraw.first().click()
+          await dhPage.waitForTimeout(900)
+        }
+        check(
+          'DAYSUGGEST-01 出させた候補には目印が付いている(「出ていない」が中身のある判定になる)',
+          (await dhPage.locator('[data-testid="day-suggest-result"]').count()) >= 1,
+          `候補=${await dhPage.locator('[data-testid="day-suggest-result"]').count()}`,
+        )
+      }
     } finally {
       await dhBrowser.close()
     }

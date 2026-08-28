@@ -744,6 +744,15 @@ import './_shared.mjs'
           before.trim().length > 0 && after.trim().length > 0,
           `前=${before.trim().slice(0, 20)} 後=${after.trim().slice(0, 20)}`,
         )
+        // 2026-08-28 便LX: 上の「畳んでいるときは候補が出ていない」（day-suggest-result が0件）は、
+        // **出る場面をこの節で1度も測っていなかった**ので、目印を変えても・カードが丸ごと
+        // 消えても緑のままだった（src で `day-suggest-result` を改名して実測）。
+        // 開いたあとの「出る場面」をここで対にする。件数は決め打ちせず下限だけ見る（禁じ手③）
+        check(
+          'DAYLAYOUT-01 開いた提案の候補には目印が付いている(畳んだときの「出ていない」が中身のある判定になる)',
+          (await section.locator('[data-testid="day-suggest-result"]').count()) >= 1,
+          `候補=${await section.locator('[data-testid="day-suggest-result"]').count()}`,
+        )
         // 2026-08-18 便HM: 献立がある日にも「1品」/「献立」の切り替えをそのまま出す。
         // 便HHで隠していた理由（押すとさらに2品入ってしまう）は便HIで消えており
         // （いまは「今日の献立に入れる」を押して食事を選ぶまで入らない）、
