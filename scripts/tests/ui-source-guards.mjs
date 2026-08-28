@@ -3513,17 +3513,23 @@ import { createRequire } from 'node:module'
   }
 
   // ---- LW-2: 出す側。同じ窓で移るリンクは全部が帰り先を持つ -------------------------------
-  // 別窓（target="_blank"）のリンクには載せない。別窓は元の画面をそのまま残すので帰り道が
-  // すでにあり、しかもホーム画面に追加したアプリの別窓はブラウザ側で開く＝iOSではデータの
-  // 置き場所が別になるため、そこから「うちレシピに戻る」と空のうちレシピが開いてしまう。
+  // この画面の既定は**同じ窓**（ホーム画面に追加したアプリの別窓はブラウザ側で開き、
+  // iOSではデータの置き場所が別になるため。SettingsPage.tsx の「うちレシピについて」の注記）。
+  // 例外は**購入の枠の中の2本だけ**で、理由は「すぐ上に解錠コードの入力欄があり、
+  // 同じ窓で移ると打ちかけのコードが消える」の1つ。守るものがあるから例外にしている。
+  // 別窓には ?from= も載せない（別窓の行き先で帰り道を出すと、ホーム画面に追加したアプリでは
+  // ブラウザ側の空のうちレシピが開く）。
+  // 2026-08-28 司令部の裁定: 解錠済み側の「詳しい説明」は入力欄が無い枝なので、
+  // 守るものが無いまま例外になっていた＝同じ窓へ戻した。
   {
     const lwSettings = lwRead('src/pages/SettingsPage.tsx')
     const lwNotice = lwRead('src/components/HomeScreenNotice.tsx')
-    // 同じ窓で移る5本（バックアップ・古い記録・紹介ページ・ホーム画面への追加・利用規約）
+    // 同じ窓で移る7本
     for (const [name, re] of [
       ['バックアップの詳しい説明', /aboutLinkWithReturn\('\/about\/manual\.html#backup', '\/settings\?section=backup'\)/],
       ['古い記録の書き出しの詳しい説明', /aboutLinkWithReturn\('\/about\/manual\.html#archive', '\/settings\?section=archive'\)/],
       ['複数の端末で使う方法', /aboutLinkWithReturn\(\s*'\/about\/multi-device\.html',/],
+      ['解錠済みのPro版の詳しい説明', /aboutLinkWithReturn\('\/about\/manual\.html#pro', '\/settings\?section=pro'\)/],
       ['紹介ページ', /aboutLinkWithReturn\('\/about\/', '\/settings\?section=about'\)/],
       ['ホーム画面に追加する方法', /aboutLinkWithReturn\('\/about\/install\.html', '\/settings\?section=about'\)/],
       ['利用規約', /aboutLinkWithReturn\('\/about\/terms\.html', '\/settings\?section=about'\)/],
@@ -3541,8 +3547,20 @@ import { createRequire } from 'node:module'
       /archive: 'archive-section'/.test(lwSettings) && /id="archive-section"/.test(lwSettings),
       true,
     )
+    // 解錠済み側の「詳しい説明」が、また別窓に戻っていないこと
+    eq(
+      'LW-2 解錠済みのPro版の詳しい説明が別窓に戻っていない（この画面の既定は同じ窓）',
+      /data-testid="pro-detail-link-activated"/.test(lwSettings) &&
+        !/target="_blank"[\s\S]{0,120}data-testid="pro-detail-link-activated"/.test(lwSettings),
+      true,
+    )
+    eq(
+      'LW-2 ?section=pro の着地点が用意されている',
+      /pro: 'pro-section'/.test(lwSettings) && /id="pro-section"/.test(lwSettings),
+      true,
+    )
     // 裸のリンクに戻っていないこと。**同じ窓で移るもの**だけを見るので、
-    // target="_blank" の3本（Pro版の説明2本・特商法表記）は数に入れない
+    // target="_blank" の2本（購入の枠の中のPro版の説明・特商法表記）は数に入れない
     const lwBare = [...lwSettings.matchAll(/href="(\/about\/[^"]*)"/g)].map((m) => m[1])
     const lwBareSameWindow = lwBare.filter((href) => {
       const at = lwSettings.indexOf(`href="${href}"`)
@@ -3552,10 +3570,33 @@ import { createRequire } from 'node:module'
     })
     eq('LW-2 同じ窓で移るのに帰り先を持たない裸のリンクが無い', lwBareSameWindow, [])
     eq(
-      'LW-2 見分けの前提: 別窓の裸のリンクは3本ある（0本なら見張りが空振りしている）',
+      'LW-2 見分けの前提: 別窓の裸のリンクは2本ある（0本なら見張りが空振りしている）',
       lwBare.length,
-      3,
+      2,
     )
+    // **残す2本は別窓のまま**であること。ここは「打ちかけの解錠コードを守るために、あえて
+    // 例外にしている」場所なので、あとから誰かが「この画面の既定は同じ窓だから」と
+    // 揃えて直してしまわないように、別窓であること自体を見張る。
+    // 守っている中身（解錠コードの入力欄が同じ枠の中にあること）も一緒に見る＝
+    // 入力欄が別の場所へ移ったら、この例外の根拠が消えるので赤にする
+    for (const testid of ['pro-detail-link', 'proBuyLegalLink']) {
+      const anchor =
+        testid === 'pro-detail-link'
+          ? /target="_blank"[\s\S]{0,120}data-testid="pro-detail-link"/
+          : /href="\/about\/tokushoho\.html"\s*\n\s*target="_blank"/
+      eq(`LW-2 購入の枠の中の「${testid}」は別窓のまま（打ちかけのコードを守るため）`, anchor.test(lwSettings), true)
+    }
+    {
+      // 守るもの＝解錠コードの入力欄が、この2本と同じ枠（未解錠の枝）の中にあること。
+      // 位置ではなく**並び順**で見る（入力欄が先・リンクが後ろ）ので、間に何が増えても崩れない
+      const lwInputAt = lwSettings.indexOf('data-testid="unlock-code-row"')
+      const lwLegalAt = lwSettings.indexOf('href="/about/tokushoho.html"')
+      eq(
+        'LW-2 別窓のままにする理由が生きている（解錠コードの入力欄が同じ枠の中にある）',
+        lwInputAt > 0 && lwLegalAt > lwInputAt,
+        true,
+      )
+    }
   }
 
   // ---- LW-3: タイマー音の説明が担う2つの事実 -----------------------------------------------

@@ -2758,19 +2758,22 @@ export default function SettingsPage() {
                     ))}
                   </div>
                   {/* 機能紹介の一番下に、詳しい説明への入口を1本置く(2026-08-12 便FW・オーナー指示)。
-                      行き先は使い方ページの「無料で使える範囲とPro版」 */}
-                  {/* 2026-08-28 便LW: この3本（機能の詳しい説明・Pro版の説明・特商法表記）だけは
-                      別窓（target="_blank"）なので、?from= の帰り道を載せない。
-                      別窓は元の画面をそのまま残すので、閉じれば元の場所に戻る＝帰り道はもうある。
-                      さらに、ホーム画面に追加したアプリの別窓はブラウザ側で開き、
-                      iOSではアプリ本体とデータの置き場所が別になる（この画面の他のリンクを
-                      別窓にしていない理由と同じ）。そこから「うちレシピに戻る」を押すと、
-                      レシピが1件も入っていない別のうちレシピが開いてしまう */}
+                      行き先は使い方ページの「無料で使える範囲とPro版」。
+                      2026-08-28 便LW（司令部の裁定）: この1本だけ別窓（target="_blank"）だったのを
+                      同じ窓へそろえ、?from= で帰り先を載せた。この画面の既定は同じ窓
+                      （すぐ下の「うちレシピについて」の注記のとおり、ホーム画面に追加したアプリの
+                      別窓はブラウザ側で開き、iOSではデータの置き場所が別になる）。
+                      下の未解錠側の2本は打ちかけの解錠コードを守るために別窓のままだが、
+                      ここは解錠済みの側で入力欄そのものが無く、守るものが無いまま例外になっていた。
+                      帰り先に ?section=pro を選んだのは実測から（390px・解錠済み。帰り着いたときの
+                      Pro版の枠の上端: ?section=pro=69px ／ ?section=なし=5,599px ／
+                      ?section=about=-755px）。この枠を名前で指すのは ?section=pro だけで、
+                      unlock.html・NutritionTeaser の既存の導線も同じ値を使っている。
+                      枠の頭に着くので、押したリンク自体は282px下（1画面は844px）＝
+                      読んでいた機能の一覧をたどって戻る形になる */}
                   <p className="mt-[var(--space-md)] border-t border-edge pt-[var(--space-sm)]">
                     <a
-                      href="/about/manual.html#pro"
-                      target="_blank"
-                      rel="noopener noreferrer"
+                      href={aboutLinkWithReturn('/about/manual.html#pro', '/settings?section=pro')}
                       data-testid="pro-detail-link-activated"
                       className="text-sm font-bold text-accent-ink underline"
                     >
@@ -2848,9 +2851,13 @@ export default function SettingsPage() {
                 <p className="mt-[var(--space-sm)] text-xs text-ink-muted">{ja.settings.proBuyNote}</p>
 
                 {/* 説明リンク1本と特商法表記(特商法表記は購入ボタンと同じ枠内に置く)。
-                    2026-08-28 便LW: どちらも別窓なので ?from= の帰り道は載せない
-                    （理由は上の「詳しい説明」と同じ。加えてここは解錠コードの入力欄の真下で、
-                    同じ窓で移ると打ちかけのコードが消える） */}
+                    2026-08-28 便LW（司令部の裁定）: **この2本だけは別窓のまま**にしてある。
+                    理由は1つで、すぐ上（unlock-code-row）に解錠コードの入力欄があり、
+                    同じ窓で移ると**打ちかけのコードが消える**から。
+                    したがって ?from= の帰り道も載せない（別窓の行き先で帰り道を出すと、
+                    ホーム画面に追加したアプリではブラウザ側の別のうちレシピが開く）。
+                    **この画面の既定は同じ窓なので、揃えて直さないこと。**
+                    見張りは scripts/tests/ui-source-guards.mjs の LW-2 が持っている */}
                 <div className="mt-[var(--space-sm)] flex flex-wrap items-center gap-x-[var(--space-md)] gap-y-1">
                   <a
                     href="/about/manual.html#pro"

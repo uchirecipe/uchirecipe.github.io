@@ -122,8 +122,18 @@ import './_shared.mjs'
       const fwProLink = fwPage.locator('[data-testid="pro-detail-link-activated"]')
       const fwProHref = (await fwProLink.count()) > 0 ? await fwProLink.getAttribute('href') : null
       check(
+        // 2026-08-28 便LW: このリンクは別窓をやめて帰り先（?from=）を載せたので、
+        // 行き先そのもの（パスと見出しの目印）で見る（完全一致だと帰り先の有無で落ちる）
         'FW-01 機能紹介の一番下にPro版の詳しい説明へのリンクがある',
-        fwProHref === '/about/manual.html#pro',
+        typeof fwProHref === 'string' &&
+          fwProHref.split('?')[0] === '/about/manual.html' &&
+          fwProHref.endsWith('#pro'),
+        String(fwProHref),
+      )
+      check(
+        'FW-01 そのリンクが、アプリへの帰り先を持っている（便LW）',
+        typeof fwProHref === 'string' &&
+          fwProHref.includes(`from=${encodeURIComponent('/settings?section=pro')}`),
         String(fwProHref),
       )
       check(
