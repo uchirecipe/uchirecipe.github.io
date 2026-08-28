@@ -54,6 +54,15 @@ export interface PlanSheet {
   days: PlanSheetDay[]
   /** 献立も記録もメモも1件も無い（＝白紙になる）か。呼び出し側はこのとき案内を出す */
   isEmpty: boolean
+  /**
+   * 紙・画面の見出しの下に置く、何を載せた1枚かの名乗り（2026-08-28 便MD で
+   * ja.mealPlan.planSheetBasisNote の直書きから、この結果の一部へ移した）。
+   *
+   * 「載せる食事」で絞ったときに名乗りが変わる＝紙を受け取った人が、朝食と昼食が
+   * 載っていないのは「登録が無いから」ではなく「絞ったから」だと読める。
+   * 絞っていないときの文は今までと1文字も同じ（押さなければ今までと同じ1枚が出る）。
+   */
+  basisNote: string
 }
 
 /** 献立表に載せる1日分を組み立てる（日付順は渡された dates のまま） */
@@ -81,8 +90,26 @@ export function buildPlanSheet(options: {
    * 既定で省き、抜けも一覧したいときのために呼び出し側（献立表のチェック）で戻せるようにする。
    */
   includeEmptyDays?: boolean
+  /**
+   * 「載せる食事」で絞っているか（2026-08-28 便MD・オーナー原文「夕食だけの献立表を
+   * 作成などできるように。」）。
+   *
+   * 絞ったかどうかを visibleSlots の中身から推し量らないのは、**設定「表示する食事」で
+   * もともと夕食だけにしている端末**と区別が付かないため（そちらは今までどおり、
+   * 今までと同じ名乗りの紙が出る＝押さなければ何も変わらない）。
+   */
+  slotsNarrowed?: boolean
 }): PlanSheet {
-  const { title, dates, visibleSlots, entries, titleOf, notes, includeEmptyDays = false } = options
+  const {
+    title,
+    dates,
+    visibleSlots,
+    entries,
+    titleOf,
+    notes,
+    includeEmptyDays = false,
+    slotsNarrowed = false,
+  } = options
   const byDateSlot = new Map<string, Pick<MealPlanEntry, 'date' | 'slot' | 'role' | 'recipeId'>[]>()
   for (const e of entries) {
     const key = `${e.date}|${e.slot}`
@@ -111,7 +138,17 @@ export function buildPlanSheet(options: {
   const isEmpty = days.every(isPlanSheetDayEmpty)
   // isEmpty（＝1枚まるごと白紙か）は省く前の全日で判定する。省いた結果0日になったのか、
   // そもそも何も無いのかで呼び出し側の案内が変わらないようにするため
-  return { title, days: includeEmptyDays ? days : days.filter((d) => !isPlanSheetDayEmpty(d)), isEmpty }
+  return {
+    title,
+    days: includeEmptyDays ? days : days.filter((d) => !isPlanSheetDayEmpty(d)),
+    isEmpty,
+    basisNote: slotsNarrowed
+      ? ja.mealPlan.planSheetBasisNotePicked.replace(
+          '{slots}',
+          slotOrder.map((s) => ja.mealPlan.slot[s]).join('・'),
+        )
+      : ja.mealPlan.planSheetBasisNote,
+  }
 }
 
 /** その日に載せるものが何も無い（献立も日付メモも無い）か */

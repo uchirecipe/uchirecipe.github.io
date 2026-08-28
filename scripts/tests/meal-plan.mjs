@@ -4075,3 +4075,181 @@ eq('rangeDayCount: 月をまたぐ計算も正しい', rangeDayCount('2026-06-28
     true,
   )
 }
+
+
+// ==========================================================================================
+// 便MD（2026-08-28）朝昼夕を選べるようにする（まとめて提案・献立表）
+//
+// オーナー原文（2件とも同じ不満）:
+//   「献立をまとめて提案に、朝昼夕の選択がない」
+//   「献立表：… 朝昼夕の選択がない。夕食だけの献立表を作成などできるように。」
+//
+// 直す前に実測したこと（2026-08-28・翌月まるごとで測定）:
+//   朝昼夕を出している端末では、まとめて提案を1回押すと **158品／30日**（朝食53・昼食49・夕食56）が
+//   一度に入っていた。夕食だけを立てる家庭には、102品が要らない献立として量産される。
+//   夕食だけを出している端末（新規ユーザーの既定）では50品／30日で、入るのは夕食だけだった。
+//
+// 直した形: 月タブに「入れる食事」「載せる食事」を足した。**押さなければ今までと同じ**
+//   （＝設定「表示する食事」ぜんぶが相手。既定は変えない）。
+//
+// ここで固定するのは「押さなければ今までと同じ1枚が出る」ことと、
+// 「絞ったら空の見出しも空の列も残らない」こと。
+// ==========================================================================================
+{
+  const { buildPlanSheet, planSheetLines } = await import('../../src/logic/planSheet.ts')
+  const mdTitles = { 10: '肉じゃが', 20: 'きんぴらごぼう', 30: 'カレー' }
+  const mdArgs = {
+    title: '2026年9月の献立',
+    dates: ['2026-09-01', '2026-09-02'],
+    entries: [
+      { date: '2026-09-01', slot: 'breakfast', role: 'main', recipeId: 30 },
+      { date: '2026-09-01', slot: 'lunch', role: 'main', recipeId: 20 },
+      { date: '2026-09-01', slot: 'dinner', role: 'main', recipeId: 10 },
+      { date: '2026-09-02', slot: 'breakfast', role: 'main', recipeId: 20 },
+    ],
+    titleOf: (id) => mdTitles[id],
+    notes: new Map(),
+  }
+  const mdAll = buildPlanSheet({ ...mdArgs, visibleSlots: ['breakfast', 'lunch', 'dinner'] })
+  const mdDinner = buildPlanSheet({ ...mdArgs, visibleSlots: ['dinner'], slotsNarrowed: true })
+  eq(
+    'MD-1 絞らなければ今までどおり朝昼夕がそろって載る（既定は変えない）',
+    mdAll.days.map((d) => d.slots.map((s) => s.label)),
+    [['朝食', '昼食', '夕食'], ['朝食']],
+  )
+  eq(
+    'MD-1 夕食だけに絞ると、夕食のある日の夕食だけが残る（空の見出しも空の列も出ない）',
+    mdDinner.days.map((d) => [d.date, d.slots.map((s) => `${s.label}:${s.dishes.map((x) => x.title).join()}`)]),
+    [['2026-09-01', ['夕食:肉じゃが']]],
+  )
+  eq(
+    'MD-1 画像が読む行にも、載せない食事の行頭ラベルが残らない',
+    planSheetLines(mdDinner).map((l) => `${l.kind}:${l.label ?? ''}:${l.text}`),
+    ['day::9/1（火）', 'dish:夕食:肉じゃが'],
+  )
+  eq(
+    'MD-1 絞っていないときの紙の名乗りは、今までの文のまま（押さなければ何も変わらない）',
+    mdAll.basisNote,
+    ja.mealPlan.planSheetBasisNote,
+  )
+  eq(
+    'MD-1 絞ったときは、何を載せた紙なのかを名乗り直す（受け取った人が理由を読める）',
+    mdDinner.basisNote,
+    ja.mealPlan.planSheetBasisNotePicked.replace('{slots}', ja.mealPlan.slot.dinner),
+  )
+  eq(
+    'MD-1 名乗りは選んだ食事を並べる（2つ選べば2つとも出る）',
+    buildPlanSheet({
+      ...mdArgs,
+      visibleSlots: ['breakfast', 'dinner'],
+      slotsNarrowed: true,
+    }).basisNote,
+    ja.mealPlan.planSheetBasisNotePicked.replace(
+      '{slots}',
+      `${ja.mealPlan.slot.breakfast}・${ja.mealPlan.slot.dinner}`,
+    ),
+  )
+  eq(
+    // 設定「表示する食事」でもともと夕食だけにしている端末は、絞ったわけではない。
+    // visibleSlots の中身から推し量ると、その端末の紙の名乗りまで勝手に変わってしまう
+    'MD-1 設定でもともと夕食だけの端末は、今までどおりの名乗りのまま（絞りと取り違えない）',
+    buildPlanSheet({ ...mdArgs, visibleSlots: ['dinner'] }).basisNote,
+    ja.mealPlan.planSheetBasisNote,
+  )
+  eq(
+    'MD-1 絞った結果、載せるものが1つも無ければ白紙と分かる（呼び出し側が案内を出す）',
+    buildPlanSheet({
+      ...mdArgs,
+      dates: ['2026-09-02'],
+      visibleSlots: ['dinner'],
+      slotsNarrowed: true,
+    }).isEmpty,
+    true,
+  )
+}
+{
+  const mdRead = (rel) =>
+    readFileSync(path.join(path.dirname(fileURLToPath(scriptFileUrl)), '..', rel), 'utf-8')
+  const mdState = mdRead('src/pages/mealPlan/useMealPlanState.ts')
+  const mdPage = mdRead('src/pages/MealPlanPage.tsx')
+  eq(
+    'MD-2 まとめて提案が入れる先は「入れる食事」で決まる（表示する食事の直読みに戻っていない）',
+    /planWeekFill\(monthTargetEntries, monthTargetDates, fillTargetSlots, today/.test(mdState),
+    true,
+  )
+  eq(
+    'MD-2 献立表が載せる食事は「載せる食事」で決まり、絞ったかどうかも一緒に渡す',
+    [
+      /visibleSlots: sheetTargetSlots,/.test(mdState),
+      /slotsNarrowed: sheetTargetSlots\.length < visibleSlots\.length,/.test(mdState),
+    ],
+    [true, true],
+  )
+  eq(
+    // 「全部外す」＝まとめて提案は1品も入れられず、献立表は白紙の紙が出る＝行き止まり。
+    // 最後の1つは外さず、なぜ外れないかをその場で言う
+    'MD-2 最後の1つは外せない（外そうとしたら理由を言って、選択は変えない）',
+    /if \(next\.length === 0\) \{\s*setMessage\(ja\.mealPlan\.slotPickKeepOne\)\s*return\s*\}/.test(
+      mdState,
+    ),
+    true,
+  )
+  eq(
+    // 覚える器は設定「表示する食事」が既に持っている。同じことを2か所で覚えない
+    'MD-2 選び直しは覚えない（設定に保存せず、画面の中だけで持つ）',
+    [
+      /const \[fillSlots, setFillSlots\] = useState<MealSlot\[\] \| null>\(null\)/.test(mdState),
+      /const \[sheetSlots, setSheetSlots\] = useState<MealSlot\[\] \| null>\(null\)/.test(mdState),
+      /saveSettings\(\{ visibleMealSlots: (?!next\b)/.test(mdState),
+    ],
+    [true, true, false],
+  )
+  eq(
+    'MD-2 「表示する食事」を変えたら選び直しは白紙に戻す（出していない食事を選んだまま残さない）',
+    /useEffect\(\(\) => \{\s*setFillSlots\(null\)\s*setSheetSlots\(null\)\s*\}, \[monthSlotPickKey\]\)/.test(
+      mdState,
+    ),
+    true,
+  )
+  eq(
+    // 中身のある側にだけ置くと、絞って空になった瞬間にチップごと消えて戻せなくなる
+    'MD-2 献立表のチップは、白紙になっても消えない場所に置く（絞りを戻せる）',
+    mdPage.indexOf("'plan-sheet-slot'") < mdPage.indexOf('{sheet.isEmpty ?') &&
+      mdPage.indexOf("'plan-sheet-slot'") > 0,
+    true,
+  )
+  eq(
+    'MD-2 絞ったせいで白紙になったときは、そう分かる案内に切り替える',
+    /sheetTargetSlots\.length < visibleSlots\.length\s*\?\s*ja\.mealPlan\.planSheetEmptyPicked/.test(
+      mdPage,
+    ),
+    true,
+  )
+  eq(
+    // 見出し（fillMonthConfirmTitle・fillMonthRangeConfirmTitle）は同じ日に別の便が直している。
+    // 絞ったことは**補足の行**として足し、見出しの件数の差し込み口には触らない
+    'MD-3 まとめて提案の確認の見出しは、件数の差し込み口{d}を持ち続ける',
+    [
+      ja.mealPlan.fillMonthConfirmTitle.includes('{d}'),
+      ja.mealPlan.fillMonthRangeConfirmTitle.includes('{d}'),
+    ],
+    [true, true],
+  )
+  eq(
+    'MD-3 絞ったことは補足の行に置く（見出しの文には差し込まない）',
+    /notes: \[slotNarrowedNotice, noteSkipped, lockNotice\]/.test(mdState),
+    true,
+  )
+  eq(
+    'MD-3 絞っていないときは、その一文を足さない（今までと1文字も変わらない）',
+    /fillTargetSlots\.length < visibleSlots\.length\s*\?\s*ja\.mealPlan\.fillMonthSlotNarrowed/.test(
+      mdState,
+    ),
+    true,
+  )
+  eq(
+    'MD-3 足す一文には、入れる食事の差し込み口{slots}がある',
+    ja.mealPlan.fillMonthSlotNarrowed.includes('{slots}'),
+    true,
+  )
+}

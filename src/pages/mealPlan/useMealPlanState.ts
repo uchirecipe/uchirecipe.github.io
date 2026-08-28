@@ -863,6 +863,68 @@ export function useMealPlanState(demo?: MonthDemoData) {
     }
     saveSettings({ visibleMealSlots: next })
   }
+
+  /* ---- 月の「入れる食事」「載せる食事」（2026-08-28 便MD）----
+     オーナー原文（2件）:
+       「献立をまとめて提案に、朝昼夕の選択がない」
+       「献立表：… 朝昼夕の選択がない。夕食だけの献立表を作成などできるように。」
+
+     直す前は、月タブのこの2つが**設定「表示する食事」に出している食事すべて**を相手にしていて、
+     月タブからは食事を選べなかった（チップは週タブの「表示のしかた」にしか無い）。
+     朝昼夕を出している端末では、まとめて提案を1回押すと30日×3食ぶんが一度に入る。
+
+     **null＝絞っていない＝今までどおり visibleSlots ぜんぶ**（押さなければ今までと同じ）。
+     買い物メモの範囲えらび（shopSlots）と同じ持ち方にそろえる。違うのは全部外せない点で、
+     こちらは0にすると「1品も入らない」「白紙の紙が出る」という行き止まりになるため
+     （設定「表示する食事」が採っている決め方と同じ）。
+
+     **覚えない（設定に保存しない）**: 覚える器は設定「表示する食事」が既に持っており、
+     いつも夕食だけの家庭はそちらを夕食だけにすれば、週・日・買い物まで含めて全部そろう
+     （新規ユーザーの既定はもともと夕食のみ＝db/settings.ts resolveVisibleMealSlotsIfNeeded）。
+     同じことを2か所で覚えると「なぜ朝食が出ないのか」の答えが2か所に分かれる。
+     隣に並ぶ「期間で絞る」「登録のない日も載せる」も画面を離れれば既定に戻るので、
+     同じ面の絞りだけが覚えている状態も作らない。 */
+  const [fillSlots, setFillSlots] = useState<MealSlot[] | null>(null)
+  const [sheetSlots, setSheetSlots] = useState<MealSlot[] | null>(null)
+  // 「表示する食事」を変えたら選び直しは白紙に戻す（表示していない食事を選んだまま残さない）。
+  // 見るのは中身を並べた文字列＝設定の読み直しで配列の実体だけが変わったときに巻き戻さないため
+  const monthSlotPickKey = visibleSlots.join(',')
+  useEffect(() => {
+    setFillSlots(null)
+    setSheetSlots(null)
+  }, [monthSlotPickKey])
+  /** まとめて提案が入れる先の食事（絞っていなければ「表示する食事」ぜんぶ） */
+  const fillTargetSlots = useMemo(
+    () => (fillSlots ?? visibleSlots).filter((s) => visibleSlots.includes(s)),
+    [fillSlots, visibleSlots],
+  )
+  /** 献立表に載せる食事（絞っていなければ「表示する食事」ぜんぶ） */
+  const sheetTargetSlots = useMemo(
+    () => (sheetSlots ?? visibleSlots).filter((s) => visibleSlots.includes(s)),
+    [sheetSlots, visibleSlots],
+  )
+  /**
+   * チップ1つの押し引き。最後の1つは外せない（外すと何も出ないため）。
+   * 全部そろった状態は null に戻す＝「絞っていない」の意味を1つに保つ（買い物メモと同じ作法）。
+   */
+  const toggleMonthSlot = (
+    slot: MealSlot,
+    picked: MealSlot[],
+    setPicked: (next: MealSlot[] | null) => void,
+  ) => {
+    const next = picked.includes(slot)
+      ? picked.filter((s) => s !== slot)
+      : sortMealSlots([...picked, slot])
+    if (next.length === 0) {
+      setMessage(ja.mealPlan.slotPickKeepOne)
+      return
+    }
+    setPicked(next.length === visibleSlots.length ? null : next)
+  }
+  const toggleFillSlot = (slot: MealSlot) => toggleMonthSlot(slot, fillTargetSlots, setFillSlots)
+  const toggleSheetSlot = (slot: MealSlot) => toggleMonthSlot(slot, sheetTargetSlots, setSheetSlots)
+  /** 選んだ食事の名前を並べたもの（確認文・紙の名乗りに差し込む） */
+  const slotNamesOf = (slots: MealSlot[]) => slots.map((s) => ja.mealPlan.slot[s]).join('・')
   /**
    * レシピID→レシピ（すでに登録されている献立・記録を「表示する／数える」ための引き当て表）。
    *
@@ -3575,7 +3637,9 @@ export function useMealPlanState(demo?: MonthDemoData) {
     }
     // 2026-08-26 便LH（オーナー原文「献立提案も絞った期間内に対応して。」）:
     // 期間で絞っているあいだは、入る先も選んだ期間の中だけになる（monthTargetDates）
-    const rawPlan = planWeekFill(monthTargetEntries, monthTargetDates, visibleSlots, today, {
+    // 2026-08-28 便MD: 入る先の食事は「入れる食事」で選べる（絞っていなければ今までどおり
+    // 表示する食事ぜんぶ）。選ばなかった食事の献立は触らない＝重複を避ける材料にだけ数える
+    const rawPlan = planWeekFill(monthTargetEntries, monthTargetDates, fillTargetSlots, today, {
       keepAuto: true,
       // 鍵の掛かった食事は触らない（2026-08-08 便DX）
       lockedKeys,
@@ -3614,6 +3678,14 @@ export function useMealPlanState(demo?: MonthDemoData) {
         : ''
     // 鍵で外した食事の一文（便DX）。確認文にも結果にも同じ文を出す
     const lockNotice = lockNoticeOf(plan.lockedSlotCount)
+    /* 2026-08-28 便MD: 「入れる食事」で絞っているときだけ、入る先の食事を確認文に足す。
+       規約F（何が起きるかを件数つきで）にそろえるが、**見出しの文（fillMonthConfirmTitle・
+       fillMonthRangeConfirmTitle）には触らない**＝同じ日に別の便が直している文なので、
+       絞ったときにだけ増える1行として補足の側に置く。絞っていなければ今までと1文字も同じ */
+    const slotNarrowedNotice =
+      fillTargetSlots.length < visibleSlots.length
+        ? ja.mealPlan.fillMonthSlotNarrowed.replace('{slots}', slotNamesOf(fillTargetSlots))
+        : ''
     // トーストは既存の作法どおり半角スペースでつなぐ（確認文は文中に差し込むので noteSkipped をそのまま使う）
     const withNoteSkipped = (text: string) =>
       withNotice(noteSkipped ? `${text} ${noteSkipped}` : text, lockNotice)
@@ -3639,8 +3711,8 @@ export function useMealPlanState(demo?: MonthDemoData) {
         ? ja.mealPlan.fillMonthConfirm
         : ja.mealPlan.fillMonthConfirmNoKept
       ).replace('{k}', String(preserved)),
-      // メモを書いた日・ロック中の食事は「対象から外した」お知らせなので、補足の行に置く
-      notes: [noteSkipped, lockNotice].filter((line) => line !== ''),
+      // メモを書いた日・ロック中の食事・選んだ食事は「対象を絞った」お知らせなので、補足の行に置く
+      notes: [slotNarrowedNotice, noteSkipped, lockNotice].filter((line) => line !== ''),
       confirmLabel: ja.mealPlan.fillMonthConfirmOk,
     })
     if (!ok) return
@@ -3849,11 +3921,14 @@ export function useMealPlanState(demo?: MonthDemoData) {
                 .replace('{y}', monthAnchor.slice(0, 4))
                 .replace('{m}', String(Number(monthAnchor.slice(5, 7)))),
         dates: monthTargetDates,
-        visibleSlots,
+        // 2026-08-28 便MD: 「載せる食事」で絞れる（絞っていなければ今までどおり表示する食事ぜんぶ）。
+        // 載せない食事は行そのものを組み立てないので、空の見出しも空の列も紙に残らない
+        visibleSlots: sheetTargetSlots,
         entries: monthTargetEntries,
         titleOf: sheetTitleOf,
         notes: monthTargetNotes,
         includeEmptyDays: planSheetIncludeEmptyDays,
+        slotsNarrowed: sheetTargetSlots.length < visibleSlots.length,
       }),
     [
       monthRangeActive,
@@ -3862,6 +3937,7 @@ export function useMealPlanState(demo?: MonthDemoData) {
       monthAnchor,
       monthTargetDates,
       visibleSlots,
+      sheetTargetSlots,
       monthTargetEntries,
       sheetTitleOf,
       monthTargetNotes,
@@ -4684,6 +4760,8 @@ export function useMealPlanState(demo?: MonthDemoData) {
     setSelectedTemplateId, templateDows, weekTemplateItems, openTemplateSave, submitTemplateSave,
     openTemplateApply, selectedTemplate, toggleTemplateDow, applyTemplate, removeTemplate,
     planSheetOpen, setPlanSheetOpen, planSheetIncludeEmptyDays, setPlanSheetIncludeEmptyDays,
+    // 月の「入れる食事」「載せる食事」（2026-08-28 便MD）
+    fillTargetSlots, sheetTargetSlots, toggleFillSlot, toggleSheetSlot,
     monthPlanSheet, savePlanSheetImage, servingsEditor, setServingsEditor, submitServings,
     setDayFoldOverrides, weekEditDate, setWeekEditDate, datesWithPlan, isDayFolded,
     setAllDaysFolded, allDaysCollapsed, allDaysLocked, rememberWeekReturn, rememberMonthReturn,

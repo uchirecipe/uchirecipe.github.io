@@ -388,6 +388,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
     setSelectedTemplateId, templateDows, weekTemplateItems, openTemplateSave, submitTemplateSave,
     openTemplateApply, selectedTemplate, toggleTemplateDow, applyTemplate, removeTemplate,
     planSheetOpen, setPlanSheetOpen, planSheetIncludeEmptyDays, setPlanSheetIncludeEmptyDays,
+    fillTargetSlots, sheetTargetSlots, toggleFillSlot, toggleSheetSlot,
     monthPlanSheet, savePlanSheetImage, servingsEditor, setServingsEditor, submitServings,
     setDayFoldOverrides, weekEditDate, setWeekEditDate, datesWithPlan, isDayFolded,
     setAllDaysFolded, allDaysCollapsed, allDaysLocked, rememberWeekReturn, rememberMonthReturn,
@@ -426,9 +427,22 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
       <Collapse open={planSheetOpen}>
         <div className="px-[var(--space-md)] pb-[var(--space-md)]">
           <p className="text-xs text-ink-muted">{ja.mealPlan.planSheetHint}</p>
+          {/* 載せる食事（2026-08-28 便MD）。押さなければ表示する食事ぜんぶ＝今までと同じ1枚。
+              **白紙のときも必ず出す**＝絞ったせいで空になった人が、同じ場所で絞りを戻せる
+              （中身のある側にだけ置くと、空にした瞬間にチップごと消えて行き止まりになる） */}
+          {renderMonthSlotPicker(
+            ja.mealPlan.sheetSlotPickLabel,
+            ja.mealPlan.sheetSlotPickAria,
+            'plan-sheet-slot',
+            sheetTargetSlots,
+            toggleSheetSlot,
+          )}
           {sheet.isEmpty ? (
             <p className="mt-[var(--space-sm)] text-sm text-ink-muted">
-              {ja.mealPlan.planSheetEmpty}
+              {/* 絞って空になったのか、そもそも何も無いのかで案内を分ける（戻せることが伝わるように） */}
+              {sheetTargetSlots.length < visibleSlots.length
+                ? ja.mealPlan.planSheetEmptyPicked
+                : ja.mealPlan.planSheetEmpty}
             </p>
           ) : (
             <>
@@ -1544,6 +1558,52 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
     </div>
   )
 
+  /**
+   * 月タブの「入れる食事」「載せる食事」（2026-08-28 便MD。オーナー原文2件
+   * 「献立をまとめて提案に、朝昼夕の選択がない」「献立表：… 朝昼夕の選択がない。
+   * 夕食だけの献立表を作成などできるように。」）。
+   *
+   * 形は**アプリに既にある選び方に合わせる**: 複数を選ぶものはチップ（表示する食事・
+   * 買い物メモの範囲えらび）、1つだけ選ぶものはプルダウン（週の区切り）という
+   * 2026-08-22 便JF・⑤の分け方に従う。ここは複数選ぶのでチップ。
+   * 見た目は「選ぶボタン」の作法（chipClass＋ChipCheck・2026-08-09 便EN）で、
+   * 隣に並ぶ実行ボタン（塗りつぶし）と押し間違えない。
+   *
+   * 並べるのは設定「表示する食事」に出している食事だけ＝画面に出ない献立が黙って増えたり、
+   * 画面に出ない食事を紙にだけ載せたりしない（logic/mealTemplate.ts と同じ線）。
+   * 2つの絞りを分けて持つのは、片方が「どこへ入れるか」（書き込む操作）で、
+   * もう片方が「どこを載せるか」（読むだけの操作）だから。1つにまとめると
+   * 「夕食だけの紙を作りたい」が「夕食にだけ献立を入れる」まで変えてしまう。
+   */
+  const renderMonthSlotPicker = (
+    label: string,
+    aria: string,
+    testId: string,
+    picked: MealSlot[],
+    onToggle: (slot: MealSlot) => void,
+  ) => (
+    <div className="mt-[var(--space-sm)]">
+      <p className="text-xs font-bold text-ink-muted">{label}</p>
+      <div role="group" aria-label={aria} className="mt-1 flex flex-wrap gap-[var(--space-sm)]">
+        {visibleSlots.map((slot) => (
+          <button
+            key={slot}
+            type="button"
+            data-testid={testId}
+            data-slot={slot}
+            onClick={() => onToggle(slot)}
+            aria-pressed={picked.includes(slot)}
+            className={chipClass(picked.includes(slot))}
+            style={chipStyle(picked.includes(slot))}
+          >
+            <ChipCheck on={picked.includes(slot)} />
+            {ja.mealPlan.slot[slot]}
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+
   return (
     <div className="mx-auto w-full max-w-md px-[var(--space-md)] pb-[var(--space-lg)] pt-[var(--space-lg)]">
       <h1 className="text-2xl font-bold">{ja.mealPlan.title}</h1>
@@ -2529,6 +2589,14 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                           ? ja.mealPlan.fillMonthRangeHint
                           : ja.mealPlan.fillMonthHint}
                       </p>
+                      {/* 入れる先の食事（2026-08-28 便MD）。押さなければ表示する食事ぜんぶ＝今までと同じ */}
+                      {renderMonthSlotPicker(
+                        ja.mealPlan.fillSlotPickLabel,
+                        ja.mealPlan.fillSlotPickAria,
+                        'month-fill-slot',
+                        fillTargetSlots,
+                        toggleFillSlot,
+                      )}
                       {/* 自動提案の条件(2026-07-30 便CH/C11)。この条件は週タブと共有していて、
                           月の「献立をまとめて提案」にもそのまま効く */}
                       {renderSuggestConditions()}

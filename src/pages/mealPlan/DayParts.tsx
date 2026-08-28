@@ -476,7 +476,9 @@ function PlanSheetView({ sheet }: { sheet: PlanSheet }) {
   return (
     <>
       <h3 className="sheet-title text-lg font-bold">{sheet.title}</h3>
-      <p className="sheet-basis mt-0.5 text-[10px] text-ink-muted">{ja.mealPlan.planSheetBasisNote}</p>
+      {/* 何を載せた1枚かの名乗り。文は logic/planSheet.ts が決める（2026-08-28 便MD）＝
+          「載せる食事」で絞ったときに、絞ったことが紙の上からも読める */}
+      <p className="sheet-basis mt-0.5 text-[10px] text-ink-muted">{sheet.basisNote}</p>
       <ul className="mt-[var(--space-sm)] divide-y divide-edge">
         {sheet.days.map((day) => (
           <li key={day.date} className="sheet-day py-1.5">

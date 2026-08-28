@@ -10,7 +10,7 @@
 // 走る順番と、どの節がどのファイルに居るかは scripts/e2e-smoke.mjs が持っている。
 // **節どうしは前の節が残した画面の状態を引き継ぐので、順番も、この区切りも動かさないこと。**
 //
-// この中の節: MEALPLAN-09, SLOTWIN-01, PASTLOG-01, MEALPLAN-07, RANGE-EA, MEALPLAN-S1S2, MEALPLAN-S3, MEALPLAN-SERV, SHOPRANGE-EA, MEALPLAN-HOUSE
+// この中の節: MEALPLAN-09, SLOTWIN-01, PASTLOG-01, MEALPLAN-07, RANGE-EA, MEALPLAN-S1S2, MEALPLAN-S3, MEALPLAN-SERV, SHOPRANGE-EA, MEALPLAN-HOUSE, MDSLOT-01
 // ==========================================================================================
 import './_shared.mjs'
 
@@ -2100,5 +2100,323 @@ import './_shared.mjs'
       )
     } finally {
       await hhBrowser.close()
+    }
+  }
+
+  // --- MDSLOT-01: 月タブの「入れる食事」「載せる食事」(2026-08-28 便MD・オーナー原文2件
+  // 「献立をまとめて提案に、朝昼夕の選択がない」
+  // 「献立表：… 朝昼夕の選択がない。夕食だけの献立表を作成などできるように。」)。
+  //
+  // 直す前は、月タブのこの2つが設定「表示する食事」に出している食事すべてを相手にしていて、
+  // 月タブからは食事を選べなかった(チップは週タブの「表示のしかた」にしか無い)。
+  // 朝昼夕を出している端末では、まとめて提案を1回押すと30日×3食ぶんが一度に入っていた。
+  //
+  // 再発防止の要点:
+  //  ①押さなければ今までと同じ(既定は表示する食事ぜんぶが選ばれている)
+  //  ②夕食だけを選べば、入るのも紙に載るのも夕食だけ(空の見出し・空の列が残らない)
+  //  ③最後の1つは外せない(外すと1品も入らず、紙が白紙になる行き止まりのため)
+  //  ④覚えない(読み込み直すと既定へ戻る)
+  //  ⑤印刷と画像の両方で同じ1枚が出る ---
+  currentCheck = 'MDSLOT-01'
+  {
+    const mdBrowser = await chromium.launch()
+    const mdContext = await mdBrowser.newContext({ viewport: { width: 390, height: 844 } })
+    const mdPage = await mdContext.newPage()
+    let mdConfirmMsg = ''
+    await collectConfirms(mdPage, (text) => {
+      mdConfirmMsg = text
+    })
+    mdPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@MDSLOT-01] ${err.message}`)
+    })
+    try {
+      await mdPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await mdPage.waitForTimeout(2000) // 初回シード完了待ち
+      // 朝昼夕を出している端末にする(新規ユーザーの既定は夕食のみ)。月タブはProの機能なので解錠も入れる
+      await mdPage.evaluate(
+        () =>
+          new Promise((resolve, reject) => {
+            const req = indexedDB.open('uchi-recipe')
+            req.onsuccess = () => {
+              const tx = req.result.transaction('settings', 'readwrite')
+              const store = tx.objectStore('settings')
+              const get = store.get(1)
+              get.onsuccess = () => {
+                store.put({
+                  ...(get.result || { id: 1 }),
+                  id: 1,
+                  visibleMealSlots: ['breakfast', 'lunch', 'dinner'],
+                  proCode: 'UR-E2E-TEST-ONLY',
+                  proActivatedAt: Date.now(),
+                })
+              }
+              tx.oncomplete = () => resolve(undefined)
+              tx.onerror = () => reject(tx.error)
+            }
+            req.onerror = () => reject(req.error)
+          }),
+      )
+      await mdPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+      // 生のIndexedDBへ書いたので読み込み直す(Dexieのライブ購読はDexie経由しか見ていない)
+      await mdPage.reload({ waitUntil: 'networkidle' })
+      await mdPage.waitForTimeout(1200)
+      await mdPage.getByRole('button', { name: ja.mealPlan.viewMonth, exact: true }).click()
+      await mdPage.waitForTimeout(500)
+      // 翌月へ送る＝全日が未来日になり、実行日(月末・月初)で対象の日数が変わらない
+      await mdPage.getByRole('button', { name: ja.mealPlan.nextMonth }).click()
+      await mdPage.waitForTimeout(700)
+      const mdNow = new Date()
+      const mdNext = new Date(mdNow.getFullYear(), mdNow.getMonth() + 1, 1)
+      const mdPrefix = `${mdNext.getFullYear()}-${String(mdNext.getMonth() + 1).padStart(2, '0')}`
+      /** その月に入っている献立を食事ごとに数える(DBの実データで見る) */
+      const mdCountBySlot = async () => {
+        const rows = await mdPage.evaluate(
+          (prefix) =>
+            new Promise((resolve, reject) => {
+              const req = indexedDB.open('uchi-recipe')
+              req.onsuccess = () => {
+                const tx = req.result.transaction('mealPlans', 'readonly')
+                const g = tx.objectStore('mealPlans').getAll()
+                g.onsuccess = () =>
+                  resolve(g.result.filter((e) => e.date.startsWith(prefix)).map((e) => e.slot))
+                g.onerror = () => reject(g.error)
+              }
+              req.onerror = () => reject(req.error)
+            }),
+          mdPrefix,
+        )
+        const counts = {}
+        for (const slot of rows) counts[slot] = (counts[slot] ?? 0) + 1
+        return counts
+      }
+      // 結果の知らせが出るまで待つ(枠数が多いので決め打ちの秒数では足りない。文言は ja.ts から作る)
+      const mdTail = (text) => text.slice(text.lastIndexOf('}') + 1)
+      const mdWaitFilled = async () => {
+        const needles = [
+          mdTail(ja.mealPlan.fillMonthDone),
+          mdTail(ja.mealPlan.fillMonthKeptManual),
+          mdTail(ja.mealPlan.fillMonthNoRoom),
+          ja.mealPlan.fillMonthNoAdded,
+        ]
+        try {
+          await mdPage.waitForFunction(
+            (list) =>
+              list.some((n) => (document.body.innerText ?? '').replaceAll('​', '').includes(n)),
+            needles,
+            { timeout: 30000 },
+          )
+        } catch {
+          /* 出なかったことは、次の判定(DBの中身)が数で示す */
+        }
+        await mdPage.waitForTimeout(1200)
+      }
+
+      // ---------- ①既定: 押さなければ今までと同じ(3つとも選ばれている) ----------
+      // すでに開いていれば押さない共通の手順を使う（押す回数を決め打ちしない・禁じ手③）
+      await openMonthPlanGroup(mdPage)
+      const mdFillChips = mdPage.getByTestId('month-fill-slot')
+      const mdFillCount = await mdFillChips.count()
+      check(
+        'MDSLOT-01(既定) 「入れる食事」に、表示している食事のぶんだけボタンが出る',
+        mdFillCount === 3,
+        `chips=${mdFillCount}`,
+      )
+      check(
+        'MDSLOT-01(既定) 開いた直後は全部選ばれている(押さなければ今までと同じ相手)',
+        (await mdPage.locator('[data-testid="month-fill-slot"][aria-pressed="true"]').count()) ===
+          mdFillCount,
+      )
+
+      // ---------- ③最後の1つは外せない ----------
+      await mdPage.locator('[data-testid="month-fill-slot"][data-slot="breakfast"]').click()
+      await mdPage.waitForTimeout(250)
+      await mdPage.locator('[data-testid="month-fill-slot"][data-slot="lunch"]').click()
+      await mdPage.waitForTimeout(400)
+      await mdPage.locator('[data-testid="month-fill-slot"][data-slot="dinner"]').click()
+      await mdPage.waitForTimeout(600)
+      check(
+        'MDSLOT-01(全部外す) 最後の1つは外れない(1品も入らない状態を作らせない)',
+        (await mdPage
+          .locator('[data-testid="month-fill-slot"][data-slot="dinner"]')
+          .getAttribute('aria-pressed')) === 'true',
+      )
+      check(
+        'MDSLOT-01(全部外す) 外れない理由をその場で伝える(無反応にしない)',
+        stripZwspText(await mdPage.textContent('body')).includes(ja.mealPlan.slotPickKeepOne),
+      )
+
+      // ---------- ②夕食だけを選んでまとめて提案 ----------
+      mdConfirmMsg = ''
+      await mdPage.getByTestId('month-fill-run').click()
+      await mdWaitFilled()
+      check(
+        'MDSLOT-01(絞る) 入れる前に、どの食事に入れるのかを確認文で言う',
+        stripZwspText(mdConfirmMsg).includes(
+          ja.mealPlan.fillMonthSlotNarrowed.replace('{slots}', ja.mealPlan.slot.dinner),
+        ),
+        `confirm=${mdConfirmMsg}`,
+      )
+      const mdAfterDinner = await mdCountBySlot()
+      check(
+        'MDSLOT-01(絞る) 夕食だけを選んだら、入るのは夕食だけ(朝食・昼食は1品も増えない)',
+        (mdAfterDinner.dinner ?? 0) > 0 &&
+          (mdAfterDinner.breakfast ?? 0) === 0 &&
+          (mdAfterDinner.lunch ?? 0) === 0,
+        `counts=${JSON.stringify(mdAfterDinner)}`,
+      )
+
+      // ---------- 戻せる: 3つに戻して押すと、今までどおり朝昼夕に入る ----------
+      await mdPage.locator('[data-testid="month-fill-slot"][data-slot="breakfast"]').click()
+      await mdPage.waitForTimeout(250)
+      await mdPage.locator('[data-testid="month-fill-slot"][data-slot="lunch"]').click()
+      await mdPage.waitForTimeout(400)
+      mdConfirmMsg = ''
+      await mdPage.getByTestId('month-fill-run').click()
+      await mdWaitFilled()
+      const mdAfterAll = await mdCountBySlot()
+      check(
+        'MDSLOT-01(戻す) 3つに戻して押せば、今までどおり朝食・昼食にも入る(可逆)',
+        (mdAfterAll.breakfast ?? 0) > 0 &&
+          (mdAfterAll.lunch ?? 0) > 0 &&
+          (mdAfterAll.dinner ?? 0) >= (mdAfterDinner.dinner ?? 0),
+        `counts=${JSON.stringify(mdAfterAll)}`,
+      )
+      check(
+        'MDSLOT-01(戻す) 絞っていないときは、確認文にその一文を足さない(今までと同じ文)',
+        !stripZwspText(mdConfirmMsg).includes(mdTail(ja.mealPlan.fillMonthSlotNarrowed)),
+        `confirm=${mdConfirmMsg}`,
+      )
+
+      // ---------- ②献立表: 押さなければ今までと同じ1枚 ----------
+      await mdPage
+        .getByRole('button', { name: ja.mealPlan.planSheetTitle, exact: true })
+        .click()
+      await mdPage.waitForTimeout(700)
+      /** 紙に出ている食事のラベル(重複を除く) */
+      const mdSheetSlots = (sel) =>
+        mdPage
+          .locator(`${sel} .sheet-slot-label`)
+          .evaluateAll((els) => [...new Set(els.map((e) => e.textContent).filter(Boolean))])
+      const mdSheetRows = (sel) => mdPage.locator(`${sel} .sheet-row`).count()
+      const mdSheetBasis = async (sel) =>
+        stripZwspText((await mdPage.locator(`${sel} .sheet-basis`).textContent()) ?? '')
+      const mdAllSlots = await mdSheetSlots('.plan-sheet-preview')
+      const mdAllRows = await mdSheetRows('.plan-sheet-preview')
+      check(
+        'MDSLOT-01(献立表・既定) 押さなければ朝昼夕がそろって載る(便LHの「すべて予定」を残す)',
+        mdAllSlots.length === 3,
+        `slots=${JSON.stringify(mdAllSlots)}`,
+      )
+      check(
+        'MDSLOT-01(献立表・既定) 紙の名乗りも今までの文のまま',
+        (await mdSheetBasis('.plan-sheet-preview')) ===
+          stripZwspText(ja.mealPlan.planSheetBasisNote),
+      )
+
+      // ---------- ②献立表: 夕食だけに絞る ----------
+      await mdPage.locator('[data-testid="plan-sheet-slot"][data-slot="breakfast"]').click()
+      await mdPage.waitForTimeout(250)
+      await mdPage.locator('[data-testid="plan-sheet-slot"][data-slot="lunch"]').click()
+      await mdPage.waitForTimeout(800)
+      const mdDinnerSlots = await mdSheetSlots('.plan-sheet-preview')
+      const mdDinnerRows = await mdSheetRows('.plan-sheet-preview')
+      check(
+        'MDSLOT-01(献立表・絞る) 夕食だけの1枚になる(空の見出しも空の列も残らない)',
+        JSON.stringify(mdDinnerSlots) === JSON.stringify([ja.mealPlan.slot.dinner]) &&
+          mdDinnerRows > 0 &&
+          mdDinnerRows < mdAllRows,
+        `slots=${JSON.stringify(mdDinnerSlots)} rows=${mdDinnerRows}/${mdAllRows}`,
+      )
+      check(
+        'MDSLOT-01(献立表・絞る) 何を載せた紙なのかを名乗り直す(受け取った人が理由を読める)',
+        (await mdSheetBasis('.plan-sheet-preview')) ===
+          stripZwspText(
+            ja.mealPlan.planSheetBasisNotePicked.replace('{slots}', ja.mealPlan.slot.dinner),
+          ),
+        `basis=${await mdSheetBasis('.plan-sheet-preview')}`,
+      )
+
+      // ---------- ⑤印刷と画像の両方 ----------
+      await mdPage.emulateMedia({ media: 'print' })
+      await mdPage.waitForTimeout(300)
+      const mdPrintSlots = await mdSheetSlots('.plan-sheet-print')
+      check(
+        'MDSLOT-01(印刷) 紙に出る1枚も夕食だけになる(画面と紙で中身がずれない)',
+        JSON.stringify(mdPrintSlots) === JSON.stringify([ja.mealPlan.slot.dinner]) &&
+          (await mdSheetRows('.plan-sheet-print')) === mdDinnerRows,
+        `slots=${JSON.stringify(mdPrintSlots)}`,
+      )
+      check(
+        'MDSLOT-01(印刷) 紙の名乗りも絞ったことを言う',
+        (await mdSheetBasis('.plan-sheet-print')) ===
+          stripZwspText(
+            ja.mealPlan.planSheetBasisNotePicked.replace('{slots}', ja.mealPlan.slot.dinner),
+          ),
+      )
+      await mdPage.emulateMedia({ media: 'screen' })
+      await mdPage.waitForTimeout(200)
+      await mdPage.evaluate(() => {
+        window.__mdPrintCount = 0
+        window.print = () => {
+          window.__mdPrintCount += 1
+        }
+      })
+      await mdPage.getByRole('button', { name: ja.mealPlan.planSheetPrint, exact: true }).click()
+      await mdPage.waitForTimeout(300)
+      check(
+        'MDSLOT-01(印刷) 絞ったままでも「印刷する」がブラウザの印刷を呼ぶ',
+        (await mdPage.evaluate(() => window.__mdPrintCount)) === 1,
+      )
+      // 画像は planSheetLines(＝紙と同じ中身)から描くので、絞ると縦が縮む。
+      // 何pxになるかは月の日数と品数で変わるので決め打ちせず、絞る前後の高さを比べる
+      const mdPngHeight = async () => {
+        const [download] = await Promise.all([
+          mdPage.waitForEvent('download', { timeout: 30000 }),
+          mdPage.getByRole('button', { name: ja.mealPlan.planSheetImage, exact: true }).click(),
+        ])
+        const file = await download.path()
+        const buf = readFileSync(file)
+        return { name: download.suggestedFilename(), height: buf.readUInt32BE(20) }
+      }
+      const mdNarrowPng = await mdPngHeight()
+      check(
+        'MDSLOT-01(画像) 絞ったままでも画像が作れる(PNGとして保存される)',
+        mdNarrowPng.name.endsWith('.png') && mdNarrowPng.height > 0,
+        JSON.stringify(mdNarrowPng),
+      )
+      await mdPage.locator('[data-testid="plan-sheet-slot"][data-slot="breakfast"]').click()
+      await mdPage.waitForTimeout(250)
+      await mdPage.locator('[data-testid="plan-sheet-slot"][data-slot="lunch"]').click()
+      await mdPage.waitForTimeout(800)
+      const mdWidePng = await mdPngHeight()
+      check(
+        'MDSLOT-01(画像) 絞ると画像の中身も減る(画面・紙だけが変わって画像が取り残されていない)',
+        mdNarrowPng.height < mdWidePng.height,
+        `narrow=${mdNarrowPng.height}px all=${mdWidePng.height}px`,
+      )
+      check(
+        'MDSLOT-01(献立表・戻す) 絞りを戻すと朝昼夕がそろった1枚に戻る(可逆)',
+        (await mdSheetSlots('.plan-sheet-preview')).length === 3 &&
+          (await mdSheetRows('.plan-sheet-preview')) === mdAllRows,
+      )
+
+      // ---------- ④覚えない ----------
+      await mdPage.locator('[data-testid="plan-sheet-slot"][data-slot="breakfast"]').click()
+      await mdPage.waitForTimeout(500)
+      await mdPage.reload({ waitUntil: 'networkidle' })
+      await mdPage.waitForTimeout(1500)
+      await mdPage.getByRole('button', { name: ja.mealPlan.viewMonth, exact: true }).click()
+      await mdPage.waitForTimeout(500)
+      await mdPage.getByRole('button', { name: ja.mealPlan.planSheetTitle, exact: true }).click()
+      await mdPage.waitForTimeout(700)
+      check(
+        // 覚える器は設定「表示する食事」が持っている。同じことを2か所で覚えると
+        // 「なぜ朝食が出ないのか」の答えが2か所に分かれる
+        'MDSLOT-01(覚えない) 読み込み直すと選び直しは既定(表示する食事ぜんぶ)に戻る',
+        (await mdPage.locator('[data-testid="plan-sheet-slot"][aria-pressed="true"]').count()) === 3,
+      )
+    } finally {
+      await mdBrowser.close()
     }
   }
