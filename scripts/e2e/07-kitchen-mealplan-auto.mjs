@@ -1073,17 +1073,17 @@ import './_shared.mjs'
       await tpApplyModal.getByRole('button', { name: '入れる', exact: true }).click()
       await tpPage.waitForTimeout(900)
       check(
-        'MEALPLAN-A1B2(規約F) 確認文に「何品が入るか」と「何が消えないか」が両方ある',
+        'MEALPLAN-A1B2(規約F) 確認文が「何品を、どこへ入れるか」を言い切る',
         // 2026-08-25: 「まだ決まっていない◯食分に入れます」を書き写していた（禁じ手②）。
         // 便KTが**枠と品の単位の衝突**を直して「まだ決まっていない食事に入れます」にした。
-        // ja.ts の雛形から組み立てる＝文言を直しても数字が変わっても追従する
+        // ja.ts の雛形から組み立てる＝文言を直しても数字が変わっても追従する。
+        // 2026-08-28 便LV: 本文（旧「すでに入っている献立は消えません。」）は外したので、
+        // 見出しだけを見る（外したことそのものは meal-plan.mjs の LV-2 が見張る）
         tpConfirmMsg.includes(
           ja.mealPlan.templateApplyConfirmTitle
             .replace('{name}', '定番セット')
             .replace('{n}', '3'),
-        ) &&
-          tpConfirmMsg.includes(ja.mealPlan.templateApplyConfirm.split('{')[0]) &&
-          tpConfirmMsg.includes('消えません'),
+        ),
         `confirm=${tpConfirmMsg}`,
       )
       const tpAfter = await tpPage.evaluate(

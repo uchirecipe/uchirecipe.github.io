@@ -34,6 +34,8 @@ import { settingsLinkWithBack, resolveBackTarget } from '../../src/logic/backLin
 import {
   SCREEN_PANEL,
   parseScreenReturn,
+  pickScreenReturnBack,
+  screenPanelName,
   serializeScreenReturn,
   withScreenReturnParam,
 } from '../../src/logic/navMemory.ts'
@@ -1834,6 +1836,100 @@ eq('紫キャベツは紫カテゴリ(キャベツの野菜カテゴリより優
       ja.pantry.cookedReflectScope.includes('同じ設定です') &&
         !ja.pantry.cookedReflectScope.includes('同期'),
       true,
+    )
+  }
+}
+
+// ==========================================================================================
+// 便LV（2026-08-28）
+//  LV-1 折りたたみの名前の付け方（logic/navMemory.ts の SCREEN_PANEL / screenPanelName）
+//
+// 便LUからの申し送り:「共通の覚え ScreenReturnPoint に openPanels の口はもう用意してあるので、
+// 残っているのは配線だけです。栄養パネルの開閉と、週のグループの開閉が対象です。」
+//
+// 献立の画面には同じ形の折りたたみが並ぶ（週タブの節が6つ・栄養バランスのパネルが8枚）。
+// **並び順で覚えると、表示する食事や週を変えたときに別の折りたたみが開く**ので、
+// 名前は「何の折りたたみか」＋「どれか（節の名前・日付）」で作る。ここはその作り方を固定する。
+// ==========================================================================================
+{
+  eq(
+    'LV-1 同じ種類の折りたたみは「種類:どれか」で名前を作る',
+    screenPanelName(SCREEN_PANEL.mealPlanNutritionPanel, '2026-08-28'),
+    'mealPlanNutritionPanel:2026-08-28',
+  )
+  eq(
+    'LV-1 節ごとの名前も同じ作り方で作る（週まとめと曜日カードがぶつからない）',
+    screenPanelName(SCREEN_PANEL.mealPlanNutritionPanel, 'week') !==
+      screenPanelName(SCREEN_PANEL.mealPlanNutritionPanel, '2026-08-28'),
+    true,
+  )
+  // 覚える側と戻す側で同じ字を使うために、名前は1か所（SCREEN_PANEL）で持つ
+  eq(
+    'LV-1 献立の折りたたみの名前が1か所にそろっている',
+    [
+      typeof SCREEN_PANEL.mealPlanWeekGroup,
+      typeof SCREEN_PANEL.mealPlanMonthGroup,
+      typeof SCREEN_PANEL.mealPlanMonthNutrition,
+      typeof SCREEN_PANEL.mealPlanMonthCost,
+      typeof SCREEN_PANEL.mealPlanNutritionPanel,
+    ],
+    ['string', 'string', 'string', 'string', 'string'],
+  )
+  eq(
+    'LV-1 名前どうしがぶつからない（同じ字を2つの折りたたみで使っていない）',
+    new Set(Object.values(SCREEN_PANEL)).size,
+    Object.values(SCREEN_PANEL).length,
+  )
+  // 覚え（ScreenReturnPoint）に、名前をつけた折りたたみをそのまま往復させられる
+  {
+    const lvNames = [
+      screenPanelName(SCREEN_PANEL.mealPlanWeekGroup, 'nutrition'),
+      screenPanelName(SCREEN_PANEL.mealPlanNutritionPanel, 'week'),
+      SCREEN_PANEL.mealPlanMonthGroup,
+    ]
+    eq(
+      'LV-1 覚えた折りたたみの名前を、そのまま読み戻せる',
+      parseScreenReturn(
+        serializeScreenReturn({ path: '/meal-plan', scrollY: 0, openPanels: lvNames }),
+        '/meal-plan',
+      )?.openPanels,
+      lvNames,
+    )
+    // 献立は縦位置を自前で覚えている（WeekReturnPoint / ViewReturnPoint）ので、
+    // こちらの縦位置は 0 で書く＝2つの仕組みが同じ画面を別々の場所へ動かさない
+    // 出所（どこから来たか）も覚えに載せる。設定の「◯◯に戻る」は履歴の付け足しを持たずに
+    // 移るので、これが無いと寄り道のあとだけ「戻る」が行き先を見失う（2026-08-28 実測）
+    eq(
+      'LV-1 出所も覚えに載せて読み戻せる',
+      parseScreenReturn(
+        serializeScreenReturn({
+          path: '/recipes/12',
+          scrollY: 0,
+          back: { from: 'mealPlanWeek', fromPath: '/meal-plan?focus=week&restore=1' },
+        }),
+        '/recipes/12',
+      )?.back,
+      { from: 'mealPlanWeek', fromPath: '/meal-plan?focus=week&restore=1' },
+    )
+    // 履歴の付け足しには別の形のものも入る（例 { toast }）。2つとも文字のときだけ受け取る
+    eq('LV-1 出所の形をしていない付け足しは受け取らない', pickScreenReturnBack({ toast: 'ok' }), null)
+    eq('LV-1 付け足しが無くても落ちない', pickScreenReturnBack(null), null)
+    // 外のサイトへ飛ばす踏み台にしない（backLink の isInAppPath と同じ判定）
+    eq(
+      'LV-1 アプリの外へ帰る出所は受け取らない',
+      [
+        pickScreenReturnBack({ from: 'x', fromPath: '//evil.example.com' }),
+        pickScreenReturnBack({ from: 'x', fromPath: 'https://evil.example.com' }),
+      ],
+      [null, null],
+    )
+    eq(
+      'LV-1 献立の覚えは縦位置を持たない（0で書いても折りたたみは残る）',
+      parseScreenReturn(
+        serializeScreenReturn({ path: '/meal-plan', scrollY: 0, openPanels: lvNames }),
+        '/meal-plan',
+      )?.scrollY,
+      0,
     )
   }
 }

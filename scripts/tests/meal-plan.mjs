@@ -4003,3 +4003,75 @@ eq('rangeDayCount: 月をまたぐ計算も正しい', rangeDayCount('2026-06-28
   )
 }
 
+
+// ==========================================================================================
+// 便LV（2026-08-28）
+//  LV-2 「足すだけの操作」の確認の窓が、テンプレートとコピーで**そろっている**
+//
+// 便LTからの申し送り:「templateApplyConfirm『すでに入っている献立は消えません。』は、
+// 規約Fの例外（2026-08-25 オーナー裁定D）が同じように当てはまります。
+// コピー側（copyWeekConfirm）は外したのに、テンプレート側だけ残っているので、
+// 2つの確認がそろっていません。」
+//
+// 確かめたこと（2026-08-28 便LV）: planTemplateFill（logic/mealTemplate.ts）が返すのは
+// **足す ops だけ**で、消す行を1つも返さない＝上書きも削除もしない。
+// 見出しも「まだ決まっていない食事に入れます」と入る先を言い切っているので、
+// 「すでに入っている献立は消えません」は見出しからそのまま読める。よって本文を外した。
+//
+// 測るのは「2つの操作の作りがそろっているか」＝どちらかだけを書き戻したら赤くなる形にする。
+// ==========================================================================================
+{
+  eq(
+    'LV-2 足すだけの2つの操作（テンプレート・過去の献立のコピー）が、どちらも本文を持たない',
+    ['templateApplyConfirm' in ja.mealPlan, 'copyWeekConfirm' in ja.mealPlan],
+    [false, false],
+  )
+  eq(
+    'LV-2 どちらの見出しも、入る先を「まだ決まっていない」と言い切る',
+    [
+      ja.mealPlan.templateApplyConfirmTitle.includes('まだ決まっていない'),
+      ja.mealPlan.copyWeekConfirmTitle.includes('まだ決まっていない'),
+    ],
+    [true, true],
+  )
+  eq(
+    'LV-2 どちらの見出しも、入る品数を数で言う（規約F: 何が起きるかは件数つきで）',
+    [
+      ja.mealPlan.templateApplyConfirmTitle.includes('{n}'),
+      ja.mealPlan.copyWeekConfirmTitle.includes('{n}'),
+    ],
+    [true, true],
+  )
+  // 実装の側でも本文を渡していない（文言だけ消して、画面には別の字が残る形にしない）
+  {
+    const lvPlanState = readFileSync(
+      path.join(path.dirname(fileURLToPath(scriptFileUrl)), '..', 'src/pages/mealPlan/useMealPlanState.ts'),
+      'utf-8',
+    )
+    const lvCopyPage = readFileSync(
+      path.join(path.dirname(fileURLToPath(scriptFileUrl)), '..', 'src/pages/MealPlanCopyWeekPage.tsx'),
+      'utf-8',
+    )
+    eq(
+      'LV-2 テンプレートを入れる確認は、見出しと「入れる」だけで組み立てる',
+      /title: ja\.mealPlan\.templateApplyConfirmTitle[\s\S]{0,200}?body: '',/.test(lvPlanState),
+      true,
+    )
+    eq(
+      'LV-2 コピーの確認も同じ組み立て（片方だけ本文が復活していない）',
+      /title: withDates\(ja\.mealPlan\.copyWeekConfirmTitle\)[\s\S]{0,200}?body: '',/.test(lvCopyPage),
+      true,
+    )
+  }
+  // 鍵の掛かった食事の一言（見出しから読めないこと）は、今までどおり添える
+  eq(
+    'LV-2 見出しから読めないこと（鍵の掛かった食事）は書き続ける',
+    /notes: lockNotice \? \[lockNotice\] : \[\],/.test(
+      readFileSync(
+        path.join(path.dirname(fileURLToPath(scriptFileUrl)), '..', 'src/pages/mealPlan/useMealPlanState.ts'),
+        'utf-8',
+      ),
+    ),
+    true,
+  )
+}

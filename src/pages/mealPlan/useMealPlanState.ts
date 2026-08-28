@@ -188,12 +188,15 @@ import type {
 import {
   DAY_RETURN_KEY,
   DAY_SUGGEST_PIN_KEY,
+  MEAL_PLAN_PANEL_KEY,
   MEAL_PLAN_TAB_TAP_KEY,
   MONTH_RETURN_KEY,
+  SCREEN_PANEL,
   WEEK_RETURN_KEY,
   WEEK_RETURN_PARAM,
   type ReturnAnchor,
   forgetRecipesTabPath,
+  parseScreenReturn,
   parseSuggestionPin,
   parseSuggestionPlanPin,
   parseViewReturn,
@@ -201,7 +204,9 @@ import {
   pickReturnAnchor,
   readSessionItem,
   removeSessionItem,
+  screenPanelName,
   scrollTargetForAnchor,
+  serializeScreenReturn,
   serializeSuggestionPin,
   serializeViewReturn,
   serializeWeekReturn,
@@ -303,6 +308,31 @@ export function useMealPlanState(demo?: MonthDemoData) {
   const dbDetachedEntries = useDetachedLogEntries()
   const detachedEntries = isDemo ? EMPTY_DETACHED_ENTRIES : dbDetachedEntries
   const [searchParams, setSearchParams] = useSearchParams()
+  /**
+   * 設定・買い物メモ・作った記録などへ寄り道して帰ってきたとき、**離れる直前に開いていた
+   * 折りたたみ**の名前（2026-08-28 便LV・便LUからの申し送り）。
+   *
+   * オーナー原文（2026-08-27・便LUが受けた書き溜め）:
+   * 「各種pro版について見るからの戻り先、献立ならすべて日に戻ってしまう。直前の状態に戻して。
+   *  折りたたみが閉じてしまう、スクロール場所がズレるのもやめて。」
+   * 便LUで「どのタブ・どの週・どの縦位置」までは帰るようになったが、**折りたたみは閉じたまま**
+   * だった。実測（2026-08-28・週タブ）: 栄養パネルの中の「Pro版について見る」から設定へ移り
+   * 「献立に戻る」で帰ると、開いていた6つの節と栄養パネルがすべて畳まれていた。
+   *
+   * 覚える形は画面をまたぐ共通の覚え（logic/navMemory.ts の ScreenReturnPoint）に載せる。
+   * 縦位置はこの画面が自前で覚えている（WeekReturnPoint / ViewReturnPoint）ので、
+   * そちらとぶつからないよう **scrollY は 0 で書き、折りたたみの名前だけを使う**。
+   *
+   * 読むのは**最初の描画のとき1回だけ**（効果ではなく状態の初期値）。折りたたみは
+   * 最初の描画から開いた形にしたいので、あとから開き直すと一瞬畳まれて見える。
+   */
+  const [restoredPanels] = useState<string[]>(() =>
+    searchParams.get(WEEK_RETURN_PARAM) === '1'
+      ? (parseScreenReturn(readSessionItem(MEAL_PLAN_PANEL_KEY), location.pathname)?.openPanels ?? [])
+      : [],
+  )
+  /** 離れる直前にその折りたたみが開いていたか（最初の描画から答えられる） */
+  const wasPanelOpen = (name: string) => restoredPanels.includes(name)
   const dbSettings = useSettings()
   /** デモ中の設定はメモリだけに持つ（カレンダーの表示切替などをその場で試せるようにするため） */
   const [demoSettings, setDemoSettings] = useState<Settings | undefined>(() => demo?.settings)
@@ -1042,15 +1072,22 @@ export function useMealPlanState(demo?: MonthDemoData) {
    * 何がそこにあるかは畳んだ状態でも読める。
    * 開閉は画面を離れると既定に戻す（設定には残さない）＝週タブの操作3グループ（便DJ）と同じ作法。
    */
-  const [monthCostCardOpen, setMonthCostCardOpen] = useState(false)
-  const [monthNutritionCardOpen, setMonthNutritionCardOpen] = useState(false)
+  // 2026-08-28 便LV: 寄り道から帰ってきたときだけ、離れる直前の開閉に戻す（既定は畳んだまま）
+  const [monthCostCardOpen, setMonthCostCardOpen] = useState(() =>
+    wasPanelOpen(SCREEN_PANEL.mealPlanMonthCost),
+  )
+  const [monthNutritionCardOpen, setMonthNutritionCardOpen] = useState(() =>
+    wasPanelOpen(SCREEN_PANEL.mealPlanMonthNutrition),
+  )
   /**
    * 献立を入れる操作の折りたたみ（2026-08-26 便LH・オーナー原文「献立関連のボタンが
    * バラバラに配置してあるように見えるので、１グループにまとめて。折りたたみの見える部分は
    * 「献立をまとめて提案」のみ。」）。既定は畳む＝週タブの操作グループと同じ作法で、
    * 畳んでいても「献立をまとめて提案」だけは折りたたみの外に出したままにする。
    */
-  const [monthPlanGroupOpen, setMonthPlanGroupOpen] = useState(false)
+  const [monthPlanGroupOpen, setMonthPlanGroupOpen] = useState(() =>
+    wasPanelOpen(SCREEN_PANEL.mealPlanMonthGroup),
+  )
   /* ------------------------------------------------------------------
      食費・栄養のカードが見せる中身（2026-08-26 便LH）。
      「期間で絞る」で期間がそろっているあいだは選んだ期間の集計、ふだんは表示している月の集計。
@@ -1358,6 +1395,9 @@ export function useMealPlanState(demo?: MonthDemoData) {
   useEffect(() => {
     if (initialFocusRef.current) return
     initialFocusRef.current = true
+    // 2026-08-28 便LV: 折りたたみの覚え（restoredPanels）は最初の描画で読み終えているので、
+    // ここで捨てる＝次にこの画面を素で開いたときに、前の開閉が蘇らない
+    if (searchParams.get(WEEK_RETURN_PARAM) === '1') removeSessionItem(MEAL_PLAN_PANEL_KEY)
     const focus = searchParams.get('focus')
     // 2026-08-17 便HI（オーナー実機「ページ開いた時に、基本的にページのいちばん上を表示して」）:
     // 行き先の指定なしで開いたとき（アプリを開いた・他のタブから来た）は、必ず先頭から見せる。
@@ -3731,17 +3771,15 @@ export function useMealPlanState(demo?: MonthDemoData) {
       )
       return
     }
-    // 規約F: 何品がどこに入るかと、何が消えないかを件数つきで両方書く
+    // 規約F: 何品がどこに入るかを見出しで言い切る。
+    // 2026-08-28 便LV: 本文（旧 templateApplyConfirm「すでに入っている献立は消えません。」）を
+    // 外した＝「過去の献立をコピー」（便LT）と同じ扱い。理由は i18n/ja.ts の
+    // templateApplyConfirmOk の手前に書いてある
     const ok = await confirm({
       title: ja.mealPlan.templateApplyConfirmTitle
         .replace('{name}', template.name)
         .replace('{n}', String(plan.ops.length)),
-      /* 本文は「今ある献立には触らない」の1つだけ（2026-08-26 便LH・オーナー原文
-         「『すでに決まっている◯品と、その他の献立は消えません。』→
-           『すでに入っている献立は消えません。』ではないの？どういう意味なのかわからない。」）。
-         残る品数（旧 {k}）と、残る枠があるかないかでの言い分けは落とした＝
-         入る先は「まだ決まっていない食事」だけなので、今ある献立はどのみち全部残る */
-      body: ja.mealPlan.templateApplyConfirm,
+      body: '',
       notes: lockNotice ? [lockNotice] : [],
       confirmLabel: ja.mealPlan.templateApplyConfirmOk,
     })
@@ -3938,6 +3976,7 @@ export function useMealPlanState(demo?: MonthDemoData) {
    * 覚えるのは sessionStorage だけ＝端末に残るユーザーデータには何も書かない。
    */
   const rememberWeekReturn = () => {
+    rememberOpenPanels()
     // 2026-08-14 便GH: 縦位置に加えて「上端が見えているいちばん上の曜日カード」も覚える。
     // 選び方の理由は logic/navMemory.ts の pickReturnAnchor に書いてある
     const cards = [...document.querySelectorAll<HTMLElement>('section[data-date]')].map((el) => ({
@@ -3969,6 +4008,7 @@ export function useMealPlanState(demo?: MonthDemoData) {
    * 帰ってくるので、上の初期化処理が同じ月・同じ縦位置まで戻す。
    */
   const rememberMonthReturn = () => {
+    rememberOpenPanels()
     writeSessionItem(
       MONTH_RETURN_KEY,
       serializeViewReturn({
@@ -3981,6 +4021,7 @@ export function useMealPlanState(demo?: MonthDemoData) {
     )
   }
   const rememberDayReturn = () => {
+    rememberOpenPanels()
     writeSessionItem(DAY_RETURN_KEY, serializeViewReturn({ anchor: '', scrollY: window.scrollY }))
   }
 
@@ -4060,9 +4101,67 @@ export function useMealPlanState(demo?: MonthDemoData) {
    * 畳んでいても押すものが画面から消えない。
    * 既定の値そのものは logic/mealPlan.ts の WEEK_GROUP_DEFAULT_OPEN が持つ（見張れる形にする）。
    */
-  const [weekGroupOpen, setWeekGroupOpen] = useState<Record<keyof typeof WEEK_GROUP_DEFAULT_OPEN, boolean>>({
-    ...WEEK_GROUP_DEFAULT_OPEN,
-  })
+  const [weekGroupOpen, setWeekGroupOpen] = useState<Record<keyof typeof WEEK_GROUP_DEFAULT_OPEN, boolean>>(
+    () => {
+      // 2026-08-28 便LV: 寄り道から帰ってきたときだけ、離れる直前の開閉に戻す。
+      // 節の名前でひとつずつ見る＝節が増えても、並び順が変わっても同じ形で戻る
+      const restored = { ...WEEK_GROUP_DEFAULT_OPEN } as Record<
+        keyof typeof WEEK_GROUP_DEFAULT_OPEN,
+        boolean
+      >
+      for (const key of Object.keys(restored) as (keyof typeof WEEK_GROUP_DEFAULT_OPEN)[]) {
+        if (wasPanelOpen(screenPanelName(SCREEN_PANEL.mealPlanWeekGroup, key))) restored[key] = true
+      }
+      return restored
+    },
+  )
+
+  /**
+   * 栄養バランスのパネル（NutritionBalancePanel）の開閉（2026-08-28 便LV）。
+   *
+   * このパネルは週まとめに1つ、曜日カードに7つ出る。以前はパネルが自分で覚えていたので、
+   * **パネルの中の「Pro版について見る」から設定へ移って帰ると、そのパネルが畳まれていた**
+   * （実測 2026-08-28: 離れる前=開・帰ったあと=閉）。押した本人が開いた折りたたみなので、
+   * 画面の他の折りたたみと同じ覚え（ScreenReturnPoint）に預ける。
+   *
+   * 鍵は「週まとめか、どの日か」を指す名前（screenPanelName）。並び順では持たない
+   * ＝表示する曜日が変わっても、同じ日のパネルが同じ名前で戻る。
+   */
+  const [nutritionPanelOpen, setNutritionPanelOpen] = useState<Record<string, boolean>>(() =>
+    Object.fromEntries(
+      restoredPanels
+        .filter((name) => name.startsWith(`${SCREEN_PANEL.mealPlanNutritionPanel}:`))
+        .map((name) => [name, true]),
+    ),
+  )
+  /** 栄養バランスのパネル1枚を指す名前。週まとめは 'week'、曜日カードはその日の日付 */
+  const nutritionPanelName = (id: string) =>
+    screenPanelName(SCREEN_PANEL.mealPlanNutritionPanel, id)
+  const setNutritionPanelExpanded = (name: string, next: boolean) =>
+    setNutritionPanelOpen((prev) => ({ ...prev, [name]: next }))
+
+  /**
+   * 離れる直前に開いていた折りたたみを覚える（2026-08-28 便LV）。
+   * 下の remember◯◯Return（週・月・日）すべてから呼ぶ＝**この画面を離れる道は1本にまとめる**。
+   * 縦位置は各タブの覚えが持つので、ここでは 0 を書いて折りたたみの名前だけを使う。
+   */
+  const rememberOpenPanels = () => {
+    const open = [
+      ...(Object.keys(weekGroupOpen) as (keyof typeof WEEK_GROUP_DEFAULT_OPEN)[])
+        .filter((key) => weekGroupOpen[key])
+        .map((key) => screenPanelName(SCREEN_PANEL.mealPlanWeekGroup, key)),
+      ...(monthPlanGroupOpen ? [SCREEN_PANEL.mealPlanMonthGroup] : []),
+      ...(monthNutritionCardOpen ? [SCREEN_PANEL.mealPlanMonthNutrition] : []),
+      ...(monthCostCardOpen ? [SCREEN_PANEL.mealPlanMonthCost] : []),
+      ...Object.entries(nutritionPanelOpen)
+        .filter(([, isOpen]) => isOpen)
+        .map(([name]) => name),
+    ]
+    writeSessionItem(
+      MEAL_PLAN_PANEL_KEY,
+      serializeScreenReturn({ path: location.pathname, scrollY: 0, openPanels: open }),
+    )
+  }
 
   /**
    * 「まとめて献立を入力」が何をするか（2026-08-07 便DT-8・オーナー指示）。
@@ -4590,6 +4689,7 @@ export function useMealPlanState(demo?: MonthDemoData) {
     setAllDaysFolded, allDaysCollapsed, allDaysLocked, rememberWeekReturn, rememberMonthReturn,
     rememberDayReturn, logDetailLinkState, rememberLogDetailReturn, proGateDetour, historyToastActive,
     openHistoryFromToast, weekGroupOpen, setWeekGroupOpen, fillMode, setFillMode, clearSlotTargets,
+    nutritionPanelOpen, nutritionPanelName, setNutritionPanelExpanded,
     toggleClearSlotTarget, clearSlotLabel, clearWeekSlot, includeRice, weekCostEstimate, riceYen,
     riceCostServings, weekCost, weekMealCount, weekPricelessCount, weekBalanceByDate, weekBalance,
     weekSlotBalanceByDate, weeklyBudget, budgetDiff, hasPricedRecipe, shopSelectableDates,
