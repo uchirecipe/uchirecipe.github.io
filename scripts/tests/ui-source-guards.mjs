@@ -3481,18 +3481,26 @@ import { createRequire } from 'node:module'
     ),
     true,
   )
+  // 形は共通でも、**しまう場所は献立専用**にする。同じキーだと、途中にはさんだ画面
+  // （レシピ詳細のPro案内）の覚えが献立の覚えを上書きし、節だけが畳まれて帰る
+  // （2026-08-28 に実測: 週と縦位置は戻るのに開いていた6つが0になった）
+  eq(
+    'LV-3 折りたたみの覚えは献立専用のキーに置く（途中の画面に上書きされない）',
+    lvState.includes('MEAL_PLAN_PANEL_KEY') && !lvState.includes('SCREEN_RETURN_KEY'),
+    true,
+  )
 
   // --- 戻す側: 最初の描画から開いた形にする（あとから開き直すと一瞬畳まれて見える） ---
   eq(
     'LV-3 覚えを読むのは最初の描画のとき1回だけ（効果ではなく状態の初期値）',
-    /const \[restoredPanels\] = useState<string\[\]>\(\(\) =>[\s\S]{0,300}?parseScreenReturn\(readSessionItem\(SCREEN_RETURN_KEY\), location\.pathname\)/.test(
+    /const \[restoredPanels\] = useState<string\[\]>\(\(\) =>[\s\S]{0,300}?parseScreenReturn\(readSessionItem\(MEAL_PLAN_PANEL_KEY\), location\.pathname\)/.test(
       lvState,
     ),
     true,
   )
   eq(
     'LV-3 読んだ覚えは捨てる（次にこの画面を素で開いたときに蘇らない）',
-    /if \(searchParams\.get\(WEEK_RETURN_PARAM\) === '1'\) removeSessionItem\(SCREEN_RETURN_KEY\)/.test(
+    /if \(searchParams\.get\(WEEK_RETURN_PARAM\) === '1'\) removeSessionItem\(MEAL_PLAN_PANEL_KEY\)/.test(
       lvState,
     ),
     true,

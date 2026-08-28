@@ -503,10 +503,60 @@ export interface ScreenReturnPoint {
   scrollY: number
   /** 離れたときに開いていた折りたたみの名前（閉じていたものは入れない） */
   openPanels?: string[]
+  /**
+   * 離れたときに「この画面はどこから来たか」（2026-08-28 便LV）。
+   *
+   * 直したバグ（実測 2026-08-28）: 献立の週タブからレシピ詳細を開くと、出所は
+   * **画面の履歴の付け足し（location.state）**にだけ載っている
+   * （`{"from":"mealPlanWeek","fromPath":"/meal-plan?focus=week&restore=1"}`）。
+   * そこから「Pro版について見る」で設定へ寄り道して帰ると、設定の「レシピに戻る」は
+   * `navigate(backTarget.to)` で**付け足しを持たずに**移るので、帰り着いた詳細では
+   * `location.state` が **null** になる。詳細の「戻る」は出所が読めず、
+   * 献立ではなく**レシピ一覧**へ着地していた（2段・3段と重ねても同じ）。
+   *
+   * `?back=` が運べるのは行き先のパスだけなので、出所はこの覚えに一緒に載せて帰す。
+   * 覚えは寄り道1回きり（読んだら捨てる）なので、深く重ねても最後に覚えたものが正しく残る。
+   */
+  back?: ScreenReturnBack
+}
+
+/** 「この画面はどこから来たか」（react-router の location.state に載せている形と同じ） */
+export interface ScreenReturnBack {
+  /** 出所の呼び名（例 'mealPlanWeek'）。受け取る画面がこの字で行き先を決める */
+  from: string
+  /** 帰り先のパス（アプリ内・`/` 始まり） */
+  fromPath: string
+}
+
+/**
+ * 画面の履歴の付け足し（location.state）から、出所だけを取り出す（2026-08-28 便LV）。
+ * 付け足しには別の形のもの（例 `{ toast }`）も入るので、**2つとも文字で、
+ * 帰り先がアプリ内のパス**のときだけ受け取る（外へ飛ばす踏み台にしない＝backLink と同じ判定）。
+ */
+export function pickScreenReturnBack(state: unknown): ScreenReturnBack | null {
+  if (typeof state !== 'object' || state === null) return null
+  const { from, fromPath } = state as { from?: unknown; fromPath?: unknown }
+  if (typeof from !== 'string' || from === '') return null
+  if (typeof fromPath !== 'string' || !fromPath.startsWith('/') || fromPath.startsWith('//')) {
+    return null
+  }
+  return { from, fromPath }
 }
 
 /** 設定へ寄り道するときに居場所を覚えるキー */
 export const SCREEN_RETURN_KEY = 'screen:return'
+
+/**
+ * 献立の画面が「開いていた折りたたみ」を覚えるキー（2026-08-28 便LV）。
+ *
+ * 形は上の ScreenReturnPoint と同じだが、**しまう場所だけ分ける**。
+ * 献立は寄り道の途中に別の画面をはさむ（献立 → レシピ詳細 → そのレシピのPro案内 → 詳細 →
+ * 「戻る」→ 献立）ことがあり、同じキーだと**途中の画面の覚えが献立の覚えを上書き**する。
+ * 実測（2026-08-28）: この道を通ると、週と縦位置は戻る（別のキーで持っているため）のに
+ * **節だけが畳まれて帰っていた**（開いていた6つが0）。
+ * 献立がすでに週・月・日で別のキーを持っているのと同じ作法にそろえる。
+ */
+export const MEAL_PLAN_PANEL_KEY = 'mealPlan:panels'
 
 /**
  * 折りたたみの名前。覚える側と戻す側で同じ字を使うために1か所で持つ
@@ -548,11 +598,14 @@ export function screenPanelName(panel: string, id: string): string {
 
 export function serializeScreenReturn(point: ScreenReturnPoint): string {
   const openPanels = point.openPanels ?? []
+  const back = pickScreenReturnBack(point.back)
   return JSON.stringify({
     path: point.path,
     scrollY: Math.max(0, Math.round(point.scrollY)),
     // 1つも開いていなければ書かない（以前の版と同じ形のまま）
     ...(openPanels.length > 0 ? { openPanels } : {}),
+    // 出所が分からない画面（レシピ一覧から開いた等）では書かない
+    ...(back ? { back } : {}),
   })
 }
 
@@ -574,10 +627,11 @@ export function parseScreenReturn(
     return null
   }
   if (typeof parsed !== 'object' || parsed === null) return null
-  const { path, scrollY, openPanels } = parsed as {
+  const { path, scrollY, openPanels, back } = parsed as {
     path?: unknown
     scrollY?: unknown
     openPanels?: unknown
+    back?: unknown
   }
   if (typeof path !== 'string' || path === '' || path !== forPath) return null
   if (typeof scrollY !== 'number' || !Number.isFinite(scrollY) || scrollY < 0) return null
@@ -585,10 +639,12 @@ export function parseScreenReturn(
   const panels = Array.isArray(openPanels)
     ? openPanels.filter((name): name is string => typeof name === 'string' && name !== '')
     : []
+  const backPoint = pickScreenReturnBack(back)
   return {
     path,
     scrollY: Math.round(scrollY),
     ...(panels.length > 0 ? { openPanels: panels } : {}),
+    ...(backPoint ? { back: backPoint } : {}),
   }
 }
 

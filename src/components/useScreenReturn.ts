@@ -5,6 +5,7 @@ import {
   SCREEN_RETURN_KEY,
   WEEK_RETURN_PARAM,
   parseScreenReturn,
+  pickScreenReturnBack,
   readSessionItem,
   removeSessionItem,
   serializeScreenReturn,
@@ -47,10 +48,22 @@ export function useSettingsDetour() {
     (openPanels: string[] = [], scrollY: number = window.scrollY) => {
       writeSessionItem(
         SCREEN_RETURN_KEY,
-        serializeScreenReturn({ path: location.pathname, scrollY, openPanels }),
+        serializeScreenReturn({
+          path: location.pathname,
+          scrollY,
+          openPanels,
+          /**
+           * 「この画面はどこから来たか」も一緒に覚える（2026-08-28 便LV）。
+           * 出所は画面の履歴の付け足し（location.state）にしか無く、設定の「◯◯に戻る」は
+           * 付け足しを持たずに移るので、寄り道から帰ると**出所が消えて**いた
+           * （実測: 献立→レシピ詳細→Pro案内→詳細で state が null になり、詳細の「戻る」が
+           *   献立ではなくレシピ一覧へ着地した）。ここで控えて、下の側で付け直す。
+           */
+          back: pickScreenReturnBack(location.state) ?? undefined,
+        }),
       )
     },
-    [location.pathname],
+    [location.pathname, location.state],
   )
 
   return { linkTo, remember }
@@ -98,7 +111,19 @@ export function useScreenReturn(): ScreenReturn {
         next.delete(WEEK_RETURN_PARAM)
         return next
       },
-      { replace: true },
+      /**
+       * 印を消すついでに、**覚えていた出所を履歴の付け足しへ戻す**（2026-08-28 便LV）。
+       *
+       * 設定の「◯◯に戻る」は `navigate(backTarget.to)` で移るので、帰り着いた画面の
+       * `location.state` は null になる。出所をそこから読んでいる画面（レシピ詳細の
+       * 「戻る」）は、寄り道のあとだけ行き先を見失っていた。
+       * ここで元の形のまま付け直す＝**読む側は今までどおり `location.state` を読むだけ**で、
+       * 画面ごとに新しい読み方を足さない。
+       *
+       * これで**何段重ねても**元に戻る: 付け直した付け足しを、次の寄り道の `remember` が
+       * そのまま覚えるので、2段目・3段目でも同じ出所が運ばれる。
+       */
+      { replace: true, state: point?.back ?? null },
     )
     // 画面に着いた直後の1回だけ（consumedRef）。消した印をもう一度読ませない
     // eslint-disable-next-line react-hooks/exhaustive-deps

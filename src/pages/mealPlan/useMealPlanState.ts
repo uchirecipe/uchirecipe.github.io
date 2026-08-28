@@ -188,10 +188,10 @@ import type {
 import {
   DAY_RETURN_KEY,
   DAY_SUGGEST_PIN_KEY,
+  MEAL_PLAN_PANEL_KEY,
   MEAL_PLAN_TAB_TAP_KEY,
   MONTH_RETURN_KEY,
   SCREEN_PANEL,
-  SCREEN_RETURN_KEY,
   WEEK_RETURN_KEY,
   WEEK_RETURN_PARAM,
   type ReturnAnchor,
@@ -328,7 +328,7 @@ export function useMealPlanState(demo?: MonthDemoData) {
    */
   const [restoredPanels] = useState<string[]>(() =>
     searchParams.get(WEEK_RETURN_PARAM) === '1'
-      ? (parseScreenReturn(readSessionItem(SCREEN_RETURN_KEY), location.pathname)?.openPanels ?? [])
+      ? (parseScreenReturn(readSessionItem(MEAL_PLAN_PANEL_KEY), location.pathname)?.openPanels ?? [])
       : [],
   )
   /** 離れる直前にその折りたたみが開いていたか（最初の描画から答えられる） */
@@ -1397,7 +1397,7 @@ export function useMealPlanState(demo?: MonthDemoData) {
     initialFocusRef.current = true
     // 2026-08-28 便LV: 折りたたみの覚え（restoredPanels）は最初の描画で読み終えているので、
     // ここで捨てる＝次にこの画面を素で開いたときに、前の開閉が蘇らない
-    if (searchParams.get(WEEK_RETURN_PARAM) === '1') removeSessionItem(SCREEN_RETURN_KEY)
+    if (searchParams.get(WEEK_RETURN_PARAM) === '1') removeSessionItem(MEAL_PLAN_PANEL_KEY)
     const focus = searchParams.get('focus')
     // 2026-08-17 便HI（オーナー実機「ページ開いた時に、基本的にページのいちばん上を表示して」）:
     // 行き先の指定なしで開いたとき（アプリを開いた・他のタブから来た）は、必ず先頭から見せる。
@@ -4158,7 +4158,7 @@ export function useMealPlanState(demo?: MonthDemoData) {
         .map(([name]) => name),
     ]
     writeSessionItem(
-      SCREEN_RETURN_KEY,
+      MEAL_PLAN_PANEL_KEY,
       serializeScreenReturn({ path: location.pathname, scrollY: 0, openPanels: open }),
     )
   }

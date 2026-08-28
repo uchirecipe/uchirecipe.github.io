@@ -194,3 +194,145 @@ import './_shared.mjs'
       await lvBrowser.close()
     }
   }
+
+  // ==========================================================================================
+  // LVBACK-01 入れ子で寄り道しても、「戻る」が自分の居た画面へ帰る
+  //
+  // 直したバグ（実測 2026-08-28）: 献立の週タブからレシピ詳細を開くと、出所は
+  // **履歴の付け足し（location.state）**にだけ載っている
+  //   {"from":"mealPlanWeek","fromPath":"/meal-plan?focus=week&restore=1"}
+  // ところが設定の「レシピに戻る」は付け足しを持たずに移るので、寄り道から帰った詳細では
+  // それが **null** になり、詳細の「戻る」が献立ではなく**レシピ一覧**へ着地していた。
+  // 2段でも3段でも同じで、重ねるほど帰れなくなる（オーナー報告「戻ってくる手段がない」の家族）。
+  //
+  // 測るのは「何段重ねても、押した人が自分の居た画面へ帰れるか」だけ。
+  // 重ねる回数は検査したいことそのものなので数を書くが、**2段と3段の両方**を当てる。
+  // ==========================================================================================
+  currentCheck = 'LVBACK-01'
+  {
+    const lbBrowser = await chromium.launch()
+    try {
+      const lbCtx = await lbBrowser.newContext({ viewport: { width: 390, height: 844 } })
+      const lbPage = await lbCtx.newPage()
+      lbPage.on('dialog', (d) => void d.accept())
+      lbPage.on('pageerror', (err) => errors.push(`[pageerror@LVBACK] ${err.message}`))
+
+      const lbGroupTitles = [
+        ja.mealPlan.weekGroupDisplayTitle,
+        ja.mealPlan.weekGroupAutoTitle,
+        ja.mealPlan.weekGroupTemplateTitle,
+        ja.mealPlan.weekGroupNutritionTitle,
+        ja.mealPlan.weekGroupCostTitle,
+        ja.mealPlan.weekGroupShoppingTitle,
+      ]
+      const lbOpenGroups = async () => {
+        const open = []
+        for (const title of lbGroupTitles) {
+          const name = ja.mealPlan.weekGroupToggleCloseAria.replace('{group}', title)
+          if ((await lbPage.getByRole('button', { name }).count()) > 0) open.push(title)
+        }
+        return open
+      }
+      /** 画面に出ている節を、まだ畳んでいるものだけ開く（すでに開いていれば押さない） */
+      const lbOpenAllGroups = async () => {
+        for (const title of lbGroupTitles) {
+          const opener = lbPage.getByRole('button', {
+            name: ja.mealPlan.weekGroupToggleOpenAria.replace('{group}', title),
+          })
+          if ((await opener.count()) > 0) {
+            await opener.first().click()
+            await lbPage.waitForTimeout(300)
+          }
+        }
+      }
+      /** レシピ詳細から「Pro版について見る」→ 設定 →「レシピに戻る」を1往復 */
+      const lbDetourOnce = async () => {
+        const expand = lbPage.getByRole('button', { name: ja.nutrition.toggleExpand })
+        if ((await expand.count()) > 0) {
+          await expand.first().click()
+          await lbPage.waitForTimeout(800)
+        }
+        const gate = lbPage.getByRole('link', { name: ja.nutrition.gateLink })
+        if ((await gate.count()) === 0) return false
+        await gate.first().scrollIntoViewIfNeeded()
+        await lbPage.waitForTimeout(300)
+        await gate.first().click()
+        await lbPage.waitForTimeout(1400)
+        const backToDetail = lbPage.getByRole('button', {
+          name: ja.backLink.backTo.replace('{page}', ja.backLink.recipeDetail),
+        })
+        if ((await backToDetail.count()) === 0) return false
+        await backToDetail.first().click()
+        await lbPage.waitForTimeout(2200)
+        return true
+      }
+      /** 献立の週タブ → 曜日カードのレシピ → 寄り道を times 回 →「戻る」 */
+      const lbRound = async (times) => {
+        await lbPage.goto(`${BASE}/#/meal-plan`)
+        await lbPage.waitForTimeout(2500)
+        await lbPage
+          .getByRole('button', { name: ja.mealPlan.viewWeek, exact: true })
+          .first()
+          .click()
+        await lbPage.waitForTimeout(1800)
+        await lbOpenAllGroups()
+        const opened = await lbOpenGroups()
+        const link = lbPage.locator('a[href^="#/recipes/"]').first()
+        await link.scrollIntoViewIfNeeded()
+        await lbPage.waitForTimeout(300)
+        await link.click()
+        await lbPage.waitForTimeout(2200)
+        let detoured = 0
+        for (let i = 0; i < times; i++) if (await lbDetourOnce()) detoured++
+        await lbPage.getByRole('button', { name: ja.common.back, exact: true }).first().click()
+        await lbPage.waitForTimeout(3500)
+        return { opened, detoured, url: lbPage.url(), back: await lbOpenGroups() }
+      }
+
+      await lbPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+      // 初回だけ出る案内（作る人数と台所の器具）が後ろの画面を固定するので、先に見た記録を残す
+      await lbPage.evaluate(() => localStorage.setItem('uchirecipe:firstSetupNoticeSeen', '1'))
+      await lbPage.reload({ waitUntil: 'networkidle' })
+      await lbPage.waitForTimeout(2500)
+      await lbPage.getByRole('button', { name: ja.mealPlan.viewWeek, exact: true }).first().click()
+      await lbPage.waitForTimeout(1500)
+      await lbPage.getByRole('button', { name: ja.mealPlan.fillWeek }).first().click()
+      await lbPage.waitForTimeout(3500)
+
+      for (const times of [1, 2]) {
+        const r = await lbRound(times)
+        check(
+          `LVBACK-01 前提: ${times + 1}段の寄り道を作れている（節も開いている）`,
+          r.detoured === times && r.opened.length > 0,
+          `寄り道=${r.detoured}/${times} 開いた節=${r.opened.join('・')}`,
+        )
+        check(
+          `LVBACK-01 ${times + 1}段まで重ねても「戻る」が献立へ帰る（レシピ一覧へ飛ばない）`,
+          r.url.includes('#/meal-plan'),
+          r.url,
+        )
+        check(
+          `LVBACK-01 ${times + 1}段まで重ねても、開いていた節がそのまま帰る`,
+          r.back.length > 0 && r.opened.every((t) => r.back.includes(t)),
+          `前=${r.opened.join('・')} 後=${r.back.join('・')}`,
+        )
+      }
+
+      // 出所の無い画面（レシピ一覧から開いた詳細）は、今までどおり一覧へ帰る
+      // ＝覚えが残っていても、別の画面の出所を勝手に名乗らない
+      await lbPage.goto(`${BASE}/#/recipes`)
+      await lbPage.waitForTimeout(2200)
+      await lbPage.locator('a[href^="#/recipes/"]').first().click()
+      await lbPage.waitForTimeout(2200)
+      const lbListDetoured = await lbDetourOnce()
+      await lbPage.getByRole('button', { name: ja.common.back, exact: true }).first().click()
+      await lbPage.waitForTimeout(2500)
+      check(
+        'LVBACK-01 出所の無い詳細は、寄り道のあとも今までどおりレシピ一覧へ帰る',
+        lbListDetoured && lbPage.url().includes('#/recipes') && !lbPage.url().includes('#/meal-plan'),
+        `寄り道=${lbListDetoured} 着いた先=${lbPage.url()}`,
+      )
+    } finally {
+      await lbBrowser.close()
+    }
+  }

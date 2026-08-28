@@ -34,6 +34,7 @@ import { settingsLinkWithBack, resolveBackTarget } from '../../src/logic/backLin
 import {
   SCREEN_PANEL,
   parseScreenReturn,
+  pickScreenReturnBack,
   screenPanelName,
   serializeScreenReturn,
   withScreenReturnParam,
@@ -1896,6 +1897,32 @@ eq('紫キャベツは紫カテゴリ(キャベツの野菜カテゴリより優
     )
     // 献立は縦位置を自前で覚えている（WeekReturnPoint / ViewReturnPoint）ので、
     // こちらの縦位置は 0 で書く＝2つの仕組みが同じ画面を別々の場所へ動かさない
+    // 出所（どこから来たか）も覚えに載せる。設定の「◯◯に戻る」は履歴の付け足しを持たずに
+    // 移るので、これが無いと寄り道のあとだけ「戻る」が行き先を見失う（2026-08-28 実測）
+    eq(
+      'LV-1 出所も覚えに載せて読み戻せる',
+      parseScreenReturn(
+        serializeScreenReturn({
+          path: '/recipes/12',
+          scrollY: 0,
+          back: { from: 'mealPlanWeek', fromPath: '/meal-plan?focus=week&restore=1' },
+        }),
+        '/recipes/12',
+      )?.back,
+      { from: 'mealPlanWeek', fromPath: '/meal-plan?focus=week&restore=1' },
+    )
+    // 履歴の付け足しには別の形のものも入る（例 { toast }）。2つとも文字のときだけ受け取る
+    eq('LV-1 出所の形をしていない付け足しは受け取らない', pickScreenReturnBack({ toast: 'ok' }), null)
+    eq('LV-1 付け足しが無くても落ちない', pickScreenReturnBack(null), null)
+    // 外のサイトへ飛ばす踏み台にしない（backLink の isInAppPath と同じ判定）
+    eq(
+      'LV-1 アプリの外へ帰る出所は受け取らない',
+      [
+        pickScreenReturnBack({ from: 'x', fromPath: '//evil.example.com' }),
+        pickScreenReturnBack({ from: 'x', fromPath: 'https://evil.example.com' }),
+      ],
+      [null, null],
+    )
     eq(
       'LV-1 献立の覚えは縦位置を持たない（0で書いても折りたたみは残る）',
       parseScreenReturn(
