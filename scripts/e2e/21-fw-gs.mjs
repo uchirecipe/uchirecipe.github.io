@@ -323,7 +323,9 @@ import './_shared.mjs'
       )
       check(
         'FW-03 リンク先の見出し（id="archive"）が実在する',
-        fwProBody.includes('id="archive"') && fwProBody.includes('古い記録の書き出し（端末を軽くする）'),
+        // 2026-08-29 便MH: 節の名前は ja.settings.archiveTitle が正（画面が「（アーカイブ）」に変わったのに
+        // ここが「（端末を軽くする）」を書き写したままで、説明書を画面に合わせた瞬間に落ちていた＝禁じ手②）
+        fwProBody.includes('id="archive"') && fwProBody.includes(ja.settings.archiveTitle),
       )
     } finally {
       await fwBrowser.close()
@@ -380,8 +382,9 @@ import './_shared.mjs'
       )
       check(
         'FW-04 どの「作った！」にも効くこと・レシピ詳細のスイッチと同じ設定であることが書いてある',
-        fpBoardText.includes('レシピ・献立・並行調理ナビのどの「作った！」でも同じように下がります') &&
-          fpBoardText.includes('レシピ詳細の「作った！」に出るスイッチと同じ設定です'),
+        // 2026-08-29: 画面の文言そのものを書き写していたので ja.ts から読む（禁じ手②）。
+        // 「出る」→「ある」に直した瞬間にここが落ちた
+        fpBoardText.includes(ja.pantry.cookedReflectScope),
       )
       // ONにすると設定に記憶される
       await fpSwitch.click()
@@ -1558,7 +1561,9 @@ import './_shared.mjs'
       )
       check(
         'GS-04 使い方ページに、声の案内が聞いている間だけ出ることが書いてある',
-        gsManual.includes('を押している間だけ出ます'),
+        // 2026-08-29: 語尾（「出ます」）まで書き写していたので、**事実（押している間だけ）**で見る形にした。
+        // 表記の基準で「出ます」→「表示します」にそろえた瞬間に落ちるのは、見張りが文体を縛っていたため（禁じ手②）
+        gsManual.includes('を押している間だけ'),
       )
     } finally {
       await gsBrowser.close()
