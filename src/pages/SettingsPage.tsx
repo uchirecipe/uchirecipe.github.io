@@ -286,6 +286,10 @@ const sectionDeepLinks: Record<string, string> = {
   // updateは2026-08-09 便ER: 新設した「アプリの更新」カードへ名前で飛べる値(?section=update)。
   // 画面下の更新のお知らせを閉じたあとでも、設定から最新にできる場所へ辿り着けるようにする
   update: 'app-update-section',
+  // archiveは2026-08-28 便LW: 「古い記録の書き出し」カードへ名前で飛べる値(?section=archive)。
+  // このカードの「詳しい説明を見る」から使い方ページへ移ったあと、元の場所へ帰るために要る
+  // (?section=backup で帰すと、畳んである別のカードの位置に着いて元の場所が分からない)
+  archive: 'archive-section',
 }
 
 // 各節の見出し(パーソナライズ/レシピ/バックアップ/Pro)の共通スタイル。節の区切りとして本文カードより一回り
@@ -2503,10 +2507,12 @@ export default function SettingsPage() {
             </button>
             <p className="mt-1 text-xs text-ink-muted">{ja.settings.archiveViewNote}</p>
 
-            {/* 詳しい説明は使い方ページに任せる(2026-08-12 便FW) */}
+            {/* 詳しい説明は使い方ページに任せる(2026-08-12 便FW)。
+                2026-08-28 便LW: 便LSがバックアップ側だけに入れた帰り道を、ここにも入れた
+                （受け取り側は public/about/app-return.js） */}
             <p className="mt-[var(--space-md)]">
               <a
-                href="/about/manual.html#archive"
+                href={aboutLinkWithReturn('/about/manual.html#archive', '/settings?section=archive')}
                 data-testid="archive-detail-link"
                 className="text-sm font-bold text-accent-ink underline"
               >
@@ -2752,12 +2758,22 @@ export default function SettingsPage() {
                     ))}
                   </div>
                   {/* 機能紹介の一番下に、詳しい説明への入口を1本置く(2026-08-12 便FW・オーナー指示)。
-                      行き先は使い方ページの「無料で使える範囲とPro版」 */}
+                      行き先は使い方ページの「無料で使える範囲とPro版」。
+                      2026-08-28 便LW（司令部の裁定）: この1本だけ別窓（target="_blank"）だったのを
+                      同じ窓へそろえ、?from= で帰り先を載せた。この画面の既定は同じ窓
+                      （すぐ下の「うちレシピについて」の注記のとおり、ホーム画面に追加したアプリの
+                      別窓はブラウザ側で開き、iOSではデータの置き場所が別になる）。
+                      下の未解錠側の2本は打ちかけの解錠コードを守るために別窓のままだが、
+                      ここは解錠済みの側で入力欄そのものが無く、守るものが無いまま例外になっていた。
+                      帰り先に ?section=pro を選んだのは実測から（390px・解錠済み。帰り着いたときの
+                      Pro版の枠の上端: ?section=pro=69px ／ ?section=なし=5,599px ／
+                      ?section=about=-755px）。この枠を名前で指すのは ?section=pro だけで、
+                      unlock.html・NutritionTeaser の既存の導線も同じ値を使っている。
+                      枠の頭に着くので、押したリンク自体は282px下（1画面は844px）＝
+                      読んでいた機能の一覧をたどって戻る形になる */}
                   <p className="mt-[var(--space-md)] border-t border-edge pt-[var(--space-sm)]">
                     <a
-                      href="/about/manual.html#pro"
-                      target="_blank"
-                      rel="noopener noreferrer"
+                      href={aboutLinkWithReturn('/about/manual.html#pro', '/settings?section=pro')}
                       data-testid="pro-detail-link-activated"
                       className="text-sm font-bold text-accent-ink underline"
                     >
@@ -2834,7 +2850,14 @@ export default function SettingsPage() {
 
                 <p className="mt-[var(--space-sm)] text-xs text-ink-muted">{ja.settings.proBuyNote}</p>
 
-                {/* 説明リンク1本と特商法表記(特商法表記は購入ボタンと同じ枠内に置く) */}
+                {/* 説明リンク1本と特商法表記(特商法表記は購入ボタンと同じ枠内に置く)。
+                    2026-08-28 便LW（司令部の裁定）: **この2本だけは別窓のまま**にしてある。
+                    理由は1つで、すぐ上（unlock-code-row）に解錠コードの入力欄があり、
+                    同じ窓で移ると**打ちかけのコードが消える**から。
+                    したがって ?from= の帰り道も載せない（別窓の行き先で帰り道を出すと、
+                    ホーム画面に追加したアプリではブラウザ側の別のうちレシピが開く）。
+                    **この画面の既定は同じ窓なので、揃えて直さないこと。**
+                    見張りは scripts/tests/ui-source-guards.mjs の LW-2 が持っている */}
                 <div className="mt-[var(--space-sm)] flex flex-wrap items-center gap-x-[var(--space-md)] gap-y-1">
                   <a
                     href="/about/manual.html#pro"
@@ -2934,9 +2957,10 @@ export default function SettingsPage() {
                   .replace('{r}', String(dataCounts.recipes))
                   .replace('{c}', String(dataCounts.cookedLogs))}
           </p>
-          {/* 別窓(target="_blank")にしない: iOSのホーム画面追加アプリはSafariとストレージが別のため */}
+          {/* 別窓(target="_blank")にしない: iOSのホーム画面追加アプリはSafariとストレージが別のため。
+              2026-08-28 便LW: 同じ画面へ帰れるように ?from= を載せる */}
           <a
-            href="/about/"
+            href={aboutLinkWithReturn('/about/', '/settings?section=about')}
             className="mt-[var(--space-sm)] flex w-full items-center justify-center gap-2 rounded-md border border-edge bg-surface py-3 font-bold text-accent-ink shadow-sm"
           >
             <Info size={18} aria-hidden />
@@ -2948,7 +2972,7 @@ export default function SettingsPage() {
           {!launchedFromHomeScreen && (
             <>
               <a
-                href="/about/install.html"
+                href={aboutLinkWithReturn('/about/install.html', '/settings?section=about')}
                 data-testid="settings-install-link"
                 className="mt-[var(--space-sm)] flex w-full items-center justify-center gap-2 rounded-md border border-edge bg-surface py-3 font-bold text-accent-ink shadow-sm"
               >
@@ -2961,7 +2985,7 @@ export default function SettingsPage() {
             </>
           )}
           <a
-            href="/about/terms.html"
+            href={aboutLinkWithReturn('/about/terms.html', '/settings?section=about')}
             className="mt-[var(--space-sm)] block text-center text-sm font-bold text-accent-ink underline"
           >
             {ja.settings.termsLink}

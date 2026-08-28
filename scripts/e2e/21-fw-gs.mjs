@@ -122,8 +122,18 @@ import './_shared.mjs'
       const fwProLink = fwPage.locator('[data-testid="pro-detail-link-activated"]')
       const fwProHref = (await fwProLink.count()) > 0 ? await fwProLink.getAttribute('href') : null
       check(
+        // 2026-08-28 便LW: このリンクは別窓をやめて帰り先（?from=）を載せたので、
+        // 行き先そのもの（パスと見出しの目印）で見る（完全一致だと帰り先の有無で落ちる）
         'FW-01 機能紹介の一番下にPro版の詳しい説明へのリンクがある',
-        fwProHref === '/about/manual.html#pro',
+        typeof fwProHref === 'string' &&
+          fwProHref.split('?')[0] === '/about/manual.html' &&
+          fwProHref.endsWith('#pro'),
+        String(fwProHref),
+      )
+      check(
+        'FW-01 そのリンクが、アプリへの帰り先を持っている（便LW）',
+        typeof fwProHref === 'string' &&
+          fwProHref.includes(`from=${encodeURIComponent('/settings?section=pro')}`),
         String(fwProHref),
       )
       check(
@@ -297,8 +307,18 @@ import './_shared.mjs'
       const fwArchiveHref =
         (await fwArchiveLink.count()) > 0 ? await fwArchiveLink.getAttribute('href') : null
       check(
+        // 2026-08-28 便LW: このリンクにも帰り先（?from=）が載ったので、FW-02 と同じく
+        // 行き先そのもの（パスと見出しの目印）で見る
         'FW-03 詳しい説明のリンクが使い方ページの「古い記録の書き出し」を指す',
-        fwArchiveHref === '/about/manual.html#archive',
+        typeof fwArchiveHref === 'string' &&
+          fwArchiveHref.startsWith('/about/manual.html') &&
+          fwArchiveHref.endsWith('#archive'),
+        String(fwArchiveHref),
+      )
+      check(
+        'FW-03 詳しい説明のリンクが、アプリへの帰り先を持っている（便LW）',
+        typeof fwArchiveHref === 'string' &&
+          fwArchiveHref.includes(`from=${encodeURIComponent('/settings?section=archive')}`),
         String(fwArchiveHref),
       )
       check(

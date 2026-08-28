@@ -435,6 +435,9 @@ ${aliasTable()}
 <!-- Cloudflare Web Analytics -->
 <script defer src='https://static.cloudflareinsights.com/beacon.min.js' data-cf-beacon='{"token": "9386f480590d44cdae47f8526841e1ab"}'></script>
 <!-- End Cloudflare Web Analytics -->
+<!-- アプリから来たときだけ「← うちレシピに戻る」を出す（2026-08-28 便LW）。
+     中身は public/about/app-return.js（11ページで共有・書き写しを作らない） -->
+<script defer src="/about/app-return.js"></script>
 </body>
 </html>
 `

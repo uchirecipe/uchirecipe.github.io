@@ -645,12 +645,15 @@ import './_shared.mjs'
       // (d) 設定「うちレシピについて」の「ホーム画面への追加方法」(便EIの導線追加)。
       // ブラウザのタブで開いている状態＝アイコン起動ではないので出る
       const installLink = eiPage.locator('[data-testid="settings-install-link"]')
+      // 2026-08-28 便LW: リンクに帰り先（?from=）が載るようになったので、**行き先のパス**で見る
+      // （完全一致だと帰り先の有無で落ちる。帰り先そのものの見張りは LW-01・LW-2）
+      const eiInstallHref = (await installLink.getAttribute('href')) ?? ''
       check(
         'EI-01(d) 設定に「ホーム画面への追加方法」のリンクがある',
         (await installLink.count()) === 1 &&
-          (await installLink.getAttribute('href')) === '/about/install.html' &&
+          eiInstallHref.split('?')[0] === '/about/install.html' &&
           stripZwspText(await installLink.innerText()).includes(ja.settings.installPageLink),
-        `件数=${await installLink.count()}`,
+        `件数=${await installLink.count()} href=${eiInstallHref}`,
       )
       check(
         'EI-01(d) 先に追加したほうがよい理由(iOSでデータが分かれる)が添えてある',
