@@ -615,6 +615,22 @@ export const SCREEN_PANEL = {
    * （週まとめは 'week'、曜日カードはその日の日付）。
    */
   mealPlanNutritionPanel: 'mealPlanNutritionPanel',
+  /**
+   * 設定の折りたたみ（2026-08-29 便MJ・司令部の裁定 2026-08-28
+   * 「開いていた折りたたみは、寄り道から帰っても開いたまま」）。
+   *
+   * 設定から説明ページ（/about/ 配下）へ移ると**アプリをいったん離れる**ので、
+   * 帰り着いた設定は既定の姿＝畳んだ状態で立ち上がっていた
+   * （`?section=archive` で帰っても「古い記録の書き出し」は畳まれている）。
+   * 便LVが献立側で通した原則を設定側にもそろえるために、名前をここに置く。
+   * **「既定は畳む」（便JJ・便LS）とは別のこと**で、素で設定を開いたときは今までどおり畳んだまま。
+   */
+  settingsBackupNotice: 'settingsBackupNotice',
+  settingsMoveGuide: 'settingsMoveGuide',
+  settingsArchive: 'settingsArchive',
+  settingsProFeatures: 'settingsProFeatures',
+  settingsAppUpdateDetail: 'settingsAppUpdateDetail',
+  settingsRefreshAppDetail: 'settingsRefreshAppDetail',
 } as const
 
 /**

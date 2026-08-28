@@ -490,6 +490,7 @@ try {
   await import('./e2e/29-lu.mjs')                      // 便LU（Pro案内からの戻り先・買い物メモの下書き・在庫のスイッチ）
   await import('./e2e/29-lv.mjs')                      // 便LV（献立の折りたたみを寄り道から帰っても開いたままにする）
   await import('./e2e/30-ma.mjs')                      // 便MA（栄養・テンプレートの戻り先／ひき肉の書き分けの絞り込み）
+  await import('./e2e/31-mj.mjs')                      // 便MJ（ひき肉の絞り込み／範囲えらびのチップ／設定の折りたたみの復元）
 } catch (err) {
   ng(`実行中断(${currentCheck})`, err.message)
 } finally {

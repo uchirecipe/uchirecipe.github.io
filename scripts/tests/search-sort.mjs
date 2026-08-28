@@ -1543,7 +1543,13 @@ import { readFileSync } from 'node:fs'
 
   // ② 広げすぎていないこと。**別の肉に当たるようにはしない**
   eq('MA-1 合いびきの絞り込みに、鶏や豚のひき肉は混ざらない', filterMaster('合い挽き肉').length, 1)
-  eq('MA-1 「ひき肉」で当たるのは、いままでと同じ2件のまま', filterMaster('ひき肉').length, 2)
+  // 2026-08-29 便MJ でここは 2件 → 3件 になった（合いびき肉が「ひき肉」で出るようになった）。
+  // 数だけでなく**顔ぶれ**を見る＝「増えた1件が合いびき肉であること」まで押さえる
+  eq('MA-1 「ひき肉」で当たるのは、マスタのひき肉3件', filterMaster('ひき肉').sort(), [
+    '合いびき肉',
+    '豚ひき肉',
+    '鶏ひき肉',
+  ])
   eq(
     'MA-1 マスタの名前で絞ると、必ずその名前自身が出る（辞書を足して自分を落とさない）',
     masterNames.filter((name) => !filterMaster(name).includes(name)).length,
@@ -1569,4 +1575,108 @@ import { readFileSync } from 'node:fs'
   )
   // 辞書を足したら READINGS_VERSION を上げる決まり（既存レシピの索引を作り直す引き金）
   eq('MA-1 読み仮名の版が9以上（辞書に足したら上げる決まり）', READINGS_VERSION >= 9, true)
+}
+
+
+// ---------- 便MJ（2026-08-29）: 「ひき肉」で絞ると合いびき肉だけ出なかった ----------
+//
+// 前の便（便MA）の申し送り:「『ひき肉』で絞ると今も合いびき肉は出ません
+// （キーが `あいびきにく` で `ひきにく` を含まないため）。広げるなら価格の解決と
+// 五十音順の並び位置に波及するので、単独で測ってから。」
+//
+// 直した中身: 読み仮名の辞書（src/logic/ingredientReadings.ts）で、合いびき肉の**集約先**が
+// 濁音の「あいびきにく」だったため、検索語「ひき肉」の照合キー「ひきにく」を含んでいなかった
+// （「あい**びき**にく」と「**ひき**にく」は1文字ずれる）。集約先を清音の「あいひきにく」に
+// 揃えた。この辞書の目的は読みの正しさではなく**同じ食材が同じキーに収束すること**なので
+// （ファイル冒頭の方針）、集約先が清音でも差し支えない。
+//
+// ここで見るのは4つ。①ひき肉の仲間が「ひき肉」で1つ残らず出る ②合いびき肉に届く書き方が
+// 全部つながっている ③**絞り込みが緩くなっていない**（合いびき肉が出る語が、ひき肉を指す語だけ）
+// ④便MAが名指しした2つの波及先（価格の解決・五十音順の並び位置）が動いていない。
+{
+  const { PRICE_DEFAULTS } = await import('../../src/data/priceDefaults.ts')
+  const { buildPriceIndex, matchPriceEntry } = await import('../../src/logic/priceEstimate.ts')
+  const masterNames = PRICE_DEFAULTS.map((e) => e.name)
+  const filterMaster = (query) => {
+    const q = toHiragana(query.trim())
+    return masterNames.filter((name) => toHiragana(name).includes(q))
+  }
+
+  // ① ひき肉の仲間が、どの書き方で絞っても1つ残らず出る
+  const MINCE_ROWS = ['合いびき肉', '豚ひき肉', '鶏ひき肉']
+  for (const spelling of ['ひき肉', '挽き肉', '挽肉', 'ひきにく']) {
+    eq(`MJ-1 「${spelling}」でマスタのひき肉が全部出る`, filterMaster(spelling).sort(), [...MINCE_ROWS].sort())
+  }
+  // ② 合いびき肉に届く書き方が、どれも同じ1件に着く（送り仮名・かな・濁点のちがいで切れない）
+  for (const spelling of [
+    '合いびき肉', '合い挽き肉', '合挽き肉', '合い挽肉', '合挽肉', 'あいびき肉', 'あいびきにく', 'あいびき',
+  ]) {
+    eq(`MJ-1 「${spelling}」で合いびき肉が出る`, filterMaster(spelling), ['合いびき肉'])
+  }
+
+  /*
+   * ③ **緩くなっていないこと**。合いびき肉が当たるのは「ひき肉を指す語」だけで、
+   * 別の食材を探しているときに割り込まない。
+   * 語彙は、実際に検索語として打たれうるものを全部（マスタの名前・成分表の食品名と別名・
+   * 同梱レシピの材料名・読み仮名辞書のキー）並べる＝**713語**。
+   * 直す前の実測では 430件がのべで当たり、直したあとは 435件（+5）。
+   * 増えたのは「ひき肉」「挽き肉」「挽肉」の3語に合いびき肉が1件ずつ（+3）と、
+   * 辞書に足したかな書きの受け皿2語ぶん（+2）だけで、**別の食材が当たるようになった語は0件**。
+   */
+  const { NUTRITION_DATA } = await import('../../src/logic/nutritionData.ts')
+  const { starterDefs } = await import('../../src/db/starters.ts')
+  const { INGREDIENT_READINGS } = await import('../../src/logic/ingredientReadings.ts')
+  const vocab = new Set(masterNames)
+  for (const food of NUTRITION_DATA.foods) {
+    vocab.add(food.label)
+    for (const alias of food.aliases ?? []) vocab.add(alias)
+  }
+  for (const def of starterDefs) for (const ing of def.ingredients ?? []) vocab.add(ing.name)
+  for (const key of Object.keys(INGREDIENT_READINGS)) vocab.add(key)
+  const words = [...vocab].filter((w) => w && w.trim())
+  const mincePhrases = words.filter((w) => filterMaster(w).includes('合いびき肉')).sort()
+  eq(
+    'MJ-1 合いびき肉が出るのは、ひき肉を指す語だけ（関係ない食材の検索に割り込まない）',
+    mincePhrases,
+    [
+      'あいびき', 'あいびきにく', 'あいびき肉', 'ひき肉', '合いびき', '合いびき肉',
+      '合い挽き', '合い挽き肉', '合い挽肉', '合挽き', '合挽き肉', '合挽肉', '挽き肉', '挽肉',
+    ],
+  )
+  eq(
+    'MJ-1 語彙713語で当たる行がのべ435件を超えない（絞り込みが緩くなっていない）',
+    words.reduce((sum, w) => sum + filterMaster(w).length, 0) <= 435,
+    true,
+  )
+
+  /*
+   * ④ 便MAが名指しした2つの波及先。**どちらも動いていないこと**を数で押さえる。
+   *
+   * 価格の解決: 同梱レシピの材料を1つずつ食材価格マスタに当て、当たった行の顔ぶれを見る。
+   * 集約先を変えると両辺が同じ辞書を通るので結果は変わらないはずで、実測でも
+   * 367行の差分は0件だった。ここでは合いびき肉の行が210円/100gの行に当たり続けることを見る。
+   *
+   * 五十音順: 「食材と価格」は読み仮名（toHiragana）で並べる（db/prices.ts の listPriceEntries）。
+   * 「あいびきにく」も「あいひきにく」も同じ位置（213件中2番目）なので、並びは動かない。
+   * 便FBが集約先を変えたときに並び位置が飛んだ事故があるので、位置そのものを見張る。
+   */
+  const priceIndex = buildPriceIndex(PRICE_DEFAULTS.map((e) => ({ ...e, isDefault: true })))
+  eq(
+    'MJ-1 合いびき肉の価格が、いままでどおりマスタの「合いびき肉」に解決する',
+    matchPriceEntry('合いびき肉', priceIndex)?.normalizedName,
+    '合いびき肉',
+  )
+  for (const spelling of ['合い挽き肉', '合挽肉', 'あいびき肉']) {
+    eq(
+      `MJ-1 「${spelling}」の価格も同じ行に解決する`,
+      matchPriceEntry(spelling, priceIndex)?.normalizedName,
+      '合いびき肉',
+    )
+  }
+  const collator = new Intl.Collator('ja')
+  const kanaOrder = [...masterNames].sort((a, b) => collator.compare(toHiragana(a), toHiragana(b)))
+  eq('MJ-1 五十音順で合いびき肉が2番目のまま（並び位置が動いていない）', kanaOrder.indexOf('合いびき肉'), 1)
+  eq('MJ-1 五十音順の先頭2件', kanaOrder.slice(0, 2), ['アーモンドエッセンス', '合いびき肉'])
+  // 辞書を変えたら READINGS_VERSION を上げる決まり（保存済みレシピの索引を作り直す引き金）
+  eq('MJ-1 読み仮名の版が10以上（集約先を変えたら上げる）', READINGS_VERSION >= 10, true)
 }

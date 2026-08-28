@@ -142,8 +142,8 @@ const DAY_LINK_STATE = {
  * 塗りつぶしを使うのは実行ボタンだけにする＝塗ってあるものは押すと何かが起きる、と
  * 見た目だけで読み取れるようにする。
  */
-const chipClass = (on: boolean): string =>
-  `inline-flex items-center gap-1 rounded-full border px-3 py-2 text-sm font-bold ${
+const chipClass = (on: boolean, size = 'px-3 py-2 text-sm'): string =>
+  `inline-flex items-center gap-1 rounded-full border ${size} font-bold ${
     on ? 'border-accent text-accent-ink' : 'border-edge bg-surface text-ink-muted'
   }`
 /** 選択中のチップの地色。アクセント色から作る＝色を直書きしない（コーディング規約） */
@@ -536,6 +536,17 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
    * `<Collapse>` はこの中に置いたままにする＝「畳むと消える範囲」を
    * scripts/test-logic.mjs の COLLAPSE-1 が規則で掃けるようにするため
    * （呼び出し側で包むと、掃く側から中身が Collapse の外に見える）。
+   *
+   * 2026-08-29 便MJ: 上の説明に「表示する食事と同じ作法にそろえる」と書いてあったのに、
+   * 日付・食事のチップは選ぶと**アクセント色で塗りつぶし**（`bg-accent text-on-accent`）の
+   * ままだった。同じ節のすぐ下に並ぶ実行ボタン「選んだ範囲の買い物メモを作る」が
+   * **まったく同じ塗り**なので、選んだだけで実行し終えたように見える
+   * （2026-08-09 便ENがつぶした形そのもの。実測 390px: チップも実行ボタンも
+   *   地 rgb(204,63,1)・文字 rgb(250,245,236)）。
+   * chipClass＋chipStyle＋ChipCheck に載せ替えて、塗りつぶしを実行ボタン専用に戻した。
+   * 日付チップだけ字と左右の余白を小さいまま（`px-2 py-2 text-xs`）にしてあるのは、
+   * 7日ぶんが390pxの画面に並ぶため。**色と形の作法は同じもの**を通す
+   * （実測: チップ1つが52〜60px→70〜78pxに伸びるが、7日でも2行のままで行は増えない）。
    */
   const renderShopRange = () => (
     <Collapse open={weekGroupOpen.shopping}>
@@ -560,12 +571,10 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                   data-date={date}
                   onClick={() => toggleShopDate(date)}
                   aria-pressed={picked}
-                  className={`rounded-sm border px-2 py-2 text-xs font-bold ${
-                    picked
-                      ? 'border-accent bg-accent text-on-accent'
-                      : 'border-edge bg-surface text-ink-muted'
-                  }`}
+                  className={chipClass(picked, 'px-2 py-2 text-xs')}
+                  style={chipStyle(picked)}
                 >
+                  <ChipCheck on={picked} />
                   {dowLabels[dowIndex(date)]} {formatShoppingRangeDates([date])}
                 </button>
               )
@@ -592,12 +601,10 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                   data-slot={slot}
                   onClick={() => toggleShopSlot(slot)}
                   aria-pressed={picked}
-                  className={`rounded-sm border px-3 py-2 text-sm font-bold ${
-                    picked
-                      ? 'border-accent bg-accent text-on-accent'
-                      : 'border-edge bg-surface text-ink-muted'
-                  }`}
+                  className={chipClass(picked)}
+                  style={chipStyle(picked)}
                 >
+                  <ChipCheck on={picked} />
                   {ja.mealPlan.slot[slot]}
                 </button>
               )
