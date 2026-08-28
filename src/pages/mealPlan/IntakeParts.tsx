@@ -47,6 +47,7 @@ const formatNutrient = (key: keyof NutrientTotals, value: number): string => {
 function IntakeNutritionPanel({
   summary,
   notes = 'full',
+  dishLink,
 }: {
   summary: RangeIntakeSummary
   /**
@@ -55,6 +56,12 @@ function IntakeNutritionPanel({
    * 'brief'=数と警告だけ。長い但し書きと出典は呼び出し側の折りたたみ（NutritionSourceNotes）へ移す
    */
   notes?: 'full' | 'brief'
+  /**
+   * 「計算できなかった料理」の名前を押したときの帰り道（2026-08-28 便MA）。
+   * 週タブの NutritionBalancePanel に渡すものと同じ形・同じ名前。
+   * 渡さなければ今までどおりレシピ一覧へ戻る。
+   */
+  dishLink?: { linkState?: { from: string; fromPath: string }; onNavigate?: () => void }
 }) {
   return (
     <div>
@@ -96,7 +103,7 @@ function IntakeNutritionPanel({
               String(summary.nutrition.excludedDishCount),
             )}
           </p>
-          <NutritionGapDishes sum={summary.nutrition} kind="excluded" />
+          <NutritionGapDishes sum={summary.nutrition} kind="excluded" {...dishLink} />
         </>
       )}
       {/* 量が書いてあるのに計算できなかった材料があるレシピは、合計を静かに下げる。
@@ -109,7 +116,7 @@ function IntakeNutritionPanel({
               String(summary.nutrition.partialDishCount),
             )}
           </p>
-          <NutritionGapDishes sum={summary.nutrition} kind="partial" />
+          <NutritionGapDishes sum={summary.nutrition} kind="partial" {...dishLink} />
         </>
       )}
       {notes === 'full' && <NutritionSourceNotes />}

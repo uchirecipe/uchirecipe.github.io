@@ -4075,3 +4075,47 @@ eq('rangeDayCount: 月をまたぐ計算も正しい', rangeDayCount('2026-06-28
     true,
   )
 }
+
+// ---------- 便MA（2026-08-28）: 月タブの覚えが「選んでいた期間」も持ち帰る ----------
+//
+// オーナー原文: 「選んだ期間の栄養など、計算できなかった材料があるレシピ名をタップした後の
+// レシピ詳細から、戻るで同じ画面に戻るようにして。レシピ一覧に飛んでしまう。」
+//
+// 出所を載せて月タブへ帰れるようにしただけでは足りなかった（実測 2026-08-28）:
+// 「期間で絞る」は画面の中だけの状態で、URLにも覚えにも載っていなかったので、
+// **月タブには着くのに「選んだ期間の栄養」のカードが消えていた**（帰り着いたとき0件）。
+// 月・縦位置・開いていた窓と同じ覚え（ViewReturnPoint）に、期間も一緒に載せる。
+{
+  const maRange = parseViewReturn(
+    serializeViewReturn({ anchor: '2026-08-01', scrollY: 300, range: { start: '2026-08-03', end: '2026-08-09' } }),
+  )
+  eq('MA-5 覚えた期間がそのまま戻る', maRange.range, { start: '2026-08-03', end: '2026-08-09' })
+  eq('MA-5 月と縦位置は今までどおり戻る', [maRange.anchor, maRange.scrollY], ['2026-08-01', 300])
+  // 絞っていないときは書かない＝以前の版と同じ形のまま（古い覚えを読んでも壊れない）
+  eq(
+    'MA-5 期間で絞っていなければ覚えに書かない',
+    JSON.parse(serializeViewReturn({ anchor: '2026-08-01', scrollY: 0 })).range,
+    undefined,
+  )
+  eq(
+    'MA-5 期間を持たない古い覚えも今までどおり読める',
+    parseViewReturn('{"anchor":"2026-07-01","scrollY":5}').range,
+    undefined,
+  )
+  // 壊れた値は「絞っていなかった」に倒す（復元できないときは何もしないのが正しい振る舞い）
+  eq(
+    'MA-5 日付の形でない期間は無視する',
+    parseViewReturn('{"anchor":"","scrollY":0,"range":{"start":"きのう","end":"2026-08-09"}}').range,
+    undefined,
+  )
+  eq(
+    'MA-5 開始が終了より後の期間は無視する',
+    parseViewReturn('{"anchor":"","scrollY":0,"range":{"start":"2026-08-09","end":"2026-08-03"}}').range,
+    undefined,
+  )
+  eq(
+    'MA-5 期間が壊れていても、月と縦位置の復元までは巻き添えにしない',
+    parseViewReturn('{"anchor":"2026-07-01","scrollY":42,"range":"こわれた値"}').scrollY,
+    42,
+  )
+}

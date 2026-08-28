@@ -72,6 +72,31 @@ function isInAppPath(raw: string | null | undefined): raw is string {
 }
 
 /**
+ * 献立のどのタブから来たかを `?back=day|week|month` で運び、帰り先のパスに直す
+ * （2026-08-02 便DE-11。2026-08-28 便MA が HistoryPage.tsx から**そのまま**ここへ移した）。
+ *
+ * 上の `resolveBackTarget` が運ぶのは**パスそのもの**だが、献立は日/週/月のどれを見ていたかが
+ * URLに乗っていないので、こちらは**タブの名前**を運ぶ。`restore=1` を付けて帰すことで、
+ * 呼び出し元が離れる直前に覚えておいた月・週・縦位置・折りたたみ・選んだ期間まで戻る
+ * （覚えるのは呼び出し元の rememberWeekReturn / rememberMonthReturn / rememberDayReturn）。
+ *
+ * ここへ移した理由（2026-08-28 便MA・オーナー原文「テンプレートをこの月に入れる→
+ * テンプレートの中身を見る→ここから戻るで週に飛んでしまう。」）: 献立テンプレートの画面は
+ * 戻り先を `'/meal-plan?focus=week'` と**書き切って**いたので、月から入っても必ず週に着いた
+ * （実測: 月タブ→テンプレートの窓→内容を見る→戻る で、押されているタブが「週」）。
+ * 同じ受け渡しを2か所に書き写さないよう、記録の一覧が使っていた変換をここで共有する。
+ */
+export function mealPlanTabBackPath(back: string | null | undefined): string | null {
+  if (back === 'week') return '/meal-plan?focus=week&restore=1'
+  if (back === 'month') return '/meal-plan?focus=month&restore=1'
+  if (back === 'day') return '/meal-plan?focus=today&restore=1'
+  // 2026-08-17 便HG: ホーム画面を廃止したので、ホーム発を名乗るものは献立の「日」へ送る。
+  // 古いリンク（?back=home）を開いた人も、新しい入口と同じ場所に着くようにするため残す
+  if (back === 'home') return '/meal-plan?focus=today&restore=1'
+  return null
+}
+
+/**
  * 説明ページ（`/about/…` の静的なHTML）へのリンクに、アプリ側の帰り先を載せる
  * （2026-08-27 便LS）。
  *

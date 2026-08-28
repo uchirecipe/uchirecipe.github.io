@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { Search, Trash2, X } from 'lucide-react'
 import { listRecipes } from '../db/recipes'
@@ -17,6 +17,7 @@ import {
   TEMPLATE_NAME_MAX_LENGTH,
 } from '../logic/mealTemplate'
 import { searchRecipes } from '../logic/search'
+import { mealPlanTabBackPath } from '../logic/backLink'
 import BackHeader from '../components/BackHeader'
 import { useScrollTopOnOpen } from '../components/useScrollTopOnOpen'
 import RecipeCard from '../components/RecipeCard'
@@ -41,6 +42,18 @@ export default function MealTemplatesPage() {
   // 開いたらページのいちばん上を見せる（2026-08-21 便IU・④。「週」の同じ節から開く画面で、
   // 「別の週から入れる」とまったく同じ穴が空いていた）
   useScrollTopOnOpen()
+  /**
+   * 戻る先は「開いたタブ」へ返す（2026-08-28 便MA）。
+   *
+   * オーナー原文: 「テンプレートをこの月に入れる→テンプレートの中身を見る→ここから戻るで
+   * 週に飛んでしまう。」
+   * 直す前はここが `'/meal-plan?focus=week'` と書き切ってあり、**どこから来ても必ず週**へ
+   * 着いていた（実測: 月タブ→テンプレートの窓→内容を見る→戻る で、押されているタブが「週」）。
+   * 呼び出し元が `?back=week` / `?back=month` を付けてくるので、記録の一覧が前から使っている
+   * 変換（logic/backLink.ts）でタブごと帰す。付いていない古いリンクは今までどおり週へ返す。
+   */
+  const [backParams] = useSearchParams()
+  const backTo = mealPlanTabBackPath(backParams.get('back')) ?? '/meal-plan?focus=week'
   const confirm = useConfirm()
   const templates = useMealTemplates()
   const recipes = useLiveQuery(listRecipes, [])
@@ -163,8 +176,9 @@ export default function MealTemplatesPage() {
 
   return (
     <div className="mx-auto w-full max-w-md pb-[var(--space-lg)]">
-      {/* 戻るは呼び出し元の「週」タブへ返す（2026-08-02 便DE-11と同じ作法） */}
-      <BackHeader fallback="/meal-plan?focus=week" alwaysFallback title={ja.mealTemplates.title} />
+      {/* 戻るは呼び出し元のタブへ返す（2026-08-02 便DE-11と同じ作法。
+          2026-08-28 便MA で「週」の書き切りをやめ、?back= で来たタブへ返すようにした） */}
+      <BackHeader fallback={backTo} alwaysFallback title={ja.mealTemplates.title} />
 
       <div className="px-[var(--space-md)] pt-[var(--space-md)]">
         <p className="text-sm text-ink-muted">{ja.mealTemplates.description}</p>
