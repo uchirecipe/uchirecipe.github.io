@@ -242,14 +242,18 @@ import './_shared.mjs'
         手間レベル: await ffHeadTop('手間レベル'),
       }
       const ffTops = Object.values(ffOrder)
+      /* 2026-08-29 便MK: 「6つの区分」と言っている以上、6つ読めていることも同じ判定式で見る。
+         **実測**: ffTops を空にすると、直す前は2件とも緑のままだった（何も測らずに合格）。 */
+      const FF_SECTION_COUNT = 6
       check(
         'FF-FILTER 絞り込みが6つの区分に分かれ、それぞれに見出しが付いている',
-        ffTops.every((v) => v != null),
+        ffTops.length === FF_SECTION_COUNT && ffTops.every((v) => v != null),
         JSON.stringify(ffOrder),
       )
       check(
         `FF-FILTER 区分の並びが「レシピを絞り込む→料理の種別→${ja.search.tagTitle}→食材で絞り込む→調理時間→手間レベル」`,
-        ffTops.every((v, i) => i === 0 || (v != null && ffTops[i - 1] != null && ffTops[i - 1] < v)),
+        ffTops.length === FF_SECTION_COUNT &&
+          ffTops.every((v, i) => i === 0 || (v != null && ffTops[i - 1] != null && ffTops[i - 1] < v)),
         JSON.stringify(ffOrder),
       )
 
@@ -1214,15 +1218,19 @@ import './_shared.mjs'
         // ここが報告のバグ: 空なのに「今日の夕食にすでに入っています」と断られ、何も追加されなかった
         const restoredToasts = []
         for (const title of TITLES) restoredToasts.push(await addToDinner(title))
+        /* 2026-08-29 便MK: 3品ぶんの知らせを集められていることを、同じ判定式に入れた。
+           **実測**: restoredToasts を空にすると、直す前は2件とも緑のままだった。 */
         check(
           'FN-01 作った品を同じ夕食へ入れ直すと「すでに入っています」で断られない',
-          restoredToasts.every((t) => !t.includes('今日の夕食にすでに入っています')),
+          restoredToasts.length === TITLES.length &&
+            restoredToasts.every((t) => !t.includes('今日の夕食にすでに入っています')),
         )
         check(
           'FN-01 入れ直したことと、記録が残ることを知らせる',
-          restoredToasts.every((t) =>
-            t.includes('今日の夕食に戻しました（作った記録はそのまま残ります）'),
-          ),
+          restoredToasts.length === TITLES.length &&
+            restoredToasts.every((t) =>
+              t.includes('今日の夕食に戻しました（作った記録はそのまま残ります）'),
+            ),
         )
 
         await p.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
@@ -1885,9 +1893,11 @@ import './_shared.mjs'
         foBannerTops.push(box ? Math.round(box.y) : -1)
         await foNext(1)
       }
+      /* 2026-08-29 便MK: 3手ぶん測れていることを同じ判定式に入れた。
+         **実測**: foBannerTops を空にすると、直す前は緑のままだった（置き場所を1回も見ずに合格）。 */
       check(
         'FO-07 手順を進めても、終わったタイマーの置き場所が変わらない（毎回探さない）',
-        foBannerTops.every((y) => y >= 0 && y < 240),
+        foBannerTops.length === 3 && foBannerTops.every((y) => y >= 0 && y < 240),
         JSON.stringify(foBannerTops),
       )
       check(
