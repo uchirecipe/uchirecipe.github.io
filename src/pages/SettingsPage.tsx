@@ -63,6 +63,8 @@ import { clampServings, MIN_SERVINGS, MAX_SERVINGS } from '../logic/servings'
 import { riceServingGrams } from '../logic/nutritionBalance'
 import { clampBurners, DEFAULT_KITCHEN, MIN_BURNERS, MAX_BURNERS } from '../logic/cookAppliance'
 import { aboutLinkWithReturn, resolveBackTarget } from '../logic/backLink'
+import { SCREEN_PANEL, withScreenReturnParam } from '../logic/navMemory'
+import { useScreenReturn, useSettingsDetour } from '../components/useScreenReturn'
 import { refreshApp } from '../logic/appRefresh'
 import { applyAppUpdate, checkForAppUpdate } from '../logic/appUpdate'
 import {
@@ -517,19 +519,45 @@ export default function SettingsPage() {
   // 置き換え直後1回だけ出す「元に戻す」バナー(2026-07-17設定ゼロベース裁定#6c・三重の網の(c))。
   // タブを切り替える(=画面遷移)と消える(下のuseEffect参照)
   const [replaceUndoAvailable, setReplaceUndoAvailable] = useState(false)
+  /**
+   * 説明ページ（/about/ 配下）へ寄り道して帰ってきたとき、**開いていた折りたたみを開いたまま**に
+   * する（2026-08-29 便MJ・司令部の裁定 2026-08-28）。理由は、便LVが献立側で同じ原則を通したから
+   * ＝「開いていた折りたたみは、寄り道から帰っても開いたまま」。設定側だけ畳まれると、
+   * 帰り着いた人は自分が読んでいた場所をもう一度開き直すことになる。
+   *
+   * **各カードの「既定は畳む」（便JJ・便LS）とは別のこと**で、素で設定を開いたときの姿は
+   * 何も変わらない（覚えが無ければ下の wasOpen はすべて false を返す）。
+   * 仕組みはレシピ詳細・献立と同じ ScreenReturnPoint（logic/navMemory.ts）に乗せる。
+   */
+  const { wasOpen } = useScreenReturn()
+  /**
+   * 離れる直前の居場所を覚える口（useSettingsDetour の `remember`）。
+   * この道具は「設定へ寄り道する側」向けに作られたが、覚える中身は
+   * 「いまの画面のパス・縦位置・開いている折りたたみ」で画面を選ばないので、
+   * **設定から説明ページへ離れるとき**にもそのまま使える（覚えの形を2つに増やさない）。
+   */
+  const { remember: rememberDetour } = useSettingsDetour()
   // バックアップタブ「機種変更するときは」の折りたたみ開閉(2026-07-17設定ゼロベース裁定#5)
-  const [moveGuideOpen, setMoveGuideOpen] = useState(false)
+  const [moveGuideOpen, setMoveGuideOpen] = useState(() => wasOpen(SCREEN_PANEL.settingsMoveGuide))
   // 「古い記録の書き出し（アーカイブ）」は、機種変更と同じで一部の人がたまにしか触らない機能
   // なので既定は畳んでおく（2026-08-22 便JJ・オーナー指示）
-  const [archiveOpen, setArchiveOpen] = useState(false)
+  const [archiveOpen, setArchiveOpen] = useState(() => wasOpen(SCREEN_PANEL.settingsArchive))
   // Pro版の機能説明の折りたたみ（2026-08-09 便EO: <details>から共通の折りたたみへ）
-  const [proFeaturesOpen, setProFeaturesOpen] = useState(false)
+  const [proFeaturesOpen, setProFeaturesOpen] = useState(() =>
+    wasOpen(SCREEN_PANEL.settingsProFeatures),
+  )
   // 「バックアップを取る」の注意点と詳しい説明の折りたたみ（2026-08-27 便LS・オーナー指示
   // 「写真の選択と『ファイルに書き出す』ボタンが一番目立って欲しい」）。畳むだけで中身は減らさない
-  const [backupNoticeOpen, setBackupNoticeOpen] = useState(false)
+  const [backupNoticeOpen, setBackupNoticeOpen] = useState(() =>
+    wasOpen(SCREEN_PANEL.settingsBackupNotice),
+  )
   // 「アプリの更新」「困ったとき」の押すとき・消えるもの・残るものの折りたたみ（2026-08-27 便LS）
-  const [appUpdateDetailOpen, setAppUpdateDetailOpen] = useState(false)
-  const [refreshAppDetailOpen, setRefreshAppDetailOpen] = useState(false)
+  const [appUpdateDetailOpen, setAppUpdateDetailOpen] = useState(() =>
+    wasOpen(SCREEN_PANEL.settingsAppUpdateDetail),
+  )
+  const [refreshAppDetailOpen, setRefreshAppDetailOpen] = useState(() =>
+    wasOpen(SCREEN_PANEL.settingsRefreshAppDetail),
+  )
   // 「最新の状態にする」を押してから結果が出るまで（2026-08-09 便ER）。
   // 通信を伴うので、押しっぱなしに見えないようボタンの文字を「確認中…」に替えて二重押しも止める
   const [appUpdateChecking, setAppUpdateChecking] = useState(false)
@@ -677,6 +705,46 @@ export default function SettingsPage() {
       window.removeEventListener('resize', onScroll)
     }
   }, [settings])
+
+  /**
+   * 説明ページ（/about/ 配下）へのリンク（2026-08-29 便MJ）。
+   *
+   * /about/ は素のHTMLで、押すと**アプリをいったん離れる**（帰ってくると設定は作り直され、
+   * 折りたたみは既定の姿＝畳んだ状態で立ち上がる）。そこで
+   *  ①行き先の `?from=` に載せる帰り先へ「覚えた場所へ戻す」印（`restore=1`）を足し
+   *  ②押した瞬間に、開いている折りたたみと縦位置を覚える
+   * の2つを、この画面から出るリンク全部に同じ形で付ける。
+   * 帰り着いた設定は useScreenReturn が覚えを読んで、開いていた折りたたみを開いた姿で立ち上げる。
+   *
+   * 折りたたみを1つずつ書かず**開いているものを全部**覚えるのは、寄り道の行き先が
+   * 折りたたみの中とは限らないため（利用規約・紹介ページは折りたたみの外にある）。
+   * 帰り先の `?section=` の値は今までと同じで、**着地する位置は変えていない**
+   * （下の rememberSettingsPanels を参照。縦位置は覚えない）。
+   */
+  const openSettingsPanels = (): string[] =>
+    [
+      [moveGuideOpen, SCREEN_PANEL.settingsMoveGuide],
+      [archiveOpen, SCREEN_PANEL.settingsArchive],
+      [proFeaturesOpen, SCREEN_PANEL.settingsProFeatures],
+      [backupNoticeOpen, SCREEN_PANEL.settingsBackupNotice],
+      [appUpdateDetailOpen, SCREEN_PANEL.settingsAppUpdateDetail],
+      [refreshAppDetailOpen, SCREEN_PANEL.settingsRefreshAppDetail],
+    ]
+      .filter(([open]) => open)
+      .map(([, name]) => name as string)
+  const aboutDetourHref = (aboutHref: string, settingsPath: string): string =>
+    aboutLinkWithReturn(aboutHref, withScreenReturnParam(settingsPath))
+  /**
+   * 覚えるのは**折りたたみだけ**で、縦位置は覚えない（第2引数の 0）。
+   * 着地する場所は 2026-08-28 便LW が実測して `?section=` で決めてある
+   * （解錠済み・390px で、帰り着いたときのPro版の枠の上端が ?section=pro=69px ／
+   * ?section=なし=5,599px ／ ?section=about=-755px。枠の頭に着けて、読んでいた一覧を
+   * たどり直せる形にしてある）。縦位置まで戻すとこの着地が上書きされ、
+   * 押したリンクの位置（枠の頭より643px下）に着いて枠の名前が画面の外に出る
+   * ——実測でそうなり、e2e の LW-01 が落ちた。**司令部の裁定は折りたたみの話**なので、
+   * 着地の決めごとはそのまま生かす。
+   */
+  const rememberSettingsPanels = () => rememberDetour(openSettingsPanels(), 0)
 
   if (!settings) return null // 読み込み中
 
@@ -2098,7 +2166,8 @@ export default function SettingsPage() {
                   （受け取り側は public/about/manual.html の appReturn） */}
               <p className="mt-[var(--space-md)]">
                 <a
-                  href={aboutLinkWithReturn('/about/manual.html#backup', '/settings?section=backup')}
+                  href={aboutDetourHref('/about/manual.html#backup', '/settings?section=backup')}
+                  onClick={rememberSettingsPanels}
                   data-testid="backup-detail-link"
                   className="text-sm font-bold text-accent-ink underline"
                 >
@@ -2230,10 +2299,8 @@ export default function SettingsPage() {
                     (紹介ページ・ホーム画面への追加・利用規約)と同じ作法に揃えるため
                     (iOSのホーム画面追加アプリはSafariとストレージが別) */}
                 <a
-                  href={aboutLinkWithReturn(
-                    '/about/multi-device.html',
-                    '/settings?section=backup',
-                  )}
+                  href={aboutDetourHref('/about/multi-device.html', '/settings?section=backup')}
+                  onClick={rememberSettingsPanels}
                   data-testid="move-guide-transfer-link"
                   className="mt-1 inline-block text-xs font-bold text-accent-ink underline"
                 >
@@ -2512,7 +2579,8 @@ export default function SettingsPage() {
                 （受け取り側は public/about/app-return.js） */}
             <p className="mt-[var(--space-md)]">
               <a
-                href={aboutLinkWithReturn('/about/manual.html#archive', '/settings?section=archive')}
+                href={aboutDetourHref('/about/manual.html#archive', '/settings?section=archive')}
+                onClick={rememberSettingsPanels}
                 data-testid="archive-detail-link"
                 className="text-sm font-bold text-accent-ink underline"
               >
@@ -2773,7 +2841,8 @@ export default function SettingsPage() {
                       読んでいた機能の一覧をたどって戻る形になる */}
                   <p className="mt-[var(--space-md)] border-t border-edge pt-[var(--space-sm)]">
                     <a
-                      href={aboutLinkWithReturn('/about/manual.html#pro', '/settings?section=pro')}
+                      href={aboutDetourHref('/about/manual.html#pro', '/settings?section=pro')}
+                      onClick={rememberSettingsPanels}
                       data-testid="pro-detail-link-activated"
                       className="text-sm font-bold text-accent-ink underline"
                     >
@@ -2960,7 +3029,8 @@ export default function SettingsPage() {
           {/* 別窓(target="_blank")にしない: iOSのホーム画面追加アプリはSafariとストレージが別のため。
               2026-08-28 便LW: 同じ画面へ帰れるように ?from= を載せる */}
           <a
-            href={aboutLinkWithReturn('/about/', '/settings?section=about')}
+            href={aboutDetourHref('/about/', '/settings?section=about')}
+            onClick={rememberSettingsPanels}
             className="mt-[var(--space-sm)] flex w-full items-center justify-center gap-2 rounded-md border border-edge bg-surface py-3 font-bold text-accent-ink shadow-sm"
           >
             <Info size={18} aria-hidden />
@@ -2972,7 +3042,8 @@ export default function SettingsPage() {
           {!launchedFromHomeScreen && (
             <>
               <a
-                href={aboutLinkWithReturn('/about/install.html', '/settings?section=about')}
+                href={aboutDetourHref('/about/install.html', '/settings?section=about')}
+                onClick={rememberSettingsPanels}
                 data-testid="settings-install-link"
                 className="mt-[var(--space-sm)] flex w-full items-center justify-center gap-2 rounded-md border border-edge bg-surface py-3 font-bold text-accent-ink shadow-sm"
               >
@@ -2985,7 +3056,8 @@ export default function SettingsPage() {
             </>
           )}
           <a
-            href={aboutLinkWithReturn('/about/terms.html', '/settings?section=about')}
+            href={aboutDetourHref('/about/terms.html', '/settings?section=about')}
+            onClick={rememberSettingsPanels}
             className="mt-[var(--space-sm)] block text-center text-sm font-bold text-accent-ink underline"
           >
             {ja.settings.termsLink}

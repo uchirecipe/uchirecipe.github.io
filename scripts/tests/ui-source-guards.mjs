@@ -3255,14 +3255,20 @@ import { createRequire } from 'node:module'
   // HPへ飛ばされるので、アプリを開きなおしたり、『アプリを開く』をHPから探さないといけない」。
   // 直し方は 2026-08-26 のレシピ詳細の帰り道と同じ「行き先に帰り先を持たせる」形。
   {
-    eq(
-      'LS-3 説明ページへのリンクが、帰り先を載せて作られている',
-      /aboutLinkWithReturn\('\/about\/manual\.html#backup', '\/settings\?section=backup'\)/.test(lsSettings),
-      true,
-    )
+    /*
+     * 2026-08-29 便MJ: **道具の名前で見ない**（禁じ手②の書き写し）。
+     * 見るのは「その行き先が、帰り先を運ぶ口を通っているか」という事実だけにする。
+     * 便MJが折りたたみの復元を足したことで口が aboutLinkWithReturn から
+     * aboutDetourHref（中で aboutLinkWithReturn を呼ぶ）に変わり、
+     * 中身は良くなったのにこの2件が落ちた。口の名前は今後も変わりうる。
+     */
+    const RETURN_HREF_CALL = String.raw`(?:aboutLinkWithReturn|aboutDetourHref)\(\s*`
+    const carriesReturn = (path) =>
+      new RegExp(RETURN_HREF_CALL + `'${path.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}'`).test(lsSettings)
+    eq('LS-3 説明ページへのリンクが、帰り先を載せて作られている', carriesReturn('/about/manual.html#backup'), true)
     eq(
       'LS-3 機種変更の「複数の端末で使う方法」も同じ帰り道を持っている',
-      /aboutLinkWithReturn\(\s*'\/about\/multi-device\.html',/.test(lsSettings),
+      carriesReturn('/about/multi-device.html'),
       true,
     )
     // 帰り先を持たない裸のリンクに戻っていないこと（この2ページだけを見る）
@@ -3572,17 +3578,28 @@ import { createRequire } from 'node:module'
   {
     const lwSettings = lwRead('src/pages/SettingsPage.tsx')
     const lwNotice = lwRead('src/components/HomeScreenNotice.tsx')
-    // 同じ窓で移る7本
-    for (const [name, re] of [
-      ['バックアップの詳しい説明', /aboutLinkWithReturn\('\/about\/manual\.html#backup', '\/settings\?section=backup'\)/],
-      ['古い記録の書き出しの詳しい説明', /aboutLinkWithReturn\('\/about\/manual\.html#archive', '\/settings\?section=archive'\)/],
-      ['複数の端末で使う方法', /aboutLinkWithReturn\(\s*'\/about\/multi-device\.html',/],
-      ['解錠済みのPro版の詳しい説明', /aboutLinkWithReturn\('\/about\/manual\.html#pro', '\/settings\?section=pro'\)/],
-      ['紹介ページ', /aboutLinkWithReturn\('\/about\/', '\/settings\?section=about'\)/],
-      ['ホーム画面に追加する方法', /aboutLinkWithReturn\('\/about\/install\.html', '\/settings\?section=about'\)/],
-      ['利用規約', /aboutLinkWithReturn\('\/about\/terms\.html', '\/settings\?section=about'\)/],
+    /*
+     * 同じ窓で移る7本。**帰り先を運ぶ口の名前では見ない**（2026-08-29 便MJ・禁じ手②）。
+     * 見るのは①その行き先が帰り先を運ぶ口を通っていること ②運んでいる帰り先が
+     * この画面の `?section=` であること、の2つの事実。
+     * 口の名前を書き写していたせいで、便MJが折りたたみの復元を足して口を
+     * aboutDetourHref（中で aboutLinkWithReturn を呼ぶ）にした瞬間に7本とも落ちた。
+     */
+    const lwEsc = (t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    const lwReturnCall = (path, back) =>
+      new RegExp(
+        String.raw`(?:aboutLinkWithReturn|aboutDetourHref)\(\s*'${lwEsc(path)}',\s*'${lwEsc(back)}'`,
+      )
+    for (const [name, path, back] of [
+      ['バックアップの詳しい説明', '/about/manual.html#backup', '/settings?section=backup'],
+      ['古い記録の書き出しの詳しい説明', '/about/manual.html#archive', '/settings?section=archive'],
+      ['複数の端末で使う方法', '/about/multi-device.html', '/settings?section=backup'],
+      ['解錠済みのPro版の詳しい説明', '/about/manual.html#pro', '/settings?section=pro'],
+      ['紹介ページ', '/about/', '/settings?section=about'],
+      ['ホーム画面に追加する方法', '/about/install.html', '/settings?section=about'],
+      ['利用規約', '/about/terms.html', '/settings?section=about'],
     ]) {
-      eq(`LW-2 設定の「${name}」が帰り先を持っている`, re.test(lwSettings), true)
+      eq(`LW-2 設定の「${name}」が帰り先を持っている`, lwReturnCall(path, back).test(lwSettings), true)
     }
     eq(
       'LW-2 ホーム画面追加のお知らせの手順ページも帰り先を持つ（出る場所を決め打ちにしない）',
@@ -4066,4 +4083,99 @@ import { createRequire } from 'node:module'
     false,
   )
   eq('MB-9 同じ中身は内訳の中の1行が持っている', mbParts.includes('ja.mealPlan.weekCostNote'), true)
+}
+
+
+// ---------- 便MJ（2026-08-29）: 選ぶチップの塗りつぶし／設定の折りたたみの復元 ----------
+{
+  const mjRoot = path.join(path.dirname(fileURLToPath(scriptFileUrl)), '..')
+  const mjRead = (rel) => readFileSync(path.join(mjRoot, rel), 'utf-8')
+  const mjPlan = mjRead('src/pages/MealPlanPage.tsx')
+  const mjSettings = mjRead('src/pages/SettingsPage.tsx')
+
+  /* ---- MJ-2: 買い物メモの範囲えらびのチップが塗りつぶしに戻っていない ----
+   *
+   * 前の便（便MD）の申し送り:「買い物メモの範囲えらびのチップは塗りつぶし（実行ボタンと
+   * 同じ見た目）のままです。便ENの作法から外れていますが、担当外なので触っていません。」
+   *
+   * 2026-08-09 便EN の作法:「**塗りつぶしを使うのは実行ボタンだけ**にする＝塗ってあるものは
+   * 押すと何かが起きる、と見た目だけで読み取れるようにする」。
+   * 直す理由が強いのは、**同じ節のすぐ下に実行ボタンが並んでいる**から
+   * （実測 2026-08-29・390px: 選択中のチップの地 rgb(204,63,1)、実行ボタン
+   * 「選んだ範囲の買い物メモを作る」の地も rgb(204,63,1) で、文字色まで同じ rgb(250,245,236)）。
+   *
+   * 見るのは**範囲えらびの中だけ**を切り出して、そこに塗りつぶしの組が無いこと。
+   * 画面全体で見ると実行ボタン（塗ってよい側）まで拾ってしまう。 */
+  {
+    const mjRangeAt = mjPlan.indexOf('const renderShopRange = ()')
+    eq('MJ-2 前提: 買い物メモの範囲えらびを切り出せている', mjRangeAt > 0, true)
+    const mjRangeEnd = mjPlan.indexOf('const renderRow = (', mjRangeAt)
+    const mjRange = mjPlan.slice(mjRangeAt, mjRangeEnd)
+    eq('MJ-2 前提: 日付と食事のチップが両方この中にある',
+      mjRange.includes('data-testid="shop-range-date"') && mjRange.includes('data-testid="shop-range-slot"'),
+      true)
+    // 塗りつぶしの組（面を塗る bg-accent と、その上に乗る文字色）が1つも無いこと
+    eq('MJ-2 範囲えらびに塗りつぶし（bg-accent）が無い', /\bbg-accent\b/.test(mjRange), false)
+    eq('MJ-2 範囲えらびに塗りつぶしの文字色（text-on-accent）が無い', /\btext-on-accent\b/.test(mjRange), false)
+    // 「選ぶボタン」の作法（便EN）を、画面が自分で持たずに共通の定義から通していること
+    eq('MJ-2 チップの見た目は共通の chipClass から取る', (mjRange.match(/chipClass\(/g) ?? []).length, 2)
+    eq('MJ-2 選択中の薄い地も共通の chipStyle から取る', (mjRange.match(/chipStyle\(/g) ?? []).length, 2)
+    // 形でも選択が分かる（色だけに頼らない）。押しても幅が動かないのは ChipCheck 側の作り
+    eq('MJ-2 選んだ印（ChipCheck）が日付と食事の両方に付いている', (mjRange.match(/<ChipCheck /g) ?? []).length, 2)
+    // 実行ボタンの側は塗りつぶしのまま（作法の片側だけを消していない）
+    const mjShopSectionAt = mjPlan.indexOf("'shop-range-toggle',")
+    const mjShopSection = mjPlan.slice(mjShopSectionAt, mjShopSectionAt + 1600)
+    eq('MJ-2 実行ボタン（買い物メモを作る）は塗りつぶしのまま', /bg-accent[\s\S]{0,80}text-on-accent/.test(mjShopSection), true)
+  }
+
+  /* ---- MJ-3: 設定へ帰ると、開いていた折りたたみが開いたまま ----
+   *
+   * 司令部の裁定（2026-08-28）:「開いたまま帰します。理由は、便LVが献立側で同じ原則を
+   * 通したから——『開いていた折りたたみは、寄り道から帰っても開いたまま』」。
+   * 「既定は畳む」（便JJ・便LS）とは別のことなので、**素で開いたときの姿は変えない**。
+   *
+   * 実測（2026-08-29・390px・4581番のプレビュー）:
+   *   ?section=archive … 出る前 true → 帰った後 true（直す前は false）
+   *   ?section=backup  … 出る前 true → 帰った後 true（直す前は false）
+   *   素で ?section=archive を開く … archive も backup も false（既定は畳んだまま） */
+  {
+    // ①折りたたみの初期値が「離れたときに開いていたか」から決まる（6つ全部）
+    const mjPanels = [
+      'settingsMoveGuide', 'settingsArchive', 'settingsProFeatures',
+      'settingsBackupNotice', 'settingsAppUpdateDetail', 'settingsRefreshAppDetail',
+    ]
+    for (const panel of mjPanels) {
+      eq(
+        `MJ-3 折りたたみ「${panel}」の初期値が覚えから決まる`,
+        new RegExp(String.raw`useState\(\(\)\s*=>\s*[\s\S]{0,40}wasOpen\(SCREEN_PANEL\.${panel}\)`).test(mjSettings),
+        true,
+      )
+      // 覚える側にも同じ名前が出る（片側だけ足すと、覚えても戻らない／戻す先が無い）
+      eq(
+        `MJ-3 折りたたみ「${panel}」は離れるときにも覚える`,
+        mjSettings.includes(`SCREEN_PANEL.${panel}]`),
+        true,
+      )
+    }
+    // ②離れる直前に覚えていること。/about/ へ出るリンク全部に同じ形で付ける
+    const mjAboutLinks = (mjSettings.match(/href=\{aboutDetourHref\(/g) ?? []).length
+    eq('MJ-3 説明ページへ出るリンクは7本', mjAboutLinks, 7)
+    eq('MJ-3 その7本すべてが、離れる直前に開いている折りたたみを覚える',
+      (mjSettings.match(/onClick=\{rememberSettingsPanels\}/g) ?? []).length, 7)
+    // ③帰り先に「覚えた場所へ戻す」印が乗る（印が無いと、覚えていても読まれない）
+    eq('MJ-3 帰り先に restore の印を足している',
+      /aboutLinkWithReturn\(aboutHref, withScreenReturnParam\(settingsPath\)\)/.test(mjSettings), true)
+    // ④覚えるのは折りたたみだけ。**縦位置は覚えない**（着地する場所は便LWが実測して
+    //   `?section=` で決めてあり、縦位置まで戻すとその決めごとを上書きしてしまう。
+    //   実測 2026-08-29: 覚えるとPro版の枠の上端が -643.5px になり e2e の LW-01 が落ちた）
+    eq('MJ-3 覚えるのは折りたたみだけで、縦位置は覚えない（着地の決めごとを上書きしない）',
+      /rememberDetour\(openSettingsPanels\(\), 0\)/.test(mjSettings), true)
+    // ⑤仕組みは献立・レシピ詳細と同じ1つ（設定だけ別の覚え方を作らない）
+    eq('MJ-3 覚えと復元は共通の仕組み（useScreenReturn / useSettingsDetour）に乗せる',
+      /useScreenReturn\(\)/.test(mjSettings) && /useSettingsDetour\(\)/.test(mjSettings), true)
+    // ⑥「既定は畳む」は変えていない＝素で開いたら閉じている（true 直書きに戻っていない）
+    eq('MJ-3 折りたたみの初期値を true に直書きしていない（既定は畳むまま）',
+      /const \[(?:archiveOpen|backupNoticeOpen|moveGuideOpen|proFeaturesOpen)[^\]]*\] = useState\(true\)/.test(mjSettings),
+      false)
+  }
 }
