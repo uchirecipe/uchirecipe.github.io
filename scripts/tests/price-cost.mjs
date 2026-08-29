@@ -3409,6 +3409,147 @@ eq('normalizeIngredientNameForPrice 前後空白除去', normalizeIngredientName
       eq('JM-4 ja.ts の文言が、ブラウザ側で走る関数の中に入り込んでいない', [...new Set(jmLeaked)], [])
     }
   }
+
+  // ---- JM-8 / JM-9 / JM-10: JM-1・JM-2 の網に掛からなかった3つの形（2026-08-29 便MM） ----
+  //
+  // JM-1 / JM-2 は「**引用符の中に、ja.ts と同じ日本語がそのまま入っている**」ものだけを見ていた。
+  // そのため、掴む側なのに**1つも数えていなかった**形が3つあった（便MMが実測）:
+  //   ①CSSセレクタの**属性値** `locator('button[aria-label="絞り込み"]')`
+  //     … 引用符の中身は `button[aria-label="絞り込み"]` なので ja.ts の値と丸ごと一致しない
+  //     ＝ jmValues.has() を1度も通らない。**172か所・51種**あった
+  //   ②`getByRole(…, { name: /タイマーを調整/ })` の**正規表現リテラル**
+  //     … `/…/` は引用符ではないので JM_GRAB の QUOTE に当たらない。**74本**あった
+  //   ③判定側の `/…/.test()` の正規表現リテラル
+  // ①②はどちらも**掴む側**＝外れると要素を掴めず30秒待って**実行が中断**し、
+  // 以降が丸ごと走らないまま「合格◯件」で終わる（いちばん重い壊れ方）。
+  // ①②は ja.ts から読む形（テンプレート文字列・`jaRe()`）へ寄せて**0か所**にしたので、
+  // **1つでも増えたら赤**にする。③は66か所・41種が残っており、総数で固定する（JM-7と同じ作り）。
+  {
+    /** 文字列リテラル3種。テンプレート文字列は差し込み（${…}）が入っていても中身を見る */
+    const JM_LIT =
+      /'((?:[^'\\\n]|\\.)*)'|"((?:[^"\\\n]|\\.)*)"|`((?:[^`\\]|\\.)*)`/g
+    /** CSSの属性セレクタ `[attr="値"]`（前方一致 ^= や部分一致 *= も同じ形） */
+    const JM_ATTR = /\[[a-zA-Z-]+[*^$|~]?=\s*(?:"([^"]*)"|'([^']*)')\s*\]/g
+    /**
+     * e2e に書かれている**セレクタの属性値**を全部集める。
+     * 差し込み（`${ja.search.filterToggle}`）が入っているものは**直したあとの形**なので数えない。
+     */
+    const jmAttrValues = () => {
+      const out = []
+      JM_LIT.lastIndex = 0
+      let m
+      while ((m = JM_LIT.exec(jmJoined))) {
+        const body = m[1] ?? m[2] ?? m[3]
+        if (body == null || !body.includes('[')) continue
+        JM_ATTR.lastIndex = 0
+        let a
+        while ((a = JM_ATTR.exec(body))) {
+          const v = a[1] ?? a[2]
+          if (v && !v.includes('${')) out.push(v)
+        }
+      }
+      return out
+    }
+    /** 正規表現リテラル（文字クラス `[…]` の中の `/` に釣られないようにする） */
+    const JM_RE_LIT = String.raw`\/((?:[^/\\\n\[]|\\.|\[[^\]\n]*\])*)\/[gimsuy]*`
+    const JM_GRAB_RE = [
+      new RegExp(String.raw`getByRole\(\s*['"][^'"]*['"]\s*,\s*\{[^}]*?name:\s*` + JM_RE_LIT, 'g'),
+      new RegExp(String.raw`getBy(?:Text|Label|Placeholder|Title)\(\s*` + JM_RE_LIT, 'g'),
+      new RegExp(String.raw`hasText:\s*` + JM_RE_LIT, 'g'),
+    ]
+    const JM_JUDGE_RE = [
+      new RegExp(JM_RE_LIT + String.raw`\s*\.test\(`, 'g'),
+      new RegExp(String.raw`\.(?:match|search)\(\s*` + JM_RE_LIT, 'g'),
+    ]
+    const jmReSources = (patterns) => {
+      const out = []
+      for (const re of patterns) {
+        re.lastIndex = 0
+        let m
+        while ((m = re.exec(jmJoined))) out.push(m[1])
+      }
+      return out
+    }
+    /**
+     * 正規表現リテラルから「日本語のかたまり」を取り出す。
+     * `\d` `\s` などのエスケープは区切りとして扱う（`ロック中の\d+食分は変わりません` なら
+     * 「ロック中の」と「食分は変わりません」の2つになる）。
+     */
+    const jmReChunks = (src) =>
+      (src.replace(/\\[dwsSDWbB]/g, ' ').replace(/\\./g, ' ').match(/[぀-ヿ一-鿿]+/g) ?? [])
+    /** ja.ts の値と丸ごと同じか、値の一部か、まったく関係ないか */
+    const jmRelated = (t) =>
+      jmValues.has(t) ? 'whole' : [...jmValues].some((v) => v.includes(t)) ? 'part' : 'none'
+    const jmTally = (texts) => {
+      const out = {}
+      for (const t of texts) out[t] = (out[t] ?? 0) + 1
+      return out
+    }
+
+    const jmAllAttr = jmAttrValues()
+    const jmAllRe = [...jmReSources(JM_GRAB_RE), ...jmReSources(JM_JUDGE_RE)]
+    eq(
+      'JM-8 前提: セレクタの属性値を取り出せている（0個なら見張りが壊れている）',
+      jmAllAttr.length > 500,
+      true,
+    )
+    eq(
+      'JM-9 前提: 正規表現リテラルを取り出せている（0本なら見張りが壊れている）',
+      jmAllRe.length > 100,
+      true,
+    )
+
+    // ---- JM-8: CSSセレクタの属性値に、画面の日本語を書き写していない ----
+    {
+      const now = jmTally(jmAllAttr.filter((t) => jmHasJa(t) && jmRelated(t) !== 'none'))
+      const known = jmKnownRaw['掴む側（CSSセレクタの属性値）'] ?? {}
+      const { grew, shrank } = jmDiff(now, known, '掴む側（CSSセレクタの属性値）')
+      eq('JM-8 CSSセレクタの属性値に、画面の文言の書き写しが増えていない', grew, [])
+      eq('JM-8 CSSセレクタの属性値の一覧に、もう書き写していないものが残っていない', shrank, [])
+    }
+
+    // ---- JM-9: 掴む側の正規表現リテラルに、画面の日本語を書き写していない ----
+    //
+    // 丸ごと一致は2文字から、一部だけの一致は6文字から数える（JM-6 と同じ線引き＝
+    // テストが自分で作った料理名「肉じゃが」「EG煮物」を巻き込まない長さ）。
+    {
+      const chunks = jmReSources(JM_GRAB_RE).flatMap(jmReChunks)
+      const now = jmTally(
+        chunks.filter((t) => {
+          const r = jmRelated(t)
+          if (r === 'none') return false
+          return r === 'whole' ? [...t].length >= 2 : [...t].length >= JM_PART_MIN
+        }),
+      )
+      const known = jmKnownRaw['掴む側（正規表現リテラル）'] ?? {}
+      const { grew, shrank } = jmDiff(now, known, '掴む側（正規表現リテラル）')
+      eq('JM-9 掴む側の正規表現に、画面の文言の書き写しが増えていない', grew, [])
+      eq('JM-9 掴む側の正規表現の一覧に、もう書き写していないものが残っていない', shrank, [])
+    }
+
+    // ---- JM-10: 判定側の正規表現リテラル（6文字以上）を総数で固定する ----
+    //
+    // 66か所・41種が残っている。**掴む側と違って中断はしない**（赤になるだけ）ので、
+    // 便MM は掴む側（JM-8・JM-9）を0にすることを先にして、ここは**増やさない・
+    // 直したら一覧から消す**の形で止めた。中身は
+    // 「約[\d,]+円（1[品件]）」のように**数と文言が混ざった1本の形**が多く、
+    // ja.ts から組み立て直すと1件ずつ画面を見て確かめる必要があるため、次の便へ渡す。
+    {
+      const chunks = jmReSources(JM_JUDGE_RE).flatMap(jmReChunks)
+      const now = jmTally(
+        chunks.filter((t) => jmRelated(t) !== 'none' && [...t].length >= JM_PART_MIN),
+      )
+      const known = jmKnownRaw['判定側（正規表現リテラル）'] ?? {}
+      const { grew, shrank } = jmDiff(now, known, '判定側（正規表現リテラル）')
+      eq('JM-10 判定側の正規表現に、画面の文言の書き写しが増えていない', grew, [])
+      eq('JM-10 判定側の正規表現の一覧に、もう書き写していないものが残っていない', shrank, [])
+      eq(
+        'JM-10 判定側の正規表現の残りは一覧どおり（数え方が変わったら気づけるようにする）',
+        Object.values(now).reduce((a, b) => a + b, 0),
+        Object.values(known).reduce((a, b) => a + b, 0),
+      )
+    }
+  }
 }
 
 // ---------- 便KE: 節約したい人の実データ30品で、原価と買い物メモが判断に使えない ----------
