@@ -1181,7 +1181,7 @@ import './_shared.mjs'
           await p.waitForTimeout(600)
           await p.getByRole('button', { name: ja.detail.todayAdd }).click()
           await p.waitForTimeout(300)
-          await p.getByRole('button', { name: ja.mealPlan.slot.dinner, exact: true }).click()
+          await slotBtnExceptFill(p, ja.mealPlan.slot.dinner).click()
           await p.waitForTimeout(500)
           return (await p.textContent('body')) ?? ''
         }

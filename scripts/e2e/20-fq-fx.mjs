@@ -264,7 +264,7 @@ import './_shared.mjs'
           'FP-01 食事の振り分けは品ごとではなく1回だけ聞く',
           ((await p.textContent('body')) ?? '').includes('選んだ3品を朝食・昼食・夕食のどれに入れますか？'),
         )
-        await p.getByRole('button', { name: ja.mealPlan.slot.dinner, exact: true }).click()
+        await slotBtnExceptFill(p, ja.mealPlan.slot.dinner).click()
         await p.waitForTimeout(1600)
 
         // 入れ終わったら献立へ戻り、何品どこへ入ったかを知らせる
@@ -497,7 +497,7 @@ import './_shared.mjs'
           await p.waitForTimeout(700)
           await p.getByRole('button', { name: ja.detail.todayAdd }).click()
           await p.waitForTimeout(300)
-          await p.getByRole('button', { name: ja.mealPlan.slot.dinner, exact: true }).click()
+          await slotBtnExceptFill(p, ja.mealPlan.slot.dinner).click()
           await p.waitForTimeout(700)
         }
         const iso4 = await todayIso(p)
@@ -744,7 +744,7 @@ import './_shared.mjs'
           await p.waitForTimeout(700)
           await p.getByRole('button', { name: ja.detail.todayAdd, exact: true }).click()
           await p.waitForTimeout(300)
-          await p.getByRole('button', { name: ja.mealPlan.slot.dinner, exact: true }).click()
+          await slotBtnExceptFill(p, ja.mealPlan.slot.dinner).click()
           await p.waitForTimeout(500)
           return (await p.textContent('body')) ?? ''
         }

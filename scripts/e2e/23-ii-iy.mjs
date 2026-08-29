@@ -57,7 +57,7 @@ import './_shared.mjs'
       await frPage.waitForTimeout(500)
       await frPage.getByRole('button', { name: ja.detail.todayAdd }).click()
       await frPage.waitForTimeout(300)
-      await frPage.getByRole('button', { name: ja.mealPlan.slot.dinner, exact: true }).click()
+      await slotBtnExceptFill(frPage, ja.mealPlan.slot.dinner).click()
       await frPage.waitForTimeout(600)
 
       // ---------- 日タブ: 「今日なに作る？」を畳んだまま ----------

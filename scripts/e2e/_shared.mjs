@@ -670,3 +670,15 @@ export const openMonthPlanGroup = async (page) => {
   }
 }
 globalThis.openMonthPlanGroup = openMonthPlanGroup
+
+/**
+ * 「朝食」「昼食」「夕食」の名前のボタンは、2026-08-29 から**同じ画面に2組**並ぶことがある
+ * （前からある「表示する食事」と、便MK が足した週の「入れる食事」）。
+ * 名前だけで掴むと strict mode violation で**その節が丸ごと実行中断**する（統合時に MEALPLAN-01 で実発）。
+ * この道具は**前からあるほう**を指す＝新しいチップ（week-fill-slot）を外す。
+ * 新しいチップを掴みたいときは testid で直接掴むこと。
+ */
+globalThis.slotBtnExceptFill = (scope, name) =>
+  scope
+    .getByRole('button', { name, exact: true })
+    .and(scope.locator(':not([data-testid="week-fill-slot"])'))

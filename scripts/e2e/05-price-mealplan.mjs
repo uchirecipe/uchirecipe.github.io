@@ -416,9 +416,12 @@ import './_shared.mjs'
       await mpPage.waitForTimeout(200)
       await mpPage.locator('[data-testid="plan-conditions-close"]').click()
       await mpPage.waitForTimeout(400)
-      const breakfastFilterBtn = mpPage.getByRole('button', { name: ja.mealPlan.slot.breakfast, exact: true })
-      const lunchFilterBtn = mpPage.getByRole('button', { name: ja.mealPlan.slot.lunch, exact: true })
-      const dinnerFilterBtn = mpPage.getByRole('button', { name: ja.mealPlan.slot.dinner, exact: true })
+      // 2026-08-29: 週タブに「入れる食事」のチップ（便MK）が増え、同じ画面に「夕食」という名前の
+      // ボタンが2つ並んだ。**どちらの群のボタンかまで指す**（名前だけで掴むと strict mode で中断する）
+      const mpSlotFilter = mpPage.getByLabel(ja.mealPlan.slotFilterTitle)
+      const breakfastFilterBtn = mpSlotFilter.getByRole('button', { name: ja.mealPlan.slot.breakfast, exact: true })
+      const lunchFilterBtn = mpSlotFilter.getByRole('button', { name: ja.mealPlan.slot.lunch, exact: true })
+      const dinnerFilterBtn = mpSlotFilter.getByRole('button', { name: ja.mealPlan.slot.dinner, exact: true })
       // 2026-07-13更新: 新規ユーザーの既定表示食事帯は「夕食のみ」(オーナー判断・プレッシャー軽減)。
       // まっさらプロファイルで検証しているこのテストでは朝食/昼食=false、夕食=trueが既定になる
       check(

@@ -201,7 +201,7 @@ import './_shared.mjs'
         'SLOTWIN-01 ボタン押下で窓「朝食・昼食・夕食のどれに入れますか？」が開く',
         stripZwspText(await swPage.textContent('body')).includes(ja.detail.todaySlotDialogTitle),
       )
-      await swPage.getByRole('button', { name: ja.mealPlan.slot.dinner, exact: true }).click()
+      await slotBtnExceptFill(swPage, ja.mealPlan.slot.dinner).click()
       await swPage.waitForTimeout(500)
       check(
         'SLOTWIN-01 「今日の夕食に追加しました」トーストが出る',

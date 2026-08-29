@@ -713,7 +713,7 @@ import './_shared.mjs'
       if (await cuAdd.count()) {
         await cuAdd.first().click()
         await cuPage.waitForTimeout(600)
-        const cuSlot = cuPage.getByRole('button', { name: ja.mealPlan.slot.dinner, exact: true })
+        const cuSlot = slotBtnExceptFill(cuPage, ja.mealPlan.slot.dinner)
         if (await cuSlot.count()) {
           await cuSlot.first().click()
           await cuPage.waitForTimeout(900)
