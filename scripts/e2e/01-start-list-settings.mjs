@@ -1630,7 +1630,7 @@ import './_shared.mjs'
       const tops = new Set(chips.map((el) => Math.round(el.getBoundingClientRect().top)))
       const heights = new Set(chips.map((el) => Math.round(el.getBoundingClientRect().height)))
       return { count: chips.length, rows: tops.size, heights: heights.size }
-    })
+    }, ja.settings.tocLabel)
     check(
       'SETTINGS-TAB-01 目次チップ5つが1行に収まり、高さが揃っている(文字の折り返しが起きない)',
       chipRows !== null && chipRows.count === 5 && chipRows.rows === 1 && chipRows.heights === 1,
