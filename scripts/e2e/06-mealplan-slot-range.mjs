@@ -1920,20 +1920,27 @@ import './_shared.mjs'
         hhBase === 2,
         `chip=${await hhChip()}`,
       )
-      // 未設定のときの概算食費(合計金額)と注記を控える
+      // 未設定のときの概算食費(合計金額)と注記を控える。
+      // 2026-08-29 便MN: 注記の**取り出しの形を ja.ts から組み立てる**（直す前は文言をそのまま
+      // 正規表現に書き写していたので、表記をそろえた瞬間に数が取り出せなくなった＝禁じ手②・
+      // docs/76 4-5「見張りが文体を縛る」と同じ穴）。差し込み {n} のところだけ数の取り出しにする
+      const hhEsc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+      const hhNoteRe = new RegExp(
+        ja.mealPlan.weekCostWholeNote.split('{n}').map(hhEsc).join(String.raw`(\d+)`),
+      )
       const hhOpenCost = async () => {
         // 2026-08-25 便KU: 概算食費は節の中（節を開けば金額まで出る。名前は便LHで「食費」）
         await openWeekGroup(hhPage, ja.mealPlan.weekGroupCostTitle)
         await hhPage.waitForTimeout(500)
-        const text = (await hhPage.textContent('body')) ?? ''
+        const text = stripZwspText((await hhPage.textContent('body')) ?? '')
         return {
           yen: Number((text.match(/約([\d,]+)円/)?.[1] ?? '0').replace(/,/g, '')),
-          note: text.match(/作る食数ぶん（合計(\d+)人分）の金額です/)?.[1],
+          note: text.match(hhNoteRe)?.[1],
         }
       }
       const hhCostBefore = await hhOpenCost()
       check(
-        'MEALPLAN-HOUSE 概算食費の注記が「作る食数ぶん（合計◯人分）」になっている',
+        'MEALPLAN-HOUSE 概算食費の注記が、何人分を数えた金額かを書いている（合計◯人分）',
         hhCostBefore.note === '2' && hhCostBefore.yen > 0,
         JSON.stringify(hhCostBefore),
       )
@@ -2006,7 +2013,7 @@ import './_shared.mjs'
       )
       const hhCostAfter = await hhOpenCost()
       check(
-        'MEALPLAN-HOUSE 概算食費は作る食数ぶん(2人分→4人分でちょうど2倍・注記も4人分)',
+        'MEALPLAN-HOUSE 概算食費は作る食数分(2人分→4人分でちょうど2倍・注記も4人分)',
         hhCostAfter.note === '4' && hhCostAfter.yen === hhCostBefore.yen * 2,
         `before=${JSON.stringify(hhCostBefore)} after=${JSON.stringify(hhCostAfter)}`,
       )

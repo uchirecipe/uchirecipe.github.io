@@ -266,7 +266,7 @@ import './_shared.mjs'
         JSON.stringify(fwSteps),
       )
       check(
-        'FW-03(疑問②) 削除のボタンが最初は出ていない理由（②を済ませると出る）も書いてある',
+        'FW-03(疑問②) 削除のボタンが最初は無い理由（②を済ませると現れること）も書いてある',
         (fwSteps[2] ?? '').includes(ja.settings.archiveSteps[2].split('（')[1].replace('）', '')),
         fwSteps[2] ?? '',
       )
@@ -1125,7 +1125,10 @@ import './_shared.mjs'
       )
       check(
         'GL-02 窓の中に、何が消えて何が残るかが件数つきで書いてある（規約F）',
-        glResetText.includes('手で動かした1回ぶんを取り消します') &&
+        // 2026-08-29 便MN: 文言を書き写していたので ja.ts から組み立てる（禁じ手②）。
+        // 見たい事実は「手で動かした回数（1回）を取り消すと書いてある」ことなので、
+        // 差し込み {n} に 1 を入れた形をそのまま作る
+        glResetText.includes(ja.cookNavi.reorderUndoAllConfirm.split('。')[0].replace('{n}', '1')) &&
           glResetText.includes('選んでいる3品') &&
           glResetText.includes(ja.cookNavi.reorderUndoAllConfirm.split('{m}品')[1]),
         glResetText,
