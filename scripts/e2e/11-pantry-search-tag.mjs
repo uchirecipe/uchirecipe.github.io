@@ -1724,14 +1724,19 @@ import './_shared.mjs'
         `もとからあるタグ=${JSON.stringify(ibTagChips.map((c) => c.name))}`,
       )
       if (ibPairTag != null) {
+        /* 2026-08-29 便MK: ONの結果が**0品では在りえない**ことを、同じ判定式に入れた。
+           上の繰り返しは `both.length > 0 && both.length < union.length` のときだけ ibAnd に
+           入れているので、ここへ来た時点で0品は起こらない＝0件は正解ではない。
+           **実測**: ibAnd を空にすると、直す前は20件とも緑のままだった（素通り）。
+           直したあとは同じ壊し方で2件が赤くなる。 */
         check(
           'IB-TAG-01(②) 登録したタグを混ぜてもスイッチONで結果が絞り込まれる',
-          ibAnd.length < ibOr.length,
+          ibAnd.length > 0 && ibAnd.length < ibOr.length,
           `ON=${ibAnd.length} OFF=${ibOr.length} 組=豆腐+${ibPairTag}`,
         )
         check(
           'IB-TAG-01(②) 登録したタグを混ぜてもONの結果はOFFの結果に必ず含まれる',
-          ibAnd.every((id) => ibOr.includes(id)),
+          ibAnd.length > 0 && ibAnd.every((id) => ibOr.includes(id)),
           `ON=${JSON.stringify(ibAnd)} OFF=${JSON.stringify(ibOr)}`,
         )
       }

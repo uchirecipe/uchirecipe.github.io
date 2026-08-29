@@ -142,9 +142,12 @@ import './_shared.mjs'
           return { id, h: Math.round(r.height), right: Math.round(r.right) }
         }),
       )
+      /* 2026-08-29 便MK: 「2つ並んでも」と言っている以上、2つ拾えていることも同じ判定式で見る。
+         **実測**: ljOneBtns を空にすると、直す前は8件とも緑のままだった（何も測らずに合格）。
+         直したあとは同じ壊し方で赤くなる。 */
       check(
         'LJCOOK-01 2つ並んでも、どちらも高さ44px以上で画面からはみ出さない',
-        ljOneBtns.every((b) => b && b.h >= 44 && b.right <= 390),
+        ljOneBtns.length === 2 && ljOneBtns.every((b) => b && b.h >= 44 && b.right <= 390),
         JSON.stringify(ljOneBtns),
       )
       await ljCheckHistoryLink('日タブの「作った！」', ljOneShownAt)

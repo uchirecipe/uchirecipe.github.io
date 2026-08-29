@@ -1643,7 +1643,7 @@ import './_shared.mjs'
       )
 
       // --- KMNAVI-01: 上へ・下へは見た目が低く、当たり判定は44pxのまま ---
-      const kmTap = await kmPage.evaluate(() => {
+      let kmTap = await kmPage.evaluate(() => {
         const out = []
         for (const sel of ['navi-step-up', 'navi-step-down']) {
           const el = document.querySelector(`[data-testid="${sel}"]`)
@@ -1661,16 +1661,24 @@ import './_shared.mjs'
         }
         return out
       })
-      check('KMNAVI-01 前提: 上へ・下へのボタンが画面にある', kmTap.every((t) => t.found), JSON.stringify(kmTap))
+      /* 2026-08-29 便MK: 測る相手が2つ（上へ・下へ）そろっていることを、同じ判定式に入れた。
+         **実測**: kmTap を空にすると、直す前は5件とも緑のままだった（何も測らずに合格）。
+         直したあとは同じ壊し方で3件とも赤くなる。 */
+      const KM_BTN_COUNT = 2
+      check(
+        'KMNAVI-01 前提: 上へ・下へのボタンが画面にある',
+        kmTap.length === KM_BTN_COUNT && kmTap.every((t) => t.found),
+        JSON.stringify(kmTap),
+      )
       const KM_BTN_MAX_H = 34
       check(
         `KMNAVI-01 上へ・下への見た目の高さが${KM_BTN_MAX_H}px以下（ページを無駄に長くしない）`,
-        kmTap.every((t) => t.found && t.h <= KM_BTN_MAX_H),
+        kmTap.length === KM_BTN_COUNT && kmTap.every((t) => t.found && t.h <= KM_BTN_MAX_H),
         JSON.stringify(kmTap),
       )
       check(
         'KMNAVI-01 見た目を低くしても、押せる大きさ44pxは保たれている',
-        kmTap.every((t) => t.found && t.dead === 0),
+        kmTap.length === KM_BTN_COUNT && kmTap.every((t) => t.found && t.dead === 0),
         JSON.stringify(kmTap),
       )
 
@@ -2085,6 +2093,30 @@ import './_shared.mjs'
       )
       check(
         'LG-03a 「元に戻す」で消した手順が戻る',
+        (await lgPage.getByPlaceholder(ja.form.stepTextPlaceholder).first().inputValue()) ===
+          'LG消す手順',
+      )
+      /* 2026-08-29 便MK: 上の「確認の窓が出ない」と**対になる「出る」側**を同じ節に足した。
+         直す前は、確認の窓の目印（既定の `confirm`）が変わっても上の count()===0 は必ず緑で、
+         「窓をやめた」ことを1度も測れていなかった（便LOの走査で 26:2028 として残っていた1件）。
+         同じ登録画面のまま「キャンセル」を押す＝書きかけがあるので窓が出る操作で対にする
+         （別の画面へ移ると、この節が測っているものが変わってしまう）。
+         自動押しを止めてから押し、見終わったら「やめる」側を押して同じ画面に留まる。 */
+      await setConfirmAnswer(lgPage, 'off')
+      await lgPage.getByRole('button', { name: ja.form.cancel }).click()
+      await lgPage.waitForTimeout(600)
+      check(
+        'LG-03a 前提: 同じ画面でも、書きかけを捨てる操作では確認の窓が出る（目印が生きている）',
+        (await lgPage.locator('[data-testid="confirm"]').count()) === 1,
+      )
+      const lgCancelKeep = lgPage.locator('[data-testid="confirm-cancel"]')
+      if ((await lgCancelKeep.count()) > 0) {
+        await lgCancelKeep.first().click()
+        await lgPage.waitForTimeout(400)
+      }
+      await setConfirmAnswer(lgPage, 'accept')
+      check(
+        'LG-03a 窓の「やめる」で、書きかけの手順は消えずに残る',
         (await lgPage.getByPlaceholder(ja.form.stepTextPlaceholder).first().inputValue()) ===
           'LG消す手順',
       )

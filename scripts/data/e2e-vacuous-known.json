@@ -13,7 +13,7 @@
   "空の並びでも通る every の残り": {
     "これは何": "判定式に出てくる `.every(...)` のうち、**受け手が固定の並び（[...] や Array.from）ではなく、同じ判定式で長さも見ていない**もの。空になった瞬間に中身を1回も見ずに合格する。2026-08-27 便LK が npm test 側7件・e2e 側10件を直し、同日 便LO が npm test 側6か所・e2e 側2か所を直したあとの残り。",
     "npm test 側の件数": 53,
-    "e2e 側の件数": 74,
+    "e2e 側の件数": 61,
     "便LOが実測したこと": "① npm test 側60か所の受け手を**全部いっぺんに空配列に差し替えて**走らせた（scripts/tests/*.mjs を機械で書き換え）。**57か所が緑のまま**で、赤くなったのは1か所（dowIndex の neq）と見張り自身（LK-2）だけ＝素通りは実測で確定している。② e2e 側は10か所を標本にして同じ壊し方をし、KG-A・DAYCOND-01・ET-02・FG-LP・IH-SEARCH-01・GJ-06・BUBBLE-EX・RECIPEEXPORT-EM の158件を走らせたところ**10か所とも緑のまま**だった。",
     "残したものが「実害なし」と言える理由": {
       "①受け手が本当に固定の並び（npm test 側の大半・36か所）": "`Array.from({ length: 10 }, () => …)` を変数に入れているだけのもの（meal-plan.mjs の picks / results / dinnerPicks など）。**必ずその長さになる**ので空にはならない。走査は変数を解かないので数に入っているだけで、機械の数え過ぎ。",
@@ -33,23 +33,30 @@
     "便LXが直した中身": {
       "scripts/tests/cook-navi.mjs:1830（ナビ詰め込み3品）": "手作業(`activeSpans`)が空でも「手作業どうしが重ならない」は緑だった。3品の段取りに手作業0件は在りえないので `activeSpans.length > 0 &&` を同じ判定式に入れた（空にすると赤くなることを実測）。",
       "scripts/e2e/22-select-weekcond.mjs:1214（HV-01⑥）": "Pro側の栄養の名前の一覧が空だと「無料では出ない」が必ず緑になり、**Proの線が壊れても気づけない**。`hvProOnlyNutrients.length > 0 &&` を入れた（一覧を空にすると赤くなることを実測）。"
+    },
+    "便MKが実測したこと": "2026-08-29 便MK。**e2e 側を1件ずつ壊して測った**（変数の宣言を let に変えて、最初にその変数を見る check の直前で空を代入する＝便LXの(b)と同じ形。src は触らないので組み直しは要らない）。**測ったのは33件で、13件が本当に素通りだった**（残り20件は同じ節の別の判定が赤くなって受け止めていた）。素通りだった13件: ibAnd(11:1734)／kmTap×3(26:1664・1668・1673)／lineInfo の lineVsAbove・lineVsBelow・gaps×3(27:433・434・439)／ljOneBtns(28:147)／ffTops×2(19:247・252)／restoredToasts×2(19:1219・1223)／foBannerTops(19:1890)。**13件とも同じ判定式に件数を入れて直し、直したあとに同じ壊し方で赤くなることまで実測した**（74→61件）。受け止めていた20件: ehSeasoningColors・ihIdle・ihFishRows×2・tmAnd・badges・ktMicro×2・ktStove・dtIds1・ffTagCounts・dpNames・wmAllOptions×2・wmDayFound・wmWeekFound・wmAfterSwap・fwGroups・glAria・gjIssues。**測っていない残り**は 01・05・06・07・08・10・14・15・16・17・20・22(WEEKFOLD-01)・23・25 の節で、同じやり方でそのまま測れる。",
+    "便MKが直した中身": {
+      "scripts/e2e/11-pantry-search-tag.mjs:1734（IB-TAG-01②）": "ONの結果(ibAnd)が空でも「OFFに含まれる」は緑だった。ibAnd は `both.length > 0 && both.length < union.length` のときだけ入るので**0件は在りえない**＝0件は正解ではない（司令部の問い）。`ibAnd.length > 0 &&` を2つの判定式に入れた（空にすると赤くなることを実測）。",
+      "scripts/e2e/26-kd-ko.mjs:1664・1668・1673（KMNAVI-01）": "上へ・下への2つが1つも拾えなくても3件とも緑だった。`kmTap.length === 2` を同じ判定式に入れた。",
+      "scripts/e2e/27-ku-kt.mjs:433・434・439（KULINE-04）": "境目の線・枠の間を1組も比べていなくても緑だった。`length > 0` を同じ判定式に入れた（明暗2つとも赤くなることを実測）。",
+      "scripts/e2e/28-lj.mjs:147（LJCOOK-01）": "「2つ並んでも」と言いながら0個でも緑だった。`ljOneBtns.length === 2` を入れた。",
+      "scripts/e2e/19-ff-fo.mjs:247・252（FF-FILTER）": "「6つの区分」を1つも読めていなくても2件とも緑だった。`ffTops.length === 6` を入れた。",
+      "scripts/e2e/19-ff-fo.mjs:1219・1223（FN-01）": "入れ直しの知らせを1件も集められていなくても緑だった。`restoredToasts.length === TITLES.length` を入れた。",
+      "scripts/e2e/19-ff-fo.mjs:1890（FO-07）": "終わったタイマーの置き場所を1回も見ずに緑だった。`foBannerTops.length === 3` を入れた。"
     }
   },
   "同じ節で「在ること」を一度も確かめていない「出ていないこと」の検査": {
     "これは何": "e2e の `count() === 0`（その要素が出ていない）検査のうち、**同じ節の中でその目印が「在る」ことを1度も確かめていない**もの。2026-08-27 便LO が acorn で走査し直した（locator を入れた変数と、前方一致 data-testid^=\"…\" まで解いてから数える）。直す前は19箇所/15種、5件を直して残り13箇所/10種。2026-08-27 便LR が、その13箇所の中で唯一「アプリ側の問題」だった LG-03e / 「印から組を作る」（取り込みの結果の中のほう）を、到達不能なUIとして画面ごと落とした＝12箇所/9種。2026-08-28 便LX が src の目印を実際に改名して1件ずつ実測し、DAYSUGGEST-01 と DAYLAYOUT-01（day-suggest-result）に「出る場面」を対で足した＝10箇所/8種。",
     "数え方": "scripts/tests/ui-source-guards.mjs の LO-1 が同じ走査をして件数を固定している。増えたら赤・直したら件数を下げる。",
-    "件数": 10,
+    "件数": 5,
     "残っている12箇所を直さなかった理由": {
-      "MEALPLAN-A3B3 / day-modal-close（07:416）": "同じ判定式で `day-modal-save` と `day-modal-cancel` の「在ること」を見ているので、式全体は素通りしない。目印そのものは同じファイルの 07:750（便DUの節）が count()===1 で見ている。",
       "DAYSUGGEST-01 / day-suggest-result（07:2004）": "同じ判定式が `day-suggest-toggle` の aria-expanded と本文（ほうれん草のおひたし）を見ているので、画面に着いていることは測れている。目印は 23-ii-iy.mjs:90 と 13-trial-demo-day.mjs:816 が「在ること」の側で使っている。",
-      "ES-01 / navi-selection-dropped（10:2074・2084）": "直前・同判定式で本文の「組み合わせる2品」を見ている。「出る場面」は 11-pantry-search-tag.mjs:445 と 15-aisle-export-lp.mjs:947 が count()===1 で見ている（便EH・便EL）。同じ節で対にするには「覚えていた選択から品を落とす」状態を作り直す必要があり、節の筋が変わる。",
+      "ES-01 / navi-selection-dropped（10:2074・2084）": "直前・同判定式で本文の「組み合わせる2品」を見ている。「出る場面」は 11-pantry-search-tag.mjs:445 と 15-aisle-export-lp.mjs:947 が count()===1 で見ている（便EH・便EL）。同じ節で対にするには「覚えていた選択から品を落とす」状態を作り直す必要があり、節の筋そのものが変わる。2026-08-29 便MK: 時間の都合で手を付けていない（測ってもいない）。",
       "IH-SEARCH-01 / search-match-word（11:1334）": "直後の 11:1348 が同じ目印を読む `ihRows()` の結果で `length > 0` を見ている＝実質その場で対になっている（走査は関数の中身まで解かないので数に残っている）。",
-      "PURPOSE-01 / purpose-picker（12:1620・1637）": "解錠が要るので同じ節では対にできない。直後の PURPOSE-02 が同じ目印を `isVisible()` で見ている（未解錠→解錠の対が節をまたいで組まれている）。",
-      "DEMO-01 / month-trial-start（13:285）": "同じ判定式で `month-demo-link` の isVisible を見ている。目印そのものは 13:196 が「在ること」の側で使っている。",
       "DAYLAYOUT-01 / day-suggest-result（13:677）": "前後の行で本文（肉じゃが）と `day-suggest-draw` count()===1 を見ている。目印は同じファイルの 13:816 が「在ること」の側で使っている。",
-      "GL-05 / cook-finish-modal（21:1182）": "同じ判定式で `cook-session-step-text` count()===1 を見ている。目印は 19-ff-fo.mjs:1994 と 26-kd-ko.mjs:1690 が「在ること」の側で使っている。",
-      "LG-03a / confirm（26:2028）": "確認の窓の既定の目印。直後にトーストの文言と入力欄の中身で「消えたこと」を見ているので画面には着いている。目印は 25-jj-jq.mjs:808 が count()===1 で見ている。"
+      "GL-05 / cook-finish-modal（21:1182）": "同じ判定式で `cook-session-step-text` count()===1 を見ている。目印は 19-ff-fo.mjs:1994 と 26-kd-ko.mjs:1690 が「在ること」の側で使っている。2026-08-29 便MK: 同じ節で対にするには**段取りを最後まで進めて終わりの窓を出す**必要があるが、GL-05 は同じ画面をそのまま GL-08（タイマーの読み上げ名）へ引き継いでおり、終わらせると後ろの節が測れなくなる。節の順番を動かさずに直す形が見つからなかったので残した。"
     },
-    "便LXが実測したこと": "2026-08-28 便LX が **src の目印を実際に改名して**1件ずつ測った（改名 → `npm run build` → その節だけ e2e）。**「出ていないこと」の検査8つのうち6つが、目印を変えても緑のままだった**: MEALPLAN-A3B3(day-modal-close)・ES-01(navi-selection-dropped)・PURPOSE-01(purpose-picker)・DEMO-01(month-trial-start)・DAYSUGGEST-01/DAYLAYOUT-01(day-suggest-result)・GL-05(cook-finish-modal)。赤くなったのは IH-SEARCH-01(search-match-word) だけで、これは同じ節の他の検査が受け止めていた。**改名そのものは別の節が受け止めることも実測で確かめた**（MEALPLAN-DU・EH-01/EL-04・PURPOSE-02・TRIAL-02・DAYMODE-01・FO-09/KMFINISH-01 がそれぞれ赤）。**このとき LK-1 は5件とも取り逃していた**（`includes` の部分一致だったので `purpose-picker` → `purpose-pickerZZ` を「src に在る」と読んでいた）。LK-1 を**引用符で囲まれた1語**の照合に直し、同じ改名で赤くなることを実測した。day-suggest-result の2件は同じ節に「出る場面」を足して直した（12→10箇所）。"
+    "便LXが実測したこと": "2026-08-28 便LX が **src の目印を実際に改名して**1件ずつ測った（改名 → `npm run build` → その節だけ e2e）。**「出ていないこと」の検査8つのうち6つが、目印を変えても緑のままだった**: MEALPLAN-A3B3(day-modal-close)・ES-01(navi-selection-dropped)・PURPOSE-01(purpose-picker)・DEMO-01(month-trial-start)・DAYSUGGEST-01/DAYLAYOUT-01(day-suggest-result)・GL-05(cook-finish-modal)。赤くなったのは IH-SEARCH-01(search-match-word) だけで、これは同じ節の他の検査が受け止めていた。**改名そのものは別の節が受け止めることも実測で確かめた**（MEALPLAN-DU・EH-01/EL-04・PURPOSE-02・TRIAL-02・DAYMODE-01・FO-09/KMFINISH-01 がそれぞれ赤）。**このとき LK-1 は5件とも取り逃していた**（`includes` の部分一致だったので `purpose-picker` → `purpose-pickerZZ` を「src に在る」と読んでいた）。LK-1 を**引用符で囲まれた1語**の照合に直し、同じ改名で赤くなることを実測した。day-suggest-result の2件は同じ節に「出る場面」を足して直した（12→10箇所）。",
+    "便MKが実測したこと": "2026-08-29 便MK。**便LXが未測定だった `LG-03a` / `confirm`（26:2028）を測り、残していた5件のうち3件を直した**。①**`confirm` の壊し方**: 窓の目印は `confirm-ok` / `confirm-cancel` を連れて変わるうえ、自動押しの道具（scripts/e2e/_shared.mjs の installConfirmAutoPress）も同じ目印で窓を探しているので、src だけを改名すると**全部の節の確認の窓が押されなくなる**。そこで **ConfirmProvider の既定の目印（confirm → confirmZZ）と _shared の当て先を同時に寄せた**＝自動押しは今までどおり動き、**目印を字で読んでいる検査だけ**が赤くなる。これで他の節を巻き込まずに測れる。**実測**: この壊し方で LG-03a の `count()===0` は緑のままだった（＝素通りを確認）。同じ登録画面で「キャンセル」→書きかけを捨てる確認の窓が出る、を対にして足したところ、同じ壊し方で赤くなった。②**MEALPLAN-A3B3 / day-modal-close**: 開き直した直後＝まだ何も変えていない窓は「閉じる」1つだけなので、その場で `count()===1` を足した（src の目印を改名して赤くなることを実測）。③**DEMO-01 / month-trial-start**: 節のいちばん最後に「記録を5件入れれば入口が出る」を足した（端末のデータを見比べる判定はその前に終わっているので巻き添えにしない。改名で赤くなることを実測）。④**PURPOSE-01 / purpose-picker**: Pro案内へ着地したところで解錠し、同じ場所に3択が出るところまでを1本につないだ（改名で赤くなることを実測）。⑤**ES-01 と GL-05 は残した**（下の理由を見ること）。"
   }
 }
