@@ -1568,7 +1568,8 @@ import './_shared.mjs'
       // 便BH-2 タスク2: 主菜スロットは必ずdishType=mainのレシピから選ばれる(野菜炒め=side等は主菜に来ない)
       check(
         'MEALPLAN-04 主菜は必ずdishType=mainのレシピから選ばれる',
-        mainsAfterFirst.every((r) => r.dishType === 'main'),
+        // 便LK: 空だと every は中身を1回も見ずに true になる（測れていないのに緑）
+        mainsAfterFirst.length > 0 && mainsAfterFirst.every((r) => r.dishType === 'main'),
         `主菜のdishType=${JSON.stringify(mainsAfterFirst.map((r) => r.dishType))}`,
       )
       const idsAfterFirst = rowsAfterFirst.map((r) => r.id)

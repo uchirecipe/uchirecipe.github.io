@@ -1803,7 +1803,8 @@ import './_shared.mjs'
       )
       check(
         'WEEKFOLD-01(②) 献立を入れる前は、未来の日も全部畳まれている',
-        (await Promise.all(wfNext.map((d) => wfOpen(d)))).every((v) => v === false),
+        wfNext.length > 0 &&
+          (await Promise.all(wfNext.map((d) => wfOpen(d)))).every((v) => v === false),
         await wfOpenMap(wfNext),
       )
 
@@ -1824,7 +1825,8 @@ import './_shared.mjs'
       )
       check(
         'WEEKFOLD-01(②) 献立の無い未来の日は畳まれたまま',
-        (await Promise.all(wfEmptyDates.map((d) => wfOpen(d)))).every((v) => v === false),
+        wfEmptyDates.length > 0 &&
+          (await Promise.all(wfEmptyDates.map((d) => wfOpen(d)))).every((v) => v === false),
         await wfOpenMap(wfEmptyDates),
       )
       check(
@@ -1870,7 +1872,8 @@ import './_shared.mjs'
       )
       check(
         'WEEKFOLD-01(①) 過ぎた日は全部畳まれている',
-        (await Promise.all(wfPast.map((d) => wfOpen(d)))).every((v) => v === false),
+        wfPast.length > 0 &&
+          (await Promise.all(wfPast.map((d) => wfOpen(d)))).every((v) => v === false),
         await wfOpenMap(wfPast),
       )
       check(
@@ -1931,7 +1934,8 @@ import './_shared.mjs'
         await wfPage.waitForTimeout(900)
         check(
           'WEEKFOLD-01(①) 「すべて開く」を押せば、過ぎた日も開ける（既定は上書きできる）',
-          (await Promise.all(wfPast.map((d) => wfOpen(d)))).every((v) => v === true),
+          wfPast.length > 0 &&
+            (await Promise.all(wfPast.map((d) => wfOpen(d)))).every((v) => v === true),
           await wfOpenMap(wfPast),
         )
       }

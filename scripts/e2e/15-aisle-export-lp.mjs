@@ -1487,7 +1487,8 @@ import './_shared.mjs'
       )
       check(
         'RECIPEEXPORT-EM(b) レシピには「作った記録」の配列が付いている(記録も一緒に持ち出せる)',
-        reFile.recipes.every((r) => Array.isArray(r.cookedLogs)),
+        // 便LK: 空だと every は中身を1回も見ずに true になる（測れていないのに緑）
+        reFile.recipes.length > 0 && reFile.recipes.every((r) => Array.isArray(r.cookedLogs)),
       )
       check('RECIPEEXPORT-EM(c) 書き出し完了の知らせが出る', ((await rePage.textContent('body')) ?? '').includes('書き出しました'))
 

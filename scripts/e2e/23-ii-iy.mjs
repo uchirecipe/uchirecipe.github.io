@@ -969,7 +969,8 @@ import './_shared.mjs'
       }
       check(
         'IVFOLD-01 前提: 3つの節の見出しを全部掴めた',
-        Object.values(ivStates).every((v) => v !== null),
+        // 便LK: 空だと every は中身を1回も見ずに true になる（測れていないのに緑）
+        Object.keys(ivStates).length > 0 && Object.values(ivStates).every((v) => v !== null),
         JSON.stringify(ivStates),
       )
       check(

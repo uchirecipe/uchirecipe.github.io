@@ -538,11 +538,13 @@ import './_shared.mjs'
         )
         check(
           `BUBBLE-EX(${scheme}) しっぽが三角ではなく丸い粒2つ`,
-          bub.items.every((i) => i.tailRound && i.tailNotTriangle),
+          // 便LK: 空だと every は中身を1回も見ずに true になる（測れていないのに緑）
+          bub.items.length > 0 && bub.items.every((i) => i.tailRound && i.tailNotTriangle),
         )
         check(
           `BUBBLE-EX(${scheme}) 角が大きく丸い(半径24px以上)`,
-          bub.items.every((i) => i.radius >= 24),
+          // 便LK: 空だと every は中身を1回も見ずに true になる（測れていないのに緑）
+          bub.items.length > 0 && bub.items.every((i) => i.radius >= 24),
           bub.items.map((i) => i.radius).join(','),
         )
         check(
@@ -564,6 +566,8 @@ import './_shared.mjs'
         check(
           `BUBBLE-EX(${scheme}) 390pxで横にはみ出さない`,
           bub.docW <= bub.winW &&
+            // 便LK: 空だと every は中身を1回も見ずに true になる（測れていないのに緑）
+            bub.items.length > 0 &&
             bub.items.every((i) => i.left >= bub.secLeft - 1 && i.right <= bub.secRight + 1),
           `scrollW=${bub.docW} 枠=${Math.round(bub.secLeft)}〜${Math.round(bub.secRight)} 各=${bub.items
             .map((i) => `${i.left}-${i.right}`)
