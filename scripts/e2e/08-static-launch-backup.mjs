@@ -1740,13 +1740,17 @@ import './_shared.mjs'
       )
       check(
         'REPLACEUNDO-01(a) 確認文に「作った記録」「価格」の件数も入る',
-        dialogMessages.every((m) => /作った記録\d+件・価格\d+件/.test(m)),
+        // 便LK: 空だと every は中身を1回も見ずに true になる（測れていないのに緑）
+        dialogMessages.length > 0 &&
+          dialogMessages.every((m) => /作った記録\d+件・価格\d+件/.test(m)),
         `dialogMessages=${JSON.stringify(dialogMessages)}`,
       )
       check(
         'REPLACEUNDO-01(a) 確認文に「元に戻す」で戻せる旨(残る/どうなるか)も書かれている' +
           '(規約F。「よろしいですか？」だけの確認にしない)',
-        dialogMessages.every((m) => m.includes('元に戻す') && m.includes('戻せます')),
+        // 便LK: 空だと every は中身を1回も見ずに true になる（測れていないのに緑）
+        dialogMessages.length > 0 &&
+          dialogMessages.every((m) => m.includes('元に戻す') && m.includes('戻せます')),
       )
 
       check(

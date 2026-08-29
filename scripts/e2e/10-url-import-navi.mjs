@@ -2105,6 +2105,50 @@ import './_shared.mjs'
         'ES-02 戻った先に段取りが残っている',
         (await esPage.textContent('body')).includes('組み合わせる2品'),
       )
+
+      // 経路④: 「出ていないこと」の対（2026-08-29 便MO）。
+      // 上の3経路は知らせが**出ない**ことしか見ていなかったので、src の目印を
+      // navi-selection-droppedZZ に改名しても ES-01・ES-02 は 8/8件のまま緑だった（同日に実測）。
+      // **本当に品が落ちたときは出る**ことを同じ節で一度だけ確かめて対にする。
+      // ここは節のいちばん最後なので、後ろの判定を巻き添えにしない。
+      // 作り方: 選んでいた2品のうち副菜を今日の献立から消す（週の予定と今日の献立の両方から。
+      // 週の予定の品は今日の献立にも写されるので、片方だけ消しても候補に残る）
+      currentCheck = 'ES-01'
+      await esPage.evaluate(async () => {
+        const openDb = () =>
+          new Promise((resolve, reject) => {
+            const r = indexedDB.open('uchi-recipe')
+            r.onsuccess = () => resolve(r.result)
+            r.onerror = () => reject(r.error)
+          })
+        const db = await openDb()
+        const P = (req) => new Promise((res, rej) => { req.onsuccess = () => res(req.result); req.onerror = () => rej(req.error) })
+        const recipes = await P(db.transaction('recipes').objectStore('recipes').getAll())
+        const sideId = recipes.find((r) => r.title === 'ES予定サラダ')?.id
+        for (const table of ['mealPlans', 'todayList']) {
+          const rows = await P(db.transaction(table).objectStore(table).getAll())
+          const store = db.transaction(table, 'readwrite').objectStore(table)
+          for (const row of rows.filter((x) => x.recipeId === sideId)) await P(store.delete(row.id))
+        }
+        db.close()
+      })
+      // 生のIndexedDBへ書いたので、読み込み直したところで見る（禁じ手⑥）。
+      // 別のタブで開くのは、全画面を開いているかどうかがタブごと（sessionStorage）だから
+      // ＝調理中は記録を段取りへ逆流させない決まりがあり、開いたままだと突き合わせが働かない。
+      // 覚えていた選択（localStorage）と献立（IndexedDB）はタブをまたいで同じものを見る
+      const esTab2 = await esContext.newPage()
+      esTab2.on('dialog', (dialog) => void dialog.accept())
+      esTab2.on('pageerror', (err) => {
+        if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+        errors.push(`[pageerror@ES-01] ${err.message}`)
+      })
+      await esTab2.goto(`${BASE}/#/cook-navi`, { waitUntil: 'networkidle' })
+      await esTab2.waitForTimeout(1800)
+      check(
+        'ES-01 今日の献立から品が消えたときは「外しました」を黙って済ませない(出る側)',
+        (await esTab2.locator('[data-testid="navi-selection-dropped"]').count()) === 1,
+        `body=${((await esTab2.textContent('body')) ?? '').replace(/\u200B/g, '').slice(0, 200)}`,
+      )
     } finally {
       await esBrowser.close()
     }

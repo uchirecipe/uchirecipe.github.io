@@ -447,7 +447,8 @@ import './_shared.mjs'
         )
         check(
           'FP-03 アクセント色で塗られた食事ボタンが1つも無い',
-          slotClasses.every((c) => !c.includes('bg-accent')),
+          // 便LK: 空だと every は中身を1回も見ずに true になる（測れていないのに緑）
+          slotClasses.length > 0 && slotClasses.every((c) => !c.includes('bg-accent')),
           JSON.stringify(slotClasses),
         )
 

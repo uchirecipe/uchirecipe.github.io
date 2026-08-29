@@ -1687,7 +1687,8 @@ import './_shared.mjs'
       )
       check(
         'MEALPLAN-A5(便CH/C1) 2回目を押しても1品も消えない・入れ替わらない(総入れ替えしない)',
-        fmBefore.every((row) => fmAfterSecond.includes(row)),
+        // 便LK: 空だと every は中身を1回も見ずに true になる（1品も入っていないのに「消えていない」）
+        fmBefore.length > 0 && fmBefore.every((row) => fmAfterSecond.includes(row)),
         `before=${fmBefore.length}品 after=${fmAfterSecond.length}品 消えた=${
           fmBefore.filter((row) => !fmAfterSecond.includes(row)).length
         }品`,

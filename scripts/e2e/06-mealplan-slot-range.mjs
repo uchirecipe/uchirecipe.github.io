@@ -309,7 +309,8 @@ import './_shared.mjs'
       )
       check(
         'SLOTWIN-01(決めない) 週プランのどの枠にも入らない(従来どおりの枠なし追加)',
-        swCurrySlotCounts.every((n) => n === 0),
+        // 便LK: 空だと every は中身を1回も見ずに true になる（測れていないのに緑）
+        swCurrySlotCounts.length > 0 && swCurrySlotCounts.every((n) => n === 0),
         `counts=${JSON.stringify(swCurrySlotCounts)}`,
       )
     } finally {

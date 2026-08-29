@@ -657,7 +657,8 @@ import './_shared.mjs'
       const dcBefore = await dcSnap()
       check(
         'DAYCOND-01 前提: 位置を読めた（読めなければ見張りが壊れている）',
-        Object.values(dcBefore).every((v) => v != null),
+        // 便LK: 空だと every は中身を1回も見ずに true になる（測れていないのに緑）
+        Object.keys(dcBefore).length > 0 && Object.values(dcBefore).every((v) => v != null),
         JSON.stringify(dcBefore),
       )
 
@@ -703,7 +704,10 @@ import './_shared.mjs'
       const dcInsideBefore = await dcInsideSnap()
       check(
         'DAYCOND-01 前提: 窓の中の位置を読めた',
-        (await dcModal.count()) !== 1 || Object.values(dcInsideBefore).every((v) => v != null),
+        // 便LK: 空だと every は中身を1回も見ずに true になる（測れていないのに緑）
+        (await dcModal.count()) !== 1 ||
+          (Object.keys(dcInsideBefore).length > 0 &&
+            Object.values(dcInsideBefore).every((v) => v != null)),
         JSON.stringify(dcInsideBefore),
       )
       const dcInsideMoved = []

@@ -1675,7 +1675,8 @@ import './_shared.mjs'
       )
       check(
         'ET-02 下へスクロールしても献立の日/週/月が画面上部に残る',
-        !!etsTabs && etsTabs.top <= 1 && etsButtons.every((b) => b.inView),
+        // 便LK: 空だと every は中身を1回も見ずに true になる（測れていないのに緑）
+        !!etsTabs && etsTabs.top <= 1 && etsButtons.length > 0 && etsButtons.every((b) => b.inView),
         JSON.stringify({ bar: etsTabs, buttons: etsButtons }),
       )
       check(

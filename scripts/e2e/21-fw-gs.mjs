@@ -1320,6 +1320,15 @@ import './_shared.mjs'
       check('GL 前提: 最後の手順まで進める', (await glPage.locator('[data-testid="cook-session-finish"]').count()) === 1)
       await glPage.locator('[data-testid="cook-session-finish"]').click()
       await glPage.waitForTimeout(800)
+      // GL-05 の「途中で次へ進めても終わりの窓は出ない」（count()===0）の対（2026-08-29 便MO）。
+      // 目印を cook-finish-modalZZ に改名しても GL の節は 36/36件のまま緑だった＝出ない側だけでは
+      // 何も測れていない。**最後まで進めて終えたときは出る**のを同じ節で1つ測って対にする。
+      // 段取りを終わらせるのはこの GL-06 の役目なので、GL-05 の場で終わらせて
+      // 後ろの GL-08・GL-04 を測れなくする必要はない
+      check(
+        'GL-06 最後まで進めて「完成！」を押すと、終わりの窓がその場に出る',
+        (await glPage.locator('[data-testid="cook-finish-modal"]').count()) === 1,
+      )
       check(
         'GL-06 「完成！」の窓で、動いているタイマーのことを聞く',
         (await glPage.locator('[data-testid="cook-finish-timers"]').count()) === 1,
