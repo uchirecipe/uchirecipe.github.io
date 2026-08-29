@@ -427,16 +427,21 @@ import './_shared.mjs'
         )
         // 直す前は 地色どうし 1.04:1（ダーク1.05:1）・線と面 1.07〜1.25:1 で、
         // 「どこで朝昼夕が変わるか」を色から読めなかった。**線で引く**側で測る
+        /* 2026-08-29 便MK: 比べた組が1つも無いまま合格しないよう、件数を同じ判定式に入れた。
+           **実測**: lineVsAbove / lineVsBelow / gaps を空にすると、直す前は8件とも緑のままだった。
+           直したあとは同じ壊し方で明暗2つとも赤くなる。 */
         check(
           `KULINE-04(${scheme}) 隣り合う枠の境目の線は、上下どちらの面に対しても3:1以上`,
           lineInfo !== null &&
+            lineInfo.lineVsAbove.length > 0 &&
+            lineInfo.lineVsBelow.length > 0 &&
             lineInfo.lineVsAbove.every((v) => v !== null && v >= 3) &&
             lineInfo.lineVsBelow.every((v) => v !== null && v >= 3),
           JSON.stringify(lineInfo),
         )
         check(
           `KULINE-04(${scheme}) 枠どうしの間は16px以上（距離でも切れ目が読める）`,
-          lineInfo !== null && lineInfo.gaps.every((g) => g >= 16),
+          lineInfo !== null && lineInfo.gaps.length > 0 && lineInfo.gaps.every((g) => g >= 16),
           JSON.stringify(lineInfo),
         )
         await lineCtx.close()

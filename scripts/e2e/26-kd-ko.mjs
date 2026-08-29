@@ -1661,16 +1661,24 @@ import './_shared.mjs'
         }
         return out
       })
-      check('KMNAVI-01 前提: 上へ・下へのボタンが画面にある', kmTap.every((t) => t.found), JSON.stringify(kmTap))
+      /* 2026-08-29 便MK: 測る相手が2つ（上へ・下へ）そろっていることを、同じ判定式に入れた。
+         **実測**: kmTap を空にすると、直す前は5件とも緑のままだった（何も測らずに合格）。
+         直したあとは同じ壊し方で3件とも赤くなる。 */
+      const KM_BTN_COUNT = 2
+      check(
+        'KMNAVI-01 前提: 上へ・下へのボタンが画面にある',
+        kmTap.length === KM_BTN_COUNT && kmTap.every((t) => t.found),
+        JSON.stringify(kmTap),
+      )
       const KM_BTN_MAX_H = 34
       check(
         `KMNAVI-01 上へ・下への見た目の高さが${KM_BTN_MAX_H}px以下（ページを無駄に長くしない）`,
-        kmTap.every((t) => t.found && t.h <= KM_BTN_MAX_H),
+        kmTap.length === KM_BTN_COUNT && kmTap.every((t) => t.found && t.h <= KM_BTN_MAX_H),
         JSON.stringify(kmTap),
       )
       check(
         'KMNAVI-01 見た目を低くしても、押せる大きさ44pxは保たれている',
-        kmTap.every((t) => t.found && t.dead === 0),
+        kmTap.length === KM_BTN_COUNT && kmTap.every((t) => t.found && t.dead === 0),
         JSON.stringify(kmTap),
       )
 
