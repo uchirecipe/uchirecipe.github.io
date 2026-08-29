@@ -15,6 +15,12 @@
 //    「選んだ範囲の買い物メモを作る」も地 rgb(204,63,1)／文字 rgb(250,245,236) で**同じ**
 //  ③archive/backup とも、自分で開いてから説明ページへ出て帰ると aria-expanded が **false**
 //
+// 2026-08-29 便MN: MJPANEL-03 に⑦を足した。便MJの申し送り「`?section=pro` の往復だけは
+// **解錠が要るので e2e で測れていない**」を埋めるもの。ソースの見張り MJ-3 は /about/ へ出る
+// リンク7本すべてを見ているが、実機で往復していたのは archive・backup・利用規約の3経路だけだった。
+// 実測（2026-08-29・390px・BASE_URL=http://localhost:4601）: 解錠して archive を開いてから
+// Pro版の説明へ出て帰ると aria-expanded は **true**（＝開いたまま帰る）。着地も ?section=pro のまま
+//
 // この便の節は**自前のブラウザ**を開いて測る（前の節が残した画面の状態に寄りかからない）。
 // 曜日・月替わりの前提は置かない。掴むのは data-testid と ja.ts から組み立てた読み上げ名だけで、
 // 並び順・押す回数・置き場所には依らない（禁じ手②③④）。
@@ -325,6 +331,64 @@ import './_shared.mjs'
           )
         }
       }
+
+      // ⑦ 解錠しないと通れない道（Pro版の説明 → ?section=pro で帰る）も同じ（2026-08-29 便MN）。
+      //    便MJの申し送り「解錠が要るので e2e では測れていない」を埋める。ソースの見張り MJ-3 は
+      //    /about/ へ出るリンク7本すべてを見ているが、**実機で往復したのは archive・backup・
+      //    利用規約の3経路だけ**だった。この1本は折りたたみの中ではなく Pro版の枠の中にあり、
+      //    帰り先も ?section=pro なので、道としても着地点としても別物になる。
+      //    解錠は他の節と同じ道具（settings に proCode を直接書く）。生のIndexedDBへ書いた変更は
+      //    Dexie の購読に伝わらないので、必ず読み込み直してから見る（禁じ手⑥）
+      await mkPage.evaluate(async () => {
+        const idb = await new Promise((resolve, reject) => {
+          const r = indexedDB.open('uchi-recipe')
+          r.onsuccess = () => resolve(r.result)
+          r.onerror = () => reject(r.error)
+        })
+        const P = (req) =>
+          new Promise((res, rej) => {
+            req.onsuccess = () => res(req.result)
+            req.onerror = () => rej(req.error)
+          })
+        const store = () => idb.transaction('settings', 'readwrite').objectStore('settings')
+        const cur = (await P(store().get(1))) || { id: 1 }
+        await P(store().put({ ...cur, id: 1, proCode: 'UR-E2E-TEST-ONLY', proActivatedAt: Date.now() }))
+        idb.close()
+      })
+      await mkFreshSettings('?section=pro')
+      const mkProLink = mkPage.locator('[data-testid="pro-detail-link-activated"]')
+      check(
+        'MJPANEL-03 前提: 解錠すると、Pro版の枠に説明ページへの案内が出る',
+        (await mkProLink.count()) === 1,
+        `${await mkProLink.count()}件`,
+      )
+      // 解錠しただけでは畳んだまま＝この節が見ている「開いたまま」が既定と見分けられる形になっている
+      check(
+        'MJPANEL-03 前提: 解錠した直後も「古い記録の書き出し」は畳んである（既定は変えていない）',
+        (await mkOpen('archive-toggle')) === 'false',
+        `aria-expanded=${await mkOpen('archive-toggle')}`,
+      )
+      await mkPage.locator('[data-testid="archive-toggle"]').first().click()
+      await mkPage.waitForTimeout(600)
+      await mkProLink.first().click()
+      await mkPage.waitForLoadState('networkidle')
+      await mkPage.waitForTimeout(1800)
+      const mkProReturn = mkPage.locator('#appReturn')
+      check(
+        'MJPANEL-03 前提: Pro版の説明から説明ページへ移れて、帰り道が出ている',
+        new URL(mkPage.url()).pathname.startsWith('/about/') && (await mkProReturn.count()) === 1,
+        `着いた先=${mkPage.url()} 帰り道=${await mkProReturn.count()}件`,
+      )
+      await mkProReturn.first().click()
+      await mkPage.waitForLoadState('networkidle')
+      await mkPage.waitForTimeout(2500)
+      check(
+        'MJPANEL-03 解錠が要る道（Pro版の説明・?section=pro で帰る）でも、開いていたカードは開いたまま',
+        new URL(mkPage.url()).hash.startsWith('#/settings') &&
+          mkPage.url().includes('section=pro') &&
+          (await mkOpen('archive-toggle')) === 'true',
+        `着いた先=${mkPage.url()} aria-expanded=${await mkOpen('archive-toggle')}`,
+      )
     } finally {
       await mkBrowser.close()
     }
