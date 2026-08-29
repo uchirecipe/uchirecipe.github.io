@@ -910,7 +910,13 @@ import './_shared.mjs'
         await ezPage.locator('[data-testid="cook-session-next"]').click()
         await ezPage.waitForTimeout(200)
       }
-      await ezPage.locator('[data-testid="cook-session"] button[aria-label*="タイマー"]').first().click()
+      // 手順のタイマーを起動するボタン（読み上げ名は「15分 タイマー開始」＝ ja.timer.start が末尾に付く）。
+      // 前は「タイマー」の3文字で掴んでいたので「タイマーを開く」（自分で決めるタイマーの入口）まで
+      // 網に入っていた。実測（2026-08-29 便MM）では3つ当たっていて、そのうち2つが手順のタイマー
+      await ezPage
+        .locator(`[data-testid="cook-session"] button[aria-label*="${ja.timer.start}"]`)
+        .first()
+        .click()
       await ezPage.waitForTimeout(600)
       const ezChip = ezPage.locator('[data-testid="cook-session-current-timers"]')
       check(

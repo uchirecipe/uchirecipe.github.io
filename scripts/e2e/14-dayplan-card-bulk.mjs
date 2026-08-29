@@ -457,7 +457,7 @@ import './_shared.mjs'
       const cpSlotButtons = cpPage.locator('[data-testid="today-slot-button"]')
       check('CARDPARTS-01 前提: 食事の枠を選ぶ窓が開く', (await cpSlotButtons.count()) === 3)
       if ((await cpSlotButtons.count()) === 3) {
-        await cpPage.getByRole('button', { name: ja.mealPlan.slot.dinner, exact: true }).first().click()
+        await todaySlotBtn(cpPage, ja.mealPlan.slot.dinner).click()
         await cpPage.waitForTimeout(1600)
       }
       /**
@@ -1129,7 +1129,7 @@ import './_shared.mjs'
       )
       await snPage.locator('[data-testid="day-suggest-apply"]').click()
       await snPage.waitForTimeout(900)
-      await snPage.getByRole('button', { name: ja.mealPlan.slot.dinner, exact: true }).first().click()
+      await todaySlotBtn(snPage, ja.mealPlan.slot.dinner).click()
       await snPage.waitForTimeout(1800)
       const snPlanCard = snPage.locator('[data-testid="day-plan-card"]').filter({ hasText: snTitle }).first()
       check('SUGGESTNG-04 前提: その品が今日の献立に入った', (await snPlanCard.count()) === 1)

@@ -720,3 +720,38 @@ globalThis.slotBtnExceptFill = (scope, name) =>
   scope
     .getByRole('button', { name, exact: true })
     .and(scope.locator(':not([data-testid="week-fill-slot"])'))
+
+/**
+ * 「今日の献立に入れる」で開く、**食事の枠を選ぶ窓**のボタン（2026-08-29 便MM）。
+ *
+ * 名前だけで掴んで `.first()` を付けていた6か所（13-trial-demo-day ×2・14-dayplan-card-bulk ×2・
+ * 23-ii-iy・25-jj-jq）を、この道具に寄せた。**実測（2026-08-29・6か所とも）では
+ * 「夕食」という名前のボタンは画面に1つしか無く、`.first()` は正しいほうを掴めていた。**
+ * それでも寄せるのは、`.first()` が**同じ名前が2つになった瞬間に中断せず、
+ * 黙って別のボタンを掴んで緑のまま通る**形だから（週の「入れる食事」を足した 2026-08-29 に
+ * `MEALPLAN-01` が同じ形で倒れている）。窓のボタン（data-testid="today-slot-button"）
+ * だけを見るようにすれば、窓の外に同じ名前が増えても当たらない。
+ */
+globalThis.todaySlotBtn = (scope, name) =>
+  scope
+    .getByRole('button', { name, exact: true })
+    .and(scope.locator('[data-testid="today-slot-button"]'))
+
+/**
+ * 合わせ調味料の組の丸ボタンの aria-label の**共通の頭**（2026-08-29 便MM）。
+ * 画面には「合わせ調味料グループ1（…）」（ja.form.ingredientGroupSet）と
+ * 「合わせ調味料グループ: なし（押して設定）」（ja.form.ingredientGroupNone）の2つが出る。
+ * 前方一致で掴む・数えるときの頭を **ja.ts から作る**（画面の字を書き写さない）。
+ */
+globalThis.INGREDIENT_GROUP_PREFIX = ja.form.ingredientGroupSet.split('{n}')[0]
+globalThis.INGREDIENT_GROUP_RE = new RegExp(`^${reEscape(globalThis.INGREDIENT_GROUP_PREFIX)}[0-9]`)
+
+/**
+ * タイマーの調整の窓にある「戻る導線」のボタン名（2026-08-29 便MM）。
+ * 画面によって3つのうちどれかが出る（手順へ移る goToStep ／ 見るだけの peekStep ／
+ * 単品レシピへ飛ぶ goToRecipe）ので、**3つとも ja.ts から読んで並べる**。
+ * 前は `/を(開く|見る)/` と書き写していた＝文言を直すと掴めず30秒待って実行中断する形だった。
+ */
+globalThis.TIMER_BACK_LINK_RE = new RegExp(
+  [ja.timer.goToStep, ja.timer.peekStep, ja.timer.goToRecipe].map((t) => jaRe(t).source).join('|'),
+)

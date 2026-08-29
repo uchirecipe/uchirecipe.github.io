@@ -1097,7 +1097,7 @@ import './_shared.mjs'
           (await dmSlotButtons.count()) === 3,
         )
         if ((await dmSlotButtons.count()) === 3) {
-          await dmPage.getByRole('button', { name: ja.mealPlan.slot.dinner, exact: true }).first().click()
+          await todaySlotBtn(dmPage, ja.mealPlan.slot.dinner).click()
           await dmPage.waitForTimeout(1500)
         }
         check(
@@ -1401,7 +1401,7 @@ import './_shared.mjs'
           'DAYFLOW-01(d) 入れる前に食事の枠を選ぶ窓が開く（他の画面と同じ部品・朝昼夕の3つ）',
           (await dfPage.locator('[data-testid="today-slot-button"]').count()) === 3,
         )
-        await dfPage.getByRole('button', { name: ja.mealPlan.slot.dinner, exact: true }).first().click()
+        await todaySlotBtn(dfPage, ja.mealPlan.slot.dinner).click()
         await dfPage.waitForTimeout(1500)
         const dfAfterApply = await dfBody()
         const dfPlansAfter = await dfRead('mealPlans')

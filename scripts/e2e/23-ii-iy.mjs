@@ -484,7 +484,7 @@ import './_shared.mjs'
       }
       await ogPage.locator('[data-testid="day-suggest-apply"]').click()
       await ogPage.waitForTimeout(600)
-      await ogPage.getByRole('button', { name: ja.mealPlan.slot.dinner, exact: true }).first().click()
+      await todaySlotBtn(ogPage, ja.mealPlan.slot.dinner).click()
       await ogPage.waitForTimeout(1600)
       const ogOrganize = ogPage.locator('[data-testid="day-organize"]')
       check('IUORG-02 前提: 「整理」がある', (await ogOrganize.count()) === 1)

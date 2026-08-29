@@ -14,14 +14,6 @@
 // ==========================================================================================
 import './_shared.mjs'
 
-/**
- * 合わせ調味料の組の丸ボタンの aria-label は「合わせ調味料グループ1（…）」（ja.form.ingredientGroupSet）と
- * 「合わせ調味料グループ: なし（押して設定）」（ja.form.ingredientGroupNone）の2つ。
- * 前方一致で掴むための共通の頭を **ja.ts から作る**（画面の字を書き写さない＝JM-1）。
- */
-const INGREDIENT_GROUP_PREFIX = ja.form.ingredientGroupSet.split('{n}')[0]
-const INGREDIENT_GROUP_RE = new RegExp(`^${reEscape(INGREDIENT_GROUP_PREFIX)}[0-9]`)
-
   // --- SMK-01: 起動・初回シード ---
   currentCheck = 'SMK-01'
   await page.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })

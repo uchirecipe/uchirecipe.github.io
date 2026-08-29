@@ -1524,7 +1524,7 @@ import './_shared.mjs'
       }
       await jpcPage.locator('[data-testid="day-suggest-apply"]').click()
       await jpcPage.waitForTimeout(600)
-      await jpcPage.getByRole('button', { name: ja.mealPlan.slot.dinner, exact: true }).first().click()
+      await todaySlotBtn(jpcPage, ja.mealPlan.slot.dinner).click()
       await jpcPage.waitForTimeout(1800)
       const jpcDayCards = await jpcCheck('今日の献立（日タブ）')
       const jpcPlan = jpcDayCards.find((c) => c.name === 'day-plan-card')
