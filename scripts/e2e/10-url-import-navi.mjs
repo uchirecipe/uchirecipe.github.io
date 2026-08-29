@@ -1908,7 +1908,7 @@ import './_shared.mjs'
       const afterCooked = await nav7Page.textContent('body')
       check(
         'NAVI-09 数つきのトーストが出る',
-        /2\s*[品件]の作った記録をつけました/.test(afterCooked),
+        jaRe(ja.cookNavi.markAllCookedToast, { n: '2\\s*' }).test(afterCooked),
         afterCooked.slice(0, 120),
       )
       const cookedCount = await nav7Page.evaluate(async () => {
@@ -1944,7 +1944,7 @@ import './_shared.mjs'
       check('NAVI-09 「元に戻す」で記録が取り消される', undoneCount === 0, `残った記録=${undoneCount}`)
       check(
         'NAVI-09 取り消した件数がトーストに出る',
-        /2\s*[品件]の作った記録を取り消して、今日の献立に戻しました/.test(
+        jaRe(ja.cookNavi.markAllCookedUndone, { n: '2\\s*' }).test(
           await nav7Page.textContent('body'),
         ),
       )

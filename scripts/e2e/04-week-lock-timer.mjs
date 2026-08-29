@@ -274,7 +274,7 @@ import './_shared.mjs'
       )
       check(
         'WEEKLOCK(LOCK-5) 総入れ替えの確認文に「ロック中の◯食分は変わりません」がある(規約F)',
-        lkDialogs.some((m) => /ロック中の\d+食分は変わりません/.test(m)),
+        lkDialogs.some((m) => jaRe(ja.mealPlan.lockedSlotNotice, { n: '\\d+' }).test(m)),
         `dialogs=${JSON.stringify(lkDialogs)}`,
       )
       // 規約F: 消えるものも件数つきで書く。「変わりません」だけでは片手落ち
@@ -745,7 +745,7 @@ import './_shared.mjs'
       )
       check(
         'WEEKLOCK-BULK(テンプレ) 確認文に「ロック中の◯食分は変わりません」がある(規約F)',
-        bkDialogs.some((m) => /ロック中の\d+食分は変わりません/.test(m)),
+        bkDialogs.some((m) => jaRe(ja.mealPlan.lockedSlotNotice, { n: '\\d+' }).test(m)),
         `dialogs=${JSON.stringify(bkDialogs)}`,
       )
       // 対の確認: 鍵を外すと同じ操作で入る＝「テンプレートがそもそも入らない日」ではない
@@ -806,7 +806,7 @@ import './_shared.mjs'
       )
       check(
         'WEEKLOCK-BULK(別の週から入れる) 確認文に「ロック中の◯食分は変わりません」がある(規約F)',
-        bkDialogs.some((m) => /ロック中の\d+食分は変わりません/.test(m)),
+        bkDialogs.some((m) => jaRe(ja.mealPlan.lockedSlotNotice, { n: '\\d+' }).test(m)),
         `dialogs=${JSON.stringify(bkDialogs)}`,
       )
       // 対の確認: 鍵を外すと同じ操作で写る
@@ -860,7 +860,7 @@ import './_shared.mjs'
       )
       check(
         'WEEKLOCK-BULK(まとめて空) 確認文に「ロック中の◯食分は変わりません」がある(規約F)',
-        bkDialogs.some((m) => /ロック中の\d+食分は変わりません/.test(m)),
+        bkDialogs.some((m) => jaRe(ja.mealPlan.lockedSlotNotice, { n: '\\d+' }).test(m)),
         `dialogs=${JSON.stringify(bkDialogs)}`,
       )
       // 対の確認: 鍵を外すと同じ操作で消える
@@ -1013,7 +1013,7 @@ import './_shared.mjs'
       )
       check(
         'WEEKLOCK-MONTH 確認文に「ロック中の◯食分は変わりません」がある(規約F)',
-        bmDialogs.some((m) => /ロック中の\d+食分は変わりません/.test(m)),
+        bmDialogs.some((m) => jaRe(ja.mealPlan.lockedSlotNotice, { n: '\\d+' }).test(m)),
         `dialogs=${JSON.stringify(bmDialogs)}`,
       )
       // 対の確認: 鍵を外すと同じ操作で入る

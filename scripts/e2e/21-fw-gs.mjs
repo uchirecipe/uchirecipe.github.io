@@ -108,11 +108,16 @@ import './_shared.mjs'
       const fwProText = (
         (await fwPage.locator('#section-pro').innerText().catch(() => '')) ?? ''
       ).replace(/\u200B/g, '')
+      // 2026-08-29 便MP: リンクの名前を書き写していた（JM-10）。**どの名前かは ja.ts が持つ**ので、
+      // 束の数ぶんだけ ja.ts から名前を取り、それぞれが1回ずつしか出ていないことを見る
+      const fwLinkCounts = ja.settings.proActivatedFeatureGroups.map((g) => ({
+        label: g.linkLabel,
+        count: (fwProText.match(new RegExp(reEscape(g.linkLabel), 'g')) ?? []).length,
+      }))
       check(
         'FW-01 同じ入口リンクが繰り返し並んでいない（「レシピ一覧を開く」「献立を開く」は各1回）',
-        (fwProText.match(/レシピ一覧を開く/g) ?? []).length === 1 &&
-          (fwProText.match(/献立を開く/g) ?? []).length === 1,
-        `レシピ一覧を開く=${(fwProText.match(/レシピ一覧を開く/g) ?? []).length} 献立を開く=${(fwProText.match(/献立を開く/g) ?? []).length}`,
+        fwLinkCounts.length > 0 && fwLinkCounts.every((l) => l.count === 1),
+        fwLinkCounts.map((l) => `${l.label}=${l.count}`).join(' '),
       )
       check(
         'FW-01 束の見出しに「タブ」という内部の言い方を使っていない',
@@ -1341,7 +1346,8 @@ import './_shared.mjs'
       )
       check(
         'GL-06 何本あるか・どの料理のものかを書いてある',
-        /動いているタイマー\d+件/.test(glFinishTimers) && glFinishTimers.includes('GL'),
+        jaRe(ja.cookNavi.sessionFinishTimersTitle, { n: '\\d+' }).test(glFinishTimers) &&
+          glFinishTimers.includes('GL'),
         glFinishTimers,
       )
       check(

@@ -946,7 +946,7 @@ import './_shared.mjs'
         const cardAfter = noZw(await timerCard.innerText())
         check(
           'FS-05 動いていることと残り時間が、始めたその場に出る',
-          /タイマー動作中 残り\d+:\d\d/.test(cardAfter),
+          jaRe(ja.cookNavi.waitTimerRunning, { time: '\\d+:\\d\\d' }).test(cardAfter),
           cardAfter,
         )
         check(
@@ -1298,7 +1298,7 @@ import './_shared.mjs'
       const ftTimerBefore = await ftPage3.locator('[data-testid="navi-wait-timer-running"]').first().innerText()
       check(
         'FT-07 前提: 段取りの手順からタイマーが動き出す',
-        /タイマー動作中 残り\d+:\d\d/.test(ftTimerBefore),
+        jaRe(ja.cookNavi.waitTimerRunning, { time: '\\d+:\\d\\d' }).test(ftTimerBefore),
         ftTimerBefore,
       )
       const ftTimerStep = await ftPage3.evaluate(() => {
@@ -1313,7 +1313,7 @@ import './_shared.mjs'
         .catch(() => '(見つからない)')
       check(
         'FT-07 開き直して組み直した段取りでも、動いているタイマーは同じ手順に付いたまま',
-        /タイマー動作中 残り\d+:\d\d/.test(ftTimerAfter),
+        jaRe(ja.cookNavi.waitTimerRunning, { time: '\\d+:\\d\\d' }).test(ftTimerAfter),
         `${ftTimerAfter} / タイマーのひも付け=${ftTimerStep}`,
       )
       check(
@@ -1529,12 +1529,16 @@ import './_shared.mjs'
       // --- FU-01: 画面に出ている各手順の分を足すと、ヘッダーの品ごとの目安と一致する ---
       //   （見出しの言い方は 2026-08-25 便KT で「1品だけなら約◯分」→「単品で約◯分」に変わった。
       //     拾い方は「約◯分」のままなので、言い方が変わっても同じ判定になる）
-      const fuMinutes = await fuPage.evaluate(() => {
+      // 2026-08-29 便MP: 待ちブロックの「約◯分の待ち時間」を書き写して**数を取り出していた**（JM-10）。
+      // ブラウザの中には ja が無いので（JM-4）、ja.ts から組み立てた形を**引数で渡す**。
+      // 取り出しの丸括弧はそのまま＝1つ目の丸括弧が分数になる
+      const fuWaitReSource = jaRe(ja.cookNavi.waitBlockTitle, { n: '\\s*(\\d+)\\s*' }).source
+      const fuMinutes = await fuPage.evaluate((waitReSource) => {
         /** 手順カードに実際に出ている分数（待ちブロックの「約◯分の待ち時間」／手作業の「目安◯分」） */
         const shown = (card) => {
           const wait = card.querySelector('[data-testid="navi-wait-block"]')
           if (wait) {
-            const m = (wait.textContent ?? '').match(/約\s*(\d+)\s*分の待ち時間/)
+            const m = (wait.textContent ?? '').match(new RegExp(waitReSource))
             return m ? Number(m[1]) : 0
           }
           const active = card.querySelector('[data-testid="navi-active-minutes"]')
@@ -1554,7 +1558,7 @@ import './_shared.mjs'
         }))
         // 2026-08-26 便LG: 「1品ずつ作ると約◯分」は画面から消したので、比較の元は取らない
         return { perRecipe, legend }
-      })
+      }, fuWaitReSource)
       const fuTitles = { [fuIds[0]]: 'FUみそマヨ焼き', [fuIds[1]]: 'FUみそ汁', [fuIds[2]]: 'FUごま和え' }
       const fuMismatch = fuIds
         .map((id) => {

@@ -3529,24 +3529,41 @@ eq('normalizeIngredientNameForPrice 前後空白除去', normalizeIngredientName
 
     // ---- JM-10: 判定側の正規表現リテラル（6文字以上）を総数で固定する ----
     //
-    // 66か所・41種が残っている。**掴む側と違って中断はしない**（赤になるだけ）ので、
-    // 便MM は掴む側（JM-8・JM-9）を0にすることを先にして、ここは**増やさない・
-    // 直したら一覧から消す**の形で止めた。中身は
-    // 「約[\d,]+円（1[品件]）」のように**数と文言が混ざった1本の形**が多く、
-    // ja.ts から組み立て直すと1件ずつ画面を見て確かめる必要があるため、次の便へ渡す。
+    // 便MM が数えた時点で 66か所・41種（便MN の直しで 65か所・40種）が残っていた。
+    // **掴む側と違って中断はしない**（赤になるだけ）ので、便MM は掴む側（JM-8・JM-9）を
+    // 0にすることを先にして、ここは**増やさない・直したら一覧から消す**の形で止めた。
+    //
+    // 2026-08-29 便MP: 残っていた 65か所・40種のうち **58か所・33種**を ja.ts の型紙から
+    // 組み立てる形（`jaRe(ja.xxx.yyy, { n: '\\d+' })`）へ寄せ、**7か所・7種**にした。
+    // 残す7か所は、どれも「ja.ts の文言を見ているのではない」ものだけ:
+    //   ・静的ページ（public/about/*.html）や public/news.json の中身を見ている
+    //   ・ja.ts から消した言い回しが**戻っていないこと**を見ている（読む先が無い）
+    //   ・ja.ts の値そのものが要件を満たすかを見ている（ja から読むと ja === ja になる）
+    // 理由は scripts/data/e2e-ja-copy-known.json に1件ずつ書いてある。
+    // **理由が空のものがあると赤にする**（形だけの一覧にしないため。JM-7 と同じ作り）。
     {
       const chunks = jmReSources(JM_JUDGE_RE).flatMap(jmReChunks)
       const now = jmTally(
         chunks.filter((t) => jmRelated(t) !== 'none' && [...t].length >= JM_PART_MIN),
       )
       const known = jmKnownRaw['判定側（正規表現リテラル）'] ?? {}
-      const { grew, shrank } = jmDiff(now, known, '判定側（正規表現リテラル）')
+      const knownCount = Object.fromEntries(
+        Object.entries(known).map(([text, v]) => [text, v['か所'] ?? 0]),
+      )
+      const { grew, shrank } = jmDiff(now, knownCount, '判定側（正規表現リテラル）')
       eq('JM-10 判定側の正規表現に、画面の文言の書き写しが増えていない', grew, [])
       eq('JM-10 判定側の正規表現の一覧に、もう書き写していないものが残っていない', shrank, [])
       eq(
         'JM-10 判定側の正規表現の残りは一覧どおり（数え方が変わったら気づけるようにする）',
         Object.values(now).reduce((a, b) => a + b, 0),
-        Object.values(known).reduce((a, b) => a + b, 0),
+        Object.values(knownCount).reduce((a, b) => a + b, 0),
+      )
+      eq(
+        'JM-10 残す1件ずつに理由が書いてある（形だけの一覧にしない）',
+        Object.entries(known)
+          .filter(([, v]) => typeof v['理由'] !== 'string' || v['理由'].trim().length < 20)
+          .map(([text]) => `判定側（正規表現リテラル）「${text}」に理由が書かれていない`),
+        [],
       )
     }
   }

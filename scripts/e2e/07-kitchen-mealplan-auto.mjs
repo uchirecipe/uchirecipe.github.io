@@ -465,7 +465,9 @@ import './_shared.mjs'
       check(
         'MEALPLAN-A3B3(便HV) 記録が無い月でも「全員分」と「1日あたりの平均」は作る予定ぶんで出る',
         /全員分[^約]{0,20}約[\d,]+円のべ\d+食/.test(meCostTableText) &&
-          /1日あたりの平均[^約]{0,20}約[\d,]+円/.test(meCostTableText),
+          new RegExp(`${reEscape(ja.mealPlan.intakeCostRowPerDay)}[^約]{0,20}約[\\d,]+円`).test(
+            meCostTableText,
+          ),
         `表=${meCostTableText.slice(0, 240)}`,
       )
       // 2026-08-28 便MB（オーナー「内訳の中にも同じ内容の文があるため」）: 表のすぐ下に置いていた

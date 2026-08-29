@@ -871,7 +871,9 @@ import './_shared.mjs'
       await nbPage.waitForTimeout(500)
       check(
         'NUTRI-DAY-01(便CW-10) 週の概算食費に「ごはん◯杯分を含めた金額です」を添える',
-        /ごはん\d+杯(?:分|ぶん)（約[\d,]+円）を含めた金額です/.test(await nbPage.textContent('body')),
+        jaRe(ja.nutritionBalance.includeRiceCostNote, { n: '\\d+', yen: '[\\d,]+' }).test(
+          stripZwspText(await nbPage.textContent('body')),
+        ),
       )
     } finally {
       await nbBrowser.close()

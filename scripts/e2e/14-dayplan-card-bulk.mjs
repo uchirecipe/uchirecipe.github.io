@@ -1584,7 +1584,16 @@ import './_shared.mjs'
       check('BULKDEL-01 確認文に献立の予定の数が入る', hasCountAfter(bdDialogMsg, '献立の予定', 2), `dialog=${bdDialogMsg}`)
       check('BULKDEL-01 確認文に今日の献立の数が入る', hasCountAfter(bdDialogMsg, '今日の献立', 1), `dialog=${bdDialogMsg}`)
       check('BULKDEL-01 確認文に元に戻せないことが入る', bdDialogMsg.includes('元に戻せません'))
-      check('BULKDEL-01 確認文に残るものが数つきで入る', /残るもの: [^\n]*他のレシピ\d+[品件]・買い物メモ・食材の在庫/.test(bdDialogMsg), `dialog=${bdDialogMsg}`)
+      check(
+        'BULKDEL-01 確認文に残るものが数つきで入る',
+        // 2026-08-29 便MP: 「残るもの」の行を書き写していた（JM-10）。見出しも本文も ja.ts から組み立てる
+        new RegExp(
+          `${reEscape(ja.recipes.bulkDeleteConfirmKeptLabel)}: ${
+            jaRe(ja.recipes.bulkDeleteConfirmKept, { n: '\\d+', p: '\\d+', rest: '\\d+' }).source
+          }`,
+        ).test(bdDialogMsg),
+        `dialog=${bdDialogMsg}`,
+      )
       // 2026-08-16 便GZ: 作った記録はレシピを消しても残るので「残るもの」に書く
       check(
         'BULKDEL-01(便GZ) 確認文は作った記録を「残るもの」に書く',

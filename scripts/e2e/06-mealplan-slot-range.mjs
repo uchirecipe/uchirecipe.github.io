@@ -741,7 +741,11 @@ import './_shared.mjs'
         rcFutureTableText.includes(
           `1日あたりの平均1人分÷選んだ6日約${Math.round(Math.round(rcPersonalOne * 2) / 6).toLocaleString()}円`,
         ),
-        `表=${rcFutureTableText.match(/1日あたりの平均[^円]{0,30}円/)?.[0]}`,
+        `表=${
+          rcFutureTableText.match(
+            new RegExp(`${reEscape(ja.mealPlan.intakeCostRowPerDay)}[^円]{0,30}円`),
+          )?.[0] ?? '(1日あたりの行が無い)'
+        }`,
       )
       check(
         'MEALPLAN-07(便CA①) 廃止した「1食あたり 約◯円」は出さない',
@@ -767,7 +771,7 @@ import './_shared.mjs'
       const rcFutureOpenText = (await rcCard.textContent()) ?? ''
       check(
         'MEALPLAN-07(便CA①) 内訳に「作った記録 約0円（0品）／登録した献立 …（2品）」が出る',
-        /内訳 作った記録 約0円（0[品件]）／登録した献立 約[\d,]+円（2[品件]）/.test(rcFutureOpenText),
+        jaRe(ja.mealPlan.rangeIntakeCostBreakdown, { a: '0', an: '0', p: '[\\d,]+', pn: '2' }).test(rcFutureOpenText),
         `内訳=${rcFutureOpenText.match(/内訳[^。]{0,60}/)?.[0]}`,
       )
       check(
@@ -782,8 +786,8 @@ import './_shared.mjs'
       )
       check(
         'MEALPLAN-07(便CA①) 栄養の注記は「登録した献立2品の栄養価を、1食分ずつ足して算出した数値です」',
-        /登録した献立2[品件]の栄養価を、1食分ずつ足して算出した数値です/.test(rcFutureOpenText),
-        `注記=${rcFutureOpenText.match(/.{0,10}1食分ずつ足して算出した数値です/)?.[0]}`,
+        jaRe(ja.mealPlan.rangeIntakeNutritionCountPlan, { p: '2' }).test(rcFutureOpenText),
+        `注記=${rcFutureOpenText.match(RANGE_NUTRITION_NOTE_ANY_RE)?.[0] ?? '(栄養の注記が無い)'}`,
       )
       // 便DR: 栄養の長い但し書きと出典も月タブと同じく折りたたみの中
       check(
@@ -853,7 +857,7 @@ import './_shared.mjs'
       )
       check(
         'MEALPLAN-07(便CA②) 同じ期間に登録した献立があっても、過去の予定は0品0円で数えない',
-        /内訳 作った記録 約[\d,]+円（1[品件]）／登録した献立 約0円（0[品件]）/.test(rcPastText),
+        jaRe(ja.mealPlan.rangeIntakeCostBreakdown, { a: '[\\d,]+', an: '1', p: '0', pn: '0' }).test(rcPastText),
         `内訳=${rcPastText.match(/内訳[^。]{0,60}/)?.[0]}`,
       )
       check(
@@ -874,7 +878,7 @@ import './_shared.mjs'
       )
       check(
         'MEALPLAN-07(便CA①) 栄養の注記は「作った記録1件の栄養価を、1食分ずつ足して算出した数値です」',
-        /作った記録1[品件]の栄養価を、1食分ずつ足して算出した数値です/.test(rcPastText),
+        jaRe(ja.mealPlan.rangeIntakeNutritionCountActual, { a: '1' }).test(rcPastText),
       )
       // 記録も予定も無い期間は空案内
       await rcDay(`${rcPrevPrefix}-20`).click()
@@ -902,10 +906,13 @@ import './_shared.mjs'
         const rcMixedText = (await rcPage.textContent('body')) ?? ''
         check(
           'MEALPLAN-07(便CA③) 混在期間は「◯/◯〜◯/◯は作った記録、◯/◯〜◯/◯は登録した献立で計算しています」と区別して出す',
-          /\d+\/\d+〜\d+\/\d+は作った記録、\d+\/\d+〜\d+\/\d+は登録した献立で計算しています/.test(
-            rcMixedText,
-          ),
-          `本文=${rcMixedText.match(/.{0,40}計算しています/)?.[0]}`,
+          jaRe(ja.mealPlan.rangeBasisBoth, {
+            ps: '\\d+/\\d+',
+            pe: '\\d+/\\d+',
+            fs: '\\d+/\\d+',
+            fe: '\\d+/\\d+',
+          }).test(rcMixedText),
+          `本文=${rcMixedText.match(RANGE_BASIS_ANY_RE)?.[0] ?? '(数え方の基準行が無い)'}`,
         )
         check(
           // 2026-08-28 便MB: 文言を書き写していたため、1行縮めただけで落ちた（禁じ手②）。ja から読む
@@ -915,12 +922,17 @@ import './_shared.mjs'
         )
         check(
           'MEALPLAN-07(便CA③) 混在期間の内訳は実績1品と予定1品の両方が出る',
-          /内訳 作った記録 約[\d,]+円（1[品件]）／登録した献立 約[\d,]+円（1[品件]）/.test(rcMixedText),
+          jaRe(ja.mealPlan.rangeIntakeCostBreakdown, {
+            a: '[\\d,]+',
+            an: '1',
+            p: '[\\d,]+',
+            pn: '1',
+          }).test(rcMixedText),
           `内訳=${rcMixedText.match(/内訳[^。]{0,60}/)?.[0]}`,
         )
         check(
           'MEALPLAN-07(便CA①) 混在期間の栄養注記は「作った記録1件と登録した献立1品の栄養価を、1食分ずつ足して算出した数値です」',
-          /作った記録1[品件]と登録した献立1[品件]の栄養価を、1食分ずつ足して算出した数値です/.test(rcMixedText),
+          jaRe(ja.mealPlan.rangeIntakeNutritionCountBoth, { a: '1', p: '1' }).test(rcMixedText),
         )
         const rcMixedPersonal = Number(
           (((await rcTable.textContent()) ?? '').match(
@@ -986,7 +998,11 @@ import './_shared.mjs'
       const rcNutriKcal = rcNutriAria.match(/([\d,]+)\s*kcal/)?.[1] ?? ''
       check(
         'MEALPLAN-07(便CA②) 読み上げ(aria-label)は「◯日 ◯kcal 登録した献立」',
-        /^3日 [\d,]+\s?kcal 登録した献立$/.test(rcNutriAria),
+        jaRe(
+          ja.mealPlan.monthDayStatAriaPlan,
+          { d: '3', v: '[\\d,]+\\s?kcal' },
+          { exact: true },
+        ).test(rcNutriAria),
         `aria=${rcNutriAria}`,
       )
       check(
@@ -1209,10 +1225,8 @@ import './_shared.mjs'
       const eaTodayCardText = (await eaCard.textContent()) ?? ''
       check(
         'RANGE-EA(便EA-3) 今日の「作った記録」1品と、まだ作っていない献立1品を分けて数える',
-        /作った記録1[品件]と登録した献立1[品件]の栄養価を、1食分ずつ足して算出した数値です/.test(
-          eaTodayCardText,
-        ),
-        `カード=${eaTodayCardText.match(/.{0,20}1食分ずつ足して算出した数値です/)?.[0]}`,
+        jaRe(ja.mealPlan.rangeIntakeNutritionCountBoth, { a: '1', p: '1' }).test(eaTodayCardText),
+        `カード=${eaTodayCardText.match(RANGE_NUTRITION_NOTE_ANY_RE)?.[0] ?? '(栄養の注記が無い)'}`,
       )
       check(
         // 2026-08-26 便LH: 数え方の1行は、数字より先に読めるようカレンダーの下（選んだ期間の1行の
@@ -1245,8 +1259,8 @@ import './_shared.mjs'
       const eaCrossText = (await eaCard.textContent()) ?? ''
       check(
         'RANGE-EA(便EA-2b) 月をまたぐ期間でも、表示中の月の外の「作った記録」を数える(記録2品)',
-        /作った記録2[品件]と登録した献立1[品件]の栄養価を、1食分ずつ足して算出した数値です/.test(eaCrossText),
-        `カード=${eaCrossText.match(/.{0,26}1食分ずつ足して算出した数値です/)?.[0]}`,
+        jaRe(ja.mealPlan.rangeIntakeNutritionCountBoth, { a: '2', p: '1' }).test(eaCrossText),
+        `カード=${eaCrossText.match(RANGE_NUTRITION_NOTE_ANY_RE)?.[0] ?? '(栄養の注記が無い)'}`,
       )
       check(
         'RANGE-EA(便EA-2b) 月をまたぐ期間でも結果カードが空にならない',
@@ -1527,7 +1541,11 @@ import './_shared.mjs'
       const cwToast = (await cwPage.textContent('body')) ?? ''
       check(
         'MEALPLAN-S3 コピー完了トーストが出る',
-        /\d{4}\/\d{2}\/\d{2}〜\d{4}\/\d{2}\/\d{2}の献立を\d+品入れました/.test(cwToast),
+        jaRe(ja.mealPlan.copyWeekDone, {
+          start: '\\d{4}/\\d{2}/\\d{2}',
+          end: '\\d{4}/\\d{2}/\\d{2}',
+          n: '\\d+',
+        }).test(cwToast),
         cwToast.slice(0, 400),
       )
 

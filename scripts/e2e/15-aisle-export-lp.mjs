@@ -399,8 +399,8 @@ import './_shared.mjs'
       )
       check(
         'EE-01(③) 消える件数と残る件数を両方書く(規約F)',
-        /チェック済みの1件は買い物メモから消えます/.test(eeDialogText) &&
-          /未チェックの\d+件は買い物メモに残ります/.test(eeDialogText),
+        jaRe(ja.shopping.completeConfirmLines[1], { n: '1' }).test(eeDialogText) &&
+          jaRe(ja.shopping.completeConfirmLines[2], { m: '\\d+' }).test(eeDialogText),
       )
       // 2026-08-26 便LI（オーナー指示・書き溜め0826「ボタンの名前で意味がわかるため、
       // 説明文２つも削除」）: 「あとにする」の下の説明2行は出さない。押しても何も書き換えない
@@ -1429,7 +1429,11 @@ import './_shared.mjs'
       // 入らないものの行の中に書いてあることまで見る
       check(
         'RECIPEEXPORT-EM(a) 確認に作った記録の写真・設定が入らないと書いてある',
-        /入らないもの:[^\n]*作った記録の写真/.test(reConfirmText) && /入らないもの:[^\n]*設定/.test(reConfirmText),
+        new RegExp(
+          `${reEscape(ja.recipes.exportSelectedConfirmExcludeLabel)}:\\s*${
+            jaRe(ja.recipes.exportSelectedConfirmExcludeText, { rest: '\\d+' }).source
+          }`,
+        ).test(stripZwspText(reConfirmText)),
         reConfirmText,
       )
       check(
@@ -1442,7 +1446,9 @@ import './_shared.mjs'
       // 実測値なので数字そのものは決め打ちせず、大きさの行が出ていることだけを見る
       check(
         'RECIPEEXPORT-EM(a) 確認にファイルの大きさが出る',
-        /ファイルの大きさ:\s*約\d+(\.\d+)?(B|KB|MB)/.test(reConfirmText),
+        new RegExp(
+          `${reEscape(ja.recipes.exportSelectedConfirmSizeLabel)}:\\s*約\\d+(\\.\\d+)?(B|KB|MB)`,
+        ).test(reConfirmText),
         reConfirmText,
       )
       // 保存先の言い分け(2026-08-15 便GV)。e2eは自動化環境なので必ず自動ダウンロード側になる

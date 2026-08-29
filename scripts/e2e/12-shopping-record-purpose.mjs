@@ -572,8 +572,11 @@ import './_shared.mjs'
       const ipRead = (await ipPage.textContent('body')).replace(/​/g, '')
       check(
         'IX-PASTE-01 読み取り結果は材料2件・手順2件(宣伝2行と節の見出しは材料に数えない)',
-        ipRead.includes('材料2件・手順2件を読み取りました'),
-        ipRead.match(/材料\d+件・手順\d+件を読み取りました/)?.[0] ?? '(読み取り結果の行が無い)',
+        ipRead.includes(
+          ja.paste.resultSummary.split('。')[0].replace('{i}', '2').replace('{s}', '2'),
+        ),
+        ipRead.match(jaRe(ja.paste.resultSummary.split('。')[0], { i: '\\d+', s: '\\d+' }))?.[0] ??
+          '(読み取り結果の行が無い)',
       )
       // 入力欄に何が入ったかで見る(並び順・行の位置には依らない)
       const ipValues = await ipPage.evaluate(() =>
@@ -1007,7 +1010,9 @@ import './_shared.mjs'
       const delLogMessage = l2Dialogs[l2Dialogs.length - 1] ?? ''
       check(
         'LOG-CI2-01/C02 削除の確認文に、消える記録の日付と残る記録の件数が入る(規約F)',
-        /\d{4}\/\d{2}\/\d{2}の作った記録を削除します/.test(delLogMessage) &&
+        jaRe(ja.detail.cookedLogDeleteConfirmTitle, { date: '\\d{4}/\\d{2}/\\d{2}' }).test(
+          delLogMessage,
+        ) &&
           delLogMessage.includes(`他の作った記録${beforeDelete - 1}件は残ります`),
         delLogMessage,
       )

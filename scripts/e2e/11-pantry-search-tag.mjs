@@ -307,7 +307,7 @@ import './_shared.mjs'
       )
       check(
         'EH-01 分数の無い手作業は「この手順の見積り◯分」と書き分ける',
-        /^この手順の見積り\d+分$/.test(
+        jaRe(ja.cookNavi.activeMinutesEstimated, { n: '\\d+' }, { exact: true }).test(
           (await ehPage
             .locator('ol > li', { hasText: '鶏肉と玉ねぎを切る。' })
             .first()

@@ -1883,7 +1883,12 @@ import './_shared.mjs'
       const fcResumeHint = await fcPage.locator('[data-testid="cook-session-start-hint"]').innerText()
       check(
         'FC-04 どの手順から始まるかを、画面のバッジと同じ丸数字で添える',
-        /前に開いていた手順[①-⑳㉑-㉟㊱-㊿]/.test(fcResumeHint),
+        // 2026-08-29 便MP: 「前に開いていた手順」を書き写していた（JM-10）。差し込み {n} には
+        // 丸数字だけでなく品の名前も入る（実測「⑤（3-1）」）ので、**差し込みの手前まで**を
+        // ja.ts から取り、その直後が丸数字であることを見る（前と同じ判定・網は広げない）
+        new RegExp(
+          `${reEscape(ja.cookNavi.sessionResumeHint.split('{n}')[0])}[①-⑳㉑-㉟㊱-㊿]`,
+        ).test(stripZwspText(fcResumeHint)),
         fcResumeHint,
       )
       // 読み込み直しても「閉じている」ままで、勝手に全画面が開かない

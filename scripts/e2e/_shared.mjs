@@ -755,3 +755,39 @@ globalThis.INGREDIENT_GROUP_RE = new RegExp(`^${reEscape(globalThis.INGREDIENT_G
 globalThis.TIMER_BACK_LINK_RE = new RegExp(
   [ja.timer.goToStep, ja.timer.peekStep, ja.timer.goToRecipe].map((t) => jaRe(t).source).join('|'),
 )
+
+/**
+ * 期間の栄養の注記（2026-08-29 便MP）。「作った記録◯件と登録した献立◯品の栄養価を、
+ * 1食分ずつ足して算出した数値です」は**記録だけ／献立だけ／両方**の3通りあり、
+ * 検査は「実際にはどれが出ていたか」を失敗の説明に載せたい。
+ * **3つとも ja.ts から読んで並べる**（前は `/.{0,20}1食分ずつ足して…/` と書き写していた＝
+ * 文末の言い回しを直すと、説明が undefined になって何も読めなくなる形だった）。
+ * 節をまたいで使うので、節のファイルではなくここに置く（scripts/e2e-part.mjs は
+ * 節の塊の直前の行しか持っていかないため、節のファイルの先頭に置くと切り出しで欠ける）。
+ */
+globalThis.RANGE_NUTRITION_NOTE_ANY_RE = new RegExp(
+  [
+    ja.mealPlan.rangeIntakeNutritionCountBoth,
+    ja.mealPlan.rangeIntakeNutritionCountActual,
+    ja.mealPlan.rangeIntakeNutritionCountPlan,
+  ]
+    .map((t) => jaRe(t, { a: '\\d+', p: '\\d+' }).source)
+    .join('|'),
+)
+/**
+ * 期間の「数え方の基準」の1行（2026-08-29 便MP）。混在／先の期間だけ／今日から先／今日 の
+ * 4通りを ja.ts から読んで並べる。日付の差し込みにだけ `\d+/\d+` を当てる（`.+` は使わない）。
+ */
+globalThis.RANGE_BASIS_ANY_RE = new RegExp(
+  [
+    ja.mealPlan.rangeBasisBoth,
+    ja.mealPlan.rangeBasisFutureRange,
+    ja.mealPlan.rangeBasisPlanOnly,
+    ja.mealPlan.rangeBasisToday,
+  ]
+    .map(
+      (t) =>
+        jaRe(t, { ps: '\\d+/\\d+', pe: '\\d+/\\d+', fs: '\\d+/\\d+', fe: '\\d+/\\d+' }).source,
+    )
+    .join('|'),
+)

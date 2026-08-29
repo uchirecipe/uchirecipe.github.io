@@ -1831,7 +1831,14 @@ import './_shared.mjs'
       const copiedNutrition = await shPage.evaluate(() => navigator.clipboard.readText())
       check(
         "SHARE-01(b-2/B') 無料の栄養行はカロリーだけ(概算表記は残す)",
-        /1食あたり 約[\d,]+kcal（概算(・一部の材料を除く)?）/.test(copiedNutrition),
+        new RegExp(
+          [ja.share.lineNutritionKcalOnly, ja.share.lineNutritionKcalOnlyPartial]
+            .map(
+              (t) =>
+                jaRe(t, { scope: reEscape(ja.share.scopePerServing), kcal: '[\\d,]+' }).source,
+            )
+            .join('|'),
+        ).test(copiedNutrition),
         copiedNutrition.split('\n').find((l) => l.includes('kcal')) ?? '栄養行なし',
       )
       check(

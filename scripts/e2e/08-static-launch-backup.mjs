@@ -228,7 +228,7 @@ import './_shared.mjs'
       const afterSuccessText = await rsPage.textContent('body')
       check(
         'RECIPESET-01 ファイル読み込み(バックアップ形式)が成功し「◯品追加しました」が上部に出る',
-        /\d+[品件]追加しました/.test(afterSuccessText),
+        jaRe(ja.settings.recipeSetResult, { a: '\\d+', s: '\\d+' }).test(afterSuccessText),
       )
       check(
         'RECIPESET-01(修正4) 直前のエラーメッセージは成功後には残らない',
@@ -704,7 +704,7 @@ import './_shared.mjs'
       check(
         'LAUNCH-02(便DZ) 20件目の登録完了で「あと10品登録できます」の予告が出る',
         (await l2Page.locator('[data-testid="free-limit-notice"]').count()) > 0 &&
-          /あと10[品件]登録できます/.test(listText),
+          stripZwspText(listText).includes(ja.recipes.freeLimitNearNotice.replace('{n}', '10')),
       )
       check(
         'LAUNCH-02(便DZ) 予告と同時に件数表記も20/30品になる',
@@ -727,7 +727,7 @@ import './_shared.mjs'
       check(
         'LAUNCH-02(便DZ) 21件目では予告を出さない(節目のときだけ)',
         (await l2Page.locator('[data-testid="free-limit-notice"]').count()) === 0 &&
-          !/あと\d+[品件]登録できます/.test(listText),
+          !jaRe(ja.recipes.freeLimitNearNotice, { n: '\\d+' }).test(stripZwspText(listText)),
       )
 
       // 29件まで積んでから30件目を登録=上限到達の案内(予告ではない)

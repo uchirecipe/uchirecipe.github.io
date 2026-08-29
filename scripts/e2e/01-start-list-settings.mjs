@@ -1578,7 +1578,7 @@ import './_shared.mjs'
       const afterSetBody = await freePage.textContent('body')
       check(
         'SMK-14 ?set=付きURLは無害に設定へ着地する(取り込みは起きない・エラーも出ない)',
-        !/\d+[品件]追加しました/.test(afterSetBody) &&
+        !jaRe(ja.settings.recipeSetResult, { a: '\\d+', s: '\\d+' }).test(afterSetBody) &&
           !afterSetBody.includes('見つかりませんでした') &&
           afterSetBody.includes(ja.settings.ngTitle),
       )
@@ -1810,14 +1810,23 @@ import './_shared.mjs'
     check('ABOUT-01 バージョン表示がある', /バージョン \S+/.test(aboutText))
     check(
       'ABOUT-01 データ件数表示(レシピ◯件・作った記録◯件)がある',
-      /レシピ \d+[品件]（自分で登録 \d+\/\d+[品件]）・作った記録 \d+[品件]/.test(aboutText),
+      jaRe(ja.settings.aboutDataCountFree, {
+        r: '\\d+',
+        u: '\\d+',
+        max: '\\d+',
+        c: '\\d+',
+      }).test(aboutText),
     )
     // 2026-08-08 便DZ: 未解錠のときは、レシピ一覧と同じ「自分で登録 ◯/30品」をここにも出す
     // (オーナー要望「利用者がどう確認できるか」。総件数には基本レシピが入るので別の数として並べる)
     check(
       'ABOUT-01(便DZ) 未解錠のデータ件数に「自分で登録 ◯/30品」が出る',
       /自分で登録 \d+\/30[品件]/.test(aboutText),
-      `件数表示=${aboutText.match(/レシピ \d+件[^・]*・作った記録 \d+件/)?.[0]}`,
+      `件数表示=${
+        aboutText.match(
+          jaRe(ja.settings.aboutDataCountFree, { r: '\\d+', u: '\\d+', max: '\\d+', c: '\\d+' }),
+        )?.[0] ?? '(件数の行が無い)'
+      }`,
     )
   }
   // --- MOVEGUIDE-01(2026-07-17設定ゼロベース裁定#5): 機種変更・引っ越しガイド(折りたたみ)。
