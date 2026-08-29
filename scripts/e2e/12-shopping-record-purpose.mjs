@@ -1643,6 +1643,51 @@ import './_shared.mjs'
         p1Page.url().includes('/settings') && p1Page.url().includes('section=pro'),
         `url=${p1Page.url()}`,
       )
+
+      /* 2026-08-29 便MK: この節は `purpose-picker` の count()===0 を3回見ているのに、
+         同じ節では一度も「出る」側を測っていなかった＝目印が変わっても必ず緑になる
+         （便LOの走査で 12:1620・1637 として残っていた2件）。Pro案内へ着いたところで解錠し、
+         同じ場所に3択が出るところまでを1本につないで対にする。 */
+      await p1Page.evaluate(
+        () =>
+          new Promise((resolve, reject) => {
+            const req = indexedDB.open('uchi-recipe')
+            req.onsuccess = () => {
+              const tx = req.result.transaction('settings', 'readwrite')
+              const store = tx.objectStore('settings')
+              const get = store.get(1)
+              get.onsuccess = () => {
+                store.put({
+                  ...(get.result || { id: 1 }),
+                  id: 1,
+                  proCode: 'UR-E2E-TEST-ONLY',
+                  proActivatedAt: Date.now(),
+                })
+              }
+              tx.oncomplete = () => resolve(undefined)
+              tx.onerror = () => reject(tx.error)
+            }
+            req.onerror = () => reject(req.error)
+          }),
+      )
+      // 生のIndexedDBへ書いたので読み込み直す（Dexieのライブ購読はDexie経由しか見ていない・禁じ手⑥）
+      await p1Page.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+      await p1Page.reload({ waitUntil: 'networkidle' })
+      await p1Page.waitForTimeout(1500)
+      await p1Page.getByRole('button', { name: ja.mealPlan.viewWeek, exact: true }).click()
+      await openAllWeekDays(p1Page)
+      await p1Page.waitForTimeout(400)
+      await openWeekGroup(p1Page, ja.mealPlan.weekGroupAutoTitle)
+      await p1Page.locator('[data-testid="plan-conditions-open"]').click()
+      await p1Page.waitForTimeout(600)
+      check(
+        'PURPOSE-01 前提: 解錠すれば同じ場所に3択が出る（目印が生きている）',
+        (await p1Page.locator('[data-testid="purpose-picker"]').count()) === 1,
+      )
+      check(
+        'PURPOSE-01 解錠したら鍵付き行のほうは消える（両方は出さない）',
+        (await p1Locked.count()) === 0,
+      )
     } finally {
       await p1Browser.close()
     }
