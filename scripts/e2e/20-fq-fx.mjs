@@ -77,7 +77,10 @@ import './_shared.mjs'
       }, FQ_NOTES.map(([t]) => t))
       check(
         'FQ-01 対象9品が同梱レシピとして見つかる',
-        FQ_NOTES.every(([t]) => typeof ids[t] === 'number'),
+        // 2026-08-29 便MQ: FQ_NOTES が空だと every が中身を1回も見ずに合格し、
+        // 続く FQ-02〜04 も回る先が無くなって3件とも一緒に素通りする（実測で4件とも緑のまま）。
+        // 対象が0品なのは正解ではないので、同じ判定式に件数の下限を入れる（9という数は決め打ちしない）
+        FQ_NOTES.length > 0 && FQ_NOTES.every(([t]) => typeof ids[t] === 'number'),
         JSON.stringify(ids),
       )
 

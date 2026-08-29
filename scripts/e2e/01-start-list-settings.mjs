@@ -1698,7 +1698,11 @@ import './_shared.mjs'
     )
     check(
       'SETTINGS-TAB-01(2026-08-02) 節の並びは 個人設定→レシピ→バックアップ→Pro→アプリについて',
-      order.every((v) => v !== null) && order.every((v, i) => i === 0 || v > order[i - 1]),
+      // 2026-08-29 便MQ: order が空だと every が2つとも中身を1回も見ずに合格する（実測で緑のまま）。
+      // 5つの節が1つも読めていないのは正解ではないので、同じ判定式に件数の下限を入れる（件数の決め打ちはしない）
+      order.length > 0 &&
+        order.every((v) => v !== null) &&
+        order.every((v, i) => i === 0 || v > order[i - 1]),
       JSON.stringify(order),
     )
     // 「その他」の小見出しが全般節から消えていること(売り場順カードの食材グループ名にも

@@ -1140,7 +1140,10 @@ import './_shared.mjs'
           const evSplitWords = ['iPhone', 'iPad', 'ブラウザ', 'ホーム画面']
           check(
             'MULTIDEV-01(b) iPhone・iPadでブラウザとホーム画面のデータが分かれることに触れている',
-            evSplitWords.every((w) => evText.includes(w)) &&
+            // 2026-08-29 便MQ: evSplitWords が空だと every が中身を1回も見ずに合格する（実測で緑のまま）。
+            // そろっているかを見る語が0件なのは正解ではないので、同じ判定式に下限を入れる
+            evSplitWords.length > 0 &&
+              evSplitWords.every((w) => evText.includes(w)) &&
               (evText.includes('分かれ') || evText.includes('別々')),
             `そろっていない語=${evSplitWords.filter((w) => !evText.includes(w)).join('・') || '（分かれる/別々が無い）'}`,
           )
