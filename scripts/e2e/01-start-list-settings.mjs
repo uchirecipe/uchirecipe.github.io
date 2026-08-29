@@ -14,6 +14,14 @@
 // ==========================================================================================
 import './_shared.mjs'
 
+/**
+ * 合わせ調味料の組の丸ボタンの aria-label は「合わせ調味料グループ1（…）」（ja.form.ingredientGroupSet）と
+ * 「合わせ調味料グループ: なし（押して設定）」（ja.form.ingredientGroupNone）の2つ。
+ * 前方一致で掴むための共通の頭を **ja.ts から作る**（画面の字を書き写さない＝JM-1）。
+ */
+const INGREDIENT_GROUP_PREFIX = ja.form.ingredientGroupSet.split('{n}')[0]
+const INGREDIENT_GROUP_RE = new RegExp(`^${reEscape(INGREDIENT_GROUP_PREFIX)}[0-9]`)
+
   // --- SMK-01: 起動・初回シード ---
   currentCheck = 'SMK-01'
   await page.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
@@ -35,7 +43,7 @@ import './_shared.mjs'
   // 絞られる。UI改善バッチ 2026-07-11。チップ文言は2026-07-13「時短」→「時短レシピ」、
   // 2026-07-16便T-5で「時短レシピのみに絞る」に変更) ---
   currentCheck = 'QF-01'
-  await page.locator('button[aria-label="絞り込み"]').click()
+  await page.locator(`button[aria-label="${ja.search.filterToggle}"]`).click()
   await page.waitForTimeout(300)
   await page.getByRole('button', { name: ja.search.quickOnly, exact: true }).click()
   await page.waitForTimeout(400)
@@ -83,7 +91,7 @@ import './_shared.mjs'
     })
   const layoutBefore = await layoutContainerInfo()
   check('LAYOUT-01 既定はグリッド表示', layoutBefore.className.includes('grid-cols-2'))
-  await page.locator('button[aria-label="リスト表示に切り替え"]').click()
+  await page.locator(`button[aria-label="${ja.search.layoutToggleToList}"]`).click()
   await page.waitForTimeout(300)
   const layoutAfterToList = await layoutContainerInfo()
   check(
@@ -123,7 +131,7 @@ import './_shared.mjs'
     layoutAfterReload.className.includes('flex-col'),
   )
   // グリッド表示に戻して以降のチェック(グリッド前提のセレクタ)に影響しないようにする
-  await page.locator('button[aria-label="グリッド表示に切り替え"]').click()
+  await page.locator(`button[aria-label="${ja.search.layoutToggleToGrid}"]`).click()
   await page.waitForTimeout(300)
   const layoutAfterBackToGrid = await layoutContainerInfo()
   check('LAYOUT-01 グリッド表示に戻せる', layoutAfterBackToGrid.className.includes('grid-cols-2'))
@@ -146,7 +154,7 @@ import './_shared.mjs'
     'SORTDIR-01(2026-08-02改定) 並べ替えパネルを開く前は昇順/降順ボタンが出ていない',
     (await dirButtonCount()) === 0,
   )
-  await page.locator('button[aria-label="並び替え"]').click()
+  await page.locator(`button[aria-label="${ja.search.sortToggle}"]`).click()
   await page.waitForTimeout(300)
   check(
     'SORTDIR-01(2026-08-02改定) 並べ替えパネルを開くと昇順/降順ボタンが中に出る',
@@ -179,7 +187,7 @@ import './_shared.mjs'
   currentCheck = 'SMK-05'
   await page.getByText('肉じゃが', { exact: true }).first().click()
   await page.waitForTimeout(600)
-  await page.locator('button[aria-label="人数を増やす"]').click()
+  await page.locator(`button[aria-label="${ja.detail.servingsUp}"]`).click()
   await page.waitForTimeout(400)
   const detailText = await page.textContent('body')
   check('SMK-05 人数変更の帯分数スケール', detailText.includes('4と1/2個'), `「4と1/2個」が見つからない`)
@@ -553,12 +561,15 @@ import './_shared.mjs'
     await page.waitForTimeout(500)
     // 組の色は材料行の丸ボタンに出る。aria-label に組番号が入るので、**どの行にあっても**
     // 同じ判定になる形で数える（並びを決め打ちしない）
-    const gfGroupLabels = await page.evaluate(() =>
-      [...document.querySelectorAll('button[aria-label^="合わせ調味料グループ"]')].map(
-        (el) => el.getAttribute('aria-label') ?? '',
-      ),
+    const gfGroupLabels = await page.evaluate(
+      // 文言は ja.ts から読むが、evaluate の中はブラウザ側なので引数で渡す（JM-4）
+      (prefix) =>
+        [...document.querySelectorAll(`button[aria-label^="${prefix}"]`)].map(
+          (el) => el.getAttribute('aria-label') ?? '',
+        ),
+      INGREDIENT_GROUP_PREFIX,
     )
-    const gfGroups = gfGroupLabels.filter((l) => /^合わせ調味料グループ[0-9]/.test(l))
+    const gfGroups = gfGroupLabels.filter((l) => INGREDIENT_GROUP_RE.test(l))
     check(
       'GF-B ☆と◎が、それぞれ別の組として自動で色分けされる',
       gfGroups.length === 4 && new Set(gfGroups.map((l) => l.slice(0, 12))).size === 2,
@@ -669,14 +680,17 @@ import './_shared.mjs'
       kgMemos.filter((v) => v === 'a').length === 3,
       JSON.stringify(kgMemos),
     )
-    const kgGroupLabels = await page.evaluate(() =>
-      [...document.querySelectorAll('button[aria-label^="合わせ調味料グループ"]')].map(
-        (el) => el.getAttribute('aria-label') ?? '',
-      ),
+    const kgGroupLabels = await page.evaluate(
+      // 文言は ja.ts から読むが、evaluate の中はブラウザ側なので引数で渡す（JM-4）
+      (prefix) =>
+        [...document.querySelectorAll(`button[aria-label^="${prefix}"]`)].map(
+          (el) => el.getAttribute('aria-label') ?? '',
+        ),
+      INGREDIENT_GROUP_PREFIX,
     )
     check(
       'KG-A 小文字の印から合わせ調味料の組ができる',
-      kgGroupLabels.filter((l) => /^合わせ調味料グループ[0-9]/.test(l)).length === 3,
+      kgGroupLabels.filter((l) => INGREDIENT_GROUP_RE.test(l)).length === 3,
       JSON.stringify(kgGroupLabels),
     )
     // 保存した中身で、名前に印が残っていないことを見る（栄養・原価の名前照合を壊さないため）
@@ -1006,7 +1020,7 @@ import './_shared.mjs'
   currentCheck = 'NUTSORT-01'
   await page.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
   await page.waitForTimeout(500)
-  await page.locator('button[aria-label="並び替え"]').click()
+  await page.locator(`button[aria-label="${ja.search.sortToggle}"]`).click()
   await page.waitForTimeout(300)
   const nutSortPanelText = await page.textContent('body')
   // 見出しは2026-08-19 便HU・⑯(オーナー指示)で「栄養価で探す」→「栄養価で並び替え」に戻した
@@ -1616,8 +1630,9 @@ import './_shared.mjs'
   )
   // 2026-08-02: 目次チップは5列。390px幅で1行に収まり、文字が折り返して高さが揃わなくならないこと
   {
-    const chipRows = await page.evaluate(() => {
-      const nav = document.querySelector('nav[aria-label="設定の目次"]')
+    // 文言は ja.ts から読むが、evaluate の中はブラウザ側なので引数で渡す（JM-4）
+    const chipRows = await page.evaluate((tocLabel) => {
+      const nav = document.querySelector(`nav[aria-label="${tocLabel}"]`)
       if (!nav) return null
       const chips = Array.from(nav.querySelectorAll('button'))
       const tops = new Set(chips.map((el) => Math.round(el.getBoundingClientRect().top)))

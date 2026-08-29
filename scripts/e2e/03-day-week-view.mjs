@@ -891,7 +891,7 @@ import './_shared.mjs'
       // 見出しに出す数字は、開いたときの表・パネルと同じ値であること(別々に数え直さない)
       const ffCostValue = (await ffCard('month-cost-folded')).valueText ?? ''
       const ffCostYen = ffCostValue.match(/[\d,]+円/)?.[0] ?? ''
-      await ffPage.getByRole('button', { name: /月の食費/ }).click()
+      await ffPage.getByRole('button', { name: jaRe(ja.mealPlan.monthCostTitle, { m: '' }) }).click()
       await ffPage.waitForTimeout(700)
       const ffTable = (await ffPage.locator('[data-testid="month-cost-table"]').count())
         ? ((await ffPage.locator('[data-testid="month-cost-table"]').innerText()) ?? '').replaceAll('​', '')
@@ -946,7 +946,7 @@ import './_shared.mjs'
       )
 
       // (2) 共有の窓(同じ作法に寄せた別の窓でも、結果が同じであることを見る)
-      const bcShare = bcPage.locator('button[aria-label="シェア"]')
+      const bcShare = bcPage.locator(`button[aria-label="${ja.share.button}"]`)
       if ((await bcShare.count()) > 0) {
         await bcShare.first().click()
         await bcPage.waitForTimeout(400)
@@ -1253,8 +1253,9 @@ import './_shared.mjs'
       )
 
       // DT-6: 食事のボタン群は見出し「表示のしかた」と同じ行(＝折りたたみボタンの直後)にある
-      const wuSlotInHeader = await wuPage.evaluate(() => {
-        const group = document.querySelector('[role="group"][aria-label="表示する食事"]')
+      // 文言は ja.ts から読むが、evaluate の中はブラウザ側なので引数で渡す（JM-4）
+      const wuSlotInHeader = await wuPage.evaluate((slotFilterTitle) => {
+        const group = document.querySelector(`[role="group"][aria-label="${slotFilterTitle}"]`)
         const toggle = group?.parentElement?.querySelector('button[aria-expanded]')
         return {
           sameRow: !!toggle,
@@ -1263,7 +1264,7 @@ import './_shared.mjs'
             !!group &&
             (toggle.compareDocumentPosition(group) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0,
         }
-      })
+      }, ja.mealPlan.slotFilterTitle)
       check(
         'WEEKUI-01(便DT-6) 食事のボタン群は「表示のしかた」の見出し(折りたたみボタン)の横にある',
         wuSlotInHeader.sameRow && wuSlotInHeader.afterToggle,
@@ -1490,7 +1491,7 @@ import './_shared.mjs'
       // （切り替えた時点で1組出るが、ここでは行を用意したいだけなので押して引き直しておく）
       await dtPage.locator('[data-testid="day-mode-plan"]').click()
       await dtPage.waitForTimeout(1200)
-      await dtPage.getByRole('button', { name: /おまかせで献立を組む/ }).first().click()
+      await dtPage.getByRole('button', { name: jaRe(ja.mealPlan.todaySuggestButton) }).first().click()
       await dtPage.waitForTimeout(800)
       await dtPage.locator('[data-testid="day-suggest-apply"]').click()
       await dtPage.waitForTimeout(400)
@@ -1604,9 +1605,10 @@ import './_shared.mjs'
       )
 
       // ---------- DT-3: 日付の切り替え欄は「すべて折りたたむ」の上・7日分カードの直前 ----------
-      const dtOrder = await dtPage.evaluate(() => {
+      // 文言は ja.ts から読むが、evaluate の中はブラウザ側なので引数で渡す（JM-4）
+      const dtOrder = await dtPage.evaluate((prevWeek) => {
         const all = [...document.querySelectorAll('button')]
-        const prev = document.querySelector('button[aria-label="前の週"]')
+        const prev = document.querySelector(`button[aria-label="${prevWeek}"]`)
         const collapse = all.find((b) => b.textContent?.trim() === 'すべて折りたたむ')
         const firstCard = document.querySelector('section[data-date]')
         const autoToggle = all.find((b) => b.textContent?.includes('献立を提案'))
@@ -1618,7 +1620,7 @@ import './_shared.mjs'
           beforeCollapse: pos(prev, collapse),
           beforeCards: pos(collapse, firstCard),
         }
-      })
+      }, ja.mealPlan.prevWeek)
       check(
         'WEEKUI-DT(便DT-3) 日付の切り替え欄は操作グループより下・「すべて折りたたむ」の上にある',
         dtOrder.hasAll && dtOrder.afterGroups && dtOrder.beforeCollapse && dtOrder.beforeCards,
@@ -1736,7 +1738,7 @@ import './_shared.mjs'
       await dtPage.waitForTimeout(300)
       const dtScrollBefore = await dtPage.evaluate(() => Math.round(window.scrollY))
       const dtWeekBefore =
-        (await dtPage.locator('button[aria-label="前の週"] ~ button').first().textContent()) ?? ''
+        (await dtPage.locator(`button[aria-label="${ja.mealPlan.prevWeek}"] ~ button`).first().textContent()) ?? ''
       check(
         'WEEKUI-DT(便DT-2) 前提: 記録カードを開く前に週タブを送っている',
         dtScrollBefore > 0,
@@ -1765,7 +1767,7 @@ import './_shared.mjs'
         `url=${dtPage.url()}`,
       )
       const dtWeekAfter =
-        (await dtPage.locator('button[aria-label="前の週"] ~ button').first().textContent()) ?? ''
+        (await dtPage.locator(`button[aria-label="${ja.mealPlan.prevWeek}"] ~ button`).first().textContent()) ?? ''
       check(
         'WEEKUI-DT(便DT-2) 戻ると週タブが開き、離れる前と同じ週を見ている',
         dtWeekAfter.trim() === dtWeekBefore.trim() && dtWeekAfter.trim() !== '',

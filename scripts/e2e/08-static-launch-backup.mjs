@@ -128,10 +128,10 @@ import './_shared.mjs'
       await pcPage.waitForTimeout(500)
       if (pcYesterday.slice(0, 7) !== `${pcNow.getFullYear()}-${pcPad(pcNow.getMonth() + 1)}`) {
         // 実行日が月初(1日)のときだけ、昨日は前の月に表示される
-        await pcPage.locator('button[aria-label="前の月"]').click()
+        await pcPage.locator(`button[aria-label="${ja.mealPlan.prevMonth}"]`).click()
         await pcPage.waitForTimeout(400)
       }
-      const pcPhotoCell = pcPage.locator('button[aria-label="記録あり"]').first()
+      const pcPhotoCell = pcPage.locator(`button[aria-label="${ja.mealPlan.monthDayHasLog}"]`).first()
       check('PHOTOCAL-01 記録のある日セルが「記録あり」で出る', (await pcPhotoCell.count()) >= 1)
       check(
         'PHOTOCAL-01 記録写真のある日のセルに写真(img)が敷かれる',

@@ -1683,9 +1683,9 @@ import './_shared.mjs'
       // ---------- ③「食材と価格」からじゃがいもを消す＝価格が分からない材料が1件できる ----------
       await jgPage.goto(`${BASE}/#/prices`, { waitUntil: 'networkidle' })
       await jgPage.waitForTimeout(1000)
-      await jgPage.locator('input[aria-label="食材名で絞り込む"]').fill('じゃがいも')
+      await jgPage.locator(`input[aria-label="${ja.priceMaster.searchLabel}"]`).fill('じゃがいも')
       await jgPage.waitForTimeout(400)
-      await jgPage.locator('button[aria-label="この食材を削除"]').first().click()
+      await jgPage.locator(`button[aria-label="${ja.priceMaster.remove}"]`).first().click()
       await jgPage.waitForTimeout(500)
       await jgPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
       await jgPage.waitForTimeout(800)
@@ -1740,7 +1740,7 @@ import './_shared.mjs'
       await shPage.waitForTimeout(500)
 
       // シェアボタン→選択モーダル(旧インラインパネルは廃止)
-      await shPage.locator('button[aria-label="シェア"]').click()
+      await shPage.locator(`button[aria-label="${ja.share.button}"]`).click()
       await shPage.waitForTimeout(300)
       const shareDialog = shPage.getByRole('dialog', { name: ja.share.dialogTitle })
       check('SHARE-01 シェアボタンで選択モーダルが開く', (await shareDialog.count()) === 1)
@@ -1971,13 +1971,13 @@ import './_shared.mjs'
       // (b) くわしくタブが空のうちは●が出ず、入力があると出る
       await ftPage.goto(`${BASE}/#/recipes/new`, { waitUntil: 'networkidle' })
       await ftPage.waitForTimeout(500)
-      const dotBefore = await ftPage.locator('[aria-label="入力済みの項目があります"]').count()
+      const dotBefore = await ftPage.locator(`[aria-label="${ja.form.formTabDetailFilledHint}"]`).count()
       check('FORMTABS-01b くわしくタブが空のうちは●が出ない', dotBefore === 0)
       await ftPage.getByRole('tab', { name: ja.form.formTabDetail }).click()
       await ftPage.waitForTimeout(200)
       await ftPage.getByPlaceholder(ja.form.memoPlaceholder).fill('E2Eタブ確認メモ')
       await ftPage.waitForTimeout(200)
-      const dotAfter = await ftPage.locator('[aria-label="入力済みの項目があります"]').count()
+      const dotAfter = await ftPage.locator(`[aria-label="${ja.form.formTabDetailFilledHint}"]`).count()
       check('FORMTABS-01b くわしくに入力があると見出し右に●が出る', dotAfter > 0)
 
       // (c) くわしくタブを表示中に料理名未入力のまま保存すると、エラー表示+「かんたん」タブへ戻る

@@ -565,7 +565,7 @@ import './_shared.mjs'
         await p.waitForTimeout(500)
         await p.getByText(title, { exact: true }).first().click()
         await p.waitForTimeout(700)
-        await p.getByRole('button', { name: /今日の献立に追加済み/ }).click()
+        await p.getByRole('button', { name: jaRe(ja.detail.todayAdded) }).click()
         await p.waitForTimeout(600)
       }
       /** ナビを開いて「何品を選択中か」「段取りを作るが押せるか」を読む */
@@ -1001,7 +1001,7 @@ import './_shared.mjs'
         currentCheck = 'FS-07'
         await p.locator('[data-testid="cook-session-start"]').click()
         await p.waitForTimeout(700)
-        await p.locator('button[aria-label="声で操作する"]').click()
+        await p.locator(`button[aria-label="${ja.focus.micStart}"]`).click()
         await p.waitForTimeout(500)
         check(
           'FS-07 前提: 「声で操作」ONで聞いている状態になる',
@@ -1725,7 +1725,7 @@ import './_shared.mjs'
       const fuWaitTimer = fuPage.getByRole('button', { name: ja.cookNavi.startTimer }).first()
       await fuWaitTimer.click()
       await fuPage.waitForTimeout(800)
-      const fuBarRow = fuPage.locator('button[aria-label*="タイマーを調整"]').first()
+      const fuBarRow = fuPage.locator(`button[aria-label*="${ja.timer.adjustDialogTitle}"]`).first()
       const fuBarAria = (await fuBarRow.getAttribute('aria-label')) ?? ''
       // 2026-08-14 便GL: 読み上げ名は「段取り9・手順1の2つめ」の形になった（丸数字は使わない。
       // 読み上げソフトによって「まる9」「9」と読みが割れるため）。くっついて読めないことは同じ
@@ -1756,7 +1756,7 @@ import './_shared.mjs'
       await fuPage.goto(`${BASE}/#/recipes/${fuIds[0]}`)
       await fuPage.reload({ waitUntil: 'networkidle' })
       await fuPage.waitForTimeout(1200)
-      const fuChips = fuPage.locator('button[aria-label*="タイマー開始"]:visible')
+      const fuChips = fuPage.locator(`button[aria-label*="${ja.timer.start}"]:visible`)
       await fuChips.nth(0).click()
       await fuPage.waitForTimeout(600)
       await fuChips.nth(1).click()
@@ -2086,7 +2086,7 @@ import './_shared.mjs'
 
       // --- FX-02 / FX-03: 声の案内 ---
       currentCheck = 'FX-02'
-      const fxMicStart = fxPage.locator('button[aria-label="声で操作する"]')
+      const fxMicStart = fxPage.locator(`button[aria-label="${ja.focus.micStart}"]`)
       if ((await fxMicStart.count()) > 0) {
         await fxMicStart.click()
         await fxPage.waitForTimeout(400)
@@ -2181,7 +2181,7 @@ import './_shared.mjs'
         return { canScroll: el.scrollHeight > el.clientHeight ? true : 'fits' }
       })
       check('FX-09 手順の枠は縦に送れる作りのまま', fxScrollable != null, JSON.stringify(fxScrollable))
-      await fxPage.locator('[data-testid="cook-text-size-modal"] button[aria-label="閉じる"]').click()
+      await fxPage.locator(`[data-testid="cook-text-size-modal"] button[aria-label="${ja.common.close}"]`).click()
       await fxPage.waitForTimeout(400)
       await fxPage.reload({ waitUntil: 'networkidle' })
       await fxPage.waitForTimeout(1600)
@@ -2199,7 +2199,7 @@ import './_shared.mjs'
       await fxPage.waitForTimeout(400)
       await fxPage.locator('[data-testid="cook-text-size-option"]').nth(1).click()
       await fxPage.waitForTimeout(400)
-      await fxPage.locator('[data-testid="cook-text-size-modal"] button[aria-label="閉じる"]').click()
+      await fxPage.locator(`[data-testid="cook-text-size-modal"] button[aria-label="${ja.common.close}"]`).click()
       await fxPage.waitForTimeout(400)
       check('FX-09 「普通」に戻せる', (await fxStepFontSize()) === '24px', await fxStepFontSize())
 
@@ -2209,7 +2209,7 @@ import './_shared.mjs'
         'FX-05 読み上げを使う前は、読み方の案内を出さない',
         (await fxPage.locator('[data-testid="speech-reading-hint"]').count()) === 0,
       )
-      await fxPage.locator('button[aria-label="読み上げ"]').first().click()
+      await fxPage.locator(`button[aria-label="${ja.focus.read}"]`).first().click()
       await fxPage.waitForTimeout(600)
       const fxReadingHint = await fxPage
         .locator('[data-testid="speech-reading-hint"]')
@@ -2231,7 +2231,7 @@ import './_shared.mjs'
         await fxPage.locator('[data-testid="cook-session-start"]').click()
         await fxPage.waitForTimeout(700)
       }
-      await fxPage.locator('button[aria-label="読み上げ"]').first().click()
+      await fxPage.locator(`button[aria-label="${ja.focus.read}"]`).first().click()
       await fxPage.waitForTimeout(600)
       check(
         'FX-05 一度閉じたら、次に読み上げを使っても出さない（しつこくしない）',

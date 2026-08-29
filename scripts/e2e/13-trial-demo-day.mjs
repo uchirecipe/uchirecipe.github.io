@@ -296,9 +296,9 @@ import './_shared.mjs'
         ((await dmPage.locator('[data-testid="month-demo-banner"]').textContent()) ?? '').includes(ja.mealPlan.monthDemoBannerTitle),
       )
       // 2026-08-07 便DU: 食費・栄養のカードは折りたたみになった(既定は畳む)ので、中身を読む前に開く
-      await dmPage.getByRole('button', { name: /月の食費/ }).click()
+      await dmPage.getByRole('button', { name: jaRe(ja.mealPlan.monthCostTitle, { m: '' }) }).click()
       await dmPage.waitForTimeout(300)
-      await dmPage.getByRole('button', { name: /月の栄養（1人分）/ }).click()
+      await dmPage.getByRole('button', { name: jaRe(ja.mealPlan.monthNutritionTitle, { m: '' }) }).click()
       await dmPage.waitForTimeout(300)
       const dmBody = (await dmPage.textContent('body')) ?? ''
       check(
@@ -1015,7 +1015,7 @@ import './_shared.mjs'
         )
         // 2026-08-19 便IA: 「条件をしぼる」は**窓**で開く。開いているあいだ後ろの画面は
         // 窓に覆われて押せないので、閉じるのは窓の中の「閉じる」から行う
-        const dmConditions = dmSection().getByRole('button', { name: /条件をしぼる/ })
+        const dmConditions = dmSection().getByRole('button', { name: jaRe(ja.dayStart.conditionsToggle) })
         if ((await dmConditions.count()) === 1) {
           await dmConditions.click()
           await dmPage.waitForTimeout(600)
@@ -1773,7 +1773,7 @@ import './_shared.mjs'
           'DAYDEFAULT-01 「1品」を押すと1品側になる',
           (await ddPressed('day-mode-one')) === 'true',
         )
-        const ddConditions = ddSection().getByRole('button', { name: /条件をしぼる/ })
+        const ddConditions = ddSection().getByRole('button', { name: jaRe(ja.dayStart.conditionsToggle) })
         check('DAYDEFAULT-01 前提: 「条件をしぼる」が押せる', (await ddConditions.count()) === 1)
         if ((await ddConditions.count()) === 1) {
           await ddConditions.click()

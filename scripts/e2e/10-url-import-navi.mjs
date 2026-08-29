@@ -14,6 +14,16 @@
 // ==========================================================================================
 import './_shared.mjs'
 
+/**
+ * タイマーの調整の窓にある「戻る導線」のボタン名（2026-08-29 便MM）。
+ * 画面によって3つのうちどれかが出る（手順へ移る `goToStep` ／ 見るだけの `peekStep` ／
+ * 単品レシピへ飛ぶ `goToRecipe`）ので、**3つとも ja.ts から読んで並べる**。
+ * 前は `/を(開く|見る)/` と書き写していたため、文言を直すと掴めず30秒待って実行中断していた。
+ */
+const TIMER_BACK_LINK_RE = new RegExp(
+  [ja.timer.goToStep, ja.timer.peekStep, ja.timer.goToRecipe].map((t) => jaRe(t).source).join('|'),
+)
+
 
   // --- ICONPICK-01: 「画像」3択UI(2026-07-16 Fable裁定docs/30 裁定2【画像の3択】)。
   // [カメラで撮る][アルバムから選ぶ][アイコンから選ぶ▾]の3等分タイルで、3つ目が折りたたみの
@@ -450,7 +460,7 @@ import './_shared.mjs'
       // 整理モードは続き、画面上に抜ける手段が無くなっていた。0件になったら自動で抜ける
       await pbPage.getByRole('button', { name: '全選択', exact: true }).click()
       await pbPage.waitForTimeout(200)
-      const deleteAllBtn = pbPage.getByRole('button', { name: /^選択した食材\d+件を削除$/ })
+      const deleteAllBtn = pbPage.getByRole('button', { name: jaRe(ja.pantry.organizeDeleteSelected, { n: '\\d+' }, { exact: true }) })
       await deleteAllBtn.click()
       await pbPage.waitForTimeout(500)
       check(
@@ -742,19 +752,19 @@ import './_shared.mjs'
         )
         check(
           'URLIMPORT-02 タイトルが自動入力される',
-          (await uiPage.locator('input[placeholder="例: 肉じゃが"]').inputValue()) === 'E2Eモック鍋',
+          (await uiPage.locator(`input[placeholder="${ja.form.namePlaceholder}"]`).inputValue()) === 'E2Eモック鍋',
         )
         check(
           'URLIMPORT-02 調理時間が自動入力される',
-          (await uiPage.locator('input[placeholder="例: 30"]').inputValue()) === '25',
+          (await uiPage.locator(`input[placeholder="${ja.form.cookMinutesPlaceholder}"]`).inputValue()) === '25',
         )
         check(
           'URLIMPORT-02 人数分が自動入力される(3人分)',
           (await uiPage.locator('span.min-w-14.text-center.text-lg.font-bold.text-ink').textContent()) === '3人分',
         )
-        const ingNameInputs = uiPage.locator('input[placeholder="例: じゃがいも"]')
-        const ingAmountInputs = uiPage.locator('input[placeholder="例: 3"]')
-        const ingUnitInputs = uiPage.locator('input[placeholder="例: 個"]')
+        const ingNameInputs = uiPage.locator(`input[placeholder="${ja.form.ingredientNamePlaceholder}"]`)
+        const ingAmountInputs = uiPage.locator(`input[placeholder="${ja.form.ingredientAmountPlaceholder}"]`)
+        const ingUnitInputs = uiPage.locator(`input[placeholder="${ja.form.ingredientUnitPlaceholder}"]`)
         check(
           'URLIMPORT-02 材料1件目: name=鶏もも肉・splitQuantityでamount=300/unit=g に分解される',
           (await ingNameInputs.nth(0).inputValue()) === '鶏もも肉' &&
@@ -767,7 +777,7 @@ import './_shared.mjs'
             (await ingAmountInputs.nth(1).inputValue()) === '2' &&
             (await ingUnitInputs.nth(1).inputValue()) === '大さじ',
         )
-        const stepInputs = uiPage.locator('textarea[placeholder="例: じゃがいもを一口大に切る"]')
+        const stepInputs = uiPage.locator(`textarea[placeholder="${ja.form.stepTextPlaceholder}"]`)
         check(
           'URLIMPORT-02 手順が2件とも自動入力される',
           (await stepInputs.nth(0).inputValue()) === '鶏肉を切る' &&
@@ -932,9 +942,9 @@ import './_shared.mjs'
         await uiPage.locator('input[type="url"]').first().fill('https://example.com/colon-marker-recipe')
         await uiPage.getByRole('button', { name: '読み込む' }).click()
         await uiPage.waitForTimeout(500)
-        const colonNameInputs = uiPage.locator('input[placeholder="例: じゃがいも"]')
-        const colonAmountInputs = uiPage.locator('input[placeholder="例: 3"]')
-        const colonUnitInputs = uiPage.locator('input[placeholder="例: 個"]')
+        const colonNameInputs = uiPage.locator(`input[placeholder="${ja.form.ingredientNamePlaceholder}"]`)
+        const colonAmountInputs = uiPage.locator(`input[placeholder="${ja.form.ingredientAmountPlaceholder}"]`)
+        const colonUnitInputs = uiPage.locator(`input[placeholder="${ja.form.ingredientUnitPlaceholder}"]`)
         check(
           'URLIMPORT-07 コロン書式「木綿豆腐: 75 g」→ name=木綿豆腐/amount=75/unit=g に修復',
           (await colonNameInputs.nth(0).inputValue()) === '木綿豆腐' &&
@@ -1023,8 +1033,8 @@ import './_shared.mjs'
         await uiPage.locator('input[type="url"]').first().fill('https://example.com/group-marker')
         await uiPage.getByRole('button', { name: '読み込む' }).click()
         await uiPage.waitForTimeout(600)
-        const groupNameInputs = uiPage.locator('input[placeholder="例: じゃがいも"]')
-        const groupMemoInputs = uiPage.locator('input[placeholder="材料メモ（任意。例: なければ玉ねぎでも可）"]')
+        const groupNameInputs = uiPage.locator(`input[placeholder="${ja.form.ingredientNamePlaceholder}"]`)
+        const groupMemoInputs = uiPage.locator(`input[placeholder="${ja.form.ingredientMemoPlaceholder}"]`)
         check(
           'URLIMPORT-11 材料からゴミ行(関連レシピ)と見出し行(合わせ調味料)が落ちて3件になる(C07/C08)',
           (await groupNameInputs.count()) === 3 &&
@@ -1053,7 +1063,7 @@ import './_shared.mjs'
           'URLIMPORT-11 メモが空の行では「メモを追加」の裏に隠れている(2026-08-26 便LG)',
           (await memoOfIngredient('じゃがいも')) === null,
         )
-        const stepTextareas = uiPage.locator('textarea[placeholder="例: じゃがいもを一口大に切る"]')
+        const stepTextareas = uiPage.locator(`textarea[placeholder="${ja.form.stepTextPlaceholder}"]`)
         check(
           'URLIMPORT-11 手順に紛れたSNS名の行が落ちる(C07)',
           (await stepTextareas.count()) === 2 &&
@@ -1084,7 +1094,7 @@ import './_shared.mjs'
         const amountlessHints = uiPage.getByText(ja.form.importedAmountlessHint)
         check('URLIMPORT-12 該当の材料行にだけ控えめな印が付く(2件)', (await amountlessHints.count()) === 2)
         // 自分で分量を入れると印は消える(「まだ空のまま」を指す印なので)
-        await uiPage.locator('input[placeholder="例: 3"]').nth(1).fill('少々')
+        await uiPage.locator(`input[placeholder="${ja.form.ingredientAmountPlaceholder}"]`).nth(1).fill('少々')
         await uiPage.waitForTimeout(300)
         check('URLIMPORT-12 分量を入れた行の印は消える', (await amountlessHints.count()) === 1)
 
@@ -1109,7 +1119,7 @@ import './_shared.mjs'
         )
         check(
           'URLIMPORT-13 上限に達しているので「＋」は押せない(手入力と同じ状態になる)',
-          await uiPage.locator('button[aria-label="人数を増やす"]').first().isDisabled(),
+          await uiPage.locator(`button[aria-label="${ja.detail.servingsUp}"]`).first().isDisabled(),
         )
 
         // --- URLIMPORT-14(2026-07-30 便CK/②-1・S1): 置き換え確認に写真の扱いを書く。
@@ -1286,10 +1296,10 @@ import './_shared.mjs'
         currentCheck = 'URLIMPORT-16'
         await uiPage.reload({ waitUntil: 'networkidle' })
         await uiPage.waitForTimeout(500)
-        await uiPage.locator('input[placeholder="例: 肉じゃが"]').fill('手入力のレシピ')
-        await uiPage.locator('input[placeholder="例: じゃがいも"]').first().fill('じゃがいも')
+        await uiPage.locator(`input[placeholder="${ja.form.namePlaceholder}"]`).fill('手入力のレシピ')
+        await uiPage.locator(`input[placeholder="${ja.form.ingredientNamePlaceholder}"]`).first().fill('じゃがいも')
         await uiPage
-          .locator('textarea[placeholder="例: じゃがいもを一口大に切る"]')
+          .locator(`textarea[placeholder="${ja.form.stepTextPlaceholder}"]`)
           .first()
           .fill('切る')
         await uiPage.getByText(ja.urlImport.open).click()
@@ -1400,11 +1410,11 @@ import './_shared.mjs'
       )
 
       // 「2秒」ボタンで短いタイマーを起動
-      await naviPage.getByRole('button', { name: /2秒 タイマー開始/ }).first().click()
+      await naviPage.getByRole('button', { name: new RegExp(`2秒 ${reEscape(ja.timer.start)}`) }).first().click()
       await naviPage.waitForTimeout(400)
 
       // NAVI-02: 動作中タイマーの行タップ→±調整の窓が開く(ナビ内に留まる)
-      await naviPage.locator('[aria-label*="タイマーを調整"]').first().click()
+      await naviPage.locator(`[aria-label*="${ja.timer.adjustDialogTitle}"]`).first().click()
       await naviPage.waitForTimeout(400)
       check(
         'NAVI-02 動作中タイマーのタップで±調整の窓が開く(ナビ内)',
@@ -1432,7 +1442,7 @@ import './_shared.mjs'
       )
       await naviPage
         .getByRole('dialog', { name: ja.timer.adjustDialogTitle })
-        .getByRole('button', { name: /を(開く|見る)/ })
+        .getByRole('button', { name: TIMER_BACK_LINK_RE })
         .click()
       await naviPage.waitForTimeout(700)
       check(
@@ -1455,7 +1465,7 @@ import './_shared.mjs'
       await naviPage.waitForTimeout(400)
       await naviPage
         .getByRole('dialog', { name: ja.timer.adjustDialogTitle })
-        .getByRole('button', { name: /を(開く|見る)/ })
+        .getByRole('button', { name: TIMER_BACK_LINK_RE })
         .click()
       await naviPage.waitForTimeout(700)
       check(
@@ -1729,7 +1739,7 @@ import './_shared.mjs'
       )
       await nav6Page.getByRole('button', { name: ja.paste.apply }).click()
       await nav6Page.waitForTimeout(400)
-      const minutesInputs = nav6Page.locator('input[aria-label="分（任意）"]')
+      const minutesInputs = nav6Page.locator(`input[aria-label="${ja.form.stepMinutes}"]`)
       check(
         'NAVI-06 本文の「15分」が手順2の分数欄に入る',
         (await minutesInputs.nth(1).inputValue()) === '15',
@@ -1853,7 +1863,7 @@ import './_shared.mjs'
 
       // NAVI-08: ナビから2秒タイマーを起動→別の画面へ→完了タイマーをタップ→ナビへ戻る
       currentCheck = 'NAVI-08'
-      await nav7Page.getByRole('button', { name: /2秒 タイマー開始/ }).first().click()
+      await nav7Page.getByRole('button', { name: new RegExp(`2秒 ${reEscape(ja.timer.start)}`) }).first().click()
       await nav7Page.waitForTimeout(300)
       await nav7Page.goto(`${BASE}/#/shopping`)
       await nav7Page.waitForTimeout(500)
@@ -1863,7 +1873,7 @@ import './_shared.mjs'
       // 2026-08-11 便FO: 帯は窓を開くだけになったので、移動は窓の「手順◯を開く」から
       await nav7Page
         .getByRole('dialog', { name: ja.timer.adjustDialogTitle })
-        .getByRole('button', { name: /を(開く|見る)/ })
+        .getByRole('button', { name: TIMER_BACK_LINK_RE })
         .click()
       await nav7Page.waitForTimeout(900)
       check(
@@ -2083,7 +2093,7 @@ import './_shared.mjs'
 
       // 経路③: 実行中のタイマーが終了→常駐バーの完了タイマーを押す→ナビの段取りへ戻る
       currentCheck = 'ES-02'
-      await esPage.getByRole('button', { name: /2秒 タイマー開始/ }).first().click()
+      await esPage.getByRole('button', { name: new RegExp(`2秒 ${reEscape(ja.timer.start)}`) }).first().click()
       await esPage.waitForTimeout(300)
       await esPage.goto(`${BASE}/#/shopping`)
       await esPage.waitForTimeout(500)
@@ -2093,7 +2103,7 @@ import './_shared.mjs'
       // 2026-08-11 便FO: 帯は窓を開くだけになったので、移動は窓の「手順◯を開く」から
       await esPage
         .getByRole('dialog', { name: ja.timer.adjustDialogTitle })
-        .getByRole('button', { name: /を(開く|見る)/ })
+        .getByRole('button', { name: TIMER_BACK_LINK_RE })
         .click()
       await esPage.waitForTimeout(1200)
       check(

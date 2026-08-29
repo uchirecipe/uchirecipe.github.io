@@ -244,7 +244,7 @@ import './_shared.mjs'
       await fdPage.evaluate(() => window.scrollTo(0, 500))
       await fdPage.waitForTimeout(500)
       const fdBeforeWeek = await fdGeom()
-      check('FD-08 前提: 「次の週」が押せる', await fdClickSel('button[aria-label="次の週"]'))
+      check('FD-08 前提: 「次の週」が押せる', await fdClickSel(`button[aria-label="${ja.mealPlan.nextWeek}"]`))
       await fdPage.waitForTimeout(1800)
       const fdNextWeek = await fdGeom()
       check(
@@ -252,7 +252,7 @@ import './_shared.mjs'
         Math.abs(fdNextWeek.y - fdBeforeWeek.y) <= 2,
         `${fdBeforeWeek.y}→${fdNextWeek.y}`,
       )
-      check('FD-08 前提: 「前の週」が押せる', await fdClickSel('button[aria-label="前の週"]'))
+      check('FD-08 前提: 「前の週」が押せる', await fdClickSel(`button[aria-label="${ja.mealPlan.prevWeek}"]`))
       await fdPage.waitForTimeout(1800)
       const fdPrevWeek = await fdGeom()
       check(
@@ -1689,7 +1689,7 @@ import './_shared.mjs'
       fiPage.locator('[data-testid="cook-session"] p', { hasText: ja.focus.micLabel }).first().innerText()
     /** 「声で操作」をONにする（すでにONなら何もしない＝押すとOFFになってしまう） */
     const fiListen = async () => {
-      const start = fiPage.locator('button[aria-label="声で操作する"]')
+      const start = fiPage.locator(`button[aria-label="${ja.focus.micStart}"]`)
       if ((await start.count()) === 0) return
       await start.click()
       await fiPage.waitForTimeout(300)
@@ -1919,7 +1919,7 @@ import './_shared.mjs'
       currentCheck = 'FI-06'
       await fiSay('3分タイマー')
       const fiTimerCount = () =>
-        fiPage.locator('[data-testid="cook-session"] button[aria-label*="タイマーを調整"]').count()
+        fiPage.locator(`[data-testid="cook-session"] button[aria-label*="${ja.timer.adjustDialogTitle}"]`).count()
       const fiTimersBefore = await fiTimerCount()
       check('FI-06 前提: タイマーを1本動かせた', fiTimersBefore >= 1, `本数=${fiTimersBefore}`)
       for (const word of ['青', '緑', 'ピンク']) await fiSay(word)

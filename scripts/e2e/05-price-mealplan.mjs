@@ -303,7 +303,7 @@ import './_shared.mjs'
         'MEALPLAN-01(Fix1) 当週表示中は中央チップにaria-labelが無い',
         (await weekCenterBtn.getAttribute('aria-label')) === null,
       )
-      await mpPage.locator('button[aria-label="次の週"]').click()
+      await mpPage.locator(`button[aria-label="${ja.mealPlan.nextWeek}"]`).click()
       await openAllWeekDays(mpPage) // 便ID・⑦: 畳む既定になったので、カードの中を触る前に開く
       await mpPage.waitForTimeout(400)
       check(
@@ -386,7 +386,7 @@ import './_shared.mjs'
         'MEALPLAN-01(Fix4) 「選択中」バッジは現在のレシピ(肉じゃが)の行に付く',
         (await currentPickRow.textContent())?.includes('肉じゃが'),
       )
-      await mpPage.locator('button[aria-label="閉じる"]').click()
+      await mpPage.locator(`button[aria-label="${ja.common.close}"]`).click()
       await mpPage.waitForTimeout(300)
 
       // Fix5: aria-pressed(見た目は変更しない)
@@ -663,7 +663,7 @@ import './_shared.mjs'
         'NUTRI-DAY-01 献立を入れると各日カードに「この日の献立の栄養（1人分の概算）」が出る',
         nbFilledText.includes(ja.nutritionBalance.dayTitlePlan),
       )
-      const dayToggles = nbPage.getByRole('button', { name: /^この日（.+）の栄養の概算を詳しく見る$/ })
+      const dayToggles = nbPage.getByRole('button', { name: jaRe(ja.nutritionBalance.dayToggleExpand, {}, { exact: true }) })
       check(
         'NUTRI-DAY-01 7日分すべてに折りたたみの栄養行が出る(読み上げ名に日付が入る)',
         (await dayToggles.count()) === 7,
@@ -926,7 +926,7 @@ import './_shared.mjs'
       await npPage.getByRole('button', { name: ja.mealPlan.fillWeek }).click()
       await npPage.waitForTimeout(1500)
       await npPage
-        .getByRole('button', { name: /^この日（.+）の栄養の概算を詳しく見る$/ })
+        .getByRole('button', { name: jaRe(ja.nutritionBalance.dayToggleExpand, {}, { exact: true }) })
         .first()
         .click()
       await npPage.waitForTimeout(400)
@@ -971,7 +971,13 @@ import './_shared.mjs'
         npOpenText.includes(ja.nutritionBalance.slotBreakdownTitle),
       )
       const npSlotRows = await npPage
-        .locator('dt', { hasText: /^(朝食|昼食|夕食)$/ })
+        .locator('dt', {
+          hasText: new RegExp(
+            `^(${[ja.mealPlan.slot.breakfast, ja.mealPlan.slot.lunch, ja.mealPlan.slot.dinner]
+              .map(reEscape)
+              .join('|')})$`,
+          ),
+        })
         .count()
       check(
         'NUTRI-PRO-01(便CW-6) 内訳は献立のある食事の数だけ並ぶ(朝食・夕食の2行)',
@@ -1037,7 +1043,7 @@ import './_shared.mjs'
         'MEALPLAN-02(Fix2) 当月表示中は中央チップにaria-labelが無い',
         (await monthCenterBtn.getAttribute('aria-label')) === null,
       )
-      await mp2Page.locator('button[aria-label="前の月"]').click()
+      await mp2Page.locator(`button[aria-label="${ja.mealPlan.prevMonth}"]`).click()
       await mp2Page.waitForTimeout(400)
       check(
         'MEALPLAN-02(Fix2) 「前の月」で先月へ→中央チップにaria-label(今月へ戻る)が付く',
@@ -1078,7 +1084,7 @@ import './_shared.mjs'
         await dayModal.getByRole('button', { name: ja.mealPlan.monthDayModalOpenWeek }).isVisible(),
       )
       // ×で閉じられる
-      await dayModal.locator('button[aria-label="閉じる"]').click()
+      await dayModal.locator(`button[aria-label="${ja.common.close}"]`).click()
       await mp2Page.waitForTimeout(300)
       check('MEALPLAN-02(便U-5) ×でモーダルが閉じる', !(await dayModal.isVisible()))
 
@@ -1195,7 +1201,7 @@ import './_shared.mjs'
       // 月〜水は過去)ため、サイコロの行インデックス(nth)が曜日で変わってしまう。
       // 「次の週」へ1回進めば、その週の月曜は実行日が何曜日でも必ず未来日になり、テストが
       // 決定的になる(過去日保護そのものの検証はMEALPLAN-06で別途行う)
-      await mp3Page.locator('button[aria-label="次の週"]').click()
+      await mp3Page.locator(`button[aria-label="${ja.mealPlan.nextWeek}"]`).click()
       await openAllWeekDays(mp3Page) // 便ID・⑦: 畳む既定になったので、カードの中を触る前に開く
       await mp3Page.waitForTimeout(300)
 
@@ -1277,15 +1283,15 @@ import './_shared.mjs'
         JSON.stringify(await mp3Picked()) === JSON.stringify([...MEAL_GENRES]),
         `選ばれている=${JSON.stringify(await mp3Picked())}`,
       )
-      await mp3Page.locator('[data-testid="plan-genre-chip"][data-genre="中華"]').click()
+      await mp3Page.locator(`[data-testid="plan-genre-chip"][data-genre="${MEAL_GENRES[MEAL_GENRES.length - 1]}"]`).click()
       await mp3Page.waitForTimeout(300)
       check(
         'MEALPLAN-03 料理のジャンルは1つ外しても残りが選ばれたまま(複数選べる)',
-        JSON.stringify(await mp3Picked()) === JSON.stringify(['和食', '洋食']),
+        JSON.stringify(await mp3Picked()) === JSON.stringify(MEAL_GENRES.slice(0, -1)),
         `選ばれている=${JSON.stringify(await mp3Picked())}`,
       )
       // 以降の提案テストに影響しないよう「指定なし」(3つとも選んだ状態)へ戻す
-      await mp3Page.locator('[data-testid="plan-genre-chip"][data-genre="中華"]').click()
+      await mp3Page.locator(`[data-testid="plan-genre-chip"][data-genre="${MEAL_GENRES[MEAL_GENRES.length - 1]}"]`).click()
       await mp3Page.waitForTimeout(300)
       // 「高たんぱく優先」トグルは削除済み(2026-08-09 便EO・オーナー指示)
       check(
@@ -1372,7 +1378,7 @@ import './_shared.mjs'
       // --- 2026-08-02 便CW-2: 既定の主菜/副菜の空欄行も×で畳める。畳んでも献立データは
       // 消えず(空欄行を隠すだけ)、戻すのは既存の「＋料理を追加」→主菜/副菜。
       // 同じ日の空欄行で、閉じる→同じ役割で戻す、が1行ぶんで往復することを確認する
-      const hideBtns = mp3Card(mp3D2).getByRole('button', { name: /の空いている行を閉じる$/ })
+      const hideBtns = mp3Card(mp3D2).getByRole('button', { name: jaRe(ja.mealPlan.hideEmptyRow, { role: '' }, { end: true }) })
       const beforeHideEmpty = await mp3Empty(mp3D2).count()
       const beforeHideCount = await hideBtns.count()
       // 空欄行は「既定の空欄行(×=閉じる)」と「＋料理を追加で増やした行(×=この追加した行をやめる)」の
@@ -1491,7 +1497,7 @@ import './_shared.mjs'
       // 2026-07-16 便W-⑤a: 過去日はまとめて献立の対象外になったため、実行日の曜日に関係なく
       // 「7日×主菜+副菜=14件が全部埋まる」を保証するには表示中の週を全日程未来にする必要がある
       // (MEALPLAN-03と同じ理由。「次の週」に進めば当週の月曜は実行日に関わらず必ず未来日)
-      await mp4Page.locator('button[aria-label="次の週"]').click()
+      await mp4Page.locator(`button[aria-label="${ja.mealPlan.nextWeek}"]`).click()
       await openAllWeekDays(mp4Page) // 便ID・⑦: 畳む既定になったので、カードの中を触る前に開く
       await mp4Page.waitForTimeout(300)
 
@@ -1729,7 +1735,7 @@ import './_shared.mjs'
       // ため、ここは todayList を直接1件消して再取り込みが起きないことだけを検証する
       check(
         'MEALPLAN-05(便DH) 週の予定から来た品に×(この献立から外す)は出ない',
-        (await mp5Page.locator('button[aria-label="この献立から外す"]').count()) === 0,
+        (await mp5Page.locator(`button[aria-label="${ja.mealPlan.todayRemove}"]`).count()) === 0,
       )
       await mp5Page.evaluate(
         (recipeId) =>
@@ -1800,7 +1806,7 @@ import './_shared.mjs'
       await mp6Page.getByRole('button', { name: ja.mealPlan.viewWeek, exact: true }).click()
       await openAllWeekDays(mp6Page) // 便ID・⑦: 畳む既定になったので、カードの中を触る前に開く
       await mp6Page.waitForTimeout(300)
-      await mp6Page.locator('button[aria-label="前の週"]').click()
+      await mp6Page.locator(`button[aria-label="${ja.mealPlan.prevWeek}"]`).click()
       await openAllWeekDays(mp6Page) // 便ID・⑦: 畳む既定になったので、カードの中を触る前に開く
       await mp6Page.waitForTimeout(300)
 
@@ -1883,7 +1889,7 @@ import './_shared.mjs'
       await openAllWeekDays(mp8Page) // 便ID・⑦: 畳む既定になったので、カードの中を触る前に開く
       await mp8Page.waitForTimeout(300)
       // 全日程を未来日にするため「次の週」へ(過去日保護と切り分ける。MEALPLAN-03/04と同じ理由)
-      await mp8Page.locator('button[aria-label="次の週"]').click()
+      await mp8Page.locator(`button[aria-label="${ja.mealPlan.nextWeek}"]`).click()
       await openAllWeekDays(mp8Page) // 便ID・⑦: 畳む既定になったので、カードの中を触る前に開く
       await mp8Page.waitForTimeout(300)
 

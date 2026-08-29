@@ -1442,14 +1442,14 @@ import './_shared.mjs'
       // --- GS-03: 案内を出す条件を、並行調理ナビ（FO-03）とそろえる ---
       check(
         'GS-03 前提: 1品の調理中モードに「声で操作」のボタンが常にある（声を使えることの入口）',
-        (await gsPage.locator('button[aria-label="声で操作する"]').count()) === 1,
+        (await gsPage.locator(`button[aria-label="${ja.focus.micStart}"]`).count()) === 1,
       )
       check(
         'GS-03 声を切っている間は、言葉の一覧を画面に出さない（ナビと同じ）',
         !(await gsBody()).includes('声で操作:'),
         (await gsBody()).slice(0, 160),
       )
-      await gsPage.locator('button[aria-label="声で操作する"]').click()
+      await gsPage.locator(`button[aria-label="${ja.focus.micStart}"]`).click()
       await gsPage.waitForTimeout(500)
       check(
         'GS-03 「声で操作」を押すと言葉の一覧が出る（使う人だけが読む）',
@@ -1459,7 +1459,7 @@ import './_shared.mjs'
         'GS-03 1品の画面には色の言い方を出さない（色が無い画面なので）',
         !(await gsBody()).includes(ja.cookNavi.sessionMicColorHint),
       )
-      await gsPage.locator('button[aria-label="声の操作をやめる"]').click()
+      await gsPage.locator(`button[aria-label="${ja.focus.micStop}"]`).click()
       await gsPage.waitForTimeout(500)
       check(
         'GS-03 もう一度押して切ると、案内もまた消える',
@@ -1467,7 +1467,7 @@ import './_shared.mjs'
         (await gsBody()).slice(0, 160),
       )
       // 以降の検証のため、聞いている状態に戻す
-      await gsPage.locator('button[aria-label="声で操作する"]').click()
+      await gsPage.locator(`button[aria-label="${ja.focus.micStart}"]`).click()
       await gsPage.waitForTimeout(500)
 
       // --- GS-01: 画面のボタンの表記そのままで手順を動かせる ---
@@ -1662,7 +1662,7 @@ import './_shared.mjs'
       // 2026-08-19 便IA: 在庫の絞り込みは「条件をしぼる」の窓の中へ移した
       // （同じ絞り込みなのに片方だけ外に残すと、押したときに後ろが動く/動かないが割れるため）
       {
-        const nhConditions = nhPage.getByRole('button', { name: /条件をしぼる/ })
+        const nhConditions = nhPage.getByRole('button', { name: jaRe(ja.dayStart.conditionsToggle) })
         check('NOHOME-01 前提: 「今日なに作る？」に「条件をしぼる」がある', (await nhConditions.count()) === 1)
         if ((await nhConditions.count()) === 1) {
           await nhConditions.click()

@@ -33,7 +33,7 @@ import './_shared.mjs'
       const hcTitles = () =>
         hcPage.locator('div.grid.grid-cols-2 a[href^="#/recipes/"] p.font-bold').allTextContents()
       const hcOpenFilter = async () => {
-        await hcPage.locator('button[aria-label="絞り込み"]').click()
+        await hcPage.locator(`button[aria-label="${ja.search.filterToggle}"]`).click()
         await hcPage.waitForTimeout(400)
       }
       const hcPanelVisible = () =>
@@ -57,7 +57,7 @@ import './_shared.mjs'
       // 条件をかける（0件でも全件でもない状態を作る＝閉じ方の違いが結果に出る余地を残す）
       await hcPage.getByRole('button', { name: '主菜', exact: true }).click()
       await hcPage.waitForTimeout(300)
-      await hcPage.locator('select[aria-label="調理時間"]').selectOption({ label: ja.search.timeUnder30 })
+      await hcPage.locator(`select[aria-label="${ja.search.timeTitle}"]`).selectOption({ label: ja.search.timeUnder30 })
       await hcPage.waitForTimeout(500)
       const hcFilteredInPanel = (await hcTitles()).length
       check(
@@ -705,7 +705,7 @@ import './_shared.mjs'
       await setConfirmAnswer(w1Page, 'cancel')
 
       // C13: 並び替えパネルに「よく使う順」の意味が書かれている
-      await w1Page.locator('button[aria-label="並び替え"]').click()
+      await w1Page.locator(`button[aria-label="${ja.search.sortToggle}"]`).click()
       await w1Page.waitForTimeout(300)
       const sortPanelText = await w1Page.textContent('body')
       check(
@@ -716,7 +716,7 @@ import './_shared.mjs'
       await w1Page.waitForTimeout(300)
 
       // C20: お気に入り0件の状態で「お気に入り」絞り込みをONにして0件にする
-      await w1Page.locator('button[aria-label="絞り込み"]').click()
+      await w1Page.locator(`button[aria-label="${ja.search.filterToggle}"]`).click()
       await w1Page.waitForTimeout(300)
       await w1Page.getByRole('button', { name: 'お気に入り', exact: true }).click()
       await w1Page.waitForTimeout(300)
@@ -947,7 +947,7 @@ import './_shared.mjs'
         await l2Page.getByRole('button', { name: ja.detail.cookedSave, exact: true }).click()
         await l2Page.waitForTimeout(600)
       }
-      const seeAll = l2Page.getByRole('link', { name: /すべて見る（他\d+件）/ })
+      const seeAll = l2Page.getByRole('link', { name: jaRe(ja.detail.cookedLogsSeeAll, { n: '\\d+' }) })
       check('LOG-CI2-01/C03 記録が6件以上あると「すべて見る（他◯件）」が出る', (await seeAll.count()) === 1)
       check(
         'LOG-CI2-01/C03 「他◯件」の件数が「総数−表示中の5件」になっている',
@@ -996,7 +996,7 @@ import './_shared.mjs'
       await l2Page.goto(`${BASE}/#/recipes/${recipeId}`, { waitUntil: 'networkidle' })
       await l2Page.waitForTimeout(700)
       const beforeDelete = (await readLogs(recipeId)).length
-      await l2Page.locator('button[aria-label="この記録を編集"]').first().click()
+      await l2Page.locator(`button[aria-label="${ja.detail.cookedLogEdit}"]`).first().click()
       await l2Page.waitForTimeout(400)
       const deleteLogBtn = l2Page.getByRole('button', { name: 'この記録を削除' })
       check('LOG-CI2-01/C02 記録の編集行に「この記録を削除」が出る', (await deleteLogBtn.count()) === 1)
@@ -1036,7 +1036,7 @@ import './_shared.mjs'
 
       // --- C05: 記録の編集フォームからも人数を直せる ---
       const beforeEditServings = (await readLogs(recipeId))[0]?.servings
-      await l2Page.locator('button[aria-label="この記録を編集"]').first().click()
+      await l2Page.locator(`button[aria-label="${ja.detail.cookedLogEdit}"]`).first().click()
       await l2Page.waitForTimeout(400)
       const editRow = l2Page.locator('li', { hasText: ja.detail.cookedServings }).last()
       check(
@@ -1082,7 +1082,7 @@ import './_shared.mjs'
       await cyPage.waitForTimeout(700)
       // 人数を4回増やして6人分にし、記録メモの下書きも残す
       for (let i = 0; i < 4; i++) {
-        await cyPage.locator('button[aria-label="人数を増やす"]').first().click()
+        await cyPage.locator(`button[aria-label="${ja.detail.servingsUp}"]`).first().click()
         await cyPage.waitForTimeout(120)
       }
       const beforeMove = await cyPage.locator('span.min-w-14').first().textContent()
@@ -1206,7 +1206,7 @@ import './_shared.mjs'
       await scPage.evaluate(() => navigator.clipboard.writeText('★元のクリップボード★'))
       await scPage.getByText('肉じゃが', { exact: true }).first().click()
       await scPage.waitForTimeout(600)
-      await scPage.locator('button[aria-label="シェア"]').click()
+      await scPage.locator(`button[aria-label="${ja.share.button}"]`).click()
       await scPage.waitForTimeout(300)
       const scDialog = scPage.getByRole('dialog', { name: ja.share.dialogTitle })
       await scDialog.getByRole('button', { name: ja.share.textOption }).click()
@@ -1275,7 +1275,7 @@ import './_shared.mjs'
       await s3Page.waitForTimeout(500)
 
       // C12: 五十音順が読みの順になっている(旧実装は漢字始まりが末尾に固まっていた)
-      await s3Page.locator('button[aria-label="並び替え"]').click()
+      await s3Page.locator(`button[aria-label="${ja.search.sortToggle}"]`).click()
       await s3Page.waitForTimeout(300)
       await s3Page.getByRole('button', { name: ja.search.sortKana }).click()
       await s3Page.waitForTimeout(300)
@@ -1376,9 +1376,9 @@ import './_shared.mjs'
       const registered = Number(
         ((await ssPage.locator('span.min-w-14').first().textContent()) ?? '').match(/\d+/)?.[0],
       )
-      await ssPage.locator('button[aria-label="人数を増やす"]').first().click()
+      await ssPage.locator(`button[aria-label="${ja.detail.servingsUp}"]`).first().click()
       await ssPage.waitForTimeout(300)
-      await ssPage.locator('button[aria-label="シェア"]').click()
+      await ssPage.locator(`button[aria-label="${ja.share.button}"]`).click()
       await ssPage.waitForTimeout(400)
       const ssDialog = ssPage.getByRole('dialog', { name: ja.share.dialogTitle })
       check(
@@ -1442,7 +1442,7 @@ import './_shared.mjs'
       'EDITMISSING-01 レシピが見つからないことを保存前に画面で伝える',
       (await page.textContent('body')).includes(ja.form.recipeNotFound),
     )
-    await page.locator('input[placeholder="例: 肉じゃが"]').fill('存在しないIDの編集テスト')
+    await page.locator(`input[placeholder="${ja.form.namePlaceholder}"]`).fill('存在しないIDの編集テスト')
     await page.waitForTimeout(600)
     const missingDraftKeys = await page.evaluate(() =>
       Object.keys(localStorage).filter((k) => k.startsWith('uchirecipe:draft:')),
@@ -1483,13 +1483,13 @@ import './_shared.mjs'
   {
     await page.goto(`${BASE}/#/prices`, { waitUntil: 'networkidle' })
     await page.waitForTimeout(1000)
-    await page.locator('input[aria-label="食材名で絞り込む"]').fill('玉ねぎ')
+    await page.locator(`input[aria-label="${ja.priceMaster.searchLabel}"]`).fill('玉ねぎ')
     await page.waitForTimeout(400)
     const priceBefore = await page
-      .locator('input[aria-label="玉ねぎの価格（円）"]')
+      .locator(`input[aria-label="${ja.priceMaster.entryPriceAria.replace('{name}', '玉ねぎ')}"]`)
       .first()
       .inputValue()
-    await page.locator('button[aria-label="この食材を削除"]').first().click()
+    await page.locator(`button[aria-label="${ja.priceMaster.remove}"]`).first().click()
     await page.waitForTimeout(500)
     const removedBody = await page.textContent('body')
     check(
@@ -1498,7 +1498,7 @@ import './_shared.mjs'
     )
     check(
       'PRICEUNDO-01 行は実際に消えている',
-      (await page.locator('input[aria-label="玉ねぎの価格（円）"]').count()) === 0,
+      (await page.locator(`input[aria-label="${ja.priceMaster.entryPriceAria.replace('{name}', '玉ねぎ')}"]`).count()) === 0,
     )
     await page.getByRole('button', { name: '元に戻す' }).click()
     await page.waitForTimeout(600)
@@ -1507,7 +1507,7 @@ import './_shared.mjs'
       (await page.textContent('body')).includes('「玉ねぎ」を戻しました（目安価格も元のままです）'),
     )
     const priceAfter = await page
-      .locator('input[aria-label="玉ねぎの価格（円）"]')
+      .locator(`input[aria-label="${ja.priceMaster.entryPriceAria.replace('{name}', '玉ねぎ')}"]`)
       .first()
       .inputValue()
     check(
@@ -1558,7 +1558,7 @@ import './_shared.mjs'
       await fvPage.waitForTimeout(700)
       await fvPage.getByText(ja.focus.open).click()
       await fvPage.waitForTimeout(600)
-      await fvPage.locator('button[aria-label="声で操作する"]').click()
+      await fvPage.locator(`button[aria-label="${ja.focus.micStart}"]`).click()
       await fvPage.waitForTimeout(400)
       check('FOCUSVOICE-01 前提: 「声で操作」ONで聞いている状態になる', (await fvPage.textContent('body')).includes('聞いています…'))
       for (const phrase of ['もう一回', 'もういっかい', 'もう1回', 'もう一度']) {
@@ -1855,7 +1855,7 @@ import './_shared.mjs'
       // 2026-08-26 便LH: 「栄養から組む」の入口は「献立の入れかた」の折りたたみの中へ移った
       await openMonthPlanGroup(p2Page)
       await p2Page.waitForTimeout(800)
-      const p2NutritionCard = p2Page.getByRole('button', { name: /月の栄養（1人分）/ })
+      const p2NutritionCard = p2Page.getByRole('button', { name: jaRe(ja.mealPlan.monthNutritionTitle, { m: '' }) })
       if (await p2NutritionCard.count()) {
         await p2NutritionCard.click()
         await p2Page.waitForTimeout(400)

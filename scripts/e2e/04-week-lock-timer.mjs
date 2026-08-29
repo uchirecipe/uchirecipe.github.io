@@ -1166,7 +1166,7 @@ import './_shared.mjs'
   await page.getByRole('button', { name: '15分 タイマー開始' }).click()
   await page.waitForTimeout(500)
   // タイマー起動の初回だけ出る説明バナーが、次の正規表現セレクタと混同しないことも併せて確認
-  const adjustOpenBtn = page.getByRole('button', { name: /タイマーを調整/ })
+  const adjustOpenBtn = page.getByRole('button', { name: jaRe(ja.timer.adjustDialogTitle) })
   check('TIMER-ADJ-01 常駐バーにタイマー行が現れる(タップで調整窓が開く導線)', await adjustOpenBtn.isVisible())
 
   // 常駐バー行の「+1分」ミニボタン(2026-07-13 UIペルソナQA): 調整窓を開かずに即+60秒できる近道。
@@ -1273,14 +1273,14 @@ import './_shared.mjs'
   await page.waitForTimeout(400)
   // 「タイマー」への改名(2026-08-02)後は body 全文の includes だと「タイマー開始」等に当たって
   // 常に真になるため、常駐バーの行(=調整を開くボタン)のテキストに限定して確かめる
-  const customBarRow = page.getByRole('button', { name: /タイマーを調整/ })
+  const customBarRow = page.getByRole('button', { name: jaRe(ja.timer.adjustDialogTitle) })
   const customBarText = await customBarRow.textContent()
   check(
     'TIMER-CUSTOM-01 タイマーが起動する(常駐バーに「タイマー」表示)',
     customBarText.includes('タイマー'),
     customBarText,
   )
-  await page.getByRole('button', { name: /タイマーを調整/ }).click()
+  await page.getByRole('button', { name: jaRe(ja.timer.adjustDialogTitle) }).click()
   await page.waitForTimeout(300)
   const customAdjustDialog = page.getByRole('dialog', { name: ja.timer.adjustDialogTitle })
   await customAdjustDialog.getByRole('button', { name: ja.timer.minusThirtySeconds }).click()
@@ -1347,7 +1347,7 @@ import './_shared.mjs'
       await openNikujaga()
       await tkPage.getByRole('button', { name: '15分 タイマー開始' }).click()
       await tkPage.waitForTimeout(500)
-      const barRow = tkPage.getByRole('button', { name: /タイマーを調整/ })
+      const barRow = tkPage.getByRole('button', { name: jaRe(ja.timer.adjustDialogTitle) })
       const beforeReload = parseRemainingSeconds(await barRow.first().textContent())
       // (2) 初回の注意書きが、実態に合わせた文言になっている
       check(
@@ -1381,10 +1381,13 @@ import './_shared.mjs'
         await dlg.getByRole('button', { name: ja.timer.customStart }).click()
       }
       await tkPage.waitForTimeout(500)
-      const orderLabels = await tkPage.evaluate(() =>
-        Array.from(
-          document.querySelectorAll('.fixed.inset-x-0.z-10 button[aria-label*="タイマーを調整"]'),
-        ).map((b) => b.getAttribute('aria-label')),
+      const orderLabels = await tkPage.evaluate(
+        // 文言は ja.ts から読むが、evaluate の中はブラウザ側なので引数で渡す（JM-4）
+        (adjust) =>
+          Array.from(
+            document.querySelectorAll(`.fixed.inset-x-0.z-10 button[aria-label*="${adjust}"]`),
+          ).map((b) => b.getAttribute('aria-label')),
+        ja.timer.adjustDialogTitle,
       )
       check(
         'TIMER-ORDER-01 後から起動しても残りが少ないタイマーが上に来る(起動順ではない)',
@@ -1472,13 +1475,14 @@ import './_shared.mjs'
         await dlg.getByRole('button', { name: ja.timer.customStart }).click()
       }
       await tkPage.waitForTimeout(500)
-      await focus.getByRole('button', { name: /タイマーを調整/ }).first().click()
+      await focus.getByRole('button', { name: jaRe(ja.timer.adjustDialogTitle) }).first().click()
       await tkPage.waitForTimeout(300)
       const zeroDialog = tkPage.getByRole('dialog', { name: ja.timer.adjustDialogTitle })
       check('TIMER-ADJ-02 調整の窓が開く', await zeroDialog.isVisible())
       await tkPage.waitForTimeout(11000)
-      const zeroState = await tkPage.evaluate(() => {
-        const dlg = document.querySelector('[role="dialog"][aria-label="タイマーを調整"]')
+      // 文言は ja.ts から読むが、evaluate の中はブラウザ側なので引数で渡す（JM-4）
+      const zeroState = await tkPage.evaluate((adjust) => {
+        const dlg = document.querySelector(`[role="dialog"][aria-label="${adjust}"]`)
         if (!dlg) return null
         const btns = Array.from(dlg.querySelectorAll('button'))
         const find = (t) => btns.find((b) => b.textContent.trim() === t)
@@ -1488,7 +1492,7 @@ import './_shared.mjs'
           stop: find('タイマーを消す')?.disabled,
           text: dlg.textContent,
         }
-      })
+      }, ja.timer.adjustDialogTitle)
       check(
         'TIMER-ADJ-02 窓を開いたまま終わったら「+1分」「−30秒」は押せない状態になる(死にボタンにしない)',
         zeroState != null && zeroState.plus === true && zeroState.minus === true,
@@ -1627,7 +1631,7 @@ import './_shared.mjs'
         otherPills.some((t) => t.includes('肉じゃが')),
         JSON.stringify(otherPills),
       )
-      await fkFocus.getByRole('button', { name: /タイマーを調整/ }).first().click()
+      await fkFocus.getByRole('button', { name: jaRe(ja.timer.adjustDialogTitle) }).first().click()
       await fkPage.waitForTimeout(400)
       const otherDialog = fkPage.getByRole('dialog', { name: ja.timer.adjustDialogTitle })
       check(
@@ -1639,7 +1643,7 @@ import './_shared.mjs'
       await fkPage.waitForTimeout(400)
       check(
         'FOCUS-OTHER-01 調理中モードから出ずに別の料理のタイマーを停止できる',
-        (await fkFocus.getByRole('button', { name: /タイマーを調整/ }).count()) === 0,
+        (await fkFocus.getByRole('button', { name: jaRe(ja.timer.adjustDialogTitle) }).count()) === 0,
       )
     } finally {
       await fkBrowser.close()
@@ -1825,7 +1829,7 @@ import './_shared.mjs'
         'FOCUSTOP-01 タイマーが動いていても残り時間のチップが読める',
         await ftPage
           .locator('.fixed.inset-0.z-50')
-          .getByRole('button', { name: /タイマーを調整/ })
+          .getByRole('button', { name: jaRe(ja.timer.adjustDialogTitle) })
           .first()
           .isVisible(),
       )
@@ -2000,7 +2004,7 @@ import './_shared.mjs'
       check(
         'NAVITIMER-01 そのタイマーはこの画面から開いて調整できる',
         (await ntPage
-          .locator('[data-testid="cook-session"] button[aria-label*="タイマーを調整"]')
+          .locator(`[data-testid="cook-session"] button[aria-label*="${ja.timer.adjustDialogTitle}"]`)
           .count()) > 0,
       )
       const ntRunning = await ntMeasure()
@@ -2173,13 +2177,13 @@ import './_shared.mjs'
         )
         check(
           'DS-VOICE-01 案内だけでタイマーは起動しない(0秒タイマーを作らない)',
-          (await focus.getByRole('button', { name: /タイマーを調整/ }).count()) === 0,
+          (await focus.getByRole('button', { name: jaRe(ja.timer.adjustDialogTitle) }).count()) === 0,
         )
         // 言い方どおりに言えば起動する
         await say('3分タイマー')
         check(
           'DS-VOICE-01 案内どおり「3分タイマー」と言えばタイマーが起動する',
-          (await focus.getByRole('button', { name: /タイマーを調整/ }).count()) === 1,
+          (await focus.getByRole('button', { name: jaRe(ja.timer.adjustDialogTitle) }).count()) === 1,
         )
 
         // ② この料理のタイマーにも料理名が出る
@@ -2205,7 +2209,7 @@ import './_shared.mjs'
           'DS-MUTE-01 押すと「音を戻す」に変わる(消音できている)',
           await focus.getByRole('button', { name: ja.timer.unmute }).isVisible(),
         )
-        await focus.getByRole('button', { name: /タイマーを調整/ }).click()
+        await focus.getByRole('button', { name: jaRe(ja.timer.adjustDialogTitle) }).click()
         await p.waitForTimeout(400)
         const dsDialog = p.getByRole('dialog', { name: ja.timer.adjustDialogTitle })
         check(
@@ -2223,7 +2227,7 @@ import './_shared.mjs'
         currentCheck = 'DS-BACK-01'
         check(
           'DS-BACK-01 調整の窓に手順へ戻る導線がある',
-          await dsDialog.getByRole('button', { name: /手順\d+を開く/ }).isVisible(),
+          await dsDialog.getByRole('button', { name: jaRe(ja.timer.goToStep) }).isVisible(),
         )
         await ctx.close()
       }
@@ -2306,10 +2310,10 @@ import './_shared.mjs'
         // (2026-08-17 便HG: ホーム画面を廃止したので「レシピから離れた画面」は食材にした)
         await p.goto(`${BASE}/#/shopping`, { waitUntil: 'networkidle' })
         await p.waitForTimeout(900)
-        await p.getByRole('button', { name: /タイマーを調整/ }).first().click()
+        await p.getByRole('button', { name: jaRe(ja.timer.adjustDialogTitle) }).first().click()
         await p.waitForTimeout(400)
         const barDialog = p.getByRole('dialog', { name: ja.timer.adjustDialogTitle })
-        const goBtn = barDialog.getByRole('button', { name: /手順\d+を開く/ })
+        const goBtn = barDialog.getByRole('button', { name: jaRe(ja.timer.goToStep) })
         check(
           'DS-BACK-01 他の画面でも動作中タイマーから「手順◯を開く」が出る(2026-07-12の退行の復活)',
           await goBtn.isVisible(),

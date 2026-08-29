@@ -784,9 +784,9 @@ import './_shared.mjs'
       }
       const jbPast = await jbRead(jbSeed)
       // 先の日のカードは「次の週」へ送って読む（今日が何曜日でも必ず全日が先の日になる）
-      await jbPage.locator('button[aria-label="次の週"]').click()
+      await jbPage.locator(`button[aria-label="${ja.mealPlan.nextWeek}"]`).click()
       await jbPage.waitForTimeout(700)
-      await jbPage.locator('button[aria-label="次の週"]').click()
+      await jbPage.locator(`button[aria-label="${ja.mealPlan.nextWeek}"]`).click()
       await jbPage.waitForTimeout(700)
       const jbFutureDate = await jbPage.locator('section[data-date]').first().getAttribute('data-date')
       const jbFuture = await jbRead(jbFutureDate)
@@ -811,9 +811,9 @@ import './_shared.mjs'
         `コントラスト比=${jbContrast(jbPast.title, jbPast.bg)}:1（文字=${jbPast.title} 面=${jbPast.bg}）`,
       )
       // 「押せないように見えない」＝過ぎた日のカードの押せるものが、面の上で読めること
-      await jbPage.locator('button[aria-label="前の週"]').click()
+      await jbPage.locator(`button[aria-label="${ja.mealPlan.prevWeek}"]`).click()
       await jbPage.waitForTimeout(700)
-      await jbPage.locator('button[aria-label="前の週"]').click()
+      await jbPage.locator(`button[aria-label="${ja.mealPlan.prevWeek}"]`).click()
       await jbPage.waitForTimeout(700)
       await openAllWeekDays(jbPage)
       await jbPage.waitForTimeout(500)
@@ -1474,9 +1474,9 @@ import './_shared.mjs'
         `aria-pressed=${await jfFirstLock.first().getAttribute('aria-pressed')}`,
       )
       // 週を送って戻っても掛かったまま（見た目だけの印になっていない＝端末に残っている）
-      await jfPage.locator('button[aria-label="次の週"]').click()
+      await jfPage.locator(`button[aria-label="${ja.mealPlan.nextWeek}"]`).click()
       await jfPage.waitForTimeout(700)
-      await jfPage.locator('button[aria-label="前の週"]').click()
+      await jfPage.locator(`button[aria-label="${ja.mealPlan.prevWeek}"]`).click()
       await openAllWeekDays(jfPage)
       await jfPage.waitForTimeout(700)
       check(

@@ -197,6 +197,42 @@ const check = (label, cond, detail = '') => (cond ? ok(label) : ng(label, detail
  */
 const stripZwspText = (s) => (s ?? '').replaceAll('\u200b', '')
 /**
+ * ja.ts の文言から正規表現を組み立てるときの下ごしらえ（2026-08-29 便MM）。
+ *
+ * 掴む側で `new RegExp(...)` を作るとき、文言に `.` `(` `?` などが入っていると
+ * **正規表現の記号として効いてしまい、要素を掴めず30秒待って実行が中断する**。
+ * ja.ts には「（」ではなく半角の「(」を含む文言（例: ja.form.stepMinutes は「分（任意）」だが
+ * 半角括弧を使う文言も多い）があるので、必ずここを通してから RegExp に入れる。
+ */
+const reEscape = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+/**
+ * ja.ts の文言から**掴む側の正規表現**を組み立てる（2026-08-29 便MM）。
+ *
+ * `getByRole(…, { name: /正規表現/ })` の正規表現リテラルは、JM-1 の網（引用符の中）に
+ * 掛からないので、**画面の日本語をそのまま書いた46か所が見えていなかった**。
+ * ここを通せば文言は ja.ts が正になる。
+ *
+ * ・文言の記号（`.` `(` `?` など）は reEscape で外す＝正規表現の記号として効かせない
+ * ・`{n}` のような差し込みは subs で「何を当てるか」を指定する
+ *   （`{ n: '\\d+' }` なら数字、`{ m: '' }` なら**その場所を見ない**＝前は書き写していた
+ *    「月の食費」のように、差し込みの手前や後ろだけを見ていた形をそのまま残せる）
+ *   指定が無い差し込みは `.+` を当てる
+ * ・`{ exact: true }` で前後を `^…$` で挟む
+ */
+const jaRe = (text, subs = {}, opt = {}) => {
+  const body = String(text)
+    .split(/(\{[a-zA-Z]+\})/)
+    .map((part) => {
+      const hole = /^\{([a-zA-Z]+)\}$/.exec(part)
+      if (!hole) return reEscape(part)
+      return subs[hole[1]] ?? '.+'
+    })
+    .join('')
+  const start = opt.exact || opt.start ? '^' : ''
+  const end = opt.exact || opt.end ? '$' : ''
+  return new RegExp(`${start}${body}${end}`, opt.flags ?? '')
+}
+/**
  * 週タブの曜日カードを全部開く（2026-08-19 便ID・⑦）。
  *
  * 便IDでオーナー指示により曜日カードの既定が変わった（過ぎた日・献立の無い未来の日は畳む）。
@@ -647,7 +683,9 @@ Object.assign(globalThis, {
   nutritionLabelFor, ok, openAllWeekDays, openDayOrganize, openMonthDayEdit, openWeekDayEdit,
   openWeekGroup, page, parseRemainingSeconds, path, pickDisplayIngredientChips, pickFreePort,
   readConfirms, readFileSync, readResultCount, readTotalCount, recipeServeTemp, results,
-  selectWeekLayout, setConfirmAnswer, startPreviewServer, stepAppliance, stripZwspText, webkit,
+  jaRe, reEscape, selectWeekLayout, setConfirmAnswer, startPreviewServer, stepAppliance,
+  stripZwspText,
+  webkit,
   zlib,
 })
 

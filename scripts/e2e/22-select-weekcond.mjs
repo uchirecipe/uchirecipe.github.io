@@ -674,7 +674,7 @@ import './_shared.mjs'
         JSON.stringify(cuGrid),
       )
 
-      await cuPage.locator('button[aria-label="リスト表示に切り替え"]').click()
+      await cuPage.locator(`button[aria-label="${ja.search.layoutToggleToList}"]`).click()
       await cuPage.waitForTimeout(600)
       const cuList = await cuShape()
       check('CARDUNIFY-01 「標準」カードも1枚のリンクとして出ている', !!cuList && cuList.innerRecipeLinks === 0, JSON.stringify(cuList))
@@ -689,7 +689,7 @@ import './_shared.mjs'
         `大=${JSON.stringify(cuGrid?.card)} 標準=${JSON.stringify(cuList?.card)}`,
       )
 
-      await cuPage.locator('button[aria-label="グリッド表示に切り替え"]').click()
+      await cuPage.locator(`button[aria-label="${ja.search.layoutToggleToGrid}"]`).click()
       await cuPage.waitForTimeout(600)
       const cuBack = await cuShape()
       check(
@@ -1050,7 +1050,7 @@ import './_shared.mjs'
         await hvPage.waitForTimeout(700)
       }
       const hvProteinCell = hvHasSelect ? await readNutrientCell(hvPage, hvToday) : null
-      await hvPage.getByRole('button', { name: /月の栄養（1人分）/ }).click()
+      await hvPage.getByRole('button', { name: jaRe(ja.mealPlan.monthNutritionTitle, { m: '' }) }).click()
       await hvPage.waitForTimeout(500)
       const hvPanelText = (await hvPage.locator('[data-testid="month-nutrition-panel"]').count())
         ? ((await hvPage.locator('[data-testid="month-nutrition-panel"]').innerText()) ?? '').replaceAll('​', '')
@@ -1113,14 +1113,14 @@ import './_shared.mjs'
           /^[\d,]+\s*kcal$/.test(hvFoldedNutritionText.trim()),
         `畳んだ栄養=${hvFoldedNutritionText.replace(/\n/g, ' / ') || '(出ていない)'}`,
       )
-      await hvPage.getByRole('button', { name: /月の栄養（1人分）/ }).click()
+      await hvPage.getByRole('button', { name: jaRe(ja.mealPlan.monthNutritionTitle, { m: '' }) }).click()
       await hvPage.waitForTimeout(400)
       check(
         'HV-01(⑨) 栄養カードを開いているあいだ、畳んだ側の数値は出さない(同じ数字を二度出さない)',
         (await hvPage.locator('[data-testid="month-nutrition-folded"]').count()) === 0,
       )
       // 畳み直してから、この先の食費カードの検査へ進む
-      await hvPage.getByRole('button', { name: /月の栄養（1人分）/ }).click()
+      await hvPage.getByRole('button', { name: jaRe(ja.mealPlan.monthNutritionTitle, { m: '' }) }).click()
       await hvPage.waitForTimeout(400)
       const hvFoldedCost = hvPage.locator('[data-testid="month-cost-folded"]')
       const hvFoldedCostText = (await hvFoldedCost.count())
@@ -1138,7 +1138,7 @@ import './_shared.mjs'
           hvFoldedCostYen > 0,
         `畳んだ食費=${hvFoldedCostText.replace(/\n/g, ' / ')}`,
       )
-      await hvPage.getByRole('button', { name: /月の食費/ }).click()
+      await hvPage.getByRole('button', { name: jaRe(ja.mealPlan.monthCostTitle, { m: '' }) }).click()
       await hvPage.waitForTimeout(500)
       const hvCostTableText = (await hvPage.locator('[data-testid="month-cost-table"]').count())
         ? ((await hvPage.locator('[data-testid="month-cost-table"]').innerText()) ?? '').replaceAll('​', '')
@@ -2159,7 +2159,7 @@ import './_shared.mjs'
               .filter((el) => el.getAttribute('aria-pressed') === 'true')
               .map((el) => el.getAttribute('data-genre')),
           )
-      await wmPage.locator('[data-testid="plan-genre-chip"][data-genre="中華"]').click()
+      await wmPage.locator(`[data-testid="plan-genre-chip"][data-genre="${MEAL_GENRES[MEAL_GENRES.length - 1]}"]`).click()
       await wmPage.waitForTimeout(400)
       check(
         'WEEKFMT-01(③) 前提: 条件を1つ選べた（選べていなければクリアの効きは測れていない）',
@@ -2454,7 +2454,7 @@ import './_shared.mjs'
       )
       // 前の週へ2回送る＝今日が何曜日でも7日とも過去になる（曜日の前提を置かない）
       for (let i = 0; i < 2; i++) {
-        await wmPage.locator('button[aria-label="前の週"]').click()
+        await wmPage.locator(`button[aria-label="${ja.mealPlan.prevWeek}"]`).click()
         await wmPage.waitForTimeout(700)
       }
       const wmPastDates = await wmDates()
@@ -2477,7 +2477,7 @@ import './_shared.mjs'
       )
       // 戻せば また出る（前後どちらへも送れる形にする）
       for (let i = 0; i < 2; i++) {
-        await wmPage.locator('button[aria-label="次の週"]').click()
+        await wmPage.locator(`button[aria-label="${ja.mealPlan.nextWeek}"]`).click()
         await wmPage.waitForTimeout(700)
       }
       const wmBack = await wmLockCount()

@@ -252,7 +252,11 @@ import './_shared.mjs'
       // 「すべてロック」「すべて折りたたむ」＝押すと文言が入れ替わるボタン
       await noResize('週タブ「すべてロック」', eoPage.locator('[data-testid="lock-all"]'))
       await noResize('週タブ「すべてロック」(戻す)', eoPage.locator('[data-testid="lock-all"]'))
-      const eoCollapseAll = eoPage.getByRole('button', { name: /^すべて(折りたたむ|開く)$/ })
+      const eoCollapseAll = eoPage.getByRole('button', {
+        name: new RegExp(
+          `^(${reEscape(ja.mealPlan.weekDayCollapseAll)}|${reEscape(ja.mealPlan.weekDayExpandAll)})$`,
+        ),
+      })
       await noResize('週タブ「すべて折りたたむ」', eoCollapseAll)
       await noResize('週タブ「すべて開く」', eoCollapseAll)
 
@@ -285,7 +289,7 @@ import './_shared.mjs'
       {
         const eoGenre = eoPage.locator('[data-testid="plan-genre"]')
         const before = await eoGenre.boundingBox()
-        const eoChuka = eoPage.locator('[data-testid="plan-genre-chip"][data-genre="中華"]')
+        const eoChuka = eoPage.locator(`[data-testid="plan-genre-chip"][data-genre="${MEAL_GENRES[MEAL_GENRES.length - 1]}"]`)
         check('EO-02 前提: ジャンルの並びを掴めた', (await eoChuka.count()) === 1)
         if ((await eoChuka.count()) === 1) {
           await eoChuka.click()
@@ -352,10 +356,10 @@ import './_shared.mjs'
       await eoPage.waitForTimeout(900)
 
       // 作った記録を1件つくる
-      const eoCooked = eoPage.getByRole('button', { name: /作った/ }).first()
+      const eoCooked = eoPage.getByRole('button', { name: jaRe(ja.detail.cooked) }).first()
       await eoCooked.click()
       await eoPage.waitForTimeout(700)
-      const eoSave = eoPage.getByRole('button', { name: /^記録する/ }).first()
+      const eoSave = eoPage.getByRole('button', { name: jaRe(ja.detail.cookedSave, {}, { start: true }) }).first()
       if (await eoSave.count()) {
         await eoSave.click()
         await eoPage.waitForTimeout(900)
@@ -754,14 +758,15 @@ import './_shared.mjs'
       // 写真の拡大
       await eqDialog.getByRole('button', { name: ja.detail.cookedPhotoView }).click()
       await eqPage.waitForTimeout(600)
-      const eqZoom = eqPage.locator('div[role="dialog"][aria-label="写真を拡大表示"]')
+      const eqZoom = eqPage.locator(`div[role="dialog"][aria-label="${ja.detail.cookedPhotoView}"]`)
       check('EQ-01(①) 写真を押すと拡大表示の窓が開く', (await eqZoom.count()) === 1)
-      const eqZoomBigger = await eqPage.evaluate(() => {
-        const zoom = document.querySelector('div[role="dialog"][aria-label="写真を拡大表示"] img')
-        const thumb = [...document.querySelectorAll('button[aria-label="写真を拡大表示"] img')][0]
+      // 文言は ja.ts から読むが、evaluate の中はブラウザ側なので引数で渡す（JM-4）
+      const eqZoomBigger = await eqPage.evaluate((photoView) => {
+        const zoom = document.querySelector(`div[role="dialog"][aria-label="${photoView}"] img`)
+        const thumb = [...document.querySelectorAll(`button[aria-label="${photoView}"] img`)][0]
         if (!zoom || !thumb) return null
         return { zoom: zoom.getBoundingClientRect().height, thumb: thumb.getBoundingClientRect().height }
-      })
+      }, ja.detail.cookedPhotoView)
       check(
         'EQ-01(①) 拡大表示は小窓のサムネイルより大きい',
         !!eqZoomBigger && eqZoomBigger.zoom > eqZoomBigger.thumb,
@@ -1630,7 +1635,7 @@ import './_shared.mjs'
       // （便EOの「伸びた部分を画面内に入れる」処理が、貼り付く帯の高さを見込んでいるか）
       await etsPage.evaluate(() => window.scrollTo(0, 0))
       await etsPage.waitForTimeout(500)
-      await etsPage.locator('button[aria-label="絞り込み"]').click()
+      await etsPage.locator(`button[aria-label="${ja.search.filterToggle}"]`).click()
       await etsPage.waitForTimeout(1400)
       const etsPanel = await etsPage.evaluate(() => {
         const bar = document.querySelector('.recipes-searchbar').getBoundingClientRect()

@@ -99,7 +99,7 @@ import './_shared.mjs'
       )
       check(
         'EG-01 行内の「手順◯」の表記は消えている(読み上げ用の隠し文字だけ)',
-        (await egPage.locator('ol > li p > span.text-ink-muted', { hasText: /^手順\d+$/ }).count()) === 0,
+        (await egPage.locator('ol > li p > span.text-ink-muted', { hasText: jaRe(ja.cookNavi.stepNumberLabel, { n: '\\d+' }, { exact: true }) }).count()) === 0,
       )
       // ③ 湯を沸かすの差し込み。2026-08-09 便ES（オーナー指示D-3/D-4）:
       //    「ナビが追加」の札はやめて手順番号を「◯-1」「◯-2」に、分数（約5分）は表示しない
@@ -383,7 +383,7 @@ import './_shared.mjs'
       // （本文に「15分」と書いてある手順には出ない＝そこを押そうとすると必ず待ちぼうけになる）。
       // 切り出した「湯を沸かす」がその条件を満たすので、そのカードで見る
       const ehTimerCard = ehPage.locator('ol > li', { hasText: ja.cookNavi.addedBoilWaterStep }).first()
-      const ehTimerButton = ehTimerCard.getByRole('button', { name: /タイマーを始める/ })
+      const ehTimerButton = ehTimerCard.getByRole('button', { name: jaRe(ja.cookNavi.startTimer) })
       if ((await ehTimerButton.count()) === 0) {
         check('EH-01 常駐タイマーの番号が、ナビの段取りの通し番号になる', false, 'タイマー開始ボタンが見つからない')
       } else {
@@ -399,7 +399,7 @@ import './_shared.mjs'
           ehBarNumber === ehTimerOrder,
           `段取りの番号=${ehTimerOrder} タイマーの番号=${ehBarNumber}`,
         )
-        const ehTimerClose = ehPage.locator('div.fixed [aria-label="タイマーを消す"]').first()
+        const ehTimerClose = ehPage.locator(`div.fixed [aria-label="${ja.timer.dismiss}"]`).first()
         if ((await ehTimerClose.count()) > 0) await ehTimerClose.click()
         await ehPage.waitForTimeout(300)
       }
@@ -616,7 +616,7 @@ import './_shared.mjs'
       await pfPage.waitForTimeout(1800) // 初回シード完了待ち(在庫プリセット12品は全て「ない」で投入)
 
       // 1) 在庫が全て「ない」のうちは、絞り込みパネルに「在庫の食材で絞る」チップが出ない
-      await pfPage.locator('button[aria-label="絞り込み"]').click()
+      await pfPage.locator(`button[aria-label="${ja.search.filterToggle}"]`).click()
       await pfPage.waitForTimeout(300)
       check(
         'PANTRYFILTER-01 在庫が空のうちはチップが出ない',
@@ -652,7 +652,7 @@ import './_shared.mjs'
       await pfPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
       await pfPage.waitForTimeout(800)
       const totalCards = await cardCount()
-      await pfPage.locator('button[aria-label="絞り込み"]').click()
+      await pfPage.locator(`button[aria-label="${ja.search.filterToggle}"]`).click()
       await pfPage.waitForTimeout(300)
       check(
         'PANTRYFILTER-01 在庫があるとチップが出る',
@@ -667,10 +667,13 @@ import './_shared.mjs'
       await pfPage.waitForTimeout(400)
       // 「使いたい食材」のチップは ChipInput(span+✗ボタン)。在庫の「玉ねぎ」が入ったことを見る
       const wantedChips = () =>
-        pfPage.evaluate(() =>
-          Array.from(document.querySelectorAll('span'))
-            .filter((s) => s.querySelector('button[aria-label="このチップを削除"]'))
-            .map((s) => s.textContent?.trim() ?? ''),
+        pfPage.evaluate(
+          // 文言は ja.ts から読むが、evaluate の中はブラウザ側なので引数で渡す（JM-4）
+          (chipRemove) =>
+            Array.from(document.querySelectorAll('span'))
+              .filter((s) => s.querySelector(`button[aria-label="${chipRemove}"]`))
+              .map((s) => s.textContent?.trim() ?? ''),
+          ja.chip.remove,
         )
       check(
         'PANTRYFILTER-01(便DF) 押すと在庫の食材が使いたい食材に入る',
@@ -728,7 +731,7 @@ import './_shared.mjs'
         }, text)
 
       // ---------- ③ 並び順がパネルの最上部 / ⑦ 最近作った順 ----------
-      await lpPage.locator('button[aria-label="並び替え"]').click()
+      await lpPage.locator(`button[aria-label="${ja.search.sortToggle}"]`).click()
       await lpPage.waitForTimeout(300)
       const dirTop = await topOf('並び順')
       const sortTop = await topOf('並べ替え')
@@ -770,7 +773,7 @@ import './_shared.mjs'
       await lpPage.waitForTimeout(300)
 
       // ---------- ⑤ 絞り込みパネルの区分見出しと並び ----------
-      await lpPage.locator('button[aria-label="絞り込み"]').click()
+      await lpPage.locator(`button[aria-label="${ja.search.filterToggle}"]`).click()
       await lpPage.waitForTimeout(300)
       // 見出しは2026-08-19 便HU・⑫(オーナー指示)で「どのレシピから探すか」→「レシピを絞り込む」
       const shownTop = await topOf('レシピを絞り込む')
@@ -923,7 +926,7 @@ import './_shared.mjs'
         )
       const htCards = async () => (await htIds()).length
       const htOpenFilter = async () => {
-        await htPage.locator('button[aria-label="絞り込み"]').click()
+        await htPage.locator(`button[aria-label="${ja.search.filterToggle}"]`).click()
         await htPage.waitForTimeout(400)
       }
       await htPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
@@ -1208,7 +1211,7 @@ import './_shared.mjs'
       )
 
       // ---- ①絞り込みのパネルの呼び名 ---------------------------------------------------------
-      await ihPage.locator('button[aria-label="絞り込み"]').click()
+      await ihPage.locator(`button[aria-label="${ja.search.filterToggle}"]`).click()
       await ihPage.waitForTimeout(600)
       const ihPanel = ihClean(await ihPage.textContent('[data-testid="recipes-filter-panel"]'))
       check('IH-SEARCH-01 前提: 絞り込みのパネルの中身を読めている', ihPanel.length > 0, `字数=${ihPanel.length}`)
@@ -1574,7 +1577,7 @@ import './_shared.mjs'
         return (await ibSwitchOn()) === on
       }
       const ibOpenFilter = async () => {
-        await ibPage.locator('button[aria-label="絞り込み"]').click()
+        await ibPage.locator(`button[aria-label="${ja.search.filterToggle}"]`).click()
         await ibPage.waitForTimeout(500)
       }
       await ibPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
@@ -1827,7 +1830,7 @@ import './_shared.mjs'
       await tmPage.waitForTimeout(2000)
       const tmTotal = (await tmIds()).length
       check('HZ-TAG-02 前提: 一覧にレシピが出ている', tmTotal > 0, `全件=${tmTotal}`)
-      await tmPage.locator('button[aria-label="絞り込み"]').click()
+      await tmPage.locator(`button[aria-label="${ja.search.filterToggle}"]`).click()
       await tmPage.waitForTimeout(400)
 
       // タグの名前を画面から拾う（「すべて」は絞り込みを外すチップなので除く）

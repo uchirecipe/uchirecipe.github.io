@@ -58,7 +58,7 @@ import './_shared.mjs'
       await openAllWeekDays(mp9Page) // 便ID・⑦: 畳む既定になったので、カードの中を触る前に開く
       await mp9Page.waitForTimeout(300)
       // 全日程を未来日にする(MEALPLAN-03/04/08と同じ理由)
-      await mp9Page.locator('button[aria-label="次の週"]').click()
+      await mp9Page.locator(`button[aria-label="${ja.mealPlan.nextWeek}"]`).click()
       await openAllWeekDays(mp9Page) // 便ID・⑦: 畳む既定になったので、カードの中を触る前に開く
       await mp9Page.waitForTimeout(300)
 
@@ -371,7 +371,7 @@ import './_shared.mjs'
       await plPage.waitForTimeout(500)
       if (!(await plPage.textContent('body')).includes(plYesterdaySlash)) {
         // 実行日が月曜のときだけ、昨日(日曜)は前の週に表示される
-        await plPage.locator('button[aria-label="前の週"]').click()
+        await plPage.locator(`button[aria-label="${ja.mealPlan.prevWeek}"]`).click()
         await openAllWeekDays(plPage) // 便ID・⑦: 畳む既定になったので、カードの中を触る前に開く
         await plPage.waitForTimeout(500)
       }
@@ -425,12 +425,12 @@ import './_shared.mjs'
       await plPage.waitForTimeout(500)
       if (plYesterday.slice(0, 7) !== `${plToday.getFullYear()}-${plPad(plToday.getMonth() + 1)}`) {
         // 実行日が月初(1日)のときだけ、昨日は前の月に表示される
-        await plPage.locator('button[aria-label="前の月"]').click()
+        await plPage.locator(`button[aria-label="${ja.mealPlan.prevMonth}"]`).click()
         await plPage.waitForTimeout(500)
       }
       check(
         'PASTLOG-01 月カレンダーに「記録あり」小マークが出る',
-        (await plPage.locator('[aria-label="記録あり"]').count()) >= 1,
+        (await plPage.locator(`[aria-label="${ja.mealPlan.monthDayHasLog}"]`).count()) >= 1,
       )
       // 2026-07-30 便CH/C3: 写真モードでは記録の印が出るのに、数字モードに切り替えると
       // 印ごと消えていた(同じ画面で「記録はある/数字には無い」が同居して見える)。
@@ -440,12 +440,12 @@ import './_shared.mjs'
       check(
         'PASTLOG-01(便CH/C3) 食費モードに切り替えても作った記録の日に「作った記録あり」が残る',
         (await plPage
-          .locator(`button[data-date="${plYesterday}"][aria-label*="作った記録あり"]`)
+          .locator(`button[data-date="${plYesterday}"][aria-label*="${ja.mealPlan.monthDayStatAriaLogged}"]`)
           .count()) === 1,
       )
       // 2026-08-03 便DQ: 常設1行だった全体食費は、食費の表の「全員分／作った食数ぶん」の行になった。
       // 2026-08-07 便DU: 月の食費カードは折りたたみになった(既定は畳む)ので、見出しを押して開いてから読む
-      await plPage.getByRole('button', { name: /月の食費/ }).click()
+      await plPage.getByRole('button', { name: jaRe(ja.mealPlan.monthCostTitle, { m: '' }) }).click()
       await plPage.waitForTimeout(300)
       const plMonthTable =
         (await plPage.locator('table', { hasText: ja.mealPlan.intakeCostRowPersonalNote }).first().textContent()) ?? ''
@@ -461,7 +461,7 @@ import './_shared.mjs'
       await plPage.waitForTimeout(400)
       // 「記録あり」マークの付いた日(=昨日)をタップ→日モーダルに作った記録が出る
       await plPage
-        .locator('button', { has: plPage.locator('[aria-label="記録あり"]') })
+        .locator('button', { has: plPage.locator(`[aria-label="${ja.mealPlan.monthDayHasLog}"]`) })
         .first()
         .click()
       await plPage.waitForTimeout(500)
@@ -949,7 +949,7 @@ import './_shared.mjs'
         'MEALPLAN-07 モード解除後は日タップで日モーダルが復活する',
         await rcPage.locator('[role="dialog"]').isVisible(),
       )
-      await rcPage.locator('[role="dialog"] button[aria-label="閉じる"]').click()
+      await rcPage.locator(`[role="dialog"] button[aria-label="${ja.common.close}"]`).click()
       await rcPage.waitForTimeout(300)
 
       // ===== E: カレンダーのセル表示切り替え(便CA・タスク2) =====
@@ -1611,7 +1611,7 @@ import './_shared.mjs'
       await svPage.locator('ul li button').first().click()
       await svPage.waitForTimeout(700)
 
-      const svServingsBtn = svPage.getByRole('button', { name: /この行の食数を変える/ }).first()
+      const svServingsBtn = svPage.getByRole('button', { name: jaRe(ja.mealPlan.servingsEditAria, { n: '\\d+' }) }).first()
       check(
         'MEALPLAN-SERV 入っている行に食数のボタンが出る(既定はレシピの登録人数分)',
         (await svServingsBtn.count()) === 1 &&
@@ -1646,7 +1646,7 @@ import './_shared.mjs'
       await openAllWeekDays(svPage) // 便ID・⑦: 畳む既定になったので、カードの中を触る前に開く
       await svPage.waitForTimeout(400)
       await openWeekDayEdit(svPage, svToday) // 便IV: 食数のボタンは編集モードの中
-      await svPage.getByRole('button', { name: /この行の食数を変える/ }).first().click()
+      await svPage.getByRole('button', { name: jaRe(ja.mealPlan.servingsEditAria, { n: '\\d+' }) }).first().click()
       await svPage.waitForTimeout(400)
       for (let i = 0; i < svBase; i++) {
         await svPage.getByRole('button', { name: ja.mealPlan.servingsUp }).click()
@@ -1911,7 +1911,7 @@ import './_shared.mjs'
       await hhPage.waitForTimeout(800)
 
       const hhChip = () =>
-        hhPage.getByRole('button', { name: /この行の食数を変える/ }).first().textContent()
+        hhPage.getByRole('button', { name: jaRe(ja.mealPlan.servingsEditAria, { n: '\\d+' }) }).first().textContent()
       const hhNum = (v) => Number((v ?? '').replace(/[^0-9]/g, ''))
       const hhBase = hhNum(await hhChip())
       check(
@@ -2067,7 +2067,7 @@ import './_shared.mjs'
       await openAllWeekDays(hhPage) // 便ID・⑦: 畳む既定になったので、カードの中を触る前に開く
       await openWeekDayEdit(hhPage, hhToday) // 便IV: 食数のボタンは編集モードの中
       await hhPage.waitForTimeout(400)
-      await hhPage.getByRole('button', { name: /この行の食数を変える/ }).first().click()
+      await hhPage.getByRole('button', { name: jaRe(ja.mealPlan.servingsEditAria, { n: '\\d+' }) }).first().click()
       await hhPage.waitForTimeout(400)
       check(
         'MEALPLAN-HOUSE 食数の窓に設定の「食数の設定」の値が出る',
@@ -2081,7 +2081,7 @@ import './_shared.mjs'
         hhNum(await hhChip()) === 5,
         `chip=${await hhChip()}`,
       )
-      await hhPage.getByRole('button', { name: /この行の食数を変える/ }).first().click()
+      await hhPage.getByRole('button', { name: jaRe(ja.mealPlan.servingsEditAria, { n: '\\d+' }) }).first().click()
       await hhPage.waitForTimeout(400)
       check(
         'MEALPLAN-HOUSE 戻すボタンは戻り先の人数(既定の4人分)を名乗る',

@@ -969,7 +969,7 @@ import './_shared.mjs'
       // 常駐バー側（調理中モードを閉じると出る）
       await ezPage.locator('[data-testid="cook-session-close"]').click()
       await ezPage.waitForTimeout(800)
-      const ezBarRow = ezPage.locator('button[aria-label*="タイマーを調整"]').first()
+      const ezBarRow = ezPage.locator(`button[aria-label*="${ja.timer.adjustDialogTitle}"]`).first()
       const ezBarAria = await ezBarRow.getAttribute('aria-label')
       // 2026-08-14 便GL: **読み上げ名だけ**は2つの番号をそれぞれの名前で呼ぶ形に変えた
       // （利用者テスト「タイマーの読み上げ名『手順⑨（1-2）』が、同じ『手順』で2つの番号を
@@ -1821,7 +1821,7 @@ import './_shared.mjs'
       //     2026-08-11 便FO: 案内は「声で操作」をONにしている間だけ出す（利用者テスト
       //     「声を使わないのに、画面の上5行がずっと声の説明で埋まっている」）ので、先にONにする
       currentCheck = 'FC-03'
-      const fcMicStart = fcPage.locator('button[aria-label="声で操作する"]')
+      const fcMicStart = fcPage.locator(`button[aria-label="${ja.focus.micStart}"]`)
       if ((await fcMicStart.count()) > 0) {
         await fcMicStart.click()
         await fcPage.waitForTimeout(400)
@@ -1920,7 +1920,7 @@ import './_shared.mjs'
       // **いま開いている手順の中**のタイマーを押す（画面のどこかにある最初のタイマーだと、
       // 他の品のものを押してしまい、上で控えた本文と食い違う）
       await fcPage
-        .locator('[data-testid="cook-session-step-text"] button[aria-label*="タイマー開始"]')
+        .locator(`[data-testid="cook-session-step-text"] button[aria-label*="${ja.timer.start}"]`)
         .first()
         .click()
       await fcPage.waitForTimeout(600)
@@ -2015,7 +2015,7 @@ import './_shared.mjs'
       // 全画面の中のタイマーをタップ（画面上部でも「他の品の〜」の行でも、
       // どこに出ていても同じ操作になる形で掴む＝置き場所に固定しない）
       await fcPage
-        .locator('[data-testid="cook-session"] button[aria-label*="タイマーを調整"]')
+        .locator(`[data-testid="cook-session"] button[aria-label*="${ja.timer.adjustDialogTitle}"]`)
         .first()
         .click()
       await fcPage.waitForTimeout(400)
@@ -2059,9 +2059,9 @@ import './_shared.mjs'
       await fcPage.waitForTimeout(700)
       check(
         'GQ-02 前提: 調理中モードを閉じると常駐タイマーバーが見える',
-        (await fcPage.locator('button[aria-label*="タイマーを調整"]').count()) > 0,
+        (await fcPage.locator(`button[aria-label*="${ja.timer.adjustDialogTitle}"]`).count()) > 0,
       )
-      await fcPage.locator('button[aria-label*="タイマーを調整"]').first().click()
+      await fcPage.locator(`button[aria-label*="${ja.timer.adjustDialogTitle}"]`).first().click()
       await fcPage.waitForTimeout(400)
       const fcBarGoStep = fcPage.locator('[data-testid="timer-adjust-go-step"]')
       check(

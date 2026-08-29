@@ -183,11 +183,11 @@ import './_shared.mjs'
       await dnPage.waitForTimeout(500)
       check(
         'MEALPLAN-A2 月カレンダーの今日のセルに「メモあり」の印が出る',
-        (await dnPage.locator(`button[data-date="${dnToday}"] [aria-label="メモあり"]`).count()) === 1,
+        (await dnPage.locator(`button[data-date="${dnToday}"] [aria-label="${ja.mealPlan.monthDayHasNote}"]`).count()) === 1,
       )
       check(
         'MEALPLAN-A2 メモの無い日のセルには印が出ない(1件だけ)',
-        (await dnPage.locator('[aria-label="メモあり"]').count()) === 1,
+        (await dnPage.locator(`[aria-label="${ja.mealPlan.monthDayHasNote}"]`).count()) === 1,
       )
 
       // 日モーダル: 同じメモが読める→空にすると消える
@@ -226,7 +226,7 @@ import './_shared.mjs'
       await dnPage.waitForTimeout(400)
       check(
         'MEALPLAN-A2 メモを消すと月セルの印も消える',
-        (await dnPage.locator('[aria-label="メモあり"]').count()) === 0,
+        (await dnPage.locator(`[aria-label="${ja.mealPlan.monthDayHasNote}"]`).count()) === 0,
       )
     } finally {
       await dnBrowser.close()
@@ -308,7 +308,7 @@ import './_shared.mjs'
       const meDate = `${meNext.getFullYear()}-${String(meNext.getMonth() + 1).padStart(2, '0')}-10`
       // 2026-08-07 便DU: 月の食費カードは折りたたみになった(既定は畳む)。
       // 見出しは畳んだままでも出るので、中身を読む検査の前に押して開く（開閉は月を移動しても保つ）
-      const meCostCardBtn = mePage.getByRole('button', { name: /月の食費/ })
+      const meCostCardBtn = mePage.getByRole('button', { name: jaRe(ja.mealPlan.monthCostTitle, { m: '' }) })
       check(
         'MEALPLAN-A3B3(便DU) 月の食費カードは既定で畳まれている(カレンダーを押し下げない)',
         (await meCostCardBtn.getAttribute('aria-expanded')) === 'false',
@@ -425,7 +425,7 @@ import './_shared.mjs'
       await mePage.waitForTimeout(400)
       check('MEALPLAN-A3B3(便DU) 「保存」で日の窓が閉じる', !(await meModal.isVisible()))
       // 便DU: 栄養カードも折りたたみになったので、8項目を読む前に開く
-      await mePage.getByRole('button', { name: /月の栄養（1人分）/ }).click()
+      await mePage.getByRole('button', { name: jaRe(ja.mealPlan.monthNutritionTitle, { m: '' }) }).click()
       await mePage.waitForTimeout(300)
       const meBodyAfter = (await mePage.textContent('body')) ?? ''
       check(
@@ -1817,10 +1817,10 @@ import './_shared.mjs'
       check(
         'MEALPLAN-ROLE(便DH) ×(この献立から外す)が押せるのは「レシピ一覧から選択中」だけ',
         (await roPage
-          .locator('[data-testid="day-picked"] button[aria-label="この献立から外す"]')
+          .locator(`[data-testid="day-picked"] button[aria-label="${ja.mealPlan.todayRemove}"]`)
           .count()) === 1 &&
           (await roPage
-            .locator('[data-testid="day-planned"] button[aria-label="この献立から外す"]')
+            .locator(`[data-testid="day-planned"] button[aria-label="${ja.mealPlan.todayRemove}"]`)
             .count()) === 0,
       )
       check(
@@ -1945,7 +1945,7 @@ import './_shared.mjs'
           'DAYSUGGEST-01 種別チップは「条件をしぼる」を開くまで出ない',
           (await dhPage.getByRole('button', { name: '主菜', exact: true }).count()) === 0,
         )
-        await dhPage.getByRole('button', { name: /条件をしぼる/ }).click()
+        await dhPage.getByRole('button', { name: jaRe(ja.dayStart.conditionsToggle) }).click()
         await dhPage.waitForTimeout(400)
         check(
           'DAYSUGGEST-01 「条件をしぼる」の中にレシピと同じ4区分(主菜・副菜・汁物・その他)が並ぶ',

@@ -532,7 +532,7 @@ import './_shared.mjs'
       // 表示人数を既定から1つ増やしてから記録を開く(自動記録される人数がこの値と一致するか確認するため)
       const servingsBefore = await photoPage.locator('span.min-w-14').textContent()
       const servingsBeforeNum = Number((servingsBefore ?? '').match(/\d+/)?.[0])
-      await photoPage.locator('button[aria-label="人数を増やす"]').click()
+      await photoPage.locator(`button[aria-label="${ja.detail.servingsUp}"]`).click()
       await photoPage.waitForTimeout(300)
       const expectedServings = servingsBeforeNum + 1
 
@@ -558,20 +558,20 @@ import './_shared.mjs'
 
       await photoPage.getByRole('button', { name: ja.detail.cookedSave, exact: true }).click()
       await photoPage.waitForTimeout(500)
-      const thumbButton = photoPage.locator('button[aria-label="写真を拡大表示"]').first()
+      const thumbButton = photoPage.locator(`button[aria-label="${ja.detail.cookedPhotoView}"]`).first()
       check('LOG-PHOTO-01 保存すると記録一覧にサムネイルが出る', await thumbButton.isVisible())
 
       await thumbButton.click()
       await photoPage.waitForTimeout(300)
       const viewerVisible = await photoPage
-        .locator('div[role="dialog"][aria-label="写真を拡大表示"]')
+        .locator(`div[role="dialog"][aria-label="${ja.detail.cookedPhotoView}"]`)
         .isVisible()
         .catch(() => false)
       check('LOG-PHOTO-01 サムネイルをタップすると原寸表示の窓が開く', viewerVisible)
       await photoPage.keyboard.press('Escape')
       await photoPage.waitForTimeout(300)
       const viewerClosed = !(await photoPage
-        .locator('div[role="dialog"][aria-label="写真を拡大表示"]')
+        .locator(`div[role="dialog"][aria-label="${ja.detail.cookedPhotoView}"]`)
         .isVisible()
         .catch(() => false))
       check('LOG-PHOTO-01 Escapeで原寸表示の窓が閉じる', viewerClosed)
@@ -617,7 +617,7 @@ import './_shared.mjs'
       // 追加(差し替え)ができること(新規作成時のCookedLogModalと同じ保存形式)。直前に
       // 作った写真付きの記録(index 0)を使い、削除→保存→サムネ消滅、再度編集で追加→保存→
       // サムネ再出現、の一往復を確認する ---
-      await photoPage.locator('button[aria-label="この記録を編集"]').first().click()
+      await photoPage.locator(`button[aria-label="${ja.detail.cookedLogEdit}"]`).first().click()
       await photoPage.waitForTimeout(300)
       const removePhotoBtn = photoPage.getByRole('button', { name: ja.detail.cookedLogPhotoRemove })
       check('LOG-EDIT-PHOTO-01 編集を開くと既存の写真の削除ボタンが出る', await removePhotoBtn.isVisible())
@@ -631,11 +631,11 @@ import './_shared.mjs'
       await photoPage.waitForTimeout(400)
       check(
         'LOG-EDIT-PHOTO-01 削除して保存すると記録一覧のサムネイルが消える',
-        (await photoPage.locator('button[aria-label="写真を拡大表示"]').count()) === 0,
+        (await photoPage.locator(`button[aria-label="${ja.detail.cookedPhotoView}"]`).count()) === 0,
       )
 
       // 再度編集を開き、今度はアルバムから新しい写真を選んで追加(差し替え)する
-      await photoPage.locator('button[aria-label="この記録を編集"]').first().click()
+      await photoPage.locator(`button[aria-label="${ja.detail.cookedLogEdit}"]`).first().click()
       await photoPage.waitForTimeout(300)
       await photoPage
         .locator('input[type="file"]:not([capture])')
@@ -650,7 +650,7 @@ import './_shared.mjs'
       )
       await photoPage.getByRole('button', { name: '保存する', exact: true }).click()
       await photoPage.waitForTimeout(400)
-      const reAddedThumb = photoPage.locator('button[aria-label="写真を拡大表示"]').first()
+      const reAddedThumb = photoPage.locator(`button[aria-label="${ja.detail.cookedPhotoView}"]`).first()
       check('LOG-EDIT-PHOTO-01 追加して保存すると記録一覧にサムネイルが再び出る', await reAddedThumb.isVisible())
 
       const reAddedUrl = photoPage.url()
@@ -821,7 +821,7 @@ import './_shared.mjs'
 
       // 人数を変えても「1人分」のエネルギーは変わらない(servings連動の検算。全量側だけが連動する)
       const perMatchBefore = unlockedText.match(/エネルギー\s*([\d,]+)\s*kcal/)
-      await nutPage.locator('button[aria-label="人数を増やす"]').click()
+      await nutPage.locator(`button[aria-label="${ja.detail.servingsUp}"]`).click()
       await nutPage.waitForTimeout(400)
       const afterServingsText = await nutPage.textContent('body')
       const perMatchAfter = afterServingsText.match(/エネルギー\s*([\d,]+)\s*kcal/)
@@ -853,7 +853,7 @@ import './_shared.mjs'
       await nutPage.waitForTimeout(800)
       await nutPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
       await nutPage.waitForTimeout(800)
-      await nutPage.locator('button[aria-label="並び替え"]').click()
+      await nutPage.locator(`button[aria-label="${ja.search.sortToggle}"]`).click()
       await nutPage.waitForTimeout(300)
       const proSortPanelText = await nutPage.textContent('body')
       check(
@@ -999,7 +999,7 @@ import './_shared.mjs'
       // 件数の行(表示形式の切替もここにある)がパネルの下に隠れる。先にパネルを閉じてから押す
       await nutPage.locator('[data-testid="sort-panel-close"]').click()
       await nutPage.waitForTimeout(400)
-      await nutPage.locator('button[aria-label="リスト表示に切り替え"]').click()
+      await nutPage.locator(`button[aria-label="${ja.search.layoutToggleToList}"]`).click()
       await nutPage.waitForTimeout(400)
       check(
         'NUTSORT-02 一覧(リスト)表示でも並び替え中の栄養価の値が出る(便T-7)',
@@ -1037,7 +1037,7 @@ import './_shared.mjs'
         listBadgeTap.tapped && listBadgeTap.opened,
         `tap=${JSON.stringify(listBadgeTap)}`,
       )
-      await nutPage.locator('button[aria-label="グリッド表示に切り替え"]').click()
+      await nutPage.locator(`button[aria-label="${ja.search.layoutToggleToGrid}"]`).click()
       await nutPage.waitForTimeout(300)
       const gridBadgeTap = await tapBadgeOpensRecipe()
       check(
@@ -1762,7 +1762,7 @@ import './_shared.mjs'
       // 2026-08-20 便IG・①: ×は「整理」モードの中にしか出ないので、先に整理へ入る
       await openDayOrganize(puPage)
       await puPage
-        .locator('[data-testid="day-planned"] button[aria-label="今日と今週の献立から外す"]')
+        .locator(`[data-testid="day-planned"] button[aria-label="${ja.mealPlan.todayPlannedRemove}"]`)
         .first()
         .click()
       await puPage.waitForTimeout(600)
@@ -1820,7 +1820,7 @@ import './_shared.mjs'
         'PLANUNDO-01 前提: 今日のカードを編集モードにできた（便IV）',
         (await openWeekDayEdit(puPage, puToday)) === true,
       )
-      const puWeekClear = puPage.locator('button[aria-label="この割り当てを外す"]').first()
+      const puWeekClear = puPage.locator(`button[aria-label="${ja.mealPlan.clear}"]`).first()
       check('PLANUNDO-01 前提: 週タブに割り当ての×がある', (await puWeekClear.count()) > 0)
       if ((await puWeekClear.count()) > 0) {
         await puWeekClear.click()

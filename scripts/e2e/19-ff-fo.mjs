@@ -228,7 +228,7 @@ import './_shared.mjs'
       await ffPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
       await ffPage.waitForTimeout(1200)
       const ffTotal = await ffCards()
-      await ffPage.locator('button[aria-label="絞り込み"]').click()
+      await ffPage.locator(`button[aria-label="${ja.search.filterToggle}"]`).click()
       await ffPage.waitForTimeout(700)
 
       // ---------- 区分の見出しと並び ----------
@@ -445,7 +445,7 @@ import './_shared.mjs'
       await fpPage.evaluate(() => window.scrollTo(0, 1200))
       await fpPage.waitForTimeout(500)
       const fpBefore = await fpY()
-      await fpPage.locator('button[aria-label="絞り込み"]').click()
+      await fpPage.locator(`button[aria-label="${ja.search.filterToggle}"]`).click()
       await fpPage.waitForTimeout(1200) // 開くアニメ(220ms)+位置合わせが走るなら十分な時間
       const fpAfterOpenFilter = await fpY()
       check(
@@ -480,7 +480,7 @@ import './_shared.mjs'
         (await fpY()) === fpBefore,
         `開く前=${fpBefore} 送った後=${await fpY()}`,
       )
-      await fpPage.locator('button[aria-label="絞り込み"]').click()
+      await fpPage.locator(`button[aria-label="${ja.search.filterToggle}"]`).click()
       await fpPage.waitForTimeout(900)
       check(
         'FF-PANEL 絞り込みを閉じても位置が動かない',
@@ -489,7 +489,7 @@ import './_shared.mjs'
       )
 
       // 並べ替えも同じ
-      await fpPage.locator('button[aria-label="並び替え"]').click()
+      await fpPage.locator(`button[aria-label="${ja.search.sortToggle}"]`).click()
       await fpPage.waitForTimeout(1200)
       const fpAfterOpenSort = await fpY()
       check(
@@ -505,7 +505,7 @@ import './_shared.mjs'
           fpSortGeom.panelBottom <= fpSortGeom.navTop,
         JSON.stringify(fpSortGeom),
       )
-      await fpPage.locator('button[aria-label="並び替え"]').click()
+      await fpPage.locator(`button[aria-label="${ja.search.sortToggle}"]`).click()
       await fpPage.waitForTimeout(900)
       check(
         'FF-PANEL 並べ替えを閉じても位置が動かない',
@@ -516,7 +516,7 @@ import './_shared.mjs'
       // 一覧の先頭で開いたときも、帯の裏に潜らず・タブナビと重ならない
       await fpPage.evaluate(() => window.scrollTo(0, 0))
       await fpPage.waitForTimeout(400)
-      await fpPage.locator('button[aria-label="絞り込み"]').click()
+      await fpPage.locator(`button[aria-label="${ja.search.filterToggle}"]`).click()
       await fpPage.waitForTimeout(1200)
       const fpTopGeom = await fpGeom('recipes-filter-panel')
       check(
@@ -1678,21 +1678,21 @@ import './_shared.mjs'
       check(
         'FO-03 前提: 全画面の調理中モードが開き、「声で操作」のボタンがある',
         (await foPage.locator('[data-testid="cook-session"]').count()) === 1 &&
-          (await foPage.locator('button[aria-label="声で操作する"]').count()) === 1,
+          (await foPage.locator(`button[aria-label="${ja.focus.micStart}"]`).count()) === 1,
       )
       check(
         'FO-03 声を切っている間は、言葉の一覧を画面に出さない',
         !(await foSessionText()).includes('声で操作:'),
         (await foSessionText()).slice(0, 120),
       )
-      await foPage.locator('button[aria-label="声で操作する"]').click()
+      await foPage.locator(`button[aria-label="${ja.focus.micStart}"]`).click()
       await foPage.waitForTimeout(500)
       check(
         'FO-03 「声で操作」を押すと言葉の一覧が出る（使う人だけが読む）',
         (await foSessionText()).includes('声で操作:') &&
           (await foSessionText()).includes(ja.cookNavi.sessionMicColorHint),
       )
-      await foPage.locator('button[aria-label="声の操作をやめる"]').click()
+      await foPage.locator(`button[aria-label="${ja.focus.micStop}"]`).click()
       await foPage.waitForTimeout(500)
       check(
         'FO-03 もう一度押して切ると、案内もまた消える',

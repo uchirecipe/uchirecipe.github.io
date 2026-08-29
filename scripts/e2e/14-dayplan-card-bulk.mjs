@@ -112,7 +112,7 @@ import './_shared.mjs'
       )
 
       // ①〜③ 「◯分以内」を10分にする → 押すまで変わらない → 押すと効く
-      const pfConditions = pfSection().getByRole('button', { name: /条件をしぼる/ })
+      const pfConditions = pfSection().getByRole('button', { name: jaRe(ja.dayStart.conditionsToggle) })
       check('DAYPLANFILTER-01 前提: 献立側でも「条件をしぼる」が押せる', (await pfConditions.count()) === 1)
       if ((await pfConditions.count()) === 1) {
         await pfConditions.click()
@@ -122,7 +122,7 @@ import './_shared.mjs'
       check('DAYPLANFILTER-01 前提: 条件を変える前の献立を読めた', pfBefore.length > 0)
       // 無いものを押して30秒待ち、節ごと「実行中断」で止まらないようにする
       // （止まると後ろの節まで走らないので、赤の中身が読めなくなる）
-      const pfQuick = pfSection().getByRole('button', { name: /分以内$/ })
+      const pfQuick = pfSection().getByRole('button', { name: jaRe(ja.dayStart.condQuick, { n: '' }, { end: true }) })
       check('DAYPLANFILTER-01 前提: 献立側で「◯分以内」が選べる', (await pfQuick.count()) >= 1)
       if ((await pfQuick.count()) >= 1) {
         await pfQuick.first().click()
@@ -195,7 +195,7 @@ import './_shared.mjs'
           await pfPage.locator('[data-testid="day-mode-plan"]').click()
           await pfPage.waitForTimeout(1400)
         }
-        const pfCond0 = pfSection().getByRole('button', { name: /条件をしぼる/ })
+        const pfCond0 = pfSection().getByRole('button', { name: jaRe(ja.dayStart.conditionsToggle) })
         if ((await pfCond0.count()) === 1) {
           await pfCond0.click()
           await pfPage.waitForTimeout(500)
@@ -256,7 +256,7 @@ import './_shared.mjs'
         await pfPage.locator('[data-testid="day-mode-plan"]').click()
         await pfPage.waitForTimeout(1400)
       }
-      const pfConditions2 = pfSection().getByRole('button', { name: /条件をしぼる/ })
+      const pfConditions2 = pfSection().getByRole('button', { name: jaRe(ja.dayStart.conditionsToggle) })
       if ((await pfConditions2.count()) === 1) {
         await pfConditions2.click()
         await pfPage.waitForTimeout(500)
@@ -661,7 +661,7 @@ import './_shared.mjs'
         JSON.stringify(dcBefore),
       )
 
-      const dcConditions = dcSection().getByRole('button', { name: /条件をしぼる/ })
+      const dcConditions = dcSection().getByRole('button', { name: jaRe(ja.dayStart.conditionsToggle) })
       check('DAYCOND-01 前提: 「条件をしぼる」が押せる', (await dcConditions.count()) === 1)
       if ((await dcConditions.count()) === 1) {
         await dcConditions.click()
@@ -870,7 +870,7 @@ import './_shared.mjs'
         `候補=${doShown}`,
       )
 
-      const doConditions = doSection().getByRole('button', { name: /条件をしぼる/ })
+      const doConditions = doSection().getByRole('button', { name: jaRe(ja.dayStart.conditionsToggle) })
       if ((await doConditions.count()) === 1) {
         await doConditions.click()
         await doPage.waitForTimeout(800)
@@ -1092,7 +1092,7 @@ import './_shared.mjs'
       }
       await snPage.locator('[data-testid="day-mode-one"]').click()
       await snPage.waitForTimeout(1000)
-      const snConditions = snSection().getByRole('button', { name: /条件をしぼる/ })
+      const snConditions = snSection().getByRole('button', { name: jaRe(ja.dayStart.conditionsToggle) })
       if ((await snConditions.count()) === 1) {
         await snConditions.click()
         await snPage.waitForTimeout(800)
@@ -1252,20 +1252,21 @@ import './_shared.mjs'
         stripZwspText(await fiPage.textContent('body')).includes(ja.form.quickIngredientSpaceHint),
       )
       const quick = fiPage.getByLabel(ja.form.quickIngredientLabel)
-      const rowCount = () => fiPage.locator('input[aria-label="名前"]').count()
+      const rowCount = () => fiPage.locator(`input[aria-label="${ja.form.ingredientName}"]`).count()
       // 材料名は入力欄の値なので textContent には出ない(注意書きの「豚こま 200g」を拾って
       // 偽陽性になる)。value を直接読んで確かめる
       const nameValues = () =>
-        fiPage.locator('input[aria-label="名前"]').evaluateAll((els) => els.map((el) => el.value))
+        fiPage.locator(`input[aria-label="${ja.form.ingredientName}"]`).evaluateAll((els) => els.map((el) => el.value))
       // 並び替えハンドルは材料行と手順行の両方にあるので、材料行のぶんの増減で見る
       const handleCount = () => fiPage.getByRole('group', { name: ja.form.reorderHandle }).count()
       // (d) IMEの変換確定Enter(isComposing=true)では行を足さない
       await quick.fill('たまねぎ 1個')
       const beforeIme = await rowCount()
-      await fiPage.evaluate(() => {
-        const el = document.querySelector('input[aria-label="まとめて入力"]')
+      // 文言は ja.ts から読むが、evaluate の中はブラウザ側なので引数で渡す（JM-4）
+      await fiPage.evaluate((quickLabel) => {
+        const el = document.querySelector(`input[aria-label="${quickLabel}"]`)
         el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', isComposing: true, bubbles: true }))
-      })
+      }, ja.form.quickIngredientLabel)
       await fiPage.waitForTimeout(400)
       check(
         'FORMING-01(d) 変換確定のEnter(isComposing)では材料行が増えない',
@@ -1323,7 +1324,7 @@ import './_shared.mjs'
         'FORMING-01(a) 選んだ件数が削除ボタンに出る',
         /選んだ材料2[品件行]を削除/.test(await fiPage.textContent('body')),
       )
-      await fiPage.getByRole('button', { name: /選んだ材料2[品件行]を削除/ }).click()
+      await fiPage.getByRole('button', { name: jaRe(ja.form.ingredientOrganizeDeleteSelected, { n: '2' }) }).click()
       await fiPage.waitForTimeout(500)
       check(
         'FORMING-01(a) 選んだ2行だけが消え、残りの1行(豚こま)はそのまま残る',
@@ -1367,7 +1368,7 @@ import './_shared.mjs'
       // (b) レシピ一覧の栄養並び替えのPro案内 → 設定(Pro節) → 「レシピ一覧に戻る」
       await sbPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
       await sbPage.waitForTimeout(900)
-      await sbPage.locator('button[aria-label="並び替え"]').click()
+      await sbPage.locator(`button[aria-label="${ja.search.sortToggle}"]`).click()
       await sbPage.waitForTimeout(300)
       // 2026-08-19 便HU・⑯でティーザーの文言が変わった（顔ぶれを栄養表示と同じ8項目にそろえた）
       await sbPage.getByText(ja.search.sortNutritionGate).click()

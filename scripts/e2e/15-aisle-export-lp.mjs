@@ -349,7 +349,7 @@ import './_shared.mjs'
       const eeMemoSection = eePage.locator('section', { hasText: '買い物メモ' }).first()
       const eeRowCount = await eeMemoSection.locator('ul > li').count()
       // 1件だけカゴに入れる
-      await eePage.locator('[aria-label="チェックの切り替え"]').first().click()
+      await eePage.locator(`[aria-label="${ja.shopping.toggleCheck}"]`).first().click()
       await eePage.waitForTimeout(300)
       check(
         'EE-01(⑤) OFFのあいだはチェック済みも売り場ブロックに残る(従来どおり)',
@@ -484,7 +484,7 @@ import './_shared.mjs'
       await eePage.waitForTimeout(1800)
       await eePage.getByRole('button', { name: '月', exact: true }).first().click()
       await eePage.waitForTimeout(1200)
-      const eeCostCardBtn = eePage.getByRole('button', { name: /月の食費/ })
+      const eeCostCardBtn = eePage.getByRole('button', { name: jaRe(ja.mealPlan.monthCostTitle, { m: '' }) })
       await eeCostCardBtn.waitFor({ state: 'visible', timeout: 15000 })
       check(
         'EE-01(①) 月の食費カードは畳まれたまま',
@@ -563,9 +563,9 @@ import './_shared.mjs'
       // (a) ChipInput: レシピタブの絞り込みパネル「使いたい食材」
       await eiPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
       await eiPage.waitForTimeout(1800) // 初回シード完了待ち
-      await eiPage.locator('button[aria-label="絞り込み"]').click()
+      await eiPage.locator(`button[aria-label="${ja.search.filterToggle}"]`).click()
       await eiPage.waitForTimeout(400)
-      const chipSel = 'input[placeholder="食材を1つずつ入力"]'
+      const chipSel = `input[placeholder="${ja.search.ingredientPlaceholder}"]`
       const chipCount = () => eiPage.getByRole('button', { name: ja.chip.remove }).count()
       await eiPage.fill(chipSel, 'たまねぎ')
       await imeEnter(chipSel)
@@ -601,7 +601,7 @@ import './_shared.mjs'
         })
       await eiPage.goto(`${BASE}/#/shopping`, { waitUntil: 'networkidle' })
       await eiPage.waitForTimeout(1200)
-      const pantrySel = 'input[placeholder="例: 豚肉"]'
+      const pantrySel = `input[placeholder="${ja.pantry.addPlaceholder}"]`
       const beforePantry = await pantryCount()
       await eiPage.fill(pantrySel, 'ずいき')
       await imeEnter(pantrySel)
@@ -622,7 +622,7 @@ import './_shared.mjs'
       // (c) 設定のNG食材
       await eiPage.goto(`${BASE}/#/settings`, { waitUntil: 'networkidle' })
       await eiPage.waitForTimeout(1200)
-      const ngSel = 'input[placeholder="例: えび"]'
+      const ngSel = `input[placeholder="${ja.settings.ngPlaceholder}"]`
       const ngCount = () => eiPage.getByRole('button', { name: ja.settings.ngRemove }).count()
       const beforeNg = await ngCount()
       await eiPage.fill(ngSel, 'かき')
@@ -1289,10 +1289,14 @@ import './_shared.mjs'
       await roPage.waitForTimeout(1800)
       // 記録一覧のサムネイル（タップで原寸表示になるボタンの中の画像）で向きを見る
       const roLogSize = () =>
-        roPage.evaluate(() => {
-          const img = document.querySelector('button[aria-label="写真を拡大表示"] img')
-          return img ? `${img.naturalWidth}x${img.naturalHeight}` : 'none'
-        })
+        roPage.evaluate(
+          // 文言は ja.ts から読むが、evaluate の中はブラウザ側なので引数で渡す（JM-4）
+          (photoView) => {
+            const img = document.querySelector(`button[aria-label="${photoView}"] img`)
+            return img ? `${img.naturalWidth}x${img.naturalHeight}` : 'none'
+          },
+          ja.detail.cookedPhotoView,
+        )
       const roLogBefore = await roLogSize()
       check(
         'EN-02 記録した写真が一覧のサムネイルに出る（保存直後は横長）',
@@ -1527,7 +1531,7 @@ import './_shared.mjs'
       await rePage.waitForTimeout(300)
       const [reChooser] = await Promise.all([
         rePage.waitForEvent('filechooser'),
-        rePage.getByRole('button', { name: /今のデータに追加/ }).first().click(),
+        rePage.getByRole('button', { name: jaRe(ja.settings.backupImportMerge) }).first().click(),
       ])
       await reChooser.setFiles({
         name: reDownload.suggestedFilename(),
