@@ -1876,6 +1876,48 @@ import './_shared.mjs'
         'PURPOSE-02(便HV・⑨) 答え合わせを消しても「栄養から組む」の入口は月タブに残っている',
         (await p2Page.locator('[data-testid="plan-conditions-open"]').count()) > 0,
       )
+
+      /* 2026-08-29 便MQ: この節は `purpose-locked-row` の count()===0（上の「解錠済みなら鍵付き行は
+         出さない」）を見ているのに、**同じ節では一度も「出る」側を測っていなかった**＝目印の名前が
+         変わっても必ず緑になる（便LOの走査で 12:1751 として残っていた1件）。
+         **実測**: src の data-testid を purpose-locked-rowZZ に改名して npm run build（終了コード0）
+         したうえでこの節を走らせると、**14件とも緑のまま**だった＝素通りは確定。
+         解錠を外して、同じ条件の窓に鍵付き行が戻るところまでを1本につないで対にする。 */
+      await p2Page.evaluate(
+        () =>
+          new Promise((resolve, reject) => {
+            const req = indexedDB.open('uchi-recipe')
+            req.onsuccess = () => {
+              const tx = req.result.transaction('settings', 'readwrite')
+              const store = tx.objectStore('settings')
+              const get = store.get(1)
+              get.onsuccess = () => {
+                const { proCode, proActivatedAt, ...rest } = get.result || { id: 1 }
+                const put = store.put({ ...rest, id: 1 })
+                put.onsuccess = () => resolve(undefined)
+                put.onerror = () => reject(put.error)
+              }
+              get.onerror = () => reject(get.error)
+            }
+            req.onerror = () => reject(req.error)
+          }),
+      )
+      // 生のIndexedDBへ書いたので必ず読み込み直す(Dexieのライブ購読はDexie経由の書き込みしか
+      // 見ていない＝CLAUDE.mdの禁じ手⑥)
+      await p2Page.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+      await p2Page.reload({ waitUntil: 'networkidle' })
+      await p2Page.waitForTimeout(800)
+      await p2Page.getByRole('button', { name: ja.mealPlan.viewWeek, exact: true }).click()
+      await openAllWeekDays(p2Page) // 畳む既定なので、カードの中を触る前に開く(禁じ手⑤)
+      await p2Page.waitForTimeout(400)
+      await openWeekGroup(p2Page, ja.mealPlan.weekGroupAutoTitle)
+      await p2Page.waitForTimeout(300)
+      await p2Page.locator('[data-testid="plan-conditions-open"]').click()
+      await p2Page.waitForTimeout(400)
+      check(
+        'PURPOSE-02 解錠を外すと同じ条件の窓に鍵付き行が戻る(「出さない」側だけを見ない)',
+        (await p2Page.locator('[data-testid="purpose-locked-row"]').count()) > 0,
+      )
     } finally {
       await p2Browser.close()
     }

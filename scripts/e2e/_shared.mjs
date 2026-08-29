@@ -791,3 +791,35 @@ globalThis.RANGE_BASIS_ANY_RE = new RegExp(
     )
     .join('|'),
 )
+
+/**
+ * 要素の上端（viewport相対の top）を id で読む（2026-08-29 便MQ）。
+ *
+ * 設定の1本スクロールで「その節の先頭までスクロールしたか」を測るのに使う
+ * （sticky目次チップ約88pxの下付近＝200未満なら着いたとみなす。scroll-mt-24 でチップ分だけ下げている）。
+ * **元は 01-start-list-settings.mjs の節の途中に `const` で書いてあった。**
+ * そのままだと、その道具を使う塊を `e2e-part` で切り出したとき
+ * **「settingsSectionTop is not defined」で実行中断**し、切り出せても中身が測れない
+ * （2026-08-29 に SETTINGS-TAB-01 で実測）。共有の道具に置けば、どの塊を切り出しても使える。
+ */
+globalThis.settingsSectionTop = (id) =>
+  page.evaluate((elId) => {
+    const el = document.getElementById(elId)
+    return el ? el.getBoundingClientRect().top : null
+  }, id)
+
+/**
+ * スムーズスクロールが落ち着く（window.scrollY が変化しなくなる）まで待つ（2026-08-29 便MQ）。
+ *
+ * 長距離のスムーズスクロールは固定待ちだとアニメーションの途中で測ってしまう（旧: 700ms固定で偽陰性）。
+ * settingsSectionTop と同じ理由で、節の途中の `const` から共有の道具へ移した。
+ */
+globalThis.waitScrollSettled = async () => {
+  let last = -1
+  for (let i = 0; i < 25; i++) {
+    const y = await page.evaluate(() => Math.round(window.scrollY))
+    if (y === last) return
+    last = y
+    await page.waitForTimeout(120)
+  }
+}

@@ -176,7 +176,9 @@ import './_shared.mjs'
             const t = (
               document.querySelector('[data-testid="confirm"]')?.textContent ?? ''
             ).replaceAll('\u200b', '')
-            return texts.every((one) => t.includes(one))
+            // 2026-08-29 便MQ: texts が空だと中身を1回も見ずに合格する（実測で緑のまま）。
+            // 見たい行が1つも渡っていないのは正解ではないので、同じ判定式に下限を入れる
+            return texts.length > 0 && texts.every((one) => t.includes(one))
           },
           [
             ja.form.resetConfirmKeptLabel,
