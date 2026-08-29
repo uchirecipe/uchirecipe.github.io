@@ -468,9 +468,11 @@ import './_shared.mjs'
   // このチェックは「ビルド時の設定状態と表示が一致すること」を検証する適応型にする
   // (設定済みビルド=ボタンが出る/未設定ビルド=出ない。未設定側の分岐検証はURLIMPORT-01の
   // 専用ビルド側で担保)。.env.production を読んで期待値を決める
-  await page.goto(`${BASE}/#/recipes/new`, { waitUntil: 'networkidle' })
-  await page.waitForTimeout(500)
   {
+    // 2026-08-29 便MQ: 登録画面を開くところを**塊の中**に入れた（走る順番は前と同じ）
+    currentCheck = 'URLIMPORT-00'
+    await page.goto(`${BASE}/#/recipes/new`, { waitUntil: 'networkidle' })
+    await page.waitForTimeout(500)
     const envFile = readFileSync(path.join(appRoot, '.env.production'), 'utf8')
     const m = envFile.match(/^VITE_RECIPE_IMPORT_ENDPOINT=(.*)$/m)
     const endpointConfigured = !!(m && m[1].trim())
@@ -1600,9 +1602,12 @@ import './_shared.mjs'
   // 2026-08-02 オーナー指示: 旧「全般」節の中にあった「その他」(＝アプリについて)を
   // ページ最後の独立した節へ移した(その他がページ途中にある違和感の解消) ---
   currentCheck = 'SETTINGS-TAB-01'
-  await page.goto(`${BASE}/#/settings`, { waitUntil: 'networkidle' })
-  await page.waitForTimeout(1000)
   {
+    // 2026-08-29 便MQ: 設定を開くところは**塊の中**に置く（走る順番は前と同じ）。
+    // 塊の外に置くと e2e-part で切り出したときに設定へ着かないまま測ることになる
+    currentCheck = 'SETTINGS-TAB-01'
+    await page.goto(`${BASE}/#/settings`, { waitUntil: 'networkidle' })
+    await page.waitForTimeout(1000)
     const body = await page.textContent('body')
     check(
       'SETTINGS-TAB-01 1本スクロール: 個人設定(NG食材)/レシピ(セット読み込み)/バックアップ(書き出し)/Pro(Pro版)の4節が同時に存在する',
@@ -1622,6 +1627,7 @@ import './_shared.mjs'
   )
   // 2026-08-02: 目次チップは5列。390px幅で1行に収まり、文字が折り返して高さが揃わなくならないこと
   {
+    currentCheck = 'SETTINGS-TAB-01'
     // 文言は ja.ts から読むが、evaluate の中はブラウザ側なので引数で渡す（JM-4）
     const chipRows = await page.evaluate((tocLabel) => {
       const nav = document.querySelector(`nav[aria-label="${tocLabel}"]`)
@@ -1637,24 +1643,10 @@ import './_shared.mjs'
       JSON.stringify(chipRows),
     )
   }
-  // 節の上端(viewport相対top)を返すヘルパ。sticky目次チップ(約88px)の下付近(<200)へ来たら
-  // 「その節の先頭までスクロールした」とみなす(scroll-mt-24でチップ分だけ下げている)
-  const settingsSectionTop = (id) =>
-    page.evaluate((elId) => {
-      const el = document.getElementById(elId)
-      return el ? el.getBoundingClientRect().top : null
-    }, id)
-  // スムーズスクロールが落ち着く(window.scrollYが変化しなくなる)まで待つ。長距離のスムーズ
-  // スクロールは固定待ちだとアニメーション途中で測ってしまうため(旧: 700ms固定で偽陰性)
-  const waitScrollSettled = async () => {
-    let last = -1
-    for (let i = 0; i < 25; i++) {
-      const y = await page.evaluate(() => Math.round(window.scrollY))
-      if (y === last) return
-      last = y
-      await page.waitForTimeout(120)
-    }
-  }
+  // 節の上端を読む settingsSectionTop と、スムーズスクロールの落ち着きを待つ waitScrollSettled は
+  // 2026-08-29 便MQ で共有の道具(scripts/e2e/_shared.mjs)へ移した。節の途中に const で置いていると、
+  // その道具を使う塊を e2e-part で切り出したときに「… is not defined」で実行中断し、
+  // 切り出せても中身が測れない(SETTINGS-TAB-01 で実測)。
   // 「Pro」チップ: 最上部から下部のPro節まで大きくスクロールする(topが大きく減る=下へ動いた)。
   // Pro節は最後尾なので先頭が上端(96px)まで届かず最下部で止まることがある→上端付近か最下部で合格
   await page.evaluate(() => window.scrollTo(0, 0))
@@ -1695,6 +1687,7 @@ import './_shared.mjs'
   // 2026-08-02: 「アプリについて」節がページのいちばん最後(Pro節より下)にあること。
   // 旧構成では全般節の途中(レシピ節より上)にあり、「その他」がページ途中に出ていた
   {
+    currentCheck = 'SETTINGS-TAB-01'
     const order = await page.evaluate(() =>
       ['section-basic', 'section-recipe', 'section-backup', 'section-pro', 'section-about'].map(
         (id) => {
@@ -1723,6 +1716,7 @@ import './_shared.mjs'
   }
   // ?section=about の直リンクが「アプリについて」節へ着地する(既存の?section=値は不変)
   {
+    currentCheck = 'SETTINGS-TAB-01'
     await page.goto(`${BASE}/#/settings?section=about`, { waitUntil: 'networkidle' })
     await page.waitForTimeout(1200)
     await waitScrollSettled()
@@ -1758,6 +1752,7 @@ import './_shared.mjs'
     !stripZwspText(await page.textContent('body')).includes('まだバックアップしていません'),
   )
   {
+    currentCheck = 'BANNER-01'
     const bannerWarnCls = await page.evaluate((text) => {
       const btn = Array.from(document.querySelectorAll('button')).find(
         (b) => (b.textContent ?? '').replace(/\u200B/g, '').trim() === text,
@@ -1785,6 +1780,7 @@ import './_shared.mjs'
     (await page.textContent('body')).includes('ファイルに書き出す'),
   )
   {
+    currentCheck = 'BANNER-01'
     const exportCardTop = await settingsSectionTop('backup-section')
     check(
       'BANNER-01 「書き出しへ」で①バックアップを取るカードが上端付近へ来る(旧aria-pressed検証をスクロール位置検証へ)',
@@ -1846,6 +1842,7 @@ import './_shared.mjs'
   await page.getByRole('button', { name: ja.settings.moveGuideToggle, exact: true }).click()
   await page.waitForTimeout(300)
   {
+    currentCheck = 'MOVEGUIDE-01'
     const guideText = (await page.textContent('body')).replaceAll('​', '')
     const moveGuideMissing = moveGuideSteps.filter((step) => !guideText.includes(step))
     check(
@@ -1961,6 +1958,7 @@ import './_shared.mjs'
       stripZwspText(await page.textContent('body')).includes(ja.settings.refreshAppWhatRemains),
   )
   {
+    currentCheck = 'REFRESH-APP-01'
     // 2026-08-20 便IJ: 153字の1文を3行に分けたので、文言を書き写した判定は落ちた（禁じ手②）。
     // ja.ts から読む形にし、**3行とも**画面に出ていることを見る（分けた拍子に1行落ちたら赤くなる）
     const refreshBody = (await page.textContent('body')).replaceAll('​', '')
@@ -1992,13 +1990,15 @@ import './_shared.mjs'
   // 自動スクロールはSettingsPageの1マウントにつき一度だけ動く(scrolledToSectionRefのワンショット)ため、
   // 各?section=の検証の前に一度/recipesへ抜けてSettingsPageを再マウントさせ、毎回まっさらな状態で
   // 発火することを独立に確認する。unlock.html・NutritionTeaser等の既存導線が使う互換パラメータ
-  await page.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
-  await page.waitForTimeout(300)
   // ?section=recipe は「レシピ」節へ自動スクロールする(テーマ全廃で ?section=themes は廃止したが、
   // 旧リンク互換として themes も recipe 節へ読み替えて着地させる=sectionDeepLinksのthemes→section-recipe)
-  await page.goto(`${BASE}/#/settings?section=recipe`, { waitUntil: 'networkidle' })
-  await page.waitForTimeout(1200)
   {
+    // 2026-08-29 便MQ: 着地までの操作を**塊の中**に入れた（走る順番は前と同じ）
+    currentCheck = 'SETTINGS-TAB-01'
+    await page.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+    await page.waitForTimeout(300)
+    await page.goto(`${BASE}/#/settings?section=recipe`, { waitUntil: 'networkidle' })
+    await page.waitForTimeout(1200)
     const recipeSecTop = await settingsSectionTop('section-recipe')
     check(
       'SETTINGS-TAB-01 ?section=recipeはレシピ節へ自動スクロールする(見出しがDOMにあり上端付近)',
@@ -2009,11 +2009,13 @@ import './_shared.mjs'
       `recipeSecTop=${recipeSecTop}`,
     )
   }
-  await page.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
-  await page.waitForTimeout(300)
-  await page.goto(`${BASE}/#/settings?section=pro`, { waitUntil: 'networkidle' })
-  await page.waitForTimeout(1200)
   {
+    // 2026-08-29 便MQ: 着地までの操作を**塊の中**に入れた（走る順番は前と同じ）
+    currentCheck = 'SETTINGS-TAB-01'
+    await page.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+    await page.waitForTimeout(300)
+    await page.goto(`${BASE}/#/settings?section=pro`, { waitUntil: 'networkidle' })
+    await page.waitForTimeout(1200)
     const proSecTop = await settingsSectionTop('pro-section')
     const proSecAtBottom = await page.evaluate(
       () => window.innerHeight + Math.ceil(window.scrollY) >= document.body.scrollHeight - 8,
