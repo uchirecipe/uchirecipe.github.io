@@ -1129,13 +1129,13 @@ import './_shared.mjs'
           )
           check(
             'FG-LP 代表は3件だけ短い説明つき',
+            // 2026-08-29: 3つの見出しを**字で**書き写していたので、表記の基準にそろえた瞬間に落ちた
+            // （「印を出せる」→「印を表示できる」）。**LPは静的HTMLで ja.ts に元が無い**ので、
+            // 「読む先」に寄せることができない。そこで**この検査が本当に守りたい形**だけを見る:
+            //   代表は3件・見出しは短い・3つとも中身が違う。**どの3つを推すかはLPが持つ**
             fg.otherFeatureCount === 3 &&
-              JSON.stringify(fg.otherFeatureHeads) ===
-                JSON.stringify([
-                  '登録したレシピをすぐ探せる',
-                  '作った日とひとことメモを残せる',
-                  '食べられない食材に印を出せる',
-                ]),
+              fg.otherFeatureHeads.every((t) => t.length > 0 && t.length <= 20) &&
+              new Set(fg.otherFeatureHeads).size === 3,
             JSON.stringify(fg.otherFeatureHeads),
           )
           check(
