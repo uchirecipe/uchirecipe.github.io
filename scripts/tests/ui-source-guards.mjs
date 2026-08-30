@@ -4179,3 +4179,47 @@ import { createRequire } from 'node:module'
       false)
   }
 }
+
+// ==========================================================================================
+// 計測タグ（2026-08-30）: **本番のドメインでだけ鳴らす**
+//
+// それまでは `<script defer src=…beacon.min.js>` を直に置いており、**localhost（開発サーバー・
+// プレビュー・e2e）からも同じトークンで送っていた**。Cloudflare の画面で
+// **localhost/ が最も多いURL**になっており（フルe2eは1回で733回ページを開く）、
+// 「訪問が少ないのか、訴求が弱いのか」の切り分けができない状態だった。
+// ==========================================================================================
+{
+  const cfRoot = path.join(path.dirname(fileURLToPath(scriptFileUrl)), '..')
+  const cfRead = (rel) => readFileSync(path.join(cfRoot, rel), 'utf-8')
+  const cfPages = [
+    'index.html',
+    ...readdirSync(path.join(cfRoot, 'public/about'))
+      .filter((f) => f.endsWith('.html'))
+      .map((f) => `public/about/${f}`),
+    ...readdirSync(path.join(cfRoot, 'public/about/column'))
+      .filter((f) => f.endsWith('.html'))
+      .map((f) => `public/about/column/${f}`),
+  ].sort()
+  eq('CF-1 計測を入れるページを数えられている（0枚なら見張りが壊れている）', cfPages.length >= 12, true)
+
+  // (a) 素の script タグに戻っていない（戻ると localhost からも鳴る）
+  const cfBare = cfPages.filter((rel) =>
+    /<script defer src='https:\/\/static\.cloudflareinsights\.com/.test(cfRead(rel)),
+  )
+  eq('CF-1 計測タグを素の script で置いていない（本番のドメインの判定を通す）', cfBare, [])
+
+  // (b) 計測を入れているページは、必ずドメインの判定つき
+  const cfHasBeacon = cfPages.filter((rel) => cfRead(rel).includes('cloudflareinsights.com'))
+  const cfNoGuard = cfHasBeacon.filter(
+    (rel) => !cfRead(rel).includes("location.hostname === 'uchirecipe.com'"),
+  )
+  eq('CF-1 計測を入れたページは全部が本番のドメインでだけ鳴る', cfNoGuard, [])
+  eq('CF-1 前提: 計測を入れているページがある（0枚なら見張りが空振り）', cfHasBeacon.length >= 11, true)
+
+  // (c) 生成物 foods.html の直す先は生成スクリプト側（直しても gen を忘れると本番に出ない）
+  eq(
+    'CF-1 生成スクリプト側にもドメインの判定が入っている',
+    cfRead('scripts/gen-food-price-page.mjs').includes("location.hostname === 'uchirecipe.com'"),
+    true,
+  )
+}
