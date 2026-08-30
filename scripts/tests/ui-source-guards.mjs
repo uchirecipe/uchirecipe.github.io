@@ -4223,3 +4223,41 @@ import { createRequire } from 'node:module'
     true,
   )
 }
+
+// ==========================================================================================
+// SEO の土台（2026-08-30）: 検索に載せたいページが sitemap から漏れていないか
+//
+// 2026-08-30 に実発: `about/foods.html`（食品と目安価格の一覧＝「◯◯ 値段 目安」と相性がよい）が
+// sitemap から漏れていた。**生成物なので、作り直すたびに見落とされていた**。
+// `robots.txt` も無く、sitemap の在り処を検索エンジンに伝えていなかった。
+// ==========================================================================================
+{
+  const seoRoot = path.join(path.dirname(fileURLToPath(scriptFileUrl)), '..')
+  const seoRead = (rel) => readFileSync(path.join(seoRoot, rel), 'utf-8')
+  const seoMap = seoRead('public/sitemap.xml')
+  const seoLocs = [...seoMap.matchAll(/<loc>([^<]*)<\/loc>/g)].map((m) => m[1])
+  eq('SEO-1 sitemap を読めている（0件なら見張りが壊れている）', seoLocs.length >= 9, true)
+
+  eq(
+    'SEO-1 robots.txt があり、sitemap の在り処を伝えている',
+    seoRead('public/robots.txt').includes('Sitemap: https://uchirecipe.com/sitemap.xml'),
+    true,
+  )
+
+  // noindex を付けていない公開ページは、全部 sitemap に載っている
+  const seoPages = [
+    ...readdirSync(path.join(seoRoot, 'public/about'))
+      .filter((f) => f.endsWith('.html'))
+      .map((f) => `about/${f}`),
+    ...readdirSync(path.join(seoRoot, 'public/about/column'))
+      .filter((f) => f.endsWith('.html'))
+      .map((f) => `about/column/${f}`),
+  ]
+  const seoMissing = seoPages.filter((rel) => {
+    if (seoRead(`public/${rel}`).includes('name="robots" content="noindex')) return false
+    if (rel === 'about/unlock.html') return false // 買ったあとに読む案内。検索から来る人には用が無い
+    const url = `https://uchirecipe.com/${rel}`
+    return !seoLocs.includes(url) && !seoLocs.includes(url.replace('/index.html', '/'))
+  })
+  eq('SEO-1 検索に載せたい公開ページが sitemap から漏れていない', seoMissing, [])
+}

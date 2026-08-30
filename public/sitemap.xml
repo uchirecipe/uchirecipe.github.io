@@ -25,6 +25,13 @@
     <changefreq>monthly</changefreq>
     <priority>0.6</priority>
   </url>
+  <!-- 2026-08-30: 食品と目安価格の一覧。「◯◯ 値段 目安」のような検索と相性がよいのに
+       サイトマップから漏れていた（生成物なので作り直しのたびに見落とされていた） -->
+  <url>
+    <loc>https://uchirecipe.com/about/foods.html</loc>
+    <changefreq>monthly</changefreq>
+    <priority>0.5</priority>
+  </url>
   <url>
     <loc>https://uchirecipe.com/about/column/</loc>
     <changefreq>weekly</changefreq>
