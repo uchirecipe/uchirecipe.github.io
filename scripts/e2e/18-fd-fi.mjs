@@ -629,6 +629,26 @@ import './_shared.mjs'
       await fdPage.waitForTimeout(2000)
       await fdPage.getByRole('button', { name: '月', exact: true }).click()
       await fdPage.waitForTimeout(1500)
+      /* 2026-08-31 便MR（禁じ手①・月替わりの前提）: 月タブは**今日の月**から開く。
+         実行日が月の1日だと**昨日は前の月のカレンダーにしかない**ので、
+         このマスは永久に現れず、click が30秒待って**実行が中断**していた。
+         そこで止まるのはこの節だけではない——入口の try は全ファイルをまとめて囲っているので、
+         **この先の節（19-ff-fo 以降）が丸ごと走らないまま**終わる。
+         実測（2026-11-01 に時計を合わせて切り出し）: `locator('[data-date="2026-10-31"]')` で
+         Timeout 30000ms → 「実行中断(FD-06)」。他の3日（8/19・8/31・12/31）は緑。
+         直し方は PASTLOG-01・PHOTOCAL-01・WEEKOPEN-01 と同じ「出るまで前の月へ送る」。
+         押す回数は最大1回で足りるが、**前提を判定に残す**ことで、
+         出なかったときに30秒待たずその場で赤くする。 */
+      for (let i = 0; i < 2; i++) {
+        if ((await fdPage.locator(`[data-date="${fdSeed.yesterday}"]`).count()) > 0) break
+        await fdPage.getByRole('button', { name: ja.mealPlan.prevMonth, exact: true }).click()
+        await fdPage.waitForTimeout(900)
+      }
+      check(
+        'FD-06 前提: 昨日のマスが月のカレンダーに出ている（実行日が月の1日でも）',
+        (await fdPage.locator(`[data-date="${fdSeed.yesterday}"]`).count()) > 0,
+        `昨日=${fdSeed.yesterday}`,
+      )
       await fdPage.locator(`[data-date="${fdSeed.yesterday}"]`).first().click()
       await fdPage.waitForTimeout(1000)
       await fdPage.getByRole('button', { name: 'FDきんぴらごぼうの作った記録を見る' }).first().click()
