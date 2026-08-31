@@ -4991,7 +4991,13 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs'
       }
     }
     eq('ML-1 前提: 画面の文言を読めている（0件なら見張りが壊れている）', mlUnits.filter((u) => u.where.startsWith('ja.ts:')).length > 1000, true)
-    eq('ML-1 前提: 説明ページを読めている（11枚。0枚なら見張りが壊れている）', mlPages.length, 11)
+    eq(
+      // 2026-08-31: ちょうど11枚と数えていたので、**コラムを1本足しただけで落ちた**。
+      // ここが見たいのは「読めているか」で、枚数そのものではない
+      'ML-1 前提: 説明ページを読めている（11枚以上。0枚なら見張りが壊れている）',
+      mlPages.length >= 11,
+      true,
+    )
     eq('ML-1 前提: 図の説明（alt）を本文と同格に読めている', mlUnits.some((u) => u.where.startsWith('public/about/') && u.text.includes('のマーク')), true)
   }
 
