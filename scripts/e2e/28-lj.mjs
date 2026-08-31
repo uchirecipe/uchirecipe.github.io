@@ -51,9 +51,20 @@ import './_shared.mjs'
           `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`
         const now = new Date()
         const today = iso(now)
-        // 過ぎた日は「今月の1日」を使う（今日が1日なら今日）。前日を使うと今日が月初のとき
-        // 前の月のマスになり、月タブで開けない（曜日にも月替わりにも寄りかからない形）
-        const past = now.getDate() > 1 ? iso(new Date(now.getFullYear(), now.getMonth(), 1)) : today
+        /* 過ぎた日は**昨日**（2026-08-31 便MR で直した。禁じ手①）。
+           元は「今月の1日。ただし今日が1日なら今日」だった。月タブに必ずマスが在るようにする
+           工夫だったが、**今日が1日のときだけ「過ぎた日」ではなく今日になる**。
+           「作った記録を追加」は**過ぎた日の編集モードだけに出す**（MealPlanPage.tsx の
+           dayModalWindow.recordAdd）ので、そのボタンが永久に現れず、click が30秒待って
+           **実行が中断**していた。実測（2026-11-01 に時計を合わせて切り出し）:
+             NG LJCOOK-04 前提: 日の窓に「作った記録を追加」がある
+             NG 実行中断(LJCOOK-04) — waiting for
+                locator('[data-testid="past-record-add"][data-date="2026-11-01"]')
+           止まるのはこの節だけではない（入口の try が33本をまとめて囲っているため、
+           29-lt 以降が丸ごと走らない）。
+           昨日は必ず過ぎた日なので、あとは「月タブでそのマスが出るまで前の月へ送る」だけでよい
+           （LJCOOK-04 の中でそうしている。PASTLOG-01・PHOTOCAL-01 と同じ作法）。 */
+        const past = iso(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1))
         const mk = (title) => ({
           title,
           servings: 2,
@@ -215,6 +226,17 @@ import './_shared.mjs'
       await ljPage.waitForTimeout(2000)
       await ljPage.getByRole('button', { name: ja.mealPlan.viewMonth, exact: true }).click()
       await ljPage.waitForTimeout(1600)
+      // 便MR: 実行日が月の1日だと昨日は前の月にしかない。出るまで前の月へ送る（禁じ手①）
+      for (let i = 0; i < 2; i++) {
+        if ((await ljPage.locator(`[data-date="${ljSeed.past}"]`).count()) > 0) break
+        await ljPage.getByRole('button', { name: ja.mealPlan.prevMonth, exact: true }).click()
+        await ljPage.waitForTimeout(900)
+      }
+      check(
+        'LJCOOK-04 前提: 過ぎた日のマスが月のカレンダーに出ている（実行日が月の1日でも）',
+        (await ljPage.locator(`[data-date="${ljSeed.past}"]`).count()) > 0,
+        `過ぎた日=${ljSeed.past}`,
+      )
       await ljPage.locator(`[data-date="${ljSeed.past}"]`).first().click()
       await ljPage.waitForTimeout(1400)
       check(
