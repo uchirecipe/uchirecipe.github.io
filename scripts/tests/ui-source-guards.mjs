@@ -4261,3 +4261,58 @@ import { createRequire } from 'node:module'
   })
   eq('SEO-1 検索に載せたい公開ページが sitemap から漏れていない', seoMissing, [])
 }
+
+// ==========================================================================================
+// ART-1（2026-09-01）: **記事に書いた数は、全部「出どころ」を持つ**
+//
+// 2026-08-31 に実発: 司令部が書いたZenn記事の下書きに、**数字の誤りが4か所**あった。
+//   ・「4,547件すべて緑だったが23件は素通り」→ 4,547 は直し切ったあとの数。**その瞬間は無かった**
+//   ・「本当は4,547件走るはず」→ 実測は 4,540件
+//   ・「素通り23件」→ 23件は1回目だけ。実際は3回で58件
+//   ・「769→118件」→ 途中経過。**いまの値は37件で0ではない**
+// **どれも司令部が気をつけていれば防げたものではなく、別の目（Fable）が読んだから見つかった。**
+// オーナーは内容を検算できない（「私には指摘のしようがない」）ので、**機械で止める**。
+//
+// 決まり: `確認して/<記事>.md` に**2桁以上の数**を書いたら、
+//        `確認して/<記事>.出どころ.md` の表に**その数と出どころ**が要る。
+//        1桁（「1件だけ落ちた」など）は文の一部なので対象外。
+// ==========================================================================================
+{
+  const artRoot = path.join(path.dirname(fileURLToPath(scriptFileUrl)), '../..', '確認して')
+  const artFiles = existsSync(artRoot)
+    ? readdirSync(artRoot).filter((f) => f.endsWith('.md') && !f.endsWith('.出どころ.md') && f !== 'README.md')
+    : []
+  eq('ART-1 前提: 確認してフォルダを読めている', existsSync(artRoot), true)
+
+  const artNums = (text) => {
+    let t = text
+    const i = t.indexOf('---', 3)
+    if (t.startsWith('---') && i > 0) t = t.slice(i + 3) // front matter を外す
+    t = t.replace(/```[\s\S]*?```/g, '')                // コードは数えない
+    t = t.replace(/\d{4}[-/]\d{1,2}[-/]\d{1,2}/g, '')    // 日付は数えない
+    t = t.replace(/\d{4}年\d{1,2}月\d{1,2}日/g, '')
+    const out = new Set()
+    for (const m of t.matchAll(/(?<![\d,])([\d,]{2,})\s*(?=件|品|組|行|か所|回|日|字|分|円|種|本|コミット|人|秒)/g)) {
+      out.add(m[1])
+    }
+    return out
+  }
+
+  const artMissing = []
+  for (const f of artFiles) {
+    const srcPath = path.join(artRoot, f.replace(/\.md$/, '.出どころ.md'))
+    const nums = artNums(readFileSync(path.join(artRoot, f), 'utf-8'))
+    if (nums.size === 0) continue // 数を書いていない読みものは対象外
+    if (!existsSync(srcPath)) {
+      artMissing.push(`${f}: 数を${nums.size}種 書いているのに「出どころ」の表が無い`)
+      continue
+    }
+    const listed = new Set(
+      [...readFileSync(srcPath, 'utf-8').matchAll(/^\| ([\d,]+) \|/gm)].map((m) => m[1]),
+    )
+    for (const n of [...nums].sort()) {
+      if (!listed.has(n)) artMissing.push(`${f}: 「${n}」の出どころが表に無い`)
+    }
+  }
+  eq('ART-1 記事に書いた数は、全部「出どころ」の表に載っている', artMissing, [])
+}

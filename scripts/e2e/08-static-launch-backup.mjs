@@ -318,26 +318,42 @@ import './_shared.mjs'
   // --- SMK-19: 静的ページ(/about/配下・/sets/)がSW有効でも200でアプリ本体にすり替わらない ---
   // アプリ本体のtitleは「うちレシピ」単独。静的ページは必ず「◯◯｜うちレシピ」形式のtitleを持つ
   currentCheck = 'SMK-19'
+  // 2026-09-01: **題を字で書き写していた**ので、名前を変えた瞬間に落ちた
+  // （コーナー名を「コラム」→「ちょこっと豆知識」にした回）。**これで7件目**。
+  // この検査が本当に見たいのは「SWがアプリ本体にすり替えていないか」なので、
+  // **配信された題と、ファイルに書いてある題が一致するか**で見る。名前を変えても落ちない。
   const staticPages = [
-    ['/about/', 'うちレシピについて'],
-    ['/about/manual.html', 'うちレシピの使い方'],
-    ['/about/install.html', 'ホーム画面に追加する方法'], // 2026-08-08 便EF: 追加手順の専用ページ
-    ['/about/terms.html', '利用規約'],
-    ['/about/tokushoho.html', '特定商取引法に基づく表記'], // 2026-08-02 便DD: 発売と同時に公開
-    ['/about/unlock.html', '解錠コード'],
-    ['/about/column/', 'コラム'],
-    ['/about/column/kondate-kimaranai.html', '献立が決められない'],
-    ['/about/column/recipe-screenshot-seiri.html', 'スクショ'],
-    ['/about/foods.html', '食品と目安価格の一覧'],
+    '/about/',
+    '/about/manual.html',
+    '/about/install.html',
+    '/about/terms.html',
+    '/about/tokushoho.html',
+    '/about/unlock.html',
+    '/about/column/',
+    '/about/column/kondate-kimaranai.html',
+    '/about/column/recipe-screenshot-seiri.html',
+    '/about/column/recipe-aimai-kotoba.html',
+    '/about/foods.html',
     // /sets/(配布ページ)は2026-07-23のテーマ全廃で撤去
   ]
-  for (const [path, titleKeyword] of staticPages) {
-    const res = await page.goto(`${BASE}${path}`, { waitUntil: 'networkidle' })
+  const staticTitleOf = (p) => {
+    const rel = p.endsWith('/') ? `public${p}index.html` : `public${p}`
+    const html = readFileSync(path.join(appRoot, rel), 'utf-8')
+    return (html.match(/<title>([^<]*)<\/title>/) ?? [])[1] ?? ''
+  }
+  for (const p of staticPages) {
+    const res = await page.goto(`${BASE}${p}`, { waitUntil: 'networkidle' })
     const title = await page.title()
+    const want = staticTitleOf(p)
     check(
-      `SMK-19 静的ページ ${path}`,
-      res.status() === 200 && title.includes(titleKeyword),
-      `status=${res.status()} title=「${title}」`,
+      `SMK-19 静的ページ ${p}`,
+      res.status() === 200 && want.length > 0 && title === want,
+      `status=${res.status()} 配信=「${title}」 ファイル=「${want}」`,
+    )
+    check(
+      `SMK-19 静的ページ ${p} はアプリ本体にすり替わっていない`,
+      title !== 'うちレシピ' && title.endsWith('うちレシピ'),
+      title,
     )
   }
 
