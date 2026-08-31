@@ -903,11 +903,16 @@ import './_shared.mjs'
   }
 
   // --- MEALPLAN-A1B2: マイ献立テンプレート(A-1)＋曜日固定の定番(B-2)。2026-07-29 便CB-2・docs/59。
-  // 表示中の週(月曜に副菜1品・金曜に肉じゃが)を「表示している週をテンプレートとして保存」→ 月タブで翌月を開き
+  // 表示中の週(月曜に副菜1品・金曜に肉じゃが)を「表示している週をテンプレートとして保存」→ 月タブで先の月を開き
   //  ・入れる曜日を「金」だけに絞って流し込む＝毎週金曜に同じ献立が入る(B-2)
   //  ・すでに献立が入っている金曜は上書きされず残る(非破壊)
   //  ・確認文が規約F(何品が入るか＋何が消えないか)を満たしている
   // をIndexedDBの実データで確認する。月タブはPro機能のためIndexedDB直書きで解錠する ---
+  //
+  // **2026-08-31 便MR: 走らせる日で結果が変わっていたのを直した（禁じ手①）。**
+  // ①入れる先を「翌月」から**2か月先の月**へ移した（下の tpTargetAnchor の説明）
+  // ②確認文の品数を **3 の決め打ちから、入れる先の月の金曜の数から数える形**へ変えた
+  //   （入れる先の月の金曜は4回のときと5回のときがある＝月によって入る品数が変わる）
   currentCheck = 'MEALPLAN-A1B2'
   {
     const tpBrowser = await chromium.launch()
@@ -936,13 +941,20 @@ import './_shared.mjs'
       tpMonday.setDate(tpNow.getDate() + (tpNow.getDay() === 0 ? -6 : 1 - tpNow.getDay()))
       const tpFriday = new Date(tpMonday)
       tpFriday.setDate(tpMonday.getDate() + 4)
-      // 翌月(全日が未来日)の金曜すべて
-      const tpNextAnchor = new Date(tpNow.getFullYear(), tpNow.getMonth() + 1, 1)
-      const tpNextLast = new Date(tpNextAnchor.getFullYear(), tpNextAnchor.getMonth() + 1, 0).getDate()
-      const tpNextFridays = []
-      for (let day = 1; day <= tpNextLast; day++) {
-        const d = new Date(tpNextAnchor.getFullYear(), tpNextAnchor.getMonth(), day)
-        if (d.getDay() === 5) tpNextFridays.push(tpYmd(d))
+      /* 入れる先は**2か月先の月**（全日が未来日）。**翌月ではない**（2026-08-31 便MR・禁じ手①）。
+         翌月にすると、月末に近い日は**表示中の週の金曜が翌月へはみ出す**。
+         実測（2026-08-31＝月曜かつ月の最終日）: 表示中の週は 8/31〜9/6 で金曜は 9/4、
+         これが翌月9月の最初の金曜と**同じ日**になり、
+         「週に仕込む金曜の肉じゃが」と「先約として仕込む最初の金曜の副菜」が1日に重なって
+         テンプレートが2品ではなく3品になり、**7件が落ちた**（9/15・8/19 では起きない）。
+         表示中の週は今日から前後6日以内なので、**2か月先の月には決して入らない**
+         ＝重なりが原理的に起きない。月の送りもその分2回にする。 */
+      const tpTargetAnchor = new Date(tpNow.getFullYear(), tpNow.getMonth() + 2, 1)
+      const tpTargetLast = new Date(tpTargetAnchor.getFullYear(), tpTargetAnchor.getMonth() + 1, 0).getDate()
+      const tpTargetFridays = []
+      for (let day = 1; day <= tpTargetLast; day++) {
+        const d = new Date(tpTargetAnchor.getFullYear(), tpTargetAnchor.getMonth(), day)
+        if (d.getDay() === 5) tpTargetFridays.push(tpYmd(d))
       }
 
       await tpPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
@@ -967,7 +979,7 @@ import './_shared.mjs'
                 const plans = wtx.objectStore('mealPlans')
                 plans.add({ date: monday, slot: 'dinner', recipeId: side.id, role: 'main' })
                 plans.add({ date: friday, slot: 'dinner', recipeId: curry.id, role: 'main' })
-                // 翌月の最初の金曜には先約(別の料理)を入れておく＝上書きされないことの確認用
+                // 入れる先の月の最初の金曜には先約(別の料理)を入れておく＝上書きされないことの確認用
                 plans.add({ date: occupied, slot: 'dinner', recipeId: side.id, role: 'main' })
                 const settings = wtx.objectStore('settings')
                 const getReq = settings.get(1)
@@ -987,7 +999,7 @@ import './_shared.mjs'
             }
             req.onerror = () => reject(req.error)
           }),
-        [tpYmd(tpMonday), tpYmd(tpFriday), tpNextFridays[0]],
+        [tpYmd(tpMonday), tpYmd(tpFriday), tpTargetFridays[0]],
       )
       await tpPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
       await tpPage.reload({ waitUntil: 'networkidle' })
@@ -1039,12 +1051,27 @@ import './_shared.mjs'
         `items=${JSON.stringify(tpSaved[0].items)}`,
       )
 
-      // B-2: 月タブで翌月を開き、「金」だけを選んで入れる
+      // B-2: 月タブで2か月先の月を開き、「金」だけを選んで入れる
       // (便DE-8で「流し込む」→「内容を入れる」、便DJで「テンプレートを適用」に改名)
       await tpPage.getByRole('button', { name: '月', exact: true }).click()
       await tpPage.waitForTimeout(400)
-      await tpPage.getByRole('button', { name: ja.mealPlan.nextMonth }).click()
-      await tpPage.waitForTimeout(500)
+      for (let i = 0; i < 2; i++) {
+        await tpPage.getByRole('button', { name: ja.mealPlan.nextMonth }).click()
+        await tpPage.waitForTimeout(500)
+      }
+      /* 便MR: **e2e側が数えた月と、画面がいま開いている月が同じか**をここで突き合わせる。
+         今回の壊れは「e2e側の月の数え方」と「仕込んだ日」がずれたまま最後まで走り、
+         結果の側だけが赤くなって原因が読めなかった。ずれたその場で分かる形にしておく。
+         月の見出しは「今月へ戻る」ボタンの中に YYYY/MM で出ている（名前は ja.ts から読む）。 */
+      const tpShownMonth = (
+        await tpPage.getByRole('button', { name: ja.mealPlan.thisMonth }).innerText()
+      ).trim()
+      const tpWantMonth = `${tpTargetAnchor.getFullYear()}/${String(tpTargetAnchor.getMonth() + 1).padStart(2, '0')}`
+      check(
+        'MEALPLAN-A1B2(便MR) 月の送りで着いた月が、仕込んだ先の月と同じ',
+        tpShownMonth === tpWantMonth,
+        `画面=${tpShownMonth} e2e=${tpWantMonth}`,
+      )
       /* 2026-08-26 便LH（オーナー原文「献立関連のボタンがバラバラに配置してあるように見えるので、
          １グループにまとめて。折りたたみの見える部分は「献立をまとめて提案」のみ。」）:
          月タブのテンプレートは折りたたみの中へ入った。開いてから押す。
@@ -1094,10 +1121,17 @@ import './_shared.mjs'
         // ja.ts の雛形から組み立てる＝文言を直しても数字が変わっても追従する。
         // 2026-08-28 便LV: 本文（旧「すでに入っている献立は消えません。」）は外したので、
         // 見出しだけを見る（外したことそのものは meal-plan.mjs の LV-2 が見張る）
+        //
+        // **2026-08-31 便MR: 品数を 3 の決め打ちから数える形にした（禁じ手①・禁じ手③）。**
+        // 入るのは「入れる先の月の金曜のうち、まだ空いているところ」で、
+        // テンプレートが金曜に持つ献立は1品（すぐ上の「曜日で持つ」の判定が見ている）。
+        // 金曜は月によって4回のときと5回のときがあり、そのうち1つには先約を入れてある。
+        // 決め打ちの 3 は「金曜が4回の月」でしか合わず、5回の月では必ず1件落ちていた
+        // （実測: 2026-09-15 に走らせると入れる先が10月＝金曜5回で 4品になり NG）。
         tpConfirmMsg.includes(
           ja.mealPlan.templateApplyConfirmTitle
             .replace('{name}', '定番セット')
-            .replace('{n}', '3'),
+            .replace('{n}', String(tpTargetFridays.length - 1)),
         ),
         `confirm=${tpConfirmMsg}`,
       )
@@ -1114,31 +1148,31 @@ import './_shared.mjs'
             req.onerror = () => reject(req.error)
           }),
       )
-      const tpFridayPlans = tpNextFridays.map((date) =>
+      const tpFridayPlans = tpTargetFridays.map((date) =>
         tpAfter.filter((e) => e.date === date).map((e) => e.recipeId),
       )
       check(
-        'MEALPLAN-A1B2(B-2) 翌月の毎週金曜に同じ献立(肉じゃが)が入る',
+        'MEALPLAN-A1B2(B-2) 入れる先の月の毎週金曜に同じ献立(肉じゃが)が入る',
         tpFridayPlans.slice(1).every((ids) => ids.length === 1 && ids[0] === tpIds.curryId),
-        `fridays=${JSON.stringify(tpNextFridays)} plans=${JSON.stringify(tpFridayPlans)}`,
+        `fridays=${JSON.stringify(tpTargetFridays)} plans=${JSON.stringify(tpFridayPlans)}`,
       )
       check(
         'MEALPLAN-A1B2(非破壊) すでに献立がある金曜は上書きされず元のまま残る',
         tpFridayPlans[0].length === 1 && tpFridayPlans[0][0] === tpIds.sideId,
         `first=${JSON.stringify(tpFridayPlans[0])}`,
       )
-      const tpNextPrefix = `${tpNextAnchor.getFullYear()}-${String(tpNextAnchor.getMonth() + 1).padStart(2, '0')}`
+      const tpTargetPrefix = `${tpTargetAnchor.getFullYear()}-${String(tpTargetAnchor.getMonth() + 1).padStart(2, '0')}`
       check(
         'MEALPLAN-A1B2(B-2) 選ばなかった曜日(月)には何も入らない',
-        tpAfter.filter((e) => e.date.startsWith(tpNextPrefix) && e.recipeId === tpIds.sideId).length === 1,
-        `count=${tpAfter.filter((e) => e.date.startsWith(tpNextPrefix) && e.recipeId === tpIds.sideId).length}`,
+        tpAfter.filter((e) => e.date.startsWith(tpTargetPrefix) && e.recipeId === tpIds.sideId).length === 1,
+        `count=${tpAfter.filter((e) => e.date.startsWith(tpTargetPrefix) && e.recipeId === tpIds.sideId).length}`,
       )
       check(
         'MEALPLAN-A1B2 テンプレートから入れた枠は手動配置扱い(auto無し)＝まとめて献立で上書きされない',
         // 便LK: 空だと every は中身を1回も見ずに true になる（測れていないのに緑）（1件も入らなくなった退行が緑で通る）
         (() => {
           const rows = tpAfter.filter(
-            (e) => e.date.startsWith(tpNextPrefix) && e.recipeId === tpIds.curryId,
+            (e) => e.date.startsWith(tpTargetPrefix) && e.recipeId === tpIds.curryId,
           )
           return rows.length > 0 && rows.every((e) => !e.auto)
         })(),
