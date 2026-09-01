@@ -4401,3 +4401,37 @@ import { createRequire } from 'node:module'
   // memoの壊し方への歯止め（自前の比較関数を書かない等）は RecipeCard.tsx の export の説明にある
   eq('MV-3 共通のカードはReact.memoで出す', /export default memo\(RecipeCard\)/.test(cardSrc), true)
 }
+
+// ==========================================================================================
+// 便MX: レシピ登録の欄の改名（「検索キーワード」→「検索用の言葉」・2026-09-01 裁定★3）が
+// 説明のページまで届いていること
+//
+// 絞り込みパネルの欄（ja.search.tagTitle「キーワード」）と名前が混線したため、レシピ側だけを
+// 改名した（経緯は ja.form.keywordsLabel の注記。ja.ts 側の見張りは text-layout.mjs の MX-1/MX-2）。
+// GONEWORD と同じ作法で、
+//   MX-3 … 無くなった名前「検索キーワード」が説明のページに残っていない
+//          （読んだ人が画面でその名前を探して見つけられない）
+//   MX-4 … いまの欄名が使い方ページに書いてある（消しただけで書き直し忘れると、
+//          欄の説明がページから丸ごと落ちる）。期待値は ja.ts の実物から取る＝
+//          また改名したら、説明書を直すまでここが赤くなる
+// ==========================================================================================
+{
+  const mxRoot = path.join(path.dirname(fileURLToPath(scriptFileUrl)), '..')
+  const mxPages = ['public/about/manual.html', 'public/about/index.html', 'public/about/multi-device.html']
+  const mxBodyOf = (rel) =>
+    readFileSync(path.join(mxRoot, rel), 'utf-8').replace(/<!--[\s\S]*?-->/g, '')
+  for (const rel of mxPages) {
+    eq(
+      `MX-3 ${rel} に無くなった名前「検索キーワード」が残っていない（今はレシピ登録の「検索用の言葉」）`,
+      mxBodyOf(rel).includes('検索キーワード'),
+      false,
+    )
+  }
+  const mxFieldName = ja.form.keywordsLabel.replace('（任意）', '')
+  eq('MX-4 前提: レシピ登録の欄名を読めている', mxFieldName.length > 0, true)
+  eq(
+    `MX-4 使い方ページに、レシピ登録の欄のいまの名前「${mxFieldName}」が書いてある`,
+    mxBodyOf('public/about/manual.html').includes(mxFieldName),
+    true,
+  )
+}

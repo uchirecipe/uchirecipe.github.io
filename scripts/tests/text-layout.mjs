@@ -5343,3 +5343,37 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs'
     ja.detail.seasoningGroupHint,
   )
 }
+
+// ---------- MX-1/MX-2: 「キーワード」の混線を解いた改名が戻らないこと（2026-09-01 便MX・裁定★3） ----------
+// 「キーワード」を名乗る画面が2つあった: レシピ登録の欄（旧「検索キーワード」＝レシピに付く
+// 検索用の隠し語）と、絞り込みパネルの欄（ja.search.tagTitle＝タグ＋登録した言葉のチップ）。
+// オーナー裁定★3で、絞り込み側は据え置き・レシピ側を「検索用の言葉」に改名して、
+// 「キーワード」の指すものを1つにした（レシピ側の経緯は ja.form.keywordsLabel の注記）。
+// 文言は書き写さない（禁じ手②）＝見るのは事実だけ:
+//   MX-1 … レシピ側の欄まわりの文言が、絞り込みの欄名を名乗っていない（名乗ると混線が再発する）
+//   MX-2 … 「一致した場所」の行名が、レシピ登録の欄名と同じ言葉（同じものを画面ごとに
+//          違う名前で呼ばない。ja.search.matchFieldKeyword の注記の決まりそのもの）
+{
+  const filterName = ja.search.tagTitle
+  eq('MX-1 前提: 絞り込みの欄名を読めている', typeof filterName === 'string' && filterName.length > 0, true)
+  const recipeSide = {
+    'form.keywordsLabel': ja.form.keywordsLabel,
+    'form.keywordsDescription': ja.form.keywordsDescription,
+    'form.keywordPlaceholder': ja.form.keywordPlaceholder,
+    'form.keywordPending': ja.form.keywordPending,
+    'form.removeKeyword': ja.form.removeKeyword,
+    'search.matchFieldKeyword': ja.search.matchFieldKeyword,
+  }
+  eq(
+    'MX-1 レシピ側の検索用の言葉の欄が、絞り込みの欄名を名乗っていない',
+    Object.entries(recipeSide)
+      .filter(([, v]) => String(v).includes(filterName))
+      .map(([k, v]) => `${k}「${v}」に絞り込みの欄名「${filterName}」が入っている`),
+    [],
+  )
+  eq(
+    'MX-2 「一致した場所」の行名は、レシピ登録の欄名と同じ言葉（「（任意）」を除いたもの）',
+    ja.search.matchFieldKeyword,
+    ja.form.keywordsLabel.replace('（任意）', ''),
+  )
+}

@@ -1499,7 +1499,10 @@ export default function RecipesPage() {
           2026-08-20 便IH・②: 一致した場所の入口は上の件数の行へ移した(オーナー指示)。
           登録ボタンが出ているときに、入口のためだけに行が増えないようにするため */}
       {!selecting && pendingSavedSearch && !savedSearchRegistered && (results?.length ?? 0) > 0 && (
-        <div className="mt-[var(--space-sm)]">
+        // 上の間隔はspace-md(16px)。sm(8px)だと、ボタンの文言が長くなって全幅近くまで広がったとき
+        // (裁定★3で行き先を足した2026-09-01に実測320px)、真上の件数の行にある「一致した場所」の
+        // 44pxタップ域(見た目25px+上下9.5px)にボタンの上端が食い込む(見張り IH-SEARCH-01(②))
+        <div className="mt-[var(--space-md)]">
           <button
             type="button"
             data-testid="saved-search-add"
@@ -1510,9 +1513,8 @@ export default function RecipesPage() {
             <Tag size={16} className="shrink-0" aria-hidden />
             {ja.search.savedSearchAdd.replace('{q}', pendingSavedSearch)}
           </button>
-          {/* 登録ボタンの行き先の説明(便IH・③でボタンから「絞り込みの」を落としたぶん、
-              この1行が行き先を言い切る) */}
-          <p className="mt-1 text-xs text-ink-muted">{ja.search.savedSearchAddHint}</p>
+          {/* 行き先(絞り込みの「キーワード」)はボタン自身が名乗る(2026-09-01 便MX・裁定★3)。
+              便IH・③でここにあった行き先の説明の1行は、重複になったので外した(経緯はja.ts) */}
         </div>
       )}
 

@@ -989,14 +989,16 @@ import './_shared.mjs'
         htAddLabel.includes('豆腐') && htAddLabel.includes(ja.search.tagTitle),
         `ボタン=${htAddLabel}`,
       )
-      // 2026-08-20 便IH・③（オーナー「『「」を絞り込みの〜登録』→『「」をキーワードに登録』。
-      // 下に説明あるので。」）: 行き先はボタンから落として、真下の1行が言い切る形にした。
-      // **どちらかに必ず行き先が出ている**ことを見る（両方から消えると、押した先が分からなくなる）
-      const htAddHint = ((await htPage.textContent('body')) ?? '').replace(/​/g, '')
+      // 2026-08-20 便IH・③: 行き先はボタンから落として、真下の1行が言い切る形だった。
+      // 2026-09-01 便MX（裁定★3）: レシピ登録の「検索用の言葉」欄（旧「検索キーワード」）も
+      // 「〜を登録します」と名乗って混線したため、行き先をボタン自身が名乗る形に戻し、
+      // 重複になった真下の説明（savedSearchAddHint）は外した。
+      // **ボタンに必ず行き先が出ている**ことを見る（消えると、押した先が分からなくなる）。
+      // 行き先の名前は絞り込みの見出しの実物（ja.ts）から読む＝文言は書き写さない
       check(
-        `HZ-TAG-01(②) 登録の行き先(絞り込みの「${ja.search.tagTitle}」)が、ボタンかその下の説明に出ている`,
-        htAddHint.includes(ja.search.savedSearchAddHint),
-        `説明=${ja.search.savedSearchAddHint}`,
+        `HZ-TAG-01(②) 登録の行き先(絞り込みの「${ja.search.tagTitle}」)がボタンに出ている`,
+        htAddLabel.includes('絞り込') && htAddLabel.includes(`「${ja.search.tagTitle}」`),
+        `ボタン=${htAddLabel}`,
       )
       // 何品に付くか、という言い方が残っていない（レシピに書き込む機能ではなくなった）
       check(
