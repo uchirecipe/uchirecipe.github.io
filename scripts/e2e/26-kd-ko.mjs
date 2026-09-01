@@ -10,7 +10,7 @@
 // 走る順番と、どの節がどのファイルに居るかは scripts/e2e-smoke.mjs が持っている。
 // **節どうしは前の節が残した画面の状態を引き継ぐので、順番も、この区切りも動かさないこと。**
 //
-// この中の節: KDNAVI-01, KQFIN-01, KFSALT-01, KFSERV-02, KIADD-01, KIUNDO-02, KIADD-03, KILOCK-04, KITOAST-05, KIDUP-06, KJSTATE-01, KJFOLD-02, KJTHEME-03, KJLOG-04, KMNAVI-01, KMNAVI-02, KMFINISH-01, KOGAP-01, KOGAP-03, KOGAP-02, KOGAP-04, KOMULTI-01
+// この中の節: KDNAVI-01, KQFIN-01, KFSALT-01, KFSERV-02, KIADD-01, KIUNDO-02, KIADD-03, KILOCK-04, KITOAST-05, KIDUP-06, KJSTATE-01, KJFOLD-02, KJTHEME-03, KJLOG-04, KMNAVI-01, KMNAVI-02, KMFINISH-01, KOGAP-01, KOGAP-03, KOGAP-02, KOGAP-04, KOMULTI-01, MSFIN-01
 // ==========================================================================================
 import './_shared.mjs'
 
@@ -2354,5 +2354,110 @@ import './_shared.mjs'
       )
     } finally {
       await lgBrowser.close()
+    }
+  }
+
+  // ============================================================================
+  // MSFIN-01（2026-09-01 便MS・③）: 取り込みが成功したら「自動で振り分ける」を
+  // 「取り込みを終える」に差し替える
+  //
+  //   オーナー実機報告（cottaのシュークリーム取り込み）:
+  //   「新規でレシピ登録しているのに、置き換えになるのは何故？」——同じ文章のまま2回目を
+  //   押しても全文の再解析（選んだ項目・付けた色分けごと置き換え）にしかならないので、
+  //   そのあいだは accent の大ボタンをパネルを閉じるだけの「取り込みを終える」に差し替えた。
+  //   文章を書き換えると「自動で振り分ける」へ戻り、押せば従来どおり置き換えの確認が出る
+  //   （規約Fは1ミリも緩めない）。あわせて案D: やり直しても選んだ手間レベルは値も塗りも残る
+  // ============================================================================
+  currentCheck = 'MSFIN-01'
+  {
+    const msBrowser = await chromium.launch()
+    const msCtx = await msBrowser.newContext({ viewport: { width: 390, height: 844 } })
+    const msPage = await msCtx.newPage()
+    msPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@MSFIN] ${err.message}`)
+    })
+    try {
+      await msPage.goto(`${BASE}/#/recipes/new`)
+      await msPage.reload({ waitUntil: 'networkidle' })
+      await msPage.waitForTimeout(900)
+      await msPage.getByText(ja.paste.open).click()
+      await msPage.waitForTimeout(400)
+      const msPasteBox = msPage.locator(`textarea[placeholder="${ja.paste.placeholder}"]`)
+      await msPasteBox.fill(
+        'MS取り込みの品\n2人分\n\n材料\n・鶏むね肉　200g\n・しょうゆ　大さじ1\n\n作り方\n1. 鶏むね肉を切る\n2. 5分焼く',
+      )
+      await msPage.getByRole('button', { name: ja.paste.apply }).click()
+      await msPage.waitForTimeout(700)
+      check(
+        'MSFIN-01 新規の取り込みでは確認の窓が出ない（置き換えるものが無い）',
+        (await readConfirms(msPage)).length === 0,
+        JSON.stringify(await readConfirms(msPage)),
+      )
+      check(
+        'MSFIN-01 取り込みが成功すると「自動で振り分ける」が「取り込みを終える」になる',
+        (await msPage.getByRole('button', { name: ja.paste.finish }).count()) === 1 &&
+          (await msPage.getByRole('button', { name: ja.paste.apply }).count()) === 0,
+      )
+      // gap の選択（手間レベル。押した瞬間に本体へ入る＝KOGAP-02）を押しても差し替わったまま
+      const msEffortNormal = msPage
+        .locator('[data-testid="import-gap-effort"]')
+        .getByRole('button', { name: ja.effort.normal })
+      check('MSFIN-01 入らなかった項目に手間レベルの並びが出ている', (await msEffortNormal.count()) === 1)
+      await msEffortNormal.click()
+      await msPage.waitForTimeout(200)
+      check(
+        'MSFIN-01 gapの選択を押しても「取り込みを終える」のまま（文章は変わっていない）',
+        (await msPage.getByRole('button', { name: ja.paste.finish }).count()) === 1,
+      )
+      await msPage.getByRole('button', { name: ja.paste.finish }).click()
+      await msPage.waitForTimeout(400)
+      check(
+        'MSFIN-01 「取り込みを終える」でも確認の窓は出ない（何も置き換えないボタン）',
+        (await readConfirms(msPage)).length === 0,
+        JSON.stringify(await readConfirms(msPage)),
+      )
+      check('MSFIN-01 押すと貼り付けのパネルが閉じる', !(await msPasteBox.isVisible()))
+      // 開き直しても、文章がそのままなら差し替わったまま
+      await msPage.getByText(ja.paste.open).click()
+      await msPage.waitForTimeout(500)
+      check(
+        'MSFIN-01 開き直しても、文章がそのままなら「取り込みを終える」のまま',
+        (await msPage.getByRole('button', { name: ja.paste.finish }).count()) === 1,
+      )
+      // 文章を書き換えると「自動で振り分ける」へ戻る＝やり直しの道は残る
+      await msPasteBox.fill(
+        'MS取り込みの品・改\n2人分\n\n材料\n・鶏むね肉　200g\n・みそ　大さじ1\n\n作り方\n1. 鶏むね肉を切る\n2. 7分焼く',
+      )
+      await msPage.waitForTimeout(300)
+      check(
+        'MSFIN-01 文章を書き換えると「自動で振り分ける」へ戻る',
+        (await msPage.getByRole('button', { name: ja.paste.apply }).count()) === 1 &&
+          (await msPage.getByRole('button', { name: ja.paste.finish }).count()) === 0,
+      )
+      const msConfirmsBefore = (await readConfirms(msPage)).length
+      await msPage.getByRole('button', { name: ja.paste.apply }).click()
+      await msPage.waitForTimeout(800)
+      const msDialogs = (await readConfirms(msPage)).slice(msConfirmsBefore)
+      check(
+        'MSFIN-01 書き換えて押し直すと、従来どおり置き換えの確認が出る（規約F）',
+        msDialogs.length === 1 && msDialogs[0].includes(ja.paste.confirmReplaceTitle),
+        JSON.stringify(msDialogs),
+      )
+      check(
+        'MSFIN-01 確認の「残るもの」に手間レベルが入っている（案D。実際に残るものを書く）',
+        msDialogs[0]?.includes(ja.paste.confirmReplaceKept),
+        msDialogs[0],
+      )
+      // 案D: やり直しても、選んだ手間レベルは値も塗りも残る（値と塗りが食い違わない）
+      check(
+        'MSFIN-01 やり直しても選んだ手間レベルが塗られたまま（値と塗りが食い違わない・案D）',
+        (await msPage
+          .locator('[data-testid="import-gap-effort"]')
+          .getByRole('button', { name: ja.effort.normal })
+          .getAttribute('aria-pressed')) === 'true',
+      )
+    } finally {
+      await msBrowser.close()
     }
   }

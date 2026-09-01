@@ -336,6 +336,30 @@ function isNonNegativeNumber(value: string): boolean {
   return Number.isFinite(n) && n >= 0
 }
 
+/** 貼り付け（pasteイベント）のデータから画像を1枚取り出す（無ければ null。2026-09-01 便MS・②） */
+function pickImageFromDataTransfer(data: DataTransfer | null): File | null {
+  if (!data) return null
+  for (const item of Array.from(data.items)) {
+    if (item.kind === 'file' && item.type.startsWith('image/')) {
+      const file = item.getAsFile()
+      if (file) return file
+    }
+  }
+  // 一部のブラウザは items ではなく files にだけ入れてくる
+  for (const file of Array.from(data.files)) {
+    if (file.type.startsWith('image/')) return file
+  }
+  return null
+}
+
+/**
+ * 「コピーした画像を貼り付ける」ボタンを出せる端末か（2026-09-01 便MS・②）。
+ * navigator.clipboard.read の機能検出（share.ts の navigator.share と同じ作法）。
+ * スマホにはpasteイベントを起こすキーが無いので、読める端末ではボタンも並べる
+ */
+const canReadClipboardImage =
+  typeof navigator !== 'undefined' && typeof navigator.clipboard?.read === 'function'
+
 const effortLevels: EffortLevel[] = ['easy', 'normal', 'fancy']
 const seasons: Exclude<Season, 'all'>[] = ['spring', 'summer', 'autumn', 'winter']
 const mealSlots: MealSlot[] = ['breakfast', 'lunch', 'dinner']
@@ -611,9 +635,15 @@ function RecipeFormInner() {
   /** 1品に複数の料理が入っていそうな取り込みの知らせ（2026-08-25 便KO・④。知らせるだけ） */
   const [importMultiDish, setImportMultiDish] = useState<MultiDishSignal>()
 
-  /** 取り込みをやり直したときに、前の取り込みの知らせが残らないよう先に片付ける */
+  /**
+   * 取り込みをやり直したときに、前の取り込みの知らせが残らないよう先に片付ける。
+   *
+   * 2026-09-01 便MS・③案D: ここにあった setEffortPicked(false) は外した。取り込みのやり直しは
+   * 手間レベルの値（effortLevel）に触らないのに、塗りだけを消していた＝選んだ値は残っているのに
+   * 画面は未選択の顔になり、「くわしく」の手間レベル（値で塗る）と食い違っていた。
+   * ジャンル・季節などの選択が取り込みをやり直しても残るのと同じく、塗りも値に合わせて残す
+   */
   const clearImportFollowUp = () => {
-    setEffortPicked(false)
     setImportGapFields([])
     setImportGapNoticeOpen(false)
     setSeasoningGroupedNote(undefined)
@@ -764,6 +794,20 @@ function RecipeFormInner() {
   const [pasteText, setPasteText] = useState('')
   const [pasteMessage, setPasteMessage] = useState<string[]>([])
   const [pasteMessageTone, setPasteMessageTone] = useState<'info' | 'warn'>('info')
+  /**
+   * 最後に「自動で振り分ける」でフォームへ流し込んだ文章（2026-09-01 便MS・③）。
+   *
+   * オーナー実機報告「新規でレシピ登録しているのに、置き換えになるのは何故？」——
+   * 取り込みが成功した直後に同じ文章のままもう一度押しても、起きるのは全文の再解析
+   * （ひとこと説明は空・メモと材料・手順は差し替え・付けた色分けも消える）だけで、
+   * 新しく入るものは何も無い。そこで、貼り付けた文章がこの控えと同じあいだは
+   * 「自動で振り分ける」を「取り込みを終える」（パネルを閉じるだけの壊さないボタン）に
+   * 差し替える。文章を書き換えると自動で「自動で振り分ける」に戻り、押せば従来どおり
+   * 置き換えの確認（規約F）が出る＝やり直しの道は残す。URL取り込み側（urlAppliedValue）も同じ形
+   */
+  const [pasteAppliedText, setPasteAppliedText] = useState<string>()
+  /** 最後に「読み込む」で取り込んだURLの入力値（上の pasteAppliedText のURL取り込み版） */
+  const [urlAppliedValue, setUrlAppliedValue] = useState<string>()
   /**
    * 取り込みで自動的に作った合わせ調味料の組の数（2026-08-14 便GF）。
    * 「☆みそ／☆マヨネーズ」のように同じ印が付いた材料を組にできたときだけ 1 以上になる。
@@ -1269,14 +1313,11 @@ function RecipeFormInner() {
       return
     }
     try {
-      const resized = await resizePhoto(blob)
-      if (generation !== urlImportGenerationRef.current) return
-      setPhoto(resized)
-      // 取り込んだ写真に入れ替わったので見える範囲は中央に戻す(2026-08-22 便JK)
-      setPhotoFocus(undefined)
-      // 写真を新しく取得できたら、それまでアイコン優先だったとしても取り込んだ写真を見せる
-      // (onPhotoSelectedと同じ扱い。2026-07-16 Fable裁定docs/30 裁定2の状態対応を踏襲)
-      setShowIconInsteadOfPhoto(false)
+      // 縮小と反映は写真の合流点（applyPhotoBlob。2026-09-01 便MS・②）へ。見える範囲を中央へ
+      // 戻す・アイコン優先を外す、もそちらがやる（onPhotoSelectedと同じ扱い。
+      // 2026-07-16 Fable裁定docs/30 裁定2の状態対応を踏襲）
+      const applied = await applyPhotoBlob(blob, () => generation === urlImportGenerationRef.current)
+      if (!applied) return
       // 元から写真があった場合は「置き換わった」と書く(便CK/②-1。「写真も取り込みました」は
       // 足しただけのように読めるため)
       const note = hadPhoto ? ja.urlImport.photoReplaced : ja.urlImport.photoImported
@@ -1476,6 +1517,9 @@ function RecipeFormInner() {
           ingredients: importedRows.map((row) => ({ name: row.name })),
           steps: importedSteps.map((step) => ({ text: typeof step === 'string' ? step : step.text })),
         })
+        // このURLは取り込み済み＝入力がそのままのあいだは「読み込む」を「取り込みを終える」に
+        // 差し替える（③。貼り付け側 pasteAppliedText と同じ形＝2つの経路で見え方を変えない）
+        setUrlAppliedValue(urlImportValue)
         // 件数だけでは「どこを直せばよいか」が分からないという5体一致の指摘への最小限の答え
         // (便BX/C09ライト版)。分量を読み取れなかった件数だけ内訳として添える
         const amountless = countAmountlessRows(importedRows)
@@ -1661,6 +1705,9 @@ function RecipeFormInner() {
       ingredients: parsed.ingredients.map((row) => ({ name: row.name })),
       steps: pastedStepRows.map((row) => ({ text: row.text })),
     })
+    // この文章は流し込み済み＝同じままのあいだは「自動で振り分ける」を「取り込みを終える」に
+    // 差し替える（③。片側だけの警告や解析失敗では控えない＝ボタンは差し替えない）
+    setPasteAppliedText(pasteText)
     // 2026-08-25 便KS・⑧: 1本の長文にまとめる（句点でつなぐ）のをやめ、1つの知らせ＝1行にする。
     // 空の行は showPasteMessage が落とすので、ここでは並べるだけでよい
     showPasteMessage(
@@ -1676,19 +1723,102 @@ function RecipeFormInner() {
     )
   }
 
+  /**
+   * 写真のBlobを縮小してフォームへ入れる合流点（2026-09-01 便MS・②で切り出し）。
+   * カメラ・アルバム（onPhotoSelected）、URL取り込み（importPhotoFromUrl）、
+   * コピーした画像の貼り付け（pasteイベント／「コピーした画像を貼り付ける」）が全部ここへ来る。
+   * 縮小に失敗したときは呼ぶ側が知らせ方を決める（例外をそのまま投げる）。
+   *
+   * @param shouldApply 縮小を待ったあとで「まだ入れてよいか」を確かめる（URL取り込みの
+   *   世代番号のように、待っている間に取り込み直された結果を捨てるため）。false なら入れない
+   * @returns 実際にフォームへ入れたら true
+   */
+  const applyPhotoBlob = async (blob: Blob, shouldApply?: () => boolean): Promise<boolean> => {
+    const resized = await resizePhoto(blob)
+    if (shouldApply && !shouldApply()) return false
+    setPhoto(resized)
+    // 写真が入れ替わったら見える範囲は中央に戻す(2026-08-22 便JK)。
+    // 前の写真で決めた場所は、新しい写真では別のところを指してしまう
+    setPhotoFocus(undefined)
+    // 写真を新しく取得できたら、それまでアイコン優先(showIconInsteadOfPhoto)だったとしても
+    // 新しい写真を見せる(2026-07-16 Fable裁定docs/30 裁定2の状態対応)
+    setShowIconInsteadOfPhoto(false)
+    return true
+  }
+
   const onPhotoSelected = async (file: File | undefined) => {
     if (!file) return
     try {
-      setPhoto(await resizePhoto(file))
-      // 写真が入れ替わったら見える範囲は中央に戻す(2026-08-22 便JK)。
-      // 前の写真で決めた場所は、新しい写真では別のところを指してしまう
-      setPhotoFocus(undefined)
-      // 写真を新しく取得できたら、それまでアイコン優先(showIconInsteadOfPhoto)だったとしても
-      // 撮った/選んだ写真を見せる(2026-07-16 Fable裁定docs/30 裁定2の状態対応)
-      setShowIconInsteadOfPhoto(false)
+      await applyPhotoBlob(file)
       setError('')
     } catch {
       setError(ja.form.photoError)
+    }
+  }
+
+  /** 貼り付いた画像を写真へ入れて、入ったことを知らせる（②の2経路が共用する） */
+  const applyPastedImage = async (blob: Blob) => {
+    try {
+      await applyPhotoBlob(blob)
+      // 写真の欄は「かんたん」の側にあり、「くわしく」を見ているときは見えないので、
+      // 入ったことを画面の下の知らせでも伝える
+      setUrlImportToast(ja.form.photoPasted)
+      setError('')
+    } catch {
+      setError(ja.form.photoError)
+    }
+  }
+
+  /**
+   * コピーした画像の貼り付け（PCのキー操作。2026-09-01 便MS・②）。オーナー実機報告
+   * 「画像をコピーしたらそのまま貼り付けで入れられたら楽なのに」。
+   *
+   * 条件は2つだけ:
+   *  ・入力欄（INPUT / TEXTAREA / contentEditable）にフォーカスがあるときは**何もしない**
+   *    （preventDefault もしない）。ここで貼り付けを奪うと、貼り付け欄へのレシピ本文の
+   *    コピペ取り込みが壊れる＝この画面でいちばんやってはいけない事故
+   *  ・クリップボードに画像があるときだけ拾って preventDefault（文章だけの貼り付けは素通し）
+   */
+  useEffect(() => {
+    const onDocPaste = (e: ClipboardEvent) => {
+      const active = document.activeElement
+      if (
+        active instanceof HTMLElement &&
+        (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.isContentEditable)
+      ) {
+        return
+      }
+      const file = pickImageFromDataTransfer(e.clipboardData)
+      if (!file) return
+      e.preventDefault()
+      void applyPastedImage(file)
+    }
+    document.addEventListener('paste', onDocPaste)
+    return () => document.removeEventListener('paste', onDocPaste)
+    // applyPastedImage は安定した setState と resizePhoto しか使わないので、初回の分を使い続けてよい
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  /**
+   * 「コピーした画像を貼り付ける」ボタン（②）。スマホには貼り付けのキーが無いので、
+   * クリップボードを読める端末ではボタンからも入れられるようにする。
+   * iOSは利用者の押下から直接呼ばないと許可が切れるため、**最初に** read() を呼ぶ
+   * （手前に await を挟まない）
+   */
+  const pastePhotoFromClipboard = async () => {
+    try {
+      const items = await navigator.clipboard.read()
+      for (const item of items) {
+        const type = item.types.find((t) => t.startsWith('image/'))
+        if (!type) continue
+        const blob = await item.getType(type)
+        await applyPastedImage(blob)
+        return
+      }
+      setUrlImportToast(ja.form.photoPasteNone)
+    } catch {
+      // 許可されなかった・読めなかった。画像が取り出せなかった事実だけを伝える
+      setUrlImportToast(ja.form.photoPasteNone)
     }
   }
 
@@ -2279,6 +2409,19 @@ function RecipeFormInner() {
    *  ② 入らない項目があることの説明は、この端末での初回だけ。「今後表示しない」で消せて、
    *     設定の「レシピ自動取り込みのあとの説明」で戻せる
    */
+  /**
+   * 取り込みが成功して、入力（貼り付けた文章／URL）が流し込んだときのままか（2026-09-01 便MS・③）。
+   * このあいだは accent の大ボタンを「取り込みを終える」（パネルを閉じるだけ）に差し替える。
+   * 同じ内容の再解析は、選んだ項目や付けた色分けを消すだけで新しく入るものが無いため。
+   * 入力を書き換えた瞬間に「自動で振り分ける」「読み込む」へ戻る（規約Fの確認も従来どおり出る）
+   */
+  const pasteImportFinished =
+    pasteMessage.length > 0 && pasteMessageTone === 'info' && pasteText === pasteAppliedText
+  const urlImportFinished =
+    urlImportMessage.length > 0 &&
+    urlImportMessageTone === 'info' &&
+    urlImportValue === urlAppliedValue
+
   const importFollowUp =
     importMultiDish === undefined && importGapFields.length === 0 ? null : (
       <div data-testid="import-follow-up">
@@ -2518,15 +2661,27 @@ function RecipeFormInner() {
               )}
               {urlImportMessage.length > 0 && urlImportMessageTone === 'info' && importFollowUp}
               <div className="mt-[var(--space-sm)] flex gap-2">
-                <button
-                  type="button"
-                  onClick={() => void applyUrlImport()}
-                  disabled={urlImportLoading}
-                  aria-busy={urlImportLoading}
-                  className="flex-1 rounded-md bg-accent py-3 font-bold text-on-accent shadow-sm disabled:opacity-60"
-                >
-                  {urlImportLoading ? ja.urlImport.loading : ja.urlImport.apply}
-                </button>
+                {/* 取り込みが成功して入力がそのままのあいだは、再解析ではなく「取り込みを終える」
+                    （パネルを閉じるだけ）を出す（③。貼り付け側と同じ形） */}
+                {urlImportFinished ? (
+                  <button
+                    type="button"
+                    onClick={() => setUrlImportOpen(false)}
+                    className="flex-1 rounded-md bg-accent py-3 font-bold text-on-accent shadow-sm"
+                  >
+                    {ja.paste.finish}
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => void applyUrlImport()}
+                    disabled={urlImportLoading}
+                    aria-busy={urlImportLoading}
+                    className="flex-1 rounded-md bg-accent py-3 font-bold text-on-accent shadow-sm disabled:opacity-60"
+                  >
+                    {urlImportLoading ? ja.urlImport.loading : ja.urlImport.apply}
+                  </button>
+                )}
                 {/* 読み込み中は閉じられないようにする(2026-07-28 便BX/C03・QA S2)。
                     閉じると結果もエラーも出ないままフォームだけが置き換わっていた。
                     待ち時間はWorker側のFETCH_TIMEOUT_MS(8秒)で上限が担保されている */}
@@ -2573,13 +2728,25 @@ function RecipeFormInner() {
           )}
           {pasteMessage.length > 0 && pasteMessageTone === 'info' && importFollowUp}
           <div className="mt-[var(--space-sm)] flex gap-2">
-            <button
-              type="button"
-              onClick={() => void applyPaste()}
-              className="flex-1 rounded-md bg-accent py-3 font-bold text-on-accent shadow-sm"
-            >
-              {ja.paste.apply}
-            </button>
+            {/* 取り込みが成功して文章がそのままのあいだは、再解析ではなく「取り込みを終える」
+                （パネルを閉じるだけ）を出す（③。URL取り込み側と同じ形） */}
+            {pasteImportFinished ? (
+              <button
+                type="button"
+                onClick={() => setPasteOpen(false)}
+                className="flex-1 rounded-md bg-accent py-3 font-bold text-on-accent shadow-sm"
+              >
+                {ja.paste.finish}
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => void applyPaste()}
+                className="flex-1 rounded-md bg-accent py-3 font-bold text-on-accent shadow-sm"
+              >
+                {ja.paste.apply}
+              </button>
+            )}
             <button
               type="button"
               onClick={() => setPasteOpen(false)}
@@ -3319,6 +3486,20 @@ function RecipeFormInner() {
             </span>
           </button>
         </div>
+        {/* コピーした画像の貼り付け(2026-09-01 便MS・②)。クリップボードを読める端末でだけ出す
+            (navigator.clipboard.read の機能検出)。3つのボタンのグリッドには入れない
+            (4つ目を入れると並びが崩れる。LG-03の並び順もカメラ・アルバム・アイコンの3つが前提) */}
+        {canReadClipboardImage && (
+          <button
+            type="button"
+            data-testid="photo-clipboard-paste"
+            onClick={() => void pastePhotoFromClipboard()}
+            className="mt-2 flex min-h-[var(--tap-min)] w-full items-center justify-center gap-1 rounded-md border border-edge bg-surface text-sm font-bold text-accent-ink shadow-sm"
+          >
+            <ClipboardPaste size={16} aria-hidden />
+            {ja.form.photoPasteButton}
+          </button>
+        )}
         {photo && (
           <button
             type="button"

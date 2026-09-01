@@ -10,7 +10,7 @@
 // 走る順番と、どの節がどのファイルに居るかは scripts/e2e-smoke.mjs が持っている。
 // **節どうしは前の節が残した画面の状態を引き継ぐので、順番も、この区切りも動かさないこと。**
 //
-// この中の節: ICONPICK-01, FORMRESET-01, PANTRY-BULK-01, URLIMPORT-01, URLIMPORT-02, URLIMPORT-03, URLIMPORT-04, URLIMPORT-04b, URLIMPORT-05, URLIMPORT-06, URLIMPORT-07, URLIMPORT-08, URLIMPORT-09, URLIMPORT-10, URLIMPORT-11, URLIMPORT-12, URLIMPORT-13, URLIMPORT-14, KG-C, URLIMPORT-15, URLIMPORT-16, NAVI-01, NAVI-03, NAVI-04, NAVI-05, KKNAVI-01, NAVI-06, NAVI-07, NAVI-08, NAVI-09, ES-01, ES-02
+// この中の節: ICONPICK-01, FORMRESET-01, PANTRY-BULK-01, URLIMPORT-01, URLIMPORT-02, URLIMPORT-03, URLIMPORT-04, URLIMPORT-04b, URLIMPORT-05, URLIMPORT-06, URLIMPORT-07, URLIMPORT-08, URLIMPORT-09, URLIMPORT-10, URLIMPORT-11, URLIMPORT-12, URLIMPORT-13, URLIMPORT-14, KG-C, URLIMPORT-15, URLIMPORT-16, MSFIN-02, NAVI-01, NAVI-03, NAVI-04, NAVI-05, KKNAVI-01, NAVI-06, NAVI-07, NAVI-08, NAVI-09, ES-01, ES-02
 // ==========================================================================================
 import './_shared.mjs'
 
@@ -1320,6 +1320,46 @@ import './_shared.mjs'
           'URLIMPORT-16 読み込み中に画面を離れても、遷移先に置き換え確認が割り込まない',
           ghostDialogs.length === 0,
           JSON.stringify(ghostDialogs),
+        )
+
+        // --- MSFIN-02（2026-09-01 便MS・③）: URL取り込みでも、取り込みが成功して入力が
+        // そのままのあいだは「読み込む」を「取り込みを終える」（パネルを閉じるだけ）に差し替える。
+        // 貼り付け側（MSFIN-01・scripts/e2e/26-kd-ko.mjs）と同じ形＝この画面は
+        // 「2つの経路で見え方を変えない」が明文の方針。URLを書き換えると「読み込む」へ戻る ---
+        currentCheck = 'MSFIN-02'
+        await uiPage.goto(`${URLIMPORT_PREVIEW_BASE}/#/recipes/new`, { waitUntil: 'networkidle' })
+        await uiPage.reload({ waitUntil: 'networkidle' })
+        await uiPage.waitForTimeout(700)
+        await uiPage.getByText(ja.urlImport.open).click()
+        await uiPage.waitForTimeout(300)
+        await uiPage.locator('input[type="url"]').first().fill('https://example.com/success-recipe')
+        const msfinConfirmsAt = (await readConfirms(uiPage)).length
+        await uiPage.getByRole('button', { name: ja.urlImport.apply }).click()
+        await uiPage.waitForTimeout(900)
+        check(
+          'MSFIN-02 取り込みが成功すると「読み込む」が「取り込みを終える」になる',
+          (await uiPage.getByRole('button', { name: ja.paste.finish }).count()) === 1 &&
+            (await uiPage.getByRole('button', { name: ja.urlImport.apply }).count()) === 0,
+        )
+        await uiPage.getByRole('button', { name: ja.paste.finish }).click()
+        await uiPage.waitForTimeout(400)
+        check(
+          'MSFIN-02 「取り込みを終える」で確認の窓は出ず、パネルが閉じる',
+          (await readConfirms(uiPage)).length === msfinConfirmsAt &&
+            !(await uiPage.locator('input[type="url"]').first().isVisible()),
+        )
+        await uiPage.getByText(ja.urlImport.open).click()
+        await uiPage.waitForTimeout(500)
+        check(
+          'MSFIN-02 開き直しても、URLがそのままなら「取り込みを終える」のまま',
+          (await uiPage.getByRole('button', { name: ja.paste.finish }).count()) === 1,
+        )
+        await uiPage.locator('input[type="url"]').first().fill('https://example.com/success-recipe-2')
+        await uiPage.waitForTimeout(300)
+        check(
+          'MSFIN-02 URLを書き換えると「読み込む」へ戻る（やり直しの道は残す）',
+          (await uiPage.getByRole('button', { name: ja.urlImport.apply }).count()) === 1 &&
+            (await uiPage.getByRole('button', { name: ja.paste.finish }).count()) === 0,
         )
       } finally {
         await uiBrowser.close()

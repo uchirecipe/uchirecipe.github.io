@@ -10,7 +10,7 @@
 // 走る順番と、どの節がどのファイルに居るかは scripts/e2e-smoke.mjs が持っている。
 // **節どうしは前の節が残した画面の状態を引き継ぐので、順番も、この区切りも動かさないこと。**
 //
-// この中の節: JJSET-01, JJFORM-02, JKPHOTO-01, JKPHOTO-02, JKPHOTO-03, JOSELECT-01, JOLEAVE-02, JOCOST-03, JOTIMER-04, JNVIEW-01, JNEDIT-02, JNLOCK-03, JNPAST-04, JPCARD-01, JPGAP-02, JPEFFORT-03, JQBOX-01, JQBOX-02, JQSAME-03, JQTHEME-04
+// この中の節: JJSET-01, JJFORM-02, JKPHOTO-01, JKPHOTO-02, JKPHOTO-03, JOSELECT-01, JOLEAVE-02, JOCOST-03, JOTIMER-04, JNVIEW-01, JNEDIT-02, JNLOCK-03, JNPAST-04, JPCARD-01, JPGAP-02, JPEFFORT-03, JQBOX-01, JQBOX-02, JQSAME-03, JQTHEME-04, MSPASTE-01
 // ==========================================================================================
 import './_shared.mjs'
 
@@ -2311,3 +2311,123 @@ import './_shared.mjs'
   }
 
 
+
+  // ============================================================================
+  // MSPASTE-01（2026-09-01 便MS・②）: コピーした画像をそのまま写真に入れる
+  //
+  //   オーナー実機報告: 「画像はコピペではできないので、サイトから画像を一旦保存しないと
+  //   入れられないのが面倒。画像をコピーしたらそのまま貼り付けで入れられたら楽なのに。」
+  //
+  //   測ること:
+  //   ・pasteイベントに画像があれば写真に入り、知らせが出る（PCのキー操作）
+  //   ・入力欄にフォーカスがあるときは**貼り付けを奪わない**（preventDefaultもしない。
+  //     ここを奪うとレシピ本文のコピペ取り込みが壊れる＝この画面でいちばん重い事故）
+  //   ・「コピーした画像を貼り付ける」ボタン（clipboard.read の機能検出）でも入る。
+  //     ボタンはカメラ・アルバム・アイコンの3つのグリッドの外（LG-03の並びを崩さない）
+  // ============================================================================
+  currentCheck = 'MSPASTE-01'
+  {
+    const mpBrowser = await chromium.launch()
+    const mpCtx = await mpBrowser.newContext({ viewport: { width: 390, height: 844 } })
+    const mpPage = await mpCtx.newPage()
+    mpPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@MSPASTE] ${err.message}`)
+    })
+    const mpPngB64 = makeTestPng(64, 48).toString('base64')
+    /** document へ paste イベントを配る。戻り値 = preventDefault され**なかった**か */
+    const mpDispatchPaste = () =>
+      mpPage.evaluate((data) => {
+        const bytes = Uint8Array.from(atob(data), (c) => c.charCodeAt(0))
+        const file = new File([bytes], 'ms.png', { type: 'image/png' })
+        const dt = new DataTransfer()
+        dt.items.add(file)
+        const evt = new ClipboardEvent('paste', { clipboardData: dt, cancelable: true, bubbles: true })
+        return document.dispatchEvent(evt)
+      }, mpPngB64)
+    try {
+      await mpPage.goto(`${BASE}/#/recipes/new`)
+      await mpPage.reload({ waitUntil: 'networkidle' })
+      await mpPage.waitForTimeout(900)
+      check(
+        'MSPASTE-01 開いた直後は写真が無い（見える範囲の入口も無い＝ここから測れば入ったと分かる）',
+        (await mpPage.locator('[data-testid="photo-focus-open-form"]').count()) === 0,
+      )
+      const mpNotPrevented = await mpDispatchPaste()
+      check('MSPASTE-01 画像の貼り付けは拾う（preventDefaultする）', mpNotPrevented === false)
+      // 縮小して入るまで1秒前後かかることがある。決め打ちで待たず、出るまで待ってから見る
+      await mpPage
+        .locator('[data-testid="photo-focus-open-form"]')
+        .waitFor({ state: 'visible', timeout: 5000 })
+        .catch(() => {})
+      check(
+        'MSPASTE-01 貼り付けた画像が写真に入る（「見える範囲を調整」の入口が出る）',
+        (await mpPage.locator('[data-testid="photo-focus-open-form"]').count()) === 1,
+      )
+      check(
+        'MSPASTE-01 入ったことを知らせる（写真の欄が見えない「くわしく」を見ていても分かる）',
+        stripZwspText(await mpPage.textContent('body')).includes(ja.form.photoPasted),
+      )
+      // --- 入力欄にフォーカスがあるときは奪わない ---
+      await mpPage.goto(`${BASE}/#/recipes/new`)
+      await mpPage.reload({ waitUntil: 'networkidle' })
+      await mpPage.waitForTimeout(900)
+      await mpPage.getByText(ja.paste.open).click()
+      await mpPage.waitForTimeout(400)
+      await mpPage.locator(`textarea[placeholder="${ja.paste.placeholder}"]`).focus()
+      const mpFocusedNotPrevented = await mpDispatchPaste()
+      await mpPage.waitForTimeout(900)
+      check(
+        'MSPASTE-01 入力欄にフォーカスがあるときは奪わない（preventDefaultしない）',
+        mpFocusedNotPrevented === true,
+      )
+      check(
+        'MSPASTE-01 入力欄にフォーカスがあるときは写真にも入れない',
+        (await mpPage.locator('[data-testid="photo-focus-open-form"]').count()) === 0,
+      )
+      // --- 「コピーした画像を貼り付ける」ボタン ---
+      const mpPasteBtn = mpPage.locator('[data-testid="photo-clipboard-paste"]')
+      check(
+        'MSPASTE-01 clipboard.read を持つ端末ではボタンが出る（Chromiumは持っている）',
+        (await mpPasteBtn.count()) === 1,
+      )
+      check(
+        'MSPASTE-01 ボタンは3つのグリッドの外にあり、全幅で押せる',
+        await mpPage.evaluate(() => {
+          const btn = document.querySelector('[data-testid="photo-clipboard-paste"]')
+          if (!btn) return false
+          return !btn.closest('.grid-cols-3') && btn.getBoundingClientRect().width >= 300
+        }),
+      )
+      // クリップボードの中身は読み口ごと差し替えて模す（許可の窓は機械では押せないため）。
+      // ボタンの表示そのものは差し替える前の本物の read で機能検出済み
+      await mpPage.evaluate((data) => {
+        const bytes = Uint8Array.from(atob(data), (c) => c.charCodeAt(0))
+        const blob = new Blob([bytes], { type: 'image/png' })
+        navigator.clipboard.read = async () => [new ClipboardItem({ 'image/png': blob })]
+      }, mpPngB64)
+      await mpPasteBtn.click()
+      // 縮小して入るまで1秒前後かかることがある（実測: 900ms固定待ちでは3回に3回届かなかった）。
+      // 決め打ちで待たず、出るまで待ってから見る
+      await mpPage
+        .locator('[data-testid="photo-focus-open-form"]')
+        .waitFor({ state: 'visible', timeout: 5000 })
+        .catch(() => {})
+      check(
+        'MSPASTE-01 ボタンからも写真に入る',
+        (await mpPage.locator('[data-testid="photo-focus-open-form"]').count()) === 1,
+      )
+      // 画像をコピーしていないときは、その旨を知らせる
+      await mpPage.evaluate(() => {
+        navigator.clipboard.read = async () => []
+      })
+      await mpPasteBtn.click()
+      await mpPage.waitForTimeout(500)
+      check(
+        'MSPASTE-01 画像が無いときはその旨を知らせる',
+        stripZwspText(await mpPage.textContent('body')).includes(ja.form.photoPasteNone),
+      )
+    } finally {
+      await mpBrowser.close()
+    }
+  }
