@@ -10,7 +10,7 @@
 // 走る順番と、どの節がどのファイルに居るかは scripts/e2e-smoke.mjs が持っている。
 // **節どうしは前の節が残した画面の状態を引き継ぐので、順番も、この区切りも動かさないこと。**
 //
-// この中の節: SMK-01, COUNT-01, QF-01, LAYOUT-01, SORTDIR-01, SMK-05, NUT-01, ZENKAKU-01, TERM-01, SMK-08, FOCUS-MEMO-01, TAB-01, DET-01, URLIMPORT-00, SMK-04, SMK-02, SMK-03, GF-B, KG-A, KG-B, KW-01, INTRO-01, ONEPOINT-01, DISHTYPE-01, STEP0-01, NUTSORT-01, UI-390-01, UI-390-02, FOCUS-SCROLL-01, SCROLLLOCK-01, FOCUS-COPY-01, SMK-14, SETTINGS-TAB-01, BANNER-01, NGCOUNT-01, ABOUT-01, MOVEGUIDE-01, BACKUPCARDS-01
+// この中の節: SMK-01, COUNT-01, QF-01, LAYOUT-01, SORTDIR-01, SMK-05, NUT-01, ZENKAKU-01, TERM-01, SMK-08, FOCUS-MEMO-01, TAB-01, DET-01, URLIMPORT-00, SMK-04, SMK-02, SMK-03, GF-B, KG-A, KG-B, KW-01, INTRO-01, ONEPOINT-01, DISHTYPE-01, STEP0-01, NUTSORT-01, UI-390-01, UI-390-02, FOCUS-SCROLL-01, SCROLLLOCK-01, FOCUS-COPY-01, SMK-14, SETTINGS-TAB-01, BANNER-01, NGCOUNT-01, ABOUT-01, MOVEGUIDE-01, BACKUPCARDS-01, LAYOUT-02, MEMO-01
 // ==========================================================================================
 import './_shared.mjs'
 
@@ -2052,3 +2052,233 @@ import './_shared.mjs'
     stripZwspText(await page.textContent('body')).includes(ja.settings.ngTitle),
   )
 
+
+  // --- LAYOUT-02: 一覧に戻ったとき、リスト表示の設定なのに2列(グリッド)が一瞬も出ない
+  // (2026-09-01 便MV・調査C。オーナー実機「一列表示にしているのだが、一瞬2列表示が見える」)。
+  // 従来: 設定(Dexie・非同期)が届く前の初回描画が必ず既定の2列で140枚を組み、届いてから
+  // 1列で作り直していた(Dexieはレシピ一覧をキャッシュするが設定のgetはしない非対称があるので、
+  // 他画面から戻るとレシピが必ず先着する)。直しは「表示形式の鏡(logic/listPrefsMirror)から
+  // 初回描画が同期で読む」。ここは時間のしきい値では測らず、MutationObserverで
+  // 「2列のグリッドにカードが入った瞬間」が1度も無いことを見る(タイミング非依存=フレーキーにならない) ---
+  {
+    currentCheck = 'LAYOUT-02'
+    await page.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+    await page.waitForTimeout(800)
+    await page.locator(`button[aria-label="${ja.search.layoutToggleToList}"]`).click()
+    await page.waitForTimeout(500)
+    // 別画面(買い物)へ移る。買い物の画面もレシピ一覧の問い合わせを購読しているので、
+    // 戻るときはDexieのキャッシュからレシピが先着する=ちらつきが一番出やすい条件
+    await page.evaluate(() => (location.hash = '#/shopping'))
+    await page.waitForTimeout(800)
+    await page.evaluate(() => {
+      const m = (window.__mvLayout = { gridSeen: 0, mutLast: 0, navStart: performance.now() })
+      const obs = new MutationObserver(() => {
+        m.mutLast = performance.now()
+        if (document.querySelector('div.grid.grid-cols-2 a[href^="#/recipes/"]')) m.gridSeen++
+      })
+      obs.observe(document.body, {
+        subtree: true,
+        childList: true,
+        attributes: true,
+        attributeFilter: ['class'],
+      })
+      window.__mvLayoutObs = obs
+    })
+    await page.evaluate(() => (location.hash = '#/recipes'))
+    // 「最後のDOM変化から600ms動きが無い」まで待つ(枚数・時間を決め打ちしない)
+    await page.waitForFunction(
+      () =>
+        window.__mvLayout.mutLast > window.__mvLayout.navStart &&
+        performance.now() - window.__mvLayout.mutLast > 600,
+      null,
+      { timeout: 20000 },
+    )
+    const mvLayout = await page.evaluate(() => {
+      window.__mvLayoutObs?.disconnect()
+      const cardLinks = [...document.querySelectorAll('a[href^="#/recipes/"]')].filter((a) =>
+        /^#\/recipes\/\d+$/.test(a.getAttribute('href') ?? ''),
+      )
+      return {
+        gridSeen: window.__mvLayout.gridSeen,
+        cards: cardLinks.length,
+        flexCol: !!cardLinks[0]?.closest('div.flex-col'),
+      }
+    })
+    check(
+      'LAYOUT-02 前提: 戻った一覧にカードが並び、リスト表示(1列)で落ち着いている',
+      mvLayout.cards > 1 && mvLayout.flexCol,
+      `カード=${mvLayout.cards} 1列=${mvLayout.flexCol}`,
+    )
+    check(
+      'LAYOUT-02 リスト表示の設定なら、戻る途中に2列のグリッドが一瞬も出ない',
+      mvLayout.gridSeen === 0,
+      `2列が見えた回数=${mvLayout.gridSeen}`,
+    )
+    // グリッドに戻して以降の検査(グリッド前提のセレクタ)に影響させない
+    await page.locator(`button[aria-label="${ja.search.layoutToggleToGrid}"]`).click()
+    await page.waitForTimeout(500)
+
+    // --- MEMO-01: RecipeCardをReact.memoにしても、更新がその場で画面に出る(2026-09-01 便MV・調査C裁定2)。
+    // アプリで最初のmemo。memoは「propsが変わらなければ前回の描画を使い回す」ので、雑にやると
+    // 「押しても絵が変わらない」事故になる。一覧のカードでお気に入り・NGバッジ・写真の差し替え・
+    // 選択モードの4つが動くことを、付く向きと外れる向きの両方で確かめる ---
+  }
+
+  {
+    currentCheck = 'MEMO-01'
+    await page.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+    await page.waitForTimeout(800)
+
+    // ① お気に入り: 一覧の先頭カードのハートを押す→その場で変わる→もう一度押すと外れる
+    {
+      const mvCard = page.locator('[data-testid="recipe-list-card"]').first()
+      check(
+        'MEMO-01 前提: 一覧の先頭カードにお気に入りのハートがある',
+        (await mvCard.locator(`button[aria-label="${ja.detail.favoriteOn}"]`).count()) === 1,
+      )
+      await mvCard.locator(`button[aria-label="${ja.detail.favoriteOn}"]`).click()
+      await page.waitForTimeout(600)
+      check(
+        'MEMO-01 ハートを押すと、その場でお気に入りに変わる(memoが更新を止めていない)',
+        (await mvCard.locator(`button[aria-label="${ja.detail.favoriteOff}"]`).count()) === 1,
+      )
+      await mvCard.locator(`button[aria-label="${ja.detail.favoriteOff}"]`).click()
+      await page.waitForTimeout(600)
+      check(
+        'MEMO-01 もう一度押すと、その場で外れる',
+        (await mvCard.locator(`button[aria-label="${ja.detail.favoriteOn}"]`).count()) === 1,
+      )
+    }
+
+    // ② NGバッジ: NG食材を登録すると一覧のカードに印が付き、削除すると外れる
+    {
+      await page.goto(`${BASE}/#/settings`, { waitUntil: 'networkidle' })
+      await page.waitForTimeout(800)
+      await page.getByPlaceholder(ja.settings.ngPlaceholder).fill('じゃがいも')
+      await page.getByRole('button', { name: ja.settings.ngAdd, exact: true }).click()
+      await page.waitForTimeout(500)
+      await page.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await page.waitForTimeout(800)
+      const mvNikujaga = page.locator('[data-testid="recipe-list-card"]', { hasText: '肉じゃが' }).first()
+      check(
+        'MEMO-01 NG食材を登録すると、一覧のカードにNGの印が付く',
+        (await mvNikujaga.locator(`[aria-label="${ja.card.ngBadge}"]`).count()) >= 1,
+      )
+      // 後始末: NG食材を削除して、印が外れる向きも同じカードで確かめる
+      await page.goto(`${BASE}/#/settings`, { waitUntil: 'networkidle' })
+      await page.waitForTimeout(800)
+      await page
+        .locator('span', { hasText: 'じゃがいも' })
+        .locator(`button[aria-label="${ja.settings.ngRemove}"]`)
+        .first()
+        .click()
+      await page.waitForTimeout(500)
+      await page.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await page.waitForTimeout(800)
+      check(
+        'MEMO-01 NG食材を削除すると、一覧のカードの印が外れる',
+        (await mvNikujaga.locator(`[aria-label="${ja.card.ngBadge}"]`).count()) === 0,
+      )
+    }
+
+    // ③ 写真の差し替え: 写真つきで登録→一覧に写真が出る→別の写真に差し替え→一覧が新しい写真になる。
+    // 2枚は寸法を変えて作り(64×64と96×48)、カードの<img>のnaturalWidthで「どちらの写真か」を見分ける
+    {
+      await page.goto(`${BASE}/#/recipes/new`, { waitUntil: 'networkidle' })
+      await page.waitForTimeout(500)
+      await page.getByPlaceholder(ja.form.namePlaceholder).fill('MV写真確認レシピ')
+      await page.getByPlaceholder(ja.form.ingredientNamePlaceholder).first().fill('テスト材料')
+      await page.getByPlaceholder(ja.form.stepTextPlaceholder).first().fill('テスト手順')
+      await page
+        .locator('input[type="file"]:not([capture])')
+        .setInputFiles({ name: 'mv-a.png', mimeType: 'image/png', buffer: makeTestPng(64, 64) })
+      await page.waitForTimeout(700)
+      await page.getByRole('button', { name: ja.form.save, exact: true }).click()
+      await page.waitForTimeout(900)
+      await page.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await page.waitForTimeout(800)
+      const mvPhotoCard = page
+        .locator('[data-testid="recipe-list-card"]', { hasText: 'MV写真確認レシピ' })
+        .first()
+      // 写真の読み込みは非同期なので、<img>が読めるまで待つ(枠だけ先に出る)
+      await page.waitForFunction(
+        () =>
+          [...document.querySelectorAll('[data-testid="recipe-list-card"]')]
+            .find((c) => c.textContent?.includes('MV写真確認レシピ'))
+            ?.querySelector('img')?.complete === true,
+        null,
+        { timeout: 10000 },
+      )
+      const mvWidthA = await mvPhotoCard.locator('img').first().evaluate((el) => el.naturalWidth)
+      check('MEMO-01 写真つきで登録すると一覧のカードに写真が出る', mvWidthA === 64, `naturalWidth=${mvWidthA}`)
+      const mvPhotoHref = await mvPhotoCard.locator('a[href^="#/recipes/"]').first().getAttribute('href')
+      await page.goto(`${BASE}/${mvPhotoHref}/edit`, { waitUntil: 'networkidle' })
+      await page.waitForTimeout(700)
+      await page
+        .locator('input[type="file"]:not([capture])')
+        .setInputFiles({ name: 'mv-b.png', mimeType: 'image/png', buffer: makeTestPng(96, 48) })
+      await page.waitForTimeout(700)
+      await page.getByRole('button', { name: ja.form.save, exact: true }).click()
+      await page.waitForTimeout(900)
+      await page.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await page.waitForTimeout(800)
+      await page.waitForFunction(
+        () =>
+          [...document.querySelectorAll('[data-testid="recipe-list-card"]')]
+            .find((c) => c.textContent?.includes('MV写真確認レシピ'))
+            ?.querySelector('img')?.complete === true,
+        null,
+        { timeout: 10000 },
+      )
+      const mvWidthB = await mvPhotoCard.locator('img').first().evaluate((el) => el.naturalWidth)
+      check(
+        'MEMO-01 写真を差し替えると、一覧のカードが新しい写真になる(前の写真が残らない)',
+        mvWidthB === 96,
+        `naturalWidth=${mvWidthB}(64のままなら差し替え前の写真)`,
+      )
+
+      // ④ 選択モード: 「選択」で覆いが出る→押すと印と「1品を選択中」→もう一度押すと外れる
+      await page.getByRole('button', { name: ja.recipes.selectToggle, exact: true }).click()
+      await page.waitForTimeout(500)
+      check(
+        'MEMO-01 「選択」で各カードに選ぶための覆いが出る',
+        (await page.locator('[data-testid="select-card"]').count()) > 1,
+      )
+      const mvSelCard = page.locator('[data-testid="select-card"][aria-label="MV写真確認レシピ"]')
+      await mvSelCard.click()
+      await page.waitForTimeout(400)
+      check(
+        'MEMO-01 カードを押すと選択の印が付く',
+        (await mvSelCard.getAttribute('aria-pressed')) === 'true',
+      )
+      check(
+        'MEMO-01 選択中の帯に「1品を選択中」と出る',
+        jaRe(ja.recipes.selectingCount, { n: '1' }).test(
+          stripZwspText(await page.getByTestId('selection-bar').innerText()),
+        ),
+      )
+      await mvSelCard.click()
+      await page.waitForTimeout(400)
+      check(
+        'MEMO-01 もう一度押すと選択が外れる',
+        (await mvSelCard.getAttribute('aria-pressed')) === 'false',
+      )
+      await page.getByRole('button', { name: ja.recipes.selectExit, exact: true }).click()
+      await page.waitForTimeout(400)
+
+      // 後始末: 検証用に作ったレシピを削除(KW-01と同じ道)
+      await page.getByText('MV写真確認レシピ', { exact: true }).first().click()
+      await page.waitForTimeout(500)
+      await page.locator('a[href*="/edit"]').first().click()
+      await page.waitForTimeout(500)
+      await page.getByRole('button', { name: ja.form.deleteRecipe }).click()
+      await page.waitForTimeout(800)
+    }
+
+    // 次の節(02のTOAST-01)は「設定画面を開いた状態」から始まる前提なので、
+    // この節に入る前と同じ場所(#/settings?section=pro)へ戻しておく
+    await page.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+    await page.waitForTimeout(300)
+    await page.goto(`${BASE}/#/settings?section=pro`, { waitUntil: 'networkidle' })
+    await page.waitForTimeout(1200)
+  }

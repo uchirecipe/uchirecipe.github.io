@@ -312,6 +312,18 @@ export function usePriceEntries() {
   return useLiveQuery(listPriceEntries, [])
 }
 
+/**
+ * 使うときだけ読む版（2026-09-01 便MV・調査C）。
+ *
+ * レシピ一覧は「1食あたりの原価順」を選んでいる間しか価格マスタを使わないのに、
+ * 一覧を開くたびに213行を読み、届いた知らせでページ全体を描き直していた。
+ * enabled=false の間は IndexedDB へ行かず undefined のまま
+ * （原価順を選んだ瞬間に読み始め、届けばこれまでどおり自動で再描画される）。
+ */
+export function usePriceEntriesWhen(enabled: boolean): PriceEntry[] | undefined {
+  return useLiveQuery(() => (enabled ? listPriceEntries() : undefined), [enabled])
+}
+
 /** addPriceEntryの結果種別（呼び出し側でメッセージを出し分けるため） */
 export type AddPriceEntryResult =
   | { status: 'added' }

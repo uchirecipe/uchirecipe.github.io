@@ -12,6 +12,7 @@ import {
   Snowflake,
 } from 'lucide-react'
 import {
+  memo,
   useEffect,
   useState,
   type MouseEvent as ReactMouseEvent,
@@ -27,6 +28,7 @@ import type { CardDensity } from '../logic/cardDensity'
 import { cardPartsFor, type CardPartKey, type CardPlace } from '../logic/cardParts'
 import { showsEffortBadge } from '../logic/effort'
 import { photoObjectPosition } from '../logic/photoFocus'
+import { perfCountMark } from '../logic/perfMarks'
 import { ja } from '../i18n/ja'
 import { usePhotoUrl } from './usePhotoUrl'
 
@@ -309,8 +311,11 @@ function FavoriteToggle({ recipe }: { recipe: Recipe }) {
  *  large    … 写真＋名前＋時間・手間バッジ（レシピ一覧のグリッド）
  *  standard … サムネ＋名前＋同じバッジの1行（レシピ一覧の一覧表示・候補・記録の一覧・献立の「日」）
  *  small    … 小さい絵＋名前1行（週・月の献立の枠のような、狭い場所用）
+ *
+ * 末尾で React.memo に包んで出す（このアプリで memo はここが最初の1つ。2026-09-01 便MV・調査C）。
+ * 理由と、壊さないための決めごとは export のところに書いてある。
  */
-export default function RecipeCard({
+function RecipeCard({
   recipe,
   ngIngredients,
   subLabel,
@@ -335,6 +340,8 @@ export default function RecipeCard({
   titleTestId,
   thumbTestId,
 }: Props) {
+  // 計測の印（?perf=1 のときだけ。logic/perfMarks）。カード1枚の描画が何回走ったかを数える
+  perfCountMark('card:render')
   const recipePhotoUrl = usePhotoUrl(recipe.photo)
   const overridePhotoUrl = usePhotoUrl(photoOverride)
   const hasNg = ngIngredients ? hasNgIngredient(recipe, ngIngredients) : false
@@ -772,3 +779,22 @@ export default function RecipeCard({
     </div>
   )
 }
+
+/**
+ * React.memo で包む（2026-09-01 便MV・調査C。このアプリで最初の memo）。
+ *
+ * なぜ: レシピ一覧は6本の liveQuery（レシピ・設定・在庫・今日の献立・週の予定・価格）を
+ * 購読していて、どれか1本が届くたびにページ全体が描き直され、カード140枚が毎回全部
+ * 再実行されていた。カードの props が変わっていなければ前回の結果を使い回す。
+ *
+ * 壊さないための決めごと（更新が画面に出なくなる事故を防ぐ）:
+ *  - 比較は既定の浅い比較のまま。**自前の比較関数を書かない**
+ *    （「この props は見なくていい」という決め打ちが、そのまま「更新が出ない」バグになる）
+ *  - データの更新は必ず新しい参照で届く前提に乗っている: Dexie の liveQuery は届くたびに
+ *    新しいオブジェクトを作る（cache 'cloned'）ので、お気に入り・NGバッジ・写真の差し替えは
+ *    recipe / ngIngredients / photoOverride の参照が変わり、必ず描き直される。
+ *    **Dexie を通さず recipe の中身を書き換える経路を作らないこと**（作ると memo が古い絵を残す）
+ *  - ReactNode や関数の props（titleBadges・onSelect 等）を渡す画面では、呼び出しごとに
+ *    新しい参照になるぶん memo は素通りする＝従来どおり描き直されるだけで、害はない
+ */
+export default memo(RecipeCard)

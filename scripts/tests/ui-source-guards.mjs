@@ -4345,3 +4345,59 @@ import { createRequire } from 'node:module'
   }
   eq('ART-2 外へ出す記事に、作ったものの名前と行き先がある', artNoLink, [])
 }
+
+// ==========================================================================================
+// MV-1〜MV-3: レシピ一覧の速さの直しが戻らないための見張り（2026-09-01 便MV・調査C）
+//
+// オーナー実機報告:「レシピ一覧の表示が2秒近くかかる」「一列表示にしているが、一瞬2列表示が見える」
+//
+// 原因は「設定（Dexie・非同期）が届く前に、既定の2列で140枚を描き始めて、届いてから作り直す」。
+// Dexieはレシピ一覧の問い合わせをキャッシュするが設定の get はしない非対称があるので、
+// 他画面から戻るとレシピの方が**必ず**先に着く＝settings を待つ書き方に戻すと必ず再発する。
+// 直したあとの実測（CPU4倍・140品・リスト表示・買い物→一覧）:
+//   2列の混入 毎回→0回 ／ CLS 0.0694→0.0000 ／ カードの再実行 442〜560回→302回。
+// 「2列が一瞬でも出ないこと」そのものは e2e の LAYOUT-02（scripts/e2e/01）が画面で測る。
+// ここはその手前の安い見張りで、**書き方が戻っていないこと**だけを見る。
+// ==========================================================================================
+{
+  const appRoot = path.join(path.dirname(fileURLToPath(scriptFileUrl)), '..')
+  const recipesSrc = readFileSync(path.join(appRoot, 'src/pages/RecipesPage.tsx'), 'utf-8')
+  const cardSrc = readFileSync(path.join(appRoot, 'src/components/RecipeCard.tsx'), 'utf-8')
+  const mirrorSrc = readFileSync(path.join(appRoot, 'src/logic/listPrefsMirror.ts'), 'utf-8')
+
+  // MV-1: 一覧の初回描画が settings の到着を待たない（鏡から同期で読む）
+  eq(
+    'MV-1 表示形式が「settingsの到着待ち」(settings?.recipeListLayout)に戻っていない',
+    /settings\?\.recipeListLayout/.test(recipesSrc),
+    false,
+  )
+  eq(
+    'MV-1 「基本レシピを表示しない」が「settingsの到着待ち」(settings?.hideStarters)に戻っていない',
+    /settings\?\.hideStarters/.test(recipesSrc),
+    false,
+  )
+  eq('MV-1 初回の表示形式は鏡から同期で読む', /readListLayoutMirror\(/.test(recipesSrc), true)
+  eq('MV-1 初回のhideStartersも鏡から同期で読む', /readHideStartersMirror\(/.test(recipesSrc), true)
+  eq('MV-1 settingsが届いたら鏡を書き直す（Dexieが正・鏡は初回描画のための写し）', /writeListPrefsMirror\(/.test(recipesSrc), true)
+  // 鏡の読み書きが logic/listPrefsMirror の1か所に閉じていること（2つ目の置き場を作ると
+  // 「2つの正」ができて、どちらが本当の設定か分からなくなる）
+  eq('MV-1 一覧はlocalStorageを直に触らない（鏡の読み書きはlogicの1か所だけ）', recipesSrc.includes('localStorage'), false)
+  // プライベートブラウズ等で localStorage が例外を投げても落ちない（noticeSeen.ts と同じ作法）
+  eq(
+    'MV-1 鏡はlocalStorageが使えない環境でも落ちない（読み書きともtry/catch）',
+    (mirrorSrc.match(/try \{/g) ?? []).length >= 3,
+    true,
+  )
+
+  // MV-2: 価格マスタ（213行）は原価順を選んでいる間だけ読む
+  eq(
+    'MV-2 一覧の価格マスタは原価順のときだけ読む（usePriceEntriesWhen(costSortActive)）',
+    /usePriceEntriesWhen\(costSortActive\)/.test(recipesSrc),
+    true,
+  )
+  eq('MV-2 常に読む形（usePriceEntries()）が一覧に戻っていない', /usePriceEntries\(\)/.test(recipesSrc), false)
+
+  // MV-3: 共通のカードは React.memo のまま（届くたびの140枚再実行を止めている）。
+  // memoの壊し方への歯止め（自前の比較関数を書かない等）は RecipeCard.tsx の export の説明にある
+  eq('MV-3 共通のカードはReact.memoで出す', /export default memo\(RecipeCard\)/.test(cardSrc), true)
+}
