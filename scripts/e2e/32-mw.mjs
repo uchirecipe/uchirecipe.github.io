@@ -103,7 +103,7 @@ import './_shared.mjs'
       await mwPage.getByPlaceholder(ja.form.ingredientAmountPlaceholder, { exact: true }).first().fill('4')
       await mwPage.getByPlaceholder(ja.form.ingredientUnitPlaceholder, { exact: true }).first().fill('個')
       await mwPage.getByPlaceholder(ja.form.stepTextPlaceholder).first().fill('生地を絞って焼く')
-      await mwPage.getByRole('button', { name: '保存する' }).click()
+      await mwPage.getByRole('button', { name: ja.form.save }).click()
       await mwPage.waitForTimeout(800)
       check('MWUNIT-01 保存後にレシピ詳細へ遷移する', mwPage.url().includes('#/recipes/'))
 
@@ -199,6 +199,32 @@ import './_shared.mjs'
       check(
         'MWUNIT-02 「人数分を読み取れなかった」の印は出ない（読めているので）',
         (await mwPage.locator('[data-testid="servings-not-read"]').count()) === 0,
+      )
+      // 出る場面と対にする（LO-1）: 個数を消した文章を貼り直すと、印が**出る**。
+      // そのとき数え方は動かさない（読めなかったのに単位だけ人へ戻さない）。
+      // 貼り付けの欄は1回目の取り込みのあと開いたままのことがある＝**開いていなければ開く**
+      // （押す回数を決め打ちしない・禁じ手③）
+      const mwPasteArea = mwPage.locator(`textarea[placeholder="${ja.paste.placeholder}"]`)
+      if (!(await mwPasteArea.isVisible().catch(() => false))) {
+        await mwPage.getByText(ja.paste.open).click()
+        await mwPage.waitForTimeout(300)
+      }
+      await mwPasteArea.fill(mwCopied.replace(`8${ja.detail.servingsUnitPiece}\n`, ''))
+      await mwPage.getByRole('button', { name: ja.paste.apply }).click()
+      await mwPage.waitForTimeout(500)
+      check(
+        'MWUNIT-02 個数の無い文章を貼ると印が出る（出る場面との対）',
+        (await mwPage.locator('[data-testid="servings-not-read"]').count()) === 1,
+      )
+      check(
+        'MWUNIT-02 読めなかったときは数え方を動かさない（個分のまま・注意も個の言い方）',
+        (await mwPage
+          .locator('[data-testid="servings-unit-picker"]')
+          .getByRole('button', { name: ja.form.servingsUnitPiece, exact: true })
+          .getAttribute('aria-pressed')) === 'true' &&
+          stripZwspText(
+            (await mwPage.locator('[data-testid="servings-not-read"]').textContent()) ?? '',
+          ).includes(ja.form.servingsNotReadNotePiece.replace('{n}', '8')),
       )
       // 貼り付けの結果からもう1品はつくらない（往復の確認だけで足りる）。書きかけを捨てて戻る
       await mwPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
