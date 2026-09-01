@@ -1720,6 +1720,10 @@ export const ja = {
     servingsDown: '食数を減らす',
     servingsUp: '食数を増やす',
     servingsRecipeNote: 'レシピに登録されている人数分は{n}人分です',
+    // 個で数える品（Recipe.servingsUnit='piece'・2026-09-01 便MW・司令部裁定4）。
+    // この1行だけはそのレシピ1品の話なので、数え方に追従させる。食数チップ・既定・合計は
+    // 複数レシピをまたぐ数なので「人分」のまま動かさない
+    servingsRecipeNotePiece: 'レシピに登録されている個数は{n}個分です',
     // 設定「食数の設定」を入れているときは、既定がそちらに変わっているので必ず添える(便DK。
     // 2026-08-04 便DVで設定側の名前が「ふだん作る人数」→「食数の設定」に変わったので追随)
     servingsHouseholdNote: '設定の「食数の設定」は{n}人分です',
@@ -2273,6 +2277,9 @@ export const ja = {
     ingredientsClose: '材料を閉じる',
     ingredientsPanelTitle: '選んだ{n}品の材料',
     ingredientsServings: '{n}人分',
+    // 個で数える品（Recipe.servingsUnit='piece'・2026-09-01 便MW）。数字は今までどおり
+    // 作る量（枠の食数＞設定＞レシピの登録数）で、言い方だけをそのレシピの数え方に合わせる
+    ingredientsServingsPiece: '{n}個分',
     ingredientsEmpty: '材料がありません',
     stepIngredientsLabel: '{title}の材料',
     legendTitle: '組み合わせる{n}品',
@@ -4639,7 +4646,9 @@ export const ja = {
     // 自動除去される。{lines}=選択された任意行(調理時間/原価/栄養。調理時間は復元され、
     // 原価/栄養は受け手固有のため取り込み時に落ちる=往復で本文が汚れない)。
     // {steps}=作り方ブロック(手順が無いレシピでは見出しごと空文字になる)
-    textTemplate: '{title}\n{servings}人分\n{lines}【材料】\n{ingredients}\n{steps}\n#{app}\nhttps://{url}/',
+    // {unit}=人数分の数え方（人の品は「人分」・個で数える品は「個分」。2026-09-01 便MW。
+    // 差し込みは logic/share.ts が logic/servingsUnit.ts から引く。人の品の出力は1文字も変わらない）
+    textTemplate: '{title}\n{servings}{unit}\n{lines}【材料】\n{ingredients}\n{steps}\n#{app}\nhttps://{url}/',
     stepsHeading: '【作り方】',
     dialogTitle: 'シェアする内容',
     // 2026-07-29 便CI/C10: 旧文「料理名・食数・材料（最初の8件）・作り方は常に入ります」は
@@ -4654,6 +4663,8 @@ export const ja = {
     // 2026-07-29 便CI/C18: 共有する分量は画面で見ている人数に合わせる。
     // 何人分で出るのかを、送る前にこの窓で言い切る
     servingsNote: 'いま表示している{n}人分の分量でシェアします',
+    // 個で数える品（2026-09-01 便MW）
+    servingsNotePiece: 'いま表示している{n}個分の分量でシェアします',
     optImage: 'レシピ画像（写真またはアイコン）',
     optImageCardOnly: '※画像カードのみ',
     optCookMinutes: '調理時間',
@@ -4664,6 +4675,13 @@ export const ja = {
     optNutrition: '1食あたりのカロリー・塩分',
     optNutritionKcalOnly: '1食あたりのカロリー',
     /**
+     * 個で数える品（Recipe.servingsUnit='piece'・2026-09-01 便MW）の選択肢。
+     * 出るシェア文が「1個あたり 約◯kcal」なので、選ぶときの名前も同じ言い方にする
+     * （wholeBatch の選択肢と同じ理由。チェック欄と送られる文を食い違わせない）
+     */
+    optNutritionPiece: '1個あたりのカロリー・塩分',
+    optNutritionKcalOnlyPiece: '1個あたりのカロリー',
+    /**
      * 「1食」に分けて食べる品ではないレシピ（Recipe.wholeBatch・2026-08-25 便KS・④）の選択肢。
      * 出るシェア文が「でき上がり全体で 約◯kcal」なので、**選ぶときの名前も同じ言い方**にする
      * （チェック欄が「1食あたり」で、送られる文が「でき上がり全体」だと食い違う）。
@@ -4673,6 +4691,9 @@ export const ja = {
     optAllIngredients: '材料をすべて載せる',
     lineCookMinutes: '調理時間 約{n}分',
     lineCost: '原価 1人分 約{n}円／全量（{s}人分） 約{m}円',
+    // 個で数える品（2026-09-01 便MW）。画面（レシピ詳細）が「1個あたり」なのに、送る文だけ
+    // 「1人分」だと、アプリの外にだけ違う言い方が出ていく（share.ts 冒頭の禁じ手と同じ）
+    lineCostPiece: '原価 1個分 約{n}円／全量（{s}個分） 約{m}円',
     /**
      * 「1食」に分けて食べる品ではないレシピ（Recipe.wholeBatch・2026-08-25 便KS・④）の原価。
      * 1人分の金額を出しても意味を成さないので、でき上がり全体の金額だけを書く
@@ -4686,6 +4707,8 @@ export const ja = {
      * （書き分けると、片方だけ直したときに言い方が割れる）。
      */
     scopePerServing: '1食あたり',
+    // 個で数える品（2026-09-01 便MW）
+    scopePerPiece: '1個あたり',
     scopeWholeBatch: 'でき上がり全体で',
     lineNutrition: '{scope} 約{kcal}kcal・塩分 約{salt}g（概算）',
     lineNutritionKcalOnly: '{scope} 約{kcal}kcal（概算）',
@@ -4759,6 +4782,8 @@ export const ja = {
     // 貼り付け・下書き復元から範囲外の人数分がそのまま保存できていた。取り込み側で丸めるように
     // したので通常は出ないが、保存前の最後の網としても範囲を見る
     servingsOutOfRange: '人数分は1〜20人分で保存できます（いま{n}人分）。「＋」「−」で直してください',
+    // 個で数える品（2026-09-01 便MW）。範囲そのもの（1〜20）は人の側と同じ
+    servingsOutOfRangePiece: '個数は1〜20個分で保存できます（いま{n}個分）。「＋」「−」で直してください',
     // 編集しようとしたレシピが見つからないとき(2026-07-30 便CK/①-2)。削除済み・存在しないIDの
     // 編集URLでは、以前は何の案内も出ないまま入力でき、「保存する」を押すと無言で
     // 「レシピが見つかりませんでした」の画面へ飛んで1件も保存されていなかった
@@ -4808,6 +4833,17 @@ export const ja = {
     photoError: '写真を読み込めませんでした',
     servingsLabel: '人数分',
     servingsUnit: '人分',
+    /**
+     * 人数分の数え方（2026-09-01 便MW・オーナー裁定★2）。人数分の欄のすぐ下で選ぶ2択で、
+     * 選択肢の字面はそのまま servingsUnit（'人分'）と servingsUnitPiece（'個分'）を使う。
+     * 「個分」を選ぶと、欄の名前（servingsLabelPiece）と数字のうしろの単位が個の言い方に変わる。
+     * 選んだだけでは servingsNotRead の印は消えない（数字を確かめたことにはならないため）
+     */
+    servingsUnitLabel: '数え方',
+    servingsUnitPiece: '個分',
+    // 個で数える品の欄の呼び名。servingsUnreadNotePiece（詳細側の注意）の「編集の「個数」」と
+    // 必ず同じ語にする
+    servingsLabelPiece: '個数',
     // 2026-08-23 便KF: 取り込み元に人数分が書かれていなかったときだけ、人数分の欄の下に出す。
     // 影響範囲テストB「健康を気にする人」の実測で、人数分の無い5品がすべて黙って「2人分」で
     // 保存され、うち1品はページに「(4人分)」と書いてあるのに2人分で入り、
@@ -4815,6 +4851,10 @@ export const ja = {
     // 人数分を機械が推し量って入れることはせず、読み取れなかった事実だけを伝える。
     servingsNotReadNote:
       '取り込んだ内容に人数分が書かれていませんでした。{n}人分のままなので、合っているか確認してください',
+    // 個で数える品（2026-09-01 便MW）。取り込みで単位が読めたときは印ごと消えるので、
+    // これが出るのは「読めないまま、数え方だけ手で個分にした」とき
+    servingsNotReadNotePiece:
+      '取り込んだ内容に個数が書かれていませんでした。{n}個分のままなので、合っているか確認してください',
     cookMinutesLabel: '調理時間（分）',
     cookMinutesPlaceholder: '例: 30',
     effortLabel: '手間レベル',
@@ -5236,6 +5276,15 @@ export const ja = {
     servingsUnit: '人分',
     servingsDown: '人数を減らす',
     servingsUp: '人数を増やす',
+    /**
+     * 個で数える品（Recipe.servingsUnit='piece'・2026-09-01 便MW・オーナー裁定★2）の言い方。
+     * オーナー原文「シュークリームなども8個のレシピから1個分の栄養が表示される分には問題ない」。
+     * 人の側の既存キーは値も使い方も変えず、個の側を別キーで持つ（出し分けは
+     * logic/servingsUnit.ts の1か所だけ。画面ごとに三項演算子を書き散らさない）
+     */
+    servingsUnitPiece: '個分',
+    servingsDownPiece: '個数を減らす',
+    servingsUpPiece: '個数を増やす',
     // 2026-08-25 便KS・③（オーナー原文「レシピ詳細の材料下段「登録：◯人分」がここに書いて
     // あると、材料の原価などがその人数分であるかのように見える。削除。知りたかったら編集で
     // 確認できるし。」）: 旧 servingsRegisteredNote（'登録: {n}人分'）を削除した。
@@ -5255,6 +5304,9 @@ export const ja = {
     // 金額の行でもう一度言うと、同じ数字を1画面で3回読ませることになる。
     // 見張りは scripts/test-logic.mjs の KN-1(人数分が画面から消えたら赤になる)
     pricePerServing: '1食あたり 約{n}円',
+    // 個で数える品（2026-09-01 便MW）。シュークリーム8個の合計を8で割った値は
+    // 「1食あたり」ではなく「1個あたり」の金額
+    pricePerServingPiece: '1個あたり 約{n}円',
     /**
      * 「1食」に分けて食べる品ではないレシピ（Recipe.wholeBatch）の金額の言い方
      * （2026-08-25 便KS・④。オーナー原文「１食あたり７０円とあるが、出汁だけで１食とは
@@ -5291,6 +5343,9 @@ export const ja = {
      */
     servingsUnreadNote:
       '人数分は取り込み元から読み取れず、未確認です。{n}人分は仮の数字なので、編集の「人数分」で確認してください',
+    // 個で数える品（2026-09-01 便MW）。欄の呼び名は form.servingsLabelPiece（「個数」）と必ずそろえる
+    servingsUnreadNotePiece:
+      '個数は取り込み元から読み取れず、未確認です。{n}個分は仮の数字なので、編集の「個数」で確認してください',
     // 材料行ごとの原価ビュー切り替え(2026-07-15 オーナー要望「どの食材が値段に反映されて
     // いるかが分からない」への対応。常時表示は「うるさい」で2026-07-14に廃止済みのため、
     // 見出し行のチップで表示・非表示を切り替える方式にした。既定は非表示)。
@@ -5600,6 +5655,12 @@ export const ja = {
     // detail.pricePerServing と同じ言い方に揃えたまま短くしている
     summaryLabel: '（1食あたり）: ',
     /**
+     * 個で数える品（Recipe.servingsUnit='piece'・2026-09-01 便MW・オーナー裁定★2）の要約。
+     * オーナー原文「単位は、食数を個数にした場合には、栄養も1個で表示」。
+     * 数値は今までと同じ perServing（合計÷個数）で、言い方だけを正直にする
+     */
+    summaryLabelPiece: '（1個あたり）: ',
+    /**
      * 「1食」に分けて食べる品ではないレシピ（Recipe.wholeBatch・2026-08-25 便KS・④）の要約。
      *
      * オーナー原文「出汁だけで１食とは言わない」。引っかかっているのは金額ではなく
@@ -5618,8 +5679,22 @@ export const ja = {
     // 「概算・目安」であることを必ず明示し、医療・効能の文脈は使わない。
     // 計算対象外の材料は隠さず件数と材料名で明示する。
     estimateBadge: '概算',
+    /**
+     * 献立タブの栄養バランスパネル（NutritionBalancePanel）の見出し。
+     * **レシピ詳細の栄養の表はこのキーを使わない**（下の recipeServingHeader を使う。
+     * 2026-09-01 便MW・司令部裁定3: 個で数える品の切り替えを、複数レシピを足し算する
+     * 献立側へ巻き込ませないためのキー分割。献立の「1人分」は今までどおり動かない）
+     */
     servingHeader: '1人分',
+    /**
+     * レシピ詳細の栄養の表（NutritionTeaser）の1列目の見出し（2026-09-01 便MW でキー分割）。
+     * 個で数える品は recipeServingHeaderPiece（「1個分」）に切り替わる
+     */
+    recipeServingHeader: '1人分',
+    recipeServingHeaderPiece: '1個分',
     totalHeader: '全量（{n}人分）',
+    // 個で数える品（2026-09-01 便MW）。{n}=表示中の個数
+    totalHeaderPiece: '全量（{n}個分）',
     kcalLabel: 'エネルギー',
     kcalUnit: 'kcal',
     proteinLabel: 'たんぱく質',
@@ -5704,8 +5779,8 @@ export const ja = {
     // 2026-07-28 便BY/NUT-05: 「目安」がどのくらいの精度なのかを一言で。
     // 幅の数値は根拠を出せないため書かず、ぶれる理由を書く
     precisionNote: '※ 同じ食材でも品種・大きさ・部位で成分は変わるため、数値は幅のある概算です。',
-    // 無料版で表示する項目（エネルギー・野菜量）用(2026-07-10 バッチH-4 → 2026-08-01 線引きB')
-    perServingLabel: '1食あたり',
+    // 旧 perServingLabel（'1食あたり'）は2026-09-01 便MWで削除した（src 全体で参照0件の死んだキー。
+    // 2026-07-10 バッチH-4の無料版表示用だったが、線引きB'以降どの画面からも使われていなかった）
     // 未解錠案内の冒頭に置く、Pro版で増える項目の明示（2026-07-13 UIペルソナQA:
     // 「Pro版で何が増えるか」が伝わりにくいとの指摘。断定・誇大な表現は避け、事実のみを1文で書く）。
     // 2026-08-01 線引きB'で食塩相当量がPro側へ移ったので、増える項目の列挙に加える
