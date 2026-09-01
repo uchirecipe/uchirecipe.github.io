@@ -4315,4 +4315,18 @@ import { createRequire } from 'node:module'
     }
   }
   eq('ART-1 記事に書いた数は、全部「出どころ」の表に載っている', artMissing, [])
+
+  // ART-2（2026-09-01）: **目的を果たす仕掛けが、記事の中にあるか**
+  //
+  // オーナー指摘: 「どの用に流入を予定していますか？…アプリへの流れがわかりません」。
+  // 司令部は「Zenn記事の目的は拡散と被リンク」と言いながら、**リンク0本・アプリ名0回**の記事を書いていた。
+  // **数字も因果も正しいが、目的を果たさない記事**だった。ART-1 は「間違っていないか」しか見ていない。
+  const artNoLink = []
+  for (const f of artFiles) {
+    const text = readFileSync(path.join(artRoot, f), 'utf-8')
+    if (!/^title:/m.test(text)) continue // 外へ出す記事（front matter を持つもの）だけを見る
+    if (!/https?:\/\//.test(text)) artNoLink.push(`${f}: 外向きのリンクが1本も無い`)
+    if (!text.includes('うちレシピ')) artNoLink.push(`${f}: 作ったものの名前が1度も出てこない`)
+  }
+  eq('ART-2 外へ出す記事に、作ったものの名前と行き先がある', artNoLink, [])
 }
