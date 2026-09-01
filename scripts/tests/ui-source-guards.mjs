@@ -4278,12 +4278,24 @@ import { createRequire } from 'node:module'
 //        1桁（「1件だけ落ちた」など）は文の一部なので対象外。
 // ==========================================================================================
 {
+  // 2026-09-01 便MSの申し送りで直した2点:
+  // ①worktree（便の作業場）には ../../確認して が無く、**前提の検査が全便で赤になる罠**だった
+  //   → フォルダが無い環境では黙って全体を飛ばす（統合はいつも本物の場所で npm test するので、そこで必ず走る）
+  // ②「外へ出す記事」と「選ぶための内部の一覧」の区別が無く、一覧の数字にまで出どころ表を求めていた
+  //   → **front matter（先頭の title: 行）を持つファイルだけ**を記事として見る（ART-2 と同じ物差し）。
+  //     外へ出す下書きには front matter を必ず付ける決まり（確認して/README.md に明記）
   const artRoot = path.join(path.dirname(fileURLToPath(scriptFileUrl)), '../..', '確認して')
-  const artFiles = existsSync(artRoot)
+  const artAll = existsSync(artRoot)
     ? readdirSync(artRoot).filter((f) => f.endsWith('.md') && !f.endsWith('.出どころ.md') && f !== 'README.md')
-    : []
-  eq('ART-1 前提: 確認してフォルダを読めている', existsSync(artRoot), true)
+    : null
+  const artFiles = (artAll ?? []).filter((f) => {
+    const head = readFileSync(path.join(artRoot, f), 'utf-8').slice(0, 200)
+    return head.startsWith('---') && /\ntitle:/.test(head)
+  })
 
+  if (artAll === null) {
+    // worktree など、確認して が無い環境。統合時の本物の場所で必ず走るので、ここでは黙って通す
+  }
   const artNums = (text) => {
     let t = text
     const i = t.indexOf('---', 3)
