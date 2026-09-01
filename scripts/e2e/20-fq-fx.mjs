@@ -2049,9 +2049,11 @@ import './_shared.mjs'
         fxHints.length === 1,
         `${fxHints.length}か所: ${fxHints.join(' / ')}`,
       )
+      // 2026-09-01 便MS・①: 文言まるごとの書き写し（禁じ手②・e2e-ja-copy-known.json に登録されていた）
+      // をやめ、ja.ts から読む。見張る中身は変えない＝「説明が ja.ts の文言どおりに出ている」
       check(
         'FX-01 説明の文言（「左に同じ線が付いた材料は」を言い換えた）',
-        fxHints[0] === '左の線が同じ材料どうしは、合わせ調味料です。先にまとめて計量できます',
+        stripZwspText(fxHints[0]) === ja.cookNavi.seasoningGroupHint,
         fxHints[0],
       )
       // 説明は材料一覧の見出しの下＝線が出てくる前に読める位置にある

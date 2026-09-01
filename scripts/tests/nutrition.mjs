@@ -1559,6 +1559,14 @@ const NUTRITION_DB_VERSION_FOR_KP = NUTRITION_DATA_FOR_KP.dbVersion
       ja.paste.confirmReplaceKept.includes('タグ'),
       ja.urlImport.confirmReplaceKept.includes('タグ'),
     ], [true, true])
+    // 2026-09-01 便MS・③案D: 手間レベルも取り込みは触らない（実際に残る）のに、残るものに
+    // 書かれていなかった＝規約F「何が残るか」の抜け。4本とも項目名（ja.form.effortLabel）で見る
+    eq('MS-2 「残るもの」に手間レベルが入っている（実際に残る。規約F）', [
+      ja.paste.confirmReplaceKept.includes(ja.form.effortLabel),
+      ja.paste.confirmReplaceKeptWithPhoto.includes(ja.form.effortLabel),
+      ja.urlImport.confirmReplaceKept.includes(ja.form.effortLabel),
+      ja.urlImport.confirmReplaceKeptWithPhoto.includes(ja.form.effortLabel),
+    ], [true, true, true, true])
     eq('KS-7 写真が残る経路では写真も書く', [
       ja.paste.confirmReplaceKeptWithPhoto.includes('写真'),
       ja.urlImport.confirmReplaceKeptWithPhoto.includes('写真'),

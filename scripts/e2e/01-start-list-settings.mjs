@@ -186,7 +186,13 @@ import './_shared.mjs'
   check('SMK-05 g系は整数のまま', detailText.includes('300g'), '牛こま300g(200g×1.5)が見つからない')
 
   // --- 合わせ調味料の色ライン(共通説明文の表示) ---
-  check('合わせ調味料ヒント表示', detailText.includes('合わせ調味料です'))
+  // 2026-09-01 便MS・①: 「合わせ調味料です」の書き写し（禁じ手②。どの見張りにも載っておらず、
+  // 文言を変えると予告なしに赤くなる）をやめ、ja.ts から読む。BudouXのゼロ幅スペースを外してから照合する
+  check(
+    '合わせ調味料ヒント表示',
+    stripZwspText(detailText).includes(ja.detail.seasoningGroupHint),
+    stripZwspText(detailText).slice(0, 200),
+  )
 
   // --- NUT-01: 栄養価の概算(未解錠・無料)。肉じゃがの詳細を開いたまま検証する
   // (M6-1 2026-07-12オーナー指示でNUTRITION_ENABLED=trueに前倒し有効化。

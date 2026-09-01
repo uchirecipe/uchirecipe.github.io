@@ -5329,3 +5329,17 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs'
     )
   }
 }
+
+// ---------- MS-1: 合わせ調味料の説明の双子（2026-09-01 便MS・①） ----------
+// 並行調理ナビ（ja.cookNavi.seasoningGroupHint）とレシピ詳細（ja.detail.seasoningGroupHint）は
+// 同じもの（材料の左の色の線）の説明で、**1字違わず同文**が決まり。
+// 「片方だけ直して旧文言が残った」事故が 2026-08-15 に実際に起きている（ja.ts の detail 側の注記）
+// のに、同期を見張る検査が1つも無かった。文言そのものは書き写さない（禁じ手②）＝
+// 「2つが同文であること」という事実だけを見る。文言を練り直すときは両方を一緒に直せば緑のまま
+{
+  eq(
+    'MS-1 合わせ調味料の説明は、ナビとレシピ詳細で1字違わず同文',
+    ja.cookNavi.seasoningGroupHint,
+    ja.detail.seasoningGroupHint,
+  )
+}

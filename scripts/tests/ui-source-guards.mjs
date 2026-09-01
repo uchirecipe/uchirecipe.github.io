@@ -1870,6 +1870,9 @@ import { createRequire } from 'node:module'
     // --- レシピの登録 ---
     'ja.paste.placeholder': 'レシピ登録の「文章から取り込む」欄。開閉ボタンが取り込みの名前そのもの',
     'ja.paste.apply': '同上',
+    // 取り込みが成功したあとに「自動で振り分ける」「読み込む」の場所へ出る、パネルを閉じるだけの
+    // ボタン（2026-09-01 便MS・③）。取り込みの結果と同じ場所なので、開いていなければ用が無い
+    'ja.paste.finish': '同上',
     'ja.urlImport.placeholder': 'レシピ登録の「URLから取り込む」欄。開閉ボタンが取り込みの名前そのもの',
     'ja.urlImport.apply': '同上',
     'ja.urlImport.loading': '同上',
