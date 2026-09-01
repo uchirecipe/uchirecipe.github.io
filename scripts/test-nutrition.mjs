@@ -468,6 +468,12 @@ console.log(`1人分の常識レンジ検査: ${PER_SERVING_LIMITS.length}項目
 //   40g・2人分＝1人あたり20g）。1人分: 262→271kcal ／ たんぱく質21.4→22.0g ／ 脂質16.3→16.9g ／
 //   食塩相当量1.5→1.3g ／ カルシウム379→389mg（炭水化物・食物繊維・鉄は変わらず）。
 //   ピン留めは scripts/tests/nutrition.mjs の LB-1〜LB-3。
+// ・2026-09-01 便MT（調査A「エビグラタン16.3g/人」の同梱側の直し）: 切り干し大根のハリハリ漬けと
+//   ちくわときゅうりの土佐酢あえの塩は、手順で「塩をふって…水気を絞る」のに材料メモが
+//   「1食あたり約0.5gが目安」のままで食べた扱いだった（同じことをする冷や汁は「塩もみ用」で除外済み）。
+//   メモに「きゅうりの塩もみ用。」を足して prep 除外にそろえた。動いたのはこの2品だけ:
+//   ハリハリ漬け 食塩3.2→2.7g/人・土佐酢あえ 1.7→1.2g/人（カルシウムも僅かに下がる。仮の量0.5gの
+//   塩に含まれていた分）。excluded に 塩(prep) が増える。ピン留めは scripts/tests/nutrition.mjs の MT節。
 const updateMode = process.argv.includes('--update')
 if (updateMode) {
   await writeFile(SNAPSHOT_PATH, JSON.stringify(snapshot, null, 2) + '\n')

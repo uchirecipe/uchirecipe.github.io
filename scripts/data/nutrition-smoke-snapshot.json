@@ -1052,12 +1052,14 @@
       "proteinG": 3.1,
       "fatG": 0.2,
       "carbG": 19.9,
-      "saltG": 3.2,
+      "saltG": 2.7,
       "fiberG": 3.5,
       "ironMg": 0.9,
       "calciumMg": 87
     },
-    "excluded": []
+    "excluded": [
+      "塩(prep)"
+    ]
   },
   "starter:肉巻きおにぎり": {
     "servings": 2,
@@ -1110,12 +1112,13 @@
       "proteinG": 4.7,
       "fatG": 0.2,
       "carbG": 7.4,
-      "saltG": 1.7,
+      "saltG": 1.2,
       "fiberG": 0.6,
       "ironMg": 0.3,
       "calciumMg": 29
     },
     "excluded": [
+      "塩(prep)",
       "青じそ(amount)"
     ]
   },

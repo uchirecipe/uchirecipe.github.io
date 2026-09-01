@@ -61,8 +61,8 @@ export const NUTRITION_DATA: NutritionData = {
   "source": "日本食品標準成分表（八訂）増補2023年（文部科学省）",
   "sourcePage": "https://www.mext.go.jp/a_menu/syokuhinseibun/mext_00001.html",
   "sourceFile": "https://www.mext.go.jp/content/20260327-mxt_kagsei-mext-000029402_02.xlsx",
-  "generatedAt": "2026-08-25",
-  "dbVersion": 14,
+  "generatedAt": "2026-09-01",
+  "dbVersion": 15,
   "foods": [
     {
       "id": "06153",
@@ -1345,6 +1345,29 @@ export const NUTRITION_DATA: NutritionData = {
       "unitGrams": {
         "本": 30,
         "パック": 90
+      }
+    },
+    {
+      "id": "08031",
+      "label": "マッシュルーム",
+      "mextName": "マッシュルーム 生",
+      "aliases": [
+        "マッシュルーム",
+        "ホワイトマッシュルーム"
+      ],
+      "per100g": {
+        "kcal": 15,
+        "proteinG": 2.9,
+        "fatG": 0.3,
+        "carbG": 2.1,
+        "saltG": 0,
+        "fiberG": 2,
+        "ironMg": 0.3,
+        "calciumMg": 3
+      },
+      "unitGrams": {
+        "個": 10,
+        "パック": 100
       }
     },
     {

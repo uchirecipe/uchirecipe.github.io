@@ -1622,6 +1622,9 @@ import { readFileSync } from 'node:fs'
    * 直す前の実測では 430件がのべで当たり、直したあとは 435件（+5）。
    * 増えたのは「ひき肉」「挽き肉」「挽肉」の3語に合いびき肉が1件ずつ（+3）と、
    * 辞書に足したかな書きの受け皿2語ぶん（+2）だけで、**別の食材が当たるようになった語は0件**。
+   * 2026-09-01 便MT: マッシュルーム(08031)追加で 713語→714語・435→436件（+1）。
+   * 増えたのは新しい別名「ホワイトマッシュルーム」が価格マスタの「マッシュルーム」に
+   * 当たる1件だけで、別の食材が当たるようになった語は0件（実測）。
    */
   const { NUTRITION_DATA } = await import('../../src/logic/nutritionData.ts')
   const { starterDefs } = await import('../../src/db/starters.ts')
@@ -1644,8 +1647,8 @@ import { readFileSync } from 'node:fs'
     ],
   )
   eq(
-    'MJ-1 語彙713語で当たる行がのべ435件を超えない（絞り込みが緩くなっていない）',
-    words.reduce((sum, w) => sum + filterMaster(w).length, 0) <= 435,
+    'MJ-1 語彙714語で当たる行がのべ436件を超えない（絞り込みが緩くなっていない）',
+    words.reduce((sum, w) => sum + filterMaster(w).length, 0) <= 436,
     true,
   )
 
