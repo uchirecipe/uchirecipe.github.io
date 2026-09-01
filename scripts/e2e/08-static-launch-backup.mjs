@@ -1291,6 +1291,10 @@ import './_shared.mjs'
               ...recipe,
               isFavorite: true,
               cookedLogs: [{ date: '2026-07-19', note: 'E2Eマージ確認の記録' }],
+              // 人数分未確認の印（Recipe.servingsUnread・2026-09-01 便MU）。オーナーの31品は
+              // バックアップ読み込みで入っており、この印がファイル往復で失われると
+              // 「人数分は未確認」の注意ごと消えるので、書き出し→復元の両方で実測する
+              servingsUnread: true,
             })
           }
           tx2.oncomplete = () => resolve(title)
@@ -1328,6 +1332,14 @@ import './_shared.mjs'
       check(
         'BACKUP-01 書き出しJSONに追加した在庫品が含まれる',
         (exported.pantryItems ?? []).some((p) => p.name === 'E2Eバックアップ確認在庫'),
+      )
+      // 人数分未確認の印（2026-09-01 便MU）が書き出しで落ちないこと。
+      // BackupRecipe は Omit+spread で Recipe を丸ごと持ち回る形＝列挙漏れで
+      // この印だけ落ちる書き方に変わったら、ここが赤になる
+      check(
+        'BACKUP-01 書き出しJSONに人数分未確認の印(servingsUnread)が含まれる',
+        (exported.recipes ?? []).some((r) => r.title === setup.recipeTitle && r.servingsUnread === true),
+        `recipe=${JSON.stringify((exported.recipes ?? []).find((r) => r.title === setup.recipeTitle)?.servingsUnread)}`,
       )
       check(
         'BACKUP-01 書き出しJSONの新規5テーブルはid(自動採番)を含まない(復元先で振り直すため)',
@@ -1406,9 +1418,19 @@ import './_shared.mjs'
           req2.onsuccess = () => resolve(req2.result)
           req2.onerror = () => reject(req2.error)
         })
-        const [mealPlans, pantryItems] = await Promise.all([getAll('mealPlans'), getAll('pantryItems')])
+        const [mealPlans, pantryItems, recipes] = await Promise.all([
+          getAll('mealPlans'),
+          getAll('pantryItems'),
+          getAll('recipes'),
+        ])
         idb.close()
-        return { mealPlans, pantryItems, settings }
+        return {
+          mealPlans,
+          pantryItems,
+          settings,
+          // 人数分未確認の印の復元確認用（2026-09-01 便MU）。写真(Blob)は返せないので印だけ抜く
+          recipeFlags: recipes.map((r) => ({ title: r.title, servingsUnread: r.servingsUnread })),
+        }
       })
       check(
         'BACKUP-01 週献立の割当(2026-07-20夕食)が復元される',
@@ -1419,6 +1441,14 @@ import './_shared.mjs'
         'BACKUP-01 在庫の追加品が復元される',
         restored.pantryItems.some((p) => p.name === 'E2Eバックアップ確認在庫'),
         `pantryItems=${JSON.stringify(restored.pantryItems)}`,
+      )
+      // オーナーの31品と同じ経路（バックアップ読み込み）で、人数分未確認の印が
+      // レシピ本体に付いたまま戻ること（2026-09-01 便MU）。この印が消えると
+      // レシピ詳細の「人数分は未確認」の注意も出ない
+      check(
+        'BACKUP-01 人数分未確認の印(servingsUnread)が復元される',
+        restored.recipeFlags.some((r) => r.title === setup.recipeTitle && r.servingsUnread === true),
+        `flag=${JSON.stringify(restored.recipeFlags.find((r) => r.title === setup.recipeTitle))}`,
       )
       // CODEBACKUP-01(修正1・最重要): 「ブラウザデータ消去→復元」を再現する本命シナリオ。
       // まっさらな(購入していない)別プロファイルへ「読み込む(置き換え)」で復元するだけで、

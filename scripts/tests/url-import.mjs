@@ -13,6 +13,7 @@ import { parseAmountNumber, computeRecipeNutrition } from '../../src/logic/nutri
 import {
   extractRecipeFromHtml,
   extractServings,
+  extractServingsFromHtmlBody,
   parseIso8601DurationToMinutes,
   extractImageUrl,
   splitIngredientAmount,
@@ -37,9 +38,9 @@ eq('servings: 全角「２人分」', extractServings('２人分'), 2)
 eq('servings: 「4 servings」', extractServings('4 servings'), 4)
 eq('servings: 「4(servings)」', extractServings('4(servings)'), 4)
 eq('servings: 数字のみ「2」', extractServings('2'), 2)
-// 「人分/人前」が無い裸の範囲(rakutenレシピの実例「2~3」相当)には人分直前ルールが使えないため、
-// 単純に最初の数字(範囲の下限)を採用する(「人分」付きの範囲とは挙動が異なる。次のケースと対比)
-eq('servings: 「人分」なし裸の範囲「2〜3」は最初の数字(下限)を採用', extractServings('2〜3'), 2)
+// 裸の範囲(rakutenレシピの実例「2~3」相当)も「2〜3人分」と同じく範囲の後ろ側を採用する
+// (2026-09-01 便MU。旧実装は裸の範囲だけ前側の2を返し、同じ範囲表記で挙動が逆だった)
+eq('servings: 「人分」なし裸の範囲「2〜3」も後ろ側を採用(人分付きの範囲とそろえる)', extractServings('2〜3'), 3)
 eq('servings: 範囲「3〜4人分」は人分直前の数字を採用', extractServings('3〜4人分'), 4)
 eq('servings: 数字なし「その他」はundefined(必須項目にしない)', extractServings('その他'), undefined)
 eq('servings: 配列なら先頭要素', extractServings(['4人分', '4 servings']), 4)
@@ -52,10 +53,12 @@ eq('servings: JSON数値そのもの(macaroni実測)', extractServings(2), 2)
 // フォールバック対象から除外し、他に使える数字が無ければundefinedを返す
 eq('servings: 重量表記(600g)を人数と誤認しない', extractServings('鶏もも肉600gで作る分量'), undefined)
 eq('servings: 「26個分」を人数と誤認しない', extractServings('26個分'), undefined)
+// 2026-09-01 便MU: 許可リストへの反転で「単位を飛ばして残った裸の数字を拾う」動きは廃止した。
+// 「600g / 3」の3は人数と断定できない(3枚・3回の可能性がある)ので、読めなかった扱いにする
 eq(
-  'servings: 重量の数字(先頭)を飛ばして後続の裸の数字を拾う',
+  'servings: 単位を飛ばして残った裸の数字(600g / 3)はもう人数とみなさない',
   extractServings('600g / 3'),
-  3,
+  undefined,
 )
 
 // ---- parseIso8601DurationToMinutes: 分表記・秒表記の両対応(docs/39 DELISH KITCHENの秒表記対策) ----
@@ -776,10 +779,12 @@ eq('IT②: 「天板1枚分」も読まない(既存の枚)', extractServings('�
 // 6人分になっていた
 eq('IT②: 「シェル型6〜9個分」を人数と読まない', extractServings('シェル型6〜9個分'), undefined)
 eq('IT②: 「200〜250g」も読まない', extractServings('200〜250g'), undefined)
-// 既存の挙動は変えない(人数として読めるものは読む)
+// 人数として読めるものは読む
 eq('IT②: 「4人分」はこれまでどおり4', extractServings('4人分'), 4)
-eq('IT②: 単位なしの範囲「2〜3」はこれまでどおり2', extractServings('2〜3'), 2)
-eq('IT②: 「600g / 3」はこれまでどおり3', extractServings('600g / 3'), 3)
+// 2026-09-01 便MU: 裸の範囲は「2〜3人分」とそろえて後ろ側、「単位を飛ばして残った数字」は
+// 人数とみなさない(上の servings: の節と同じ変更。ここは便ITの回帰なので二重に固定しておく)
+eq('IT②: 単位なしの範囲「2〜3」は人分付きの範囲とそろえて3', extractServings('2〜3'), 3)
+eq('IT②: 「600g / 3」は人数と断定できないのでundefined', extractServings('600g / 3'), undefined)
 
 // ---- ⑥(便IT): 手順に残る「**1**」(NHK実測) ----
 // みんなのきょうの料理は、前の手順を指す番号を JSON-LD 側で「**1**」と書いている。
@@ -888,3 +893,162 @@ eq('IT⑥: 3桁以上の数字は強調の印とみなさない', stripImportedM
 }
 
 
+// ---------- MU①: 人数の読み取りを許可リストに反転（2026-09-01 便MU） ----------
+// 旧: 「採ってはいけない単位」の拒否リスト（便IT）。列挙漏れがそのまま人数の誤読になり、
+// 「17センチ型1台分」→17人分のように、オーナー報告と同じバグが表記違いで生き残っていた。
+// 新: 「人数と断定できる形」だけを採る。列挙漏れは「読めなかった」（undefined）に倒れる。
+// 下の80通りは2026-08-31調査Bの実測入力そのまま（便MUが再実測して同じ結果を確認）。
+// 期待値の読み方: undefined＝人数と断定できない（誤読しない）／数値＝これまでどおり読める。
+{
+  const cases = [
+    // 誤読が残っていた形（旧実装の実測値をコメントで併記）→ すべてundefinedになる
+    ['17センチ型1台分', undefined], // 旧:17（カタカナのセンチが拒否リストに無い）
+    ['17ｃｍ型1台分', undefined], // 旧:17（全角ｃｍが拒否リストに無い）
+    ['18号型1台分', undefined], // 旧:18（ケーキ型の号数が拒否リストに無い）
+    ['5号（15cm）1台分', undefined], // 旧:5
+    ['16.5cm型1台', undefined], // 旧:16（小数点で単位判定に届かない）
+    ['15×15cm 1台', undefined], // 旧:15（×で単位判定に届かない）
+    ['1斤分', undefined], // 旧:1（パンの斤）
+    ['1斤', undefined], // 旧:1
+    ['1ホール分', undefined], // 旧:1
+    ['2ホール', undefined], // 旧:2
+    ['ホール1台分', undefined],
+    ['1回分', undefined], // 旧:1
+    ['2回分', undefined], // 旧:2
+    ['たこ焼き器2回分', undefined], // 旧:2
+    ['1リットル分', undefined], // 旧:1
+    ['1鍋分', undefined], // 旧:1
+    ['1ボウル分', undefined], // 旧:1
+    ['1瓶分', undefined], // 旧:1
+    ['2カップ分', undefined], // 旧:2
+    ['20コ', undefined], // 旧:20（カタカナのコ）
+    ['マフィン6コ分', undefined], // 旧:6
+    ['12 cookies', undefined], // 旧:12（英語表記）
+    ['8 slices', undefined], // 旧:8
+    ['24 pieces', undefined], // 旧:24
+    ['makes 12', undefined], // 旧:12
+    ['1 cake', undefined], // 旧:1
+    ['1 loaf', undefined],
+    ['PT30M', undefined], // 旧:30（recipeYieldに別の値が入っただけで30人分になっていた）
+    ['どんぶり2杯分', undefined],
+    ['クッキー約30枚分', undefined],
+    ['2合分', undefined],
+    ['3合分', undefined],
+    ['1L分', undefined],
+    ['約600g分', undefined],
+    ['約17cm', undefined],
+    ['直径17cm', undefined],
+    ['17cm', undefined],
+    ['15cm型1台', undefined],
+    ['1台分', undefined],
+    ['直径15cmの丸型1台分', undefined],
+    ['直径18cm丸型（1台分）', undefined],
+    ['直径21cmのタルト型1台分', undefined],
+    ['20cmパウンド型1本分', undefined],
+    ['直径17cmのシフォン型1台分', undefined],
+    ['18cm×18cmの容器1台分', undefined],
+    ['天板1枚分', undefined],
+    ['マフィン型6個分', undefined],
+    ['6個分', undefined],
+    ['2本分', undefined],
+    ['8～10個分', undefined],
+    ['シェル型6〜9個分', undefined],
+    ['作りやすい分量', undefined],
+    ['その他', undefined],
+    // 挙動が意図的に変わる2点（司令部裁定）
+    ['2〜3', 3], // 旧:2。「2〜3人分」が3を返すのと同じ「範囲は後ろ側」にそろえる
+    ['4皿', undefined], // 旧:4。「分」の付かない裸の助数詞は人数と断定できない
+    // これまで正しく読めていた形は全部そのまま読める（取りこぼしゼロ）
+    ['2人分', 2],
+    ['４人分', 4],
+    ['2 servings', 2],
+    ['4(servings)', 4],
+    ['約4人分', 4],
+    ['2〜3人分', 3],
+    ['3～4人前', 4],
+    ['1人前', 1],
+    ['4人', 4],
+    ['たっぷり2人分', 2],
+    ['5〜6人分', 6],
+    ['3-4人分', 4],
+    ['【2人分】', 2],
+    ['2人前後', 2],
+    ['2人分×2回', 2],
+    ['1人分×3回', 1],
+    ['2人分(約350g)', 2],
+    ['4人分（1人分あたり約200kcal）', 4],
+    ['4人分(2個ずつ)', 4],
+    ['2〜3人分（作りやすい分量）', 3],
+    ['2人分〜3人分', 2], // 旧実装と同じ（最初の「2人分」を読む）
+    ['2食分', 2], // 「◯食分」は1食=1人の言い換えとして読む
+    ['2皿分', 2], // 「分」が付けば読む（裸の「4皿」との対比）
+    ['2膳分', 2],
+    // 小さく出る側の既知の限界（旧実装と同じ値。大きく出る誤読ではないので許容）
+    ['大人2人+子ども2人', 2],
+  ]
+  eq('MU①: 検査の入力が調査Bの80通りと同じ数ある', cases.length, 80)
+  for (const [input, expected] of cases) {
+    eq(`MU①: 「${input}」→ ${expected === undefined ? '読めない(undefined)' : expected}`, extractServings(input), expected)
+  }
+}
+
+// ---------- MU②: JSON-LDに人数が無いとき、本文の「材料（◯人分）」を読む ----------
+// NHKきょうの料理はJSON-LDにrecipeYieldが無く、本文が「材料</h3>…<p>(4人分)</p>」の形
+// （ロールキャベツの実ページをそのまま縮めた形。2026-08-31調査B・便MUの両方で実測）。
+// 同じページの上のほうに栄養の注記「＊1人分」があるので、「材料」見出しの直後の括弧だけを読む。
+{
+  // NHK実ページの形: 見出しと括弧の間に閉じタグ・改行だけが挟まる
+  const nhkShape =
+    '<div class="hd-ttl">\n<h3 class="ttl">材料</h3>\n</div>\n</div>\n<p>(4人分)</p>\n<div id="ingredients_list">'
+  eq('MU②: NHKの形「材料</h3>…<p>(4人分)</p>」から4を読む', extractServingsFromHtmlBody(nhkShape), 4)
+  eq('MU②: 全角括弧「材料（２人分）」も読む', extractServingsFromHtmlBody('<h2>材料（２人分）</h2>'), 2)
+  eq(
+    'MU②: ハヤシライスの形「材料…(つくりやすい分量)」は読めない（人数はページに存在しない）',
+    extractServingsFromHtmlBody('<h3 class="ttl">材料</h3>\n</div>\n</div>\n<p>(つくりやすい分量)</p>'),
+    undefined,
+  )
+  eq(
+    'MU②: 「材料」に添っていない「＊1人分」（栄養の注記）は拾わない',
+    extractServingsFromHtmlBody('<p>エネルギー／360.0 kcal</p><p>＊1人分</p><h3>材料</h3>'),
+    undefined,
+  )
+  eq(
+    'MU②: 「材料」と括弧の間に別の文字があるものは拾わない（離れた数字を人数にしない）',
+    extractServingsFromHtmlBody('<p>材料はこちら。ほかのレシピ（2人分）も見る</p>'),
+    undefined,
+  )
+  eq(
+    'MU②: 最初の「材料（…）」が読めなければ、後ろは探さない（別のレシピの人数を拾わない）',
+    extractServingsFromHtmlBody('<h3>材料（作りやすい分量）</h3><h3>材料（2人分）</h3>'),
+    undefined,
+  )
+
+  // 取り込み全体（extractRecipeFromHtml）とのつなぎ込み
+  const jsonLdWithoutYield = JSON.stringify({
+    '@type': 'Recipe',
+    name: 'ロールキャベツ',
+    recipeIngredient: ['キャベツ 1個', '合いびき肉 400g'],
+    recipeInstructions: ['キャベツをゆでる。', '肉だねを包んで煮る。'],
+  })
+  const bodyWithServings =
+    '<h3 class="ttl">材料</h3>\n</div>\n</div>\n<p>(4人分)</p>\n<div id="ingredients_list"></div>'
+  const html1 = `<!doctype html><html><head><script type="application/ld+json">${jsonLdWithoutYield}</script></head><body>${bodyWithServings}</body></html>`
+  eq('MU②: JSON-LDに人数が無ければ本文の「材料（4人分）」で補う', extractRecipeFromHtml(html1, 'https://example.com/roll').servings, 4)
+
+  const jsonLdWithYield = JSON.stringify({
+    '@type': 'Recipe',
+    name: 'ロールキャベツ',
+    recipeYield: '2人分',
+    recipeIngredient: ['キャベツ 1個'],
+    recipeInstructions: ['煮る。'],
+  })
+  const html2 = `<!doctype html><html><head><script type="application/ld+json">${jsonLdWithYield}</script></head><body>${bodyWithServings}</body></html>`
+  eq('MU②: JSON-LDで人数が読めたら本文では上書きしない', extractRecipeFromHtml(html2, 'https://example.com/roll').servings, 2)
+
+  const html3 = `<!doctype html><html><head><script type="application/ld+json">${jsonLdWithoutYield}</script></head><body><h3>材料</h3><p>(つくりやすい分量)</p></body></html>`
+  eq(
+    'MU②: JSON-LDにも本文にも人数が無ければservingsキー自体を持たない（勝手に埋めない）',
+    'servings' in extractRecipeFromHtml(html3, 'https://example.com/hayashi'),
+    false,
+  )
+}

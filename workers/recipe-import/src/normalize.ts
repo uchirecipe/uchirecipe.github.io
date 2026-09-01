@@ -384,42 +384,59 @@ function extractTitle(name: unknown): string | undefined {
   return stripTitleDecoration(cleaned) || undefined
 }
 
-// 分量として扱ってはいけない単位(重量・容量・個数の「◯個分」等)が数字の直後に続く場合、
-// その数字は「人数」ではなく食材の分量・出来上がり数なので、人数フォールバックの対象から除外する
-// (docs/39再監査: クックパッド「鶏もも肉600gで作る分量」→600人分、DELISH KITCHEN「26個分」→26人分
-//  のような誤爆が実際に発生することを実測で確認)。
-// 2026-08-21 便IT: **型の大きさ(cm)と「1台分」**を追加。DELISH KITCHEN「直径17cmのシフォン型1台分」
-// →17人分、macaroni「18cm×18cmの容器1台分」→18人分になり、1食あたりの原価が約8円という
-// 明らかにおかしい数字が出ていた(テスト用データ作成時に実測)。
-const NON_SERVINGS_UNIT_AFTER_NUMBER =
-  /^\s*(?:g|kg|mg|ml|cc|l|cm|mm|㎝|㎜|個|枚|本|切れ|缶|袋|束|かけ|尾|玉|株|合|片|箱|杯|節|台)/i
-
-// 「6〜9個分」のように範囲で書かれていると、範囲の先頭の数字の直後は単位ではなく範囲の記号なので
-// 単位の判定に届かない(cotta「シェル型6〜9個分」→6人分になっていた)。単位を見る前に範囲の
-// 後ろ側(「〜9」)を読み飛ばす。
-const RANGE_TO_NEXT_NUMBER = /^\s*[〜~～ー−–—-]\s*\d+/
+// 人数の読み取りは「許可リスト」方式(2026-09-01 便MU)。
+// 旧: 「採ってはいけない単位」を列挙し、それ以外の数字を人数とみなす拒否リスト方式
+// (docs/39再監査→2026-08-21 便ITで型のcm・台を追加)。列挙漏れがそのまま人数の誤読になり、
+// 「17センチ型1台分」(カタカナ)・「17ｃｍ型1台分」(全角)・「18号型1台分」(ケーキの号数)・
+// 「16.5cm型1台」(小数)・「1ホール分」「1斤」「2回分」「PT30M」「12 cookies」など18種の誤読が
+// 実測で残っていた(2026-08-31 調査Bが80通りで実測。便MUも同じ80通りで再実測して確認)。
+// 新: 「人数と断定できる形」だけを採り、それ以外はすべて undefined。
+// 列挙漏れは「誤読」ではなく「読めなかった」に倒れる=原理的に嘘の人数が出ない。
+// 読めなかったことはapp側が Recipe.servingsUnread で持ち越し、画面で「人数分は未確認」と知らせる。
+//
+// ① 数字の直後(空白・範囲・開き括弧をはさんでよい)に「人の単位」が来るものだけを信頼する。
+//    「◯食分」「◯皿分」「◯膳分」は1食=1人の言い換えとして採る。「分」の付かない裸の助数詞
+//    (「4皿」「20コ」)は人数と断定できないので採らない
+const SERVINGS_WITH_UNIT =
+  /(\d+)\s*(?:[〜~～ー−–—-]\s*(\d+)\s*)?[（(【「]?\s*(?:人\s*(?:分|前)?|[食皿膳]分|servings?|portions?|persons?|people)/i
+// ② ①が空振りのときだけ。文字列が数字(と範囲記号・約・括弧・空白)**だけ**で出来ているときに限り、
+//    その数字を人数とみなす(recipeYieldに素の「2」や「2〜3」だけを入れるサイト向け。macaroni実測)。
+//    文字が1つでも混ざっていたら(「PT30M」「600g / 3」)人数と断定できないので採らない
+const BARE_NUMBER_ONLY =
+  /^[\s　約()（）【】]*(\d+)(?:\s*[〜~～ー−–—-]\s*(\d+))?[\s　()（）【】]*$/
 
 /**
  * recipeYield("2 servings" "4人分" "２人分" "4(servings)" "2〜3" "その他"等)から人数(整数)を取り出す。
- * 「3〜4人分」のような範囲は、app側 src/logic/parseRecipeText.ts の SERVINGS 正規表現と挙動を揃え、
- * 「人分/人前」の直前の数字(=範囲の後ろ側)を採用する。数字が全く無ければ undefined(必須項目にしない)。
+ * 人数と断定できる形だけを採る(上の許可リスト)。読めなければ undefined(必須項目にしない)。
+ * 範囲は後ろ側で統一する: 「3〜4人分」→4(app側 src/logic/parseRecipeText.ts の SERVINGS と同じ)、
+ * 裸の「2〜3」も→3(旧実装は裸の範囲だけ前側の2を返し、同じ範囲表記で挙動が逆だった。
+ * 2026-09-01 便MUでそろえた)。
  */
 export function extractServings(recipeYield: unknown): number | undefined {
   const raw = firstString(recipeYield)
   if (!raw) return undefined
   const normalized = normalizeDigits(raw)
-  const withServings = normalized.match(/(\d+)\s*人\s*(?:分|前)/)
-  if (withServings) return Number.parseInt(withServings[1], 10)
-  // 「人分/人前」の明示が無い場合だけ、最初に見つかった数字を人数とみなす。
-  // ただし直後に重量・容量・個数単位が続く数字(600g・26個分等)は人数ではないので飛ばす。
-  for (const m of normalized.matchAll(/\d+/g)) {
-    let after = normalized.slice((m.index ?? 0) + m[0].length)
-    const range = after.match(RANGE_TO_NEXT_NUMBER)
-    if (range) after = after.slice(range[0].length)
-    if (NON_SERVINGS_UNIT_AFTER_NUMBER.test(after)) continue
-    return Number.parseInt(m[0], 10)
-  }
-  return undefined
+  const m = normalized.match(SERVINGS_WITH_UNIT) ?? normalized.match(BARE_NUMBER_ONLY)
+  if (!m) return undefined
+  return Number.parseInt(m[2] ?? m[1], 10)
+}
+
+/**
+ * JSON-LDから人数が取れなかったページ向けの補完(2026-09-01 便MU)。
+ * HTML本文の「材料」見出し直後の括弧書き(「材料（4人分）」)だけを読む。
+ * NHKきょうの料理はJSON-LDにrecipeYieldが無く、本文が「材料</h3>…<p>(4人分)</p>」の形
+ * (ロールキャベツの実ページで実測。人数が入らず既定2人分のまま保存され、1食あたりの
+ * 原価・栄養が実際の2倍に出ていた)。
+ * 「材料」と括弧の間はタグと空白だけを許す=同じページの「＊1人分」(栄養の注記)や
+ * 離れた場所の数字を拾わない。最初に見つかった「材料（…）」だけを見て、中身が人数と
+ * 断定できなければ undefined(ハヤシライスの「材料 (つくりやすい分量)」は読めない。実測どおり)。
+ */
+const MATERIAL_HEADING_BRACKET = /材料(?:[\s　]|<[^>]*>)*[（(]([^（()）<>]{1,20})[）)]/
+
+export function extractServingsFromHtmlBody(html: string): number | undefined {
+  const m = html.match(MATERIAL_HEADING_BRACKET)
+  if (!m) return undefined
+  return extractServings(decodeHtmlEntities(m[1]))
 }
 
 /**
@@ -779,10 +796,17 @@ export function normalizeInstructions(recipeInstructions: unknown): string[] {
  * 結果は1件も変わらない。
  */
 export function extractRecipeFromHtml(html: string, sourceUrl: string): NormalizedRecipe | undefined {
-  return (
+  const recipe =
     buildNormalizedRecipe(parseRecipeCandidates(html), sourceUrl) ??
     buildNormalizedRecipe(parseLooseRecipeCandidates(html), sourceUrl)
-  )
+  if (!recipe) return undefined
+  // JSON-LDのrecipeYieldから人数が取れなかったときだけ、本文の「材料（◯人分）」を見る
+  // (2026-09-01 便MU)。取れているときは触らない=本文の別の数字でJSON-LDの明示を上書きしない
+  if (recipe.servings === undefined) {
+    const bodyServings = extractServingsFromHtmlBody(html)
+    if (bodyServings !== undefined) return { ...recipe, servings: bodyServings }
+  }
+  return recipe
 }
 
 /** Recipe候補の並びから、うちレシピの取り込み用の形を1件作る(揃っていなければ undefined) */

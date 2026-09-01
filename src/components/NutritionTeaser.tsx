@@ -58,9 +58,10 @@ export default function NutritionTeaser({
   defaultExpanded = false,
 }: {
   isPro: boolean
-  /** レシピ本体（実計算に使う。ingredients/servings/steps と、1食に分けない品の印だけ参照。
-   * steps は「食べずに捨てる塩」（ゆで湯用/下ごしらえ用）の判定に使う（2026-09-01 便MT） */
-  recipe: Pick<Recipe, 'ingredients' | 'servings' | 'wholeBatch' | 'steps'>
+  /** レシピ本体（実計算に使う。ingredients/servings/steps と、1食に分けない品・人数分未確認の印だけ参照。
+   * steps は「食べずに捨てる塩」（ゆで湯用/下ごしらえ用）の判定に使う（2026-09-01 便MT）。
+   * servingsUnread は「人数分は未確認」の注意（2026-09-01 便MU） */
+  recipe: Pick<Recipe, 'ingredients' | 'servings' | 'servingsUnread' | 'wholeBatch' | 'steps'>
   /** 詳細画面で現在表示中の人数（全量の表示に使う）。未指定ならレシピ登録時の人数 */
   servings?: number
   /**
@@ -176,6 +177,19 @@ export default function NutritionTeaser({
           </span>
           <ChevronIcon size={20} className="shrink-0 text-ink-muted" aria-hidden />
         </button>
+
+        {/* 人数分が取り込み元から読み取れないまま保存された品（Recipe.servingsUnread・2026-09-01 便MU）。
+            上の要約行の「1食あたり」は登録の人数分で割った値なので、その人数が仮なら
+            数字もその倍率でずれうる。折りたたみを開かなくても読める位置（カードの中・要約の直下）に
+            出す。文言は原価のそば（レシピ詳細の金額の下）と同じ1つだけを使う */}
+        {recipe.servingsUnread === true && (
+          <p
+            data-testid="nutrition-servings-unread"
+            className="px-[var(--space-md)] pb-[var(--space-md)] text-sm font-bold text-warning"
+          >
+            {ja.detail.servingsUnreadNote.replace('{n}', String(recipe.servings))}
+          </p>
+        )}
 
         {/* 8項目のお試しの入口（2026-08-08 便DZ）。
             2026-08-21 便IN: **折りたたみの外**へ出した。オーナーの原則

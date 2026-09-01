@@ -860,6 +860,16 @@ export default function RecipeDetailPage() {
           </p>
         )}
 
+        {/* 人数分が取り込み元から読み取れないまま保存された品（Recipe.servingsUnread・2026-09-01 便MU）。
+            金額は登録の人数分で割っているので、その人数が仮なら1食あたりの数字もその倍率でずれうる。
+            金額のすぐ下に置く＝どの数字の話かが場所で分かる（上の価格なし注意と同じ考え方）。
+            金額が出ていないレシピでは、栄養カード側の同じ注意（NutritionTeaser）だけが出る */}
+        {totalPrice > 0 && recipe.servingsUnread === true && (
+          <p data-testid="detail-servings-unread" className="mt-0.5 text-sm font-bold text-warning">
+            {ja.detail.servingsUnreadNote.replace('{n}', String(recipe.servings))}
+          </p>
+        )}
+
         {/* タグ */}
         {recipe.tags.length > 0 && (
           <div className="mt-2 flex flex-wrap gap-1">

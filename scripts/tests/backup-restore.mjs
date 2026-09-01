@@ -1107,3 +1107,54 @@ import { readFileSync } from 'node:fs'
   eq('GV-3 素のダイアログのときより読む量が減っている', newLength < OLD_CONFIRM_LENGTH, true)
 }
 
+
+// ---------- MU③: 人数分未確認の印(Recipe.servingsUnread)はバックアップ経路で失われない（2026-09-01 便MU） ----------
+// バックアップの書き出し・読み込みは Recipe を丸ごと持ち回る形（BackupRecipe が Omit+spread）なので、
+// 印は自動で往復する（実ファイルの往復は scripts/e2e の BACKUP-01 が実測）。
+// ここでは「フィールドを列挙して組み立て直す」経路＝列挙漏れで印が落ちる形だけを固定する。
+{
+  const { buildNumberedRecipeCopy, isSameRecipeBody } = await import('../../src/logic/backup.ts')
+  const flagged = {
+    id: 7,
+    uid: 'file-uid-mu',
+    title: 'ロールキャベツ',
+    servings: 2,
+    servingsUnread: true,
+    cookMinutes: 40,
+    effortLevel: 'normal',
+    tags: [],
+    ingredients: [{ name: 'キャベツ', amount: '1', unit: '個' }],
+    steps: [{ text: '煮る' }],
+    isFavorite: true,
+    cookedLogs: [{ date: '2026-08-30', note: '' }],
+    searchWords: [],
+    createdAt: 1,
+    updatedAt: 2,
+  }
+  // 「番号を付けて入れる」（同じ料理名の別内容をmergeで足す唯一の組み立て直し経路）で印が残る
+  const copy = buildNumberedRecipeCopy(flagged, ['ロールキャベツ'], new Set())
+  eq('MU③: 番号を付けて入れる複製にも「人数分未確認」の印が残る', copy.servingsUnread, true)
+  eq('MU③: 複製の人数分そのものも元のまま', copy.servings, 2)
+
+  // isSameRecipeBody は印の有無**だけ**の違いを「別の中身」と言わない（意図した除外）。
+  // 端末側で＋−を押して確認済みにした品を、印付きの古いファイルを読み直しただけで
+  // 「番号を付けて入れますか」と聞かれないため（人数の数字自体が違えば従来どおり別の中身になる）
+  const bodyBase = {
+    servings: 2,
+    cookMinutes: 40,
+    effortLevel: 'normal',
+    tags: [],
+    ingredients: [{ name: 'キャベツ', amount: '1', unit: '個' }],
+    steps: [{ text: '煮る' }],
+  }
+  eq(
+    'MU③: 印の有無だけが違う2品は「同じ中身」（複製を勧めない）',
+    isSameRecipeBody({ ...bodyBase, servingsUnread: true }, { ...bodyBase }),
+    true,
+  )
+  eq(
+    'MU③: 人数の数字が違えば従来どおり「別の中身」',
+    isSameRecipeBody({ ...bodyBase, servings: 4 }, { ...bodyBase }),
+    false,
+  )
+}
