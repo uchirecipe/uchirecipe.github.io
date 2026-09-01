@@ -489,6 +489,104 @@ import './_shared.mjs'
         'KFSERV-02 人数分が書いてある文章では印を出さない（毎回出る注意にしない）',
         (await kfPage.locator('[data-testid="servings-not-read"]').count()) === 0,
       )
+
+      // ⑤ 読み取れないまま保存すると印がレシピ本体に残り、詳細の栄養・原価のそばに
+      //    「人数分は未確認」が出る（2026-09-01 便MU・Recipe.servingsUnread）。
+      //    便KFの印は画面の状態だけで、保存した瞬間に「2人分と書いてあるレシピ」と
+      //    見分けが付かなくなっていた（テスト用データ31品の実測で8品）。
+      //    ＋−で確認して保存し直すと、印も注意も消える
+      currentCheck = 'MUSERV-03'
+      await kfPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await kfPage.waitForTimeout(600)
+      await kfPage.goto(`${BASE}/#/recipes/new`, { waitUntil: 'networkidle' })
+      await kfPage.waitForTimeout(600)
+      const muPasteBox = kfPage.locator(`textarea[placeholder="${ja.paste.placeholder}"]`)
+      if ((await muPasteBox.count()) === 0) {
+        await kfPage.getByText(ja.paste.open).click()
+        await kfPage.waitForTimeout(300)
+      }
+      await muPasteBox.fill(
+        'E2E人数分未確認の保存レシピ\n\n材料\n・切り干し大根　40g\n・しょうゆ　大さじ3\n\n作り方\n1. 戻す\n2. 煮る',
+      )
+      await kfPage.getByRole('button', { name: ja.paste.apply }).click()
+      await kfPage.waitForTimeout(500)
+      check(
+        'MUSERV-03 前提: 人数分を読み取れなかった印が出ている',
+        (await kfPage.locator('[data-testid="servings-not-read"]').count()) === 1,
+      )
+      // 印が出たまま保存する
+      await kfPage.getByRole('button', { name: ja.form.save }).click()
+      await kfPage.waitForTimeout(900)
+      const muRecipeId = Number((kfPage.url().match(/#\/recipes\/(\d+)/) ?? [])[1])
+      check(
+        'MUSERV-03 保存できて詳細画面に移った',
+        Number.isInteger(muRecipeId) && muRecipeId > 0,
+        `url=${kfPage.url()}`,
+      )
+      // 保存された品に印(servingsUnread)が入っている（IndexedDBの実測）
+      const muReadSaved = async () =>
+        await kfPage.evaluate(async (id) => {
+          const req = indexedDB.open('uchi-recipe')
+          const idb = await new Promise((resolve, reject) => {
+            req.onsuccess = () => resolve(req.result)
+            req.onerror = () => reject(req.error)
+          })
+          const recipe = await new Promise((resolve, reject) => {
+            const r = idb.transaction('recipes', 'readonly').objectStore('recipes').get(id)
+            r.onsuccess = () => resolve(r.result)
+            r.onerror = () => reject(r.error)
+          })
+          idb.close()
+          return { servings: recipe?.servings, servingsUnread: recipe?.servingsUnread }
+        }, muRecipeId)
+      const muSaved = await muReadSaved()
+      check(
+        'MUSERV-03 保存した品に「人数分は未確認」の印が入る',
+        muSaved.servingsUnread === true,
+        `saved=${JSON.stringify(muSaved)}`,
+      )
+      // 詳細の栄養カードに注意が出る（折りたたみを開かなくても読める位置）
+      const muNutriNote = kfPage.locator('[data-testid="nutrition-servings-unread"]')
+      check('MUSERV-03 詳細の栄養カードに「人数分は未確認」の注意が出る', (await muNutriNote.count()) === 1)
+      const muNoteText = ((await muNutriNote.count()) === 1 ? await muNutriNote.textContent() : '')
+        .replaceAll('​', '')
+      check(
+        'MUSERV-03 注意に、いまの人数分が仮の数字だと書いてある',
+        muNoteText.includes(ja.detail.servingsUnreadNote.replace('{n}', String(muSaved.servings))),
+        `注意=${muNoteText}`,
+      )
+      // 原価のそば（金額の下）にも同じ注意が出る（この品はしょうゆに既定価格があり金額が出る）
+      check(
+        'MUSERV-03 原価のそば（金額の下）にも同じ注意が出る',
+        (await kfPage.locator('[data-testid="detail-servings-unread"]').count()) === 1,
+      )
+      // 編集を開き直しても印は残る（保存しただけでは黙って確認済みにしない）
+      await kfPage.goto(`${BASE}/#/recipes/${muRecipeId}/edit`, { waitUntil: 'networkidle' })
+      await kfPage.waitForTimeout(900)
+      check(
+        'MUSERV-03 編集を開き直しても人数分の印は残っている',
+        (await kfPage.locator('[data-testid="servings-not-read"]').count()) === 1,
+      )
+      // ＋を押して確認し、保存し直すと、印も注意も消える
+      await kfPage.getByRole('button', { name: ja.detail.servingsUp }).click()
+      await kfPage.waitForTimeout(300)
+      check(
+        'MUSERV-03 ＋を押すと編集の印は消える',
+        (await kfPage.locator('[data-testid="servings-not-read"]').count()) === 0,
+      )
+      await kfPage.getByRole('button', { name: ja.form.save }).click()
+      await kfPage.waitForTimeout(900)
+      const muSaved2 = await muReadSaved()
+      check(
+        'MUSERV-03 確認後の保存で印がレシピ本体から消える',
+        muSaved2.servingsUnread == null,
+        `saved=${JSON.stringify(muSaved2)}`,
+      )
+      check(
+        'MUSERV-03 詳細の注意も消える',
+        (await kfPage.locator('[data-testid="nutrition-servings-unread"]').count()) === 0 &&
+          (await kfPage.locator('[data-testid="detail-servings-unread"]').count()) === 0,
+      )
     } finally {
       await kfBrowser.close()
     }

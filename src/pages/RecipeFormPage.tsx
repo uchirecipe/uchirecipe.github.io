@@ -199,6 +199,12 @@ type FormDraft = {
   title: string
   intro: string
   servings: number
+  /**
+   * 人数分が取り込み元から読み取れなかった印（2026-09-01 便MU）。下書きにも持たせる＝
+   * URL取り込み直後に離れて下書きから復元しても、印が黙って消えて「2人分と書いてある
+   * レシピ」に化けないようにする。古い下書き（この項目が無い）は false 扱いで従来どおり
+   */
+  servingsNotRead: boolean
   cookMinutes: string
   effortLevel: EffortLevel
   ingredients: IngredientRow[]
@@ -1040,6 +1046,7 @@ function RecipeFormInner() {
       title: recipe.title,
       intro: recipe.intro ?? '',
       servings: recipe.servings,
+      servingsNotRead: recipe.servingsUnread === true,
       cookMinutes: recipe.cookMinutes != null ? String(recipe.cookMinutes) : '',
       effortLevel: recipe.effortLevel,
       ingredients: toIngredientRows(recipe.ingredients),
@@ -1074,7 +1081,9 @@ function RecipeFormInner() {
     setPhoto(recipe.photo)
     setPhotoFocus(recipe.photoFocus)
     setServings(recipe.servings)
-    setServingsNotRead(false)
+    // 人数分が読み取れないまま保存された品（2026-09-01 便MU）は、編集でも印を出したままにする。
+    // ＋−を押すか、印の付いていない保存をするまで消えない（黙って確認済みに変えない）
+    setServingsNotRead(recipe.servingsUnread === true)
     setCookMinutes(recipe.cookMinutes != null ? String(recipe.cookMinutes) : '')
     setEffortLevel(recipe.effortLevel)
     setIngredients(toIngredientRows(recipe.ingredients))
@@ -1098,6 +1107,7 @@ function RecipeFormInner() {
         title,
         intro,
         servings,
+        servingsNotRead,
         cookMinutes,
         effortLevel,
         ingredients,
@@ -1119,6 +1129,7 @@ function RecipeFormInner() {
       title,
       intro,
       servings,
+      servingsNotRead,
       cookMinutes,
       effortLevel,
       ingredients,
@@ -1251,7 +1262,9 @@ function RecipeFormInner() {
     // 下書きの人数分も範囲に収める(便CK/①-1)。以前は素通しで、servings:99 の下書きを復元すると
     // 99人分になり、そのまま保存できていた
     setServings(clampServings(d.servings ?? 2))
-    setServingsNotRead(false)
+    // 取り込み直後の「人数分を読み取れなかった」印も下書きから戻す（2026-09-01 便MU）。
+    // この項目の無い古い下書きは従来どおり印なし
+    setServingsNotRead(d.servingsNotRead === true)
     setCookMinutes(d.cookMinutes ?? '')
     setEffortLevel(d.effortLevel ?? 'normal')
     setIngredients(d.ingredients?.length ? d.ingredients : [{ ...emptyIngredient }])
@@ -2115,6 +2128,12 @@ function RecipeFormInner() {
         // 書き出すファイルの中身もいままでと変わらない
         photoFocus: photo ? toStoredPhotoFocus(photoFocus) : undefined,
         servings,
+        // 人数分が読み取れなかった印をレシピ本体にも持ち越す（2026-09-01 便MU）。
+        // 取り込み直後の警告（servingsNotRead）は画面の状態だけで、保存すると
+        // 「2人分と書いてあるレシピ」と見分けが付かなくなっていた。
+        // 確認済み（＋−を押した・印なし）のときは undefined ＝ Dexie の update が
+        // 既存の印も消す（キーを省くと古い true が残ってしまう）
+        servingsUnread: servingsNotRead || undefined,
         cookMinutes: cookMinutes.trim() ? Number(cookMinutes) : undefined,
         effortLevel,
         tags: effectiveTags,
@@ -2261,7 +2280,7 @@ function RecipeFormInner() {
     setTitle(target.title)
     setIntro(target.intro)
     setServings(target.servings)
-    setServingsNotRead(false)
+    setServingsNotRead(target.servingsNotRead)
     setCookMinutes(target.cookMinutes)
     setEffortLevel(target.effortLevel)
     setIngredients(target.ingredients)
@@ -2294,6 +2313,7 @@ function RecipeFormInner() {
       title: loadedRecipe.title,
       intro: loadedRecipe.intro ?? '',
       servings: loadedRecipe.servings,
+      servingsNotRead: loadedRecipe.servingsUnread === true,
       cookMinutes: loadedRecipe.cookMinutes != null ? String(loadedRecipe.cookMinutes) : '',
       effortLevel: loadedRecipe.effortLevel,
       ingredients: toIngredientRows(loadedRecipe.ingredients),
@@ -2330,6 +2350,8 @@ function RecipeFormInner() {
       title: loadedRecipe.title,
       intro: def.intro ?? '',
       servings: def.servings,
+      // 基本レシピの原本は人数分が原稿に書いてある＝未確認の印は付かない
+      servingsNotRead: false,
       cookMinutes: def.cookMinutes != null ? String(def.cookMinutes) : '',
       effortLevel: def.effortLevel,
       ingredients: toIngredientRows(def.ingredients),

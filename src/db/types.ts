@@ -161,6 +161,23 @@ export interface Recipe {
    */
   photoFocus?: PhotoFocus
   servings: number
+  /**
+   * 人数分が取り込み元から読み取れず、フォーム既定の人数のまま保存された印（2026-09-01 便MU）。
+   * **未設定＝確認済み扱い**（この対応より前のデータ・バックアップはそのまま読める。移行不要）。
+   *
+   * 背景: URL取り込み・貼り付けで人数分が読めないと、フォーム既定の2人分がそのまま保存され、
+   * 「2人分と書いてあるレシピ」と保存後に見分けが付かなくなっていた（取り込み直後の警告
+   * servingsNotRead は画面の状態だけで保存されない）。テスト用データ31品の実測では8品が
+   * 既定の2で埋まり、うち5品で1食あたりの原価・栄養が実際の2〜5倍
+   * （ロールキャベツは元ページに「材料（4人分）」とあるのに2人分＝全部2倍）。
+   *
+   * true の品はレシピ詳細の栄養・原価のそばに「人数分は未確認」の注意を出す。
+   * 編集フォームの人数分の＋−を1回押したら false（確認が済んだとみなす。
+   * 取り込み直後の servingsNotRead と同じ規律）。
+   * バックアップの書き出し・読み込みは Recipe を丸ごと持ち回る形（BackupRecipe が
+   * Omit+spread）なので、この印も自動で往復する（scripts/e2e の BACKUP-01 で実測）。
+   */
+  servingsUnread?: boolean
   cookMinutes?: number
   effortLevel: EffortLevel
   tags: string[]
@@ -1074,6 +1091,9 @@ export type RecipeInput = Pick<
   | 'photo'
   | 'photoFocus'
   | 'servings'
+  // 人数分が読み取れないまま保存された印（2026-09-01 便MU）。フォームが servingsNotRead の
+  // 状態から入れる（＋−で確認したら undefined で保存し、印を消す）
+  | 'servingsUnread'
   | 'cookMinutes'
   | 'effortLevel'
   | 'tags'
