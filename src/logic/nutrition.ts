@@ -1,6 +1,6 @@
 import { stripIngredientNoise, toIngredientKey } from './kana'
 import { NUTRITION_DATA, type NutritionFood, type NutritionPer100g } from './nutritionData'
-import type { Ingredient, Recipe } from '../db/types'
+import type { Ingredient, Recipe, Step } from '../db/types'
 import {
   leadingRangeAmount,
   normalizeAmountInput,
@@ -155,6 +155,7 @@ export type ExcludedReason =
   | 'unit' // 単位をグラムに換算できない
   | 'amount' // 分量が数値でない（少々・適量など）
   | 'prep' // 塩もみ・板ずり用の塩など、洗い流し・絞りで大半が食べる分に残らない下ごしらえ用
+  | 'boil' // ゆで湯に入れる塩。湯ごと捨てるので大半が食べる分に残らない（2026-09-01 便MT・調査A）
 
 export interface ExcludedIngredient {
   name: string
@@ -171,7 +172,7 @@ export interface ExcludedIngredient {
  * 「量は書いてあるのに計算できなかった」材料が含まれているか（2026-07-28 便BY/NUT-01）。
  *
  * reason別に重みが違う:
- * - amount / prep … 「適量」「少々」「塩もみ用の塩」など、元々分量が書かれていない薬味・下ごしらえ。
+ * - amount / prep / boil … 「適量」「少々」の薬味、塩もみ用・ゆで湯用の塩など、食べる分に効かないもの。
  *   同梱103品の計算対象外66件はすべてこちら。数値を出しても実害が小さい。
  * - food / unit … 「牛肉 300g」「米 360cc」のように分量は書いてあるのに、成分データが無い・
  *   単位をグラムに換算できないケース。主材料が丸ごと落ちるのはこちらで、
@@ -239,7 +240,8 @@ const SALT_NEGLIGIBLE_G_PER_SERVING = 0.5
  *     見ないため、警告が1つも出ないまま0.0gが出ていた。
  *     ただし他の調味料で味がついている品（塩分が計算できている品）まで数えると、
  *     「塩こしょう 少々」だけで毎回注意が出て読まれなくなる（同梱109品で実測）。
- * 下ごしらえ用の塩（prep・塩もみ用など洗い流すもの）は元から食べる分に残らないので数えない。
+ * 下ごしらえ用の塩（prep・塩もみ用など洗い流すもの）とゆで湯の塩（boil・湯ごと捨てるもの）は
+ * 元から食べる分に残らないので数えない（捨てる塩は「欠落」ではない・2026-09-01 便MT）。
  *
  * 名前の判定は語だけで行う＝**当たりすぎる側に倒してある**。落ちた材料に対してだけ働くので、
  * 多めに出ても「計算に入っていない味つけがある」という事実は必ず正しい。
@@ -249,7 +251,7 @@ export function saltSourceGaps(
 ): ExcludedIngredient[] {
   const saltIsNegligible = nutrition.perServing.saltG < SALT_NEGLIGIBLE_G_PER_SERVING
   return nutrition.excluded.filter((e) => {
-    if (e.reason === 'prep') return false
+    if (e.reason === 'prep' || e.reason === 'boil') return false
     // 「お好みで」は食べるかどうかを本人が決める分なので数えない（仮の量を当てる
     // matchAssumedGrams が同じ理由で対象外にしているのと同じ線引きにそろえる）
     if (/お好みで/.test(e.name) || /お好みで/.test(e.amountText ?? '')) return false
@@ -597,16 +599,126 @@ function resolveIngredientAmount(ing: Ingredient): { value: number; unit: string
   return { value, unit: ing.unit }
 }
 
+// ---------- 「食べずに捨てる塩」の判定（2026-09-01 便MT・調査A） ----------
+//
+// URL取り込みのレシピは、ゆで湯の塩（小さじ2＝塩分12g）やエビの下処理の塩まで材料欄に書いてあり、
+// 全部を「食べた」ことにすると塩分が実際の数倍に出る（実測: エビグラタン16.25g/人。実際に食べるのは約2.8g）。
+// 同梱109品は記法ルール（docs/12）でゆで湯の塩の行を書かないため、これはURL取り込み・自作レシピ専用の穴。
+// 減塩を気にする人への表示なので、**誤爆（食べる塩を消す）だけは絶対に出さない**側に倒してある。
+//
+// 【外しすぎないための線引き（140品・食塩61行の実測で 拾い11／当たり11／誤爆0／取りこぼし0＝調査A）】
+// - 外すのは**食塩(17012)に名寄せされる行だけ**（TABLE_SALT_FOOD_ID）。コンソメ・鶏がらスープの素等に
+//   広げると、スープの汁そのもの（食べる塩分）まで消える（実測で誤爆8件＝調査Aの案R4）
+// - ゆで湯の塩（boil）は3条件すべて: ①直前の材料行が湯（お湯/湯/熱湯/ぬるま湯）
+//   ②その分量が300ml以上 ③手順の**同じ文**に「ゆで系」と「捨てる系」の両方が書いてある
+//   （「お湯600ml+塩」のすまし汁は③で残る＝汁は捨てない。「水600ml」のスープは①で残る）
+// - 下ごしらえの塩（prep）は、**直前の材料行の名前X**で「どの塩か」を特定する: Xと「塩」の両方を含み、
+//   「ふる/もむ/まぶす」と「絞る/洗い流す/流水」の両方が出る手順文があるときだけ。
+//   同名の「塩」行が3つあるレシピ（エビグラタン）でも、味つけの塩（直前＝コンソメ顆粒）を巻き込まない
+// - 外した行は必ず excluded に積む＝「計算に含めていない材料」に理由つきで出る。黙って引かない
+// - 100%外すのは近似（麺に残る分は八訂の乾麺基準では元から0なので、向きは excludedDirectionNote
+//   「実際の値はこの概算より大きくなります」と矛盾しない）。残る割合の係数は作らない（推測になるため）
+
+/** 八訂の食塩(17012)。「捨てる塩」の判定はこの食品に名寄せされる行だけに働かせる */
+const TABLE_SALT_FOOD_ID = '17012'
+
+/** ゆで湯とみなす直前の材料名（「水」を入れるとスープの汁の塩まで当たる＝調査Aの案R2で誤爆を実測） */
+const HOT_WATER_NAME = /^(お湯|湯|熱湯|ぬるま湯)$/
+
+/** ゆで湯とみなす最小の分量(ml)。汁物に使う湯と捨てるゆで湯を分ける線（調査Aの実測で誤爆0の値） */
+const BOIL_WATER_MIN_ML = 300
+
+/** 体積単位→ml（ゆで湯の分量判定専用。重さの数値は作らない） */
+const VOLUME_ML: Record<string, number> = {
+  ml: 1,
+  cc: 1,
+  ミリリットル: 1,
+  l: 1000,
+  リットル: 1000,
+  カップ: VOLUME_UNIT_FACTORS.カップ,
+}
+
+/** 手順の「ゆでる」側の言い方 */
+const BOIL_WORDS = /(ゆで|茹で|沸か|沸騰)/
+/** 手順の「湯を捨てる」側の言い方 */
+const DRAIN_WORDS = /(湯切り|湯を切|湯をきり|ザルに|ざるに|ゆで汁を?捨|湯を捨)/
+/** 手順の「塩をふる・もむ・まぶす」側の言い方 */
+const SALT_RUB_WORDS = /塩(を|で)?(振|ふっ|ふり|まぶ|もみ|もん)/
+/** 手順の「洗い流す・絞る」側の言い方 */
+const RINSE_WORDS = /(絞|しぼ|洗い流|流水|水で洗|水でさっと洗|洗って)/
+
+/** 「捨てる塩」の判定に渡す、材料行の前後関係と手順（レシピ単位の前計算込み） */
+interface SaltDiscardContext {
+  /** 材料欄でこの塩の直前にある行（「どの塩か」を特定する手がかり） */
+  prev: Ingredient | undefined
+  /** 手順の本文+memo（1手順=1要素。P5の「手順文」判定に使う） */
+  stepTexts: readonly string[]
+  /** 手順のどこかに「ゆで系」と「捨てる系」が同じ文で書かれているか（レシピ単位で1回だけ判定） */
+  boilAndDrainInSameSentence: boolean
+}
+
+/** 手順の同じ文（「。」区切り）に「ゆで系」と「捨てる系」の両方が書かれているか */
+function hasBoilAndDrainInSameSentence(steps: readonly Step[]): boolean {
+  return steps.some((st) =>
+    [st.text, st.memo ?? ''].some((t) =>
+      t.split('。').some((sentence) => BOIL_WORDS.test(sentence) && DRAIN_WORDS.test(sentence)),
+    ),
+  )
+}
+
+/** 材料行の分量を体積(ml)として読む。体積で書かれていなければ null */
+function ingredientVolumeMl(ing: Ingredient): number | null {
+  const value = parseAmountNumber(ing.amount)
+  if (value === null) return null
+  const factor = VOLUME_ML[normalizeUnitText(ing.unit).toLowerCase()]
+  return factor !== undefined ? value * factor : null
+}
+
+/**
+ * 食塩(17012)に名寄せされた材料行が「食べずに捨てる塩」かを判定する。
+ * 'boil'＝ゆで湯の塩（湯ごと捨てる）／ 'prep'＝下ごしらえの塩（洗い流す・絞る）／ null＝食べる塩。
+ * 呼び出し側（computeIngredient）が excluded に積むので、黙って消えることはない。
+ */
+function discardedSaltReason(ctx: SaltDiscardContext): 'boil' | 'prep' | null {
+  const prev = ctx.prev
+  if (!prev) return null
+  // ゆで湯の塩: 3条件すべてそろったときだけ
+  if (
+    HOT_WATER_NAME.test(prev.name.trim()) &&
+    (ingredientVolumeMl(prev) ?? 0) >= BOIL_WATER_MIN_ML &&
+    ctx.boilAndDrainInSameSentence
+  ) {
+    return 'boil'
+  }
+  // 下ごしらえの塩: 直前の材料名Xの手順文に「塩をふる/もむ/まぶす」と「絞る/洗い流す」の両方があるときだけ
+  const prevName = prev.name.replace(/[（(].*?[）)]/g, '').trim()
+  if (
+    prevName !== '' &&
+    ctx.stepTexts.some(
+      (t) => t.includes(prevName) && t.includes('塩') && SALT_RUB_WORDS.test(t) && RINSE_WORDS.test(t),
+    )
+  ) {
+    return 'prep'
+  }
+  return null
+}
+
 /** 材料1行を計算する（対象外なら reason を返す） */
 function computeIngredient(
   ing: Ingredient,
   servings: number,
+  saltCtx?: SaltDiscardContext,
 ): { item: IngredientNutrition; assumed?: AssumedIngredient } | { reason: ExcludedReason } | 'zero' {
   if (isZeroIngredient(ing.name)) return 'zero'
   // 塩もみ・板ずり用の塩は、洗い流し・絞りで大半が食べる分に残らないため計算に含めない(2026-07-11)
   if (ing.name.includes('塩') && /(塩もみ|板ずり)用/.test(ing.memo ?? '')) return { reason: 'prep' }
   const food = matchNutritionFood(ing.name)
   if (!food) return { reason: 'food' }
+  // 食塩(17012)の行だけ、「食べずに捨てる塩」（ゆで湯用/下ごしらえ用）かを手順から判定する（上の節）
+  if (saltCtx && food.id === TABLE_SALT_FOOD_ID) {
+    const discarded = discardedSaltReason(saltCtx)
+    if (discarded) return { reason: discarded }
+  }
   const resolved = resolveIngredientAmount(ing)
   if (resolved === null) {
     // 少々・適量は仮の目安量で計算に含める(2026-07-11オーナー要望。UIで仮定を必ず明示)
@@ -630,9 +742,11 @@ function computeIngredient(
 /**
  * レシピ全体の栄養概算。servingsが不正(0以下)のときは1人分として扱う。
  * 戻り値の excluded は UI で「計算に含めていない材料 n件」として必ず明示すること（docs/09 M6-1）。
+ * steps を渡すと「食べずに捨てる塩」（ゆで湯用/下ごしらえ用）の判定にも使う（2026-09-01 便MT）。
+ * 渡さなければ従来どおり材料欄だけで計算する（材料メモ「塩もみ用/板ずり用」の除外は変わらず効く）。
  */
 export function computeRecipeNutrition(
-  recipe: Pick<Recipe, 'ingredients' | 'servings'>,
+  recipe: Pick<Recipe, 'ingredients' | 'servings'> & Partial<Pick<Recipe, 'steps'>>,
 ): RecipeNutrition {
   const servings = recipe.servings > 0 ? recipe.servings : 1
   const total = emptyTotals()
@@ -640,9 +754,19 @@ export function computeRecipeNutrition(
   const excluded: ExcludedIngredient[] = []
   const assumed: AssumedIngredient[] = []
 
-  for (const ing of recipe.ingredients) {
+  // 「捨てる塩」の判定に使うレシピ単位の前計算（塩の行が無ければ実質使われないだけなので常に作る）
+  const steps = recipe.steps ?? []
+  const stepTexts = steps.map((st) => `${st.text} ${st.memo ?? ''}`)
+  const boilAndDrainInSameSentence = steps.length > 0 && hasBoilAndDrainInSameSentence(steps)
+
+  for (let idx = 0; idx < recipe.ingredients.length; idx++) {
+    const ing = recipe.ingredients[idx]
     if (!ing.name.trim()) continue
-    const result = computeIngredient(ing, servings)
+    const result = computeIngredient(ing, servings, {
+      prev: idx > 0 ? recipe.ingredients[idx - 1] : undefined,
+      stepTexts,
+      boilAndDrainInSameSentence,
+    })
     if (result === 'zero') continue
     if ('reason' in result) {
       excluded.push({

@@ -58,8 +58,9 @@ export default function NutritionTeaser({
   defaultExpanded = false,
 }: {
   isPro: boolean
-  /** レシピ本体（実計算に使う。ingredients/servings と、1食に分けない品の印だけ参照） */
-  recipe: Pick<Recipe, 'ingredients' | 'servings' | 'wholeBatch'>
+  /** レシピ本体（実計算に使う。ingredients/servings/steps と、1食に分けない品の印だけ参照。
+   * steps は「食べずに捨てる塩」（ゆで湯用/下ごしらえ用）の判定に使う（2026-09-01 便MT） */
+  recipe: Pick<Recipe, 'ingredients' | 'servings' | 'wholeBatch' | 'steps'>
   /** 詳細画面で現在表示中の人数（全量の表示に使う）。未指定ならレシピ登録時の人数 */
   servings?: number
   /**
@@ -242,12 +243,13 @@ function AssumedBlock({ nutrition }: { nutrition: Nutrition }) {
 }
 
 /** 計算に含めていない理由の表示順（重い順: 量が書いてあるのに計算できなかったものを先に出す） */
-const EXCLUDED_REASON_ORDER: ExcludedReason[] = ['food', 'unit', 'amount', 'prep']
+const EXCLUDED_REASON_ORDER: ExcludedReason[] = ['food', 'unit', 'amount', 'prep', 'boil']
 const EXCLUDED_REASON_LABEL: Record<ExcludedReason, string> = {
   food: ja.nutrition.excludedReasonFood,
   unit: ja.nutrition.excludedReasonUnit,
   amount: ja.nutrition.excludedReasonAmount,
   prep: ja.nutrition.excludedReasonPrep,
+  boil: ja.nutrition.excludedReasonBoil,
 }
 
 /**

@@ -2422,5 +2422,162 @@ const NUTRITION_DB_VERSION_FOR_KP = NUTRITION_DATA_FOR_KP.dbVersion
   }
 
   // --- LD-9: 成分表の版番号を上げた（端末側の作り直しの合図） ---
-  eq('LD-9 成分表の版は14', ldData.dbVersion, 14)
+  // 2026-09-01 便MT: 版15(マッシュルーム追加)で「=14」から「>=14」へ緩めた(KP-10と同じ形。
+  // 版は上がり続けるので、等号で書くと以後の食品追加のたびにこの見張りが赤くなる)
+  eq('LD-9 成分表の版は14以上(便LDで13→14に上げた)', ldData.dbVersion >= 14, true)
+}
+
+
+// ---------- 便MT（2026-09-01・調査A）: 「食べずに捨てる塩」をゆで湯・下ごしらえの塩まで広げる ----------
+// URL取り込みのエビグラタンの塩分が16.3g/人と出ていた件。73.5%はゆで湯用の塩 小さじ2（12g）で、
+// 実際に食べる塩分は約2.8g。しかも横の注意文は「実際より小さい数値」と逆向きだった。
+// 減塩を気にする人への表示なので、**過大に残る取りこぼしは許すが、食べる塩を消す誤爆は許さない**。
+// 誤爆0を実測した規則だけで外す（140品・食塩61行で 拾い11/当たり11/誤爆0/取りこぼし0＝調査A・便MTで再実測済み）。
+// 判定の本体と線引きの理由は src/logic/nutrition.ts の「食べずに捨てる塩」の節。
+{
+  const {
+    computeRecipeNutrition: mtNut,
+    hasSaltSourceGap: mtGap,
+    hasMaterialGap: mtMatGap,
+    matchNutritionFood: mtFood,
+  } = await import('../../src/logic/nutrition.ts')
+  const { starterDefs: mtStarters } = await import('../../src/db/starters.ts')
+
+  // --- MT-1: ゆで湯の塩（boil）の最小形＝湯1000mlの直後の塩・同じ文に「ゆで」と「湯切り」 ---
+  const mtBoilBase = {
+    servings: 1,
+    ingredients: [
+      { name: 'マカロニ', amount: '60', unit: 'g' },
+      { name: 'お湯', amount: '1000', unit: 'ml' },
+      { name: '塩', amount: '2', unit: '小さじ' },
+    ],
+    steps: [
+      { text: '鍋に湯を沸かし、塩をいれたらマカロニをいれ、ゆでます。ゆであがったらザルにあけ湯切りをします。' },
+    ],
+  }
+  const mtBoiled = mtNut(mtBoilBase)
+  eq('MT-1 ゆで湯の塩は計算から外れる(小さじ2=11.9gが1人分に乗らない)', mtBoiled.perServing.saltG < 0.1, true)
+  eq('MT-1 黙って引かない: excludedに塩(boil)が理由つきで残る',
+    mtBoiled.excluded.map((e) => `${e.name}(${e.reason})`), ['塩(boil)'])
+  eq('MT-1 捨てる塩は「欠落」ではない=KFSALT(強い注意)は出ない', mtGap(mtBoiled), false)
+  eq('MT-1 「実際より小さい数値」の注意(materialGap)も出ない', mtMatGap(mtBoiled), false)
+  // steps を渡さない従来の呼び方では従来どおり計上される（外すのは手順まで見えるときだけ）
+  const mtNoSteps = mtNut({ servings: 1, ingredients: mtBoilBase.ingredients })
+  eq('MT-1 stepsが無ければ従来どおり計上(勝手に外さない)', mtNoSteps.perServing.saltG > 11, true)
+
+  // --- MT-2: boilは3条件すべて。1つでも欠けたら外さない（過大側に倒す=食べる塩を消さない） ---
+  const mtSaltOf = (r) => mtNut(r).perServing.saltG
+  const mtKept = (r) => mtNut(r).excluded.every((e) => e.reason !== 'boil' && e.reason !== 'prep')
+  const mtWater = { ...mtBoilBase, ingredients: [mtBoilBase.ingredients[0], { name: '水', amount: '1000', unit: 'ml' }, mtBoilBase.ingredients[2]] }
+  eq('MT-2a 直前が「水」なら外さない(スープの汁の塩を守る。調査Aの案R2で誤爆を実測した線)',
+    mtKept(mtWater) && mtSaltOf(mtWater) > 11, true)
+  const mtSmall = { ...mtBoilBase, ingredients: [mtBoilBase.ingredients[0], { name: 'お湯', amount: '200', unit: 'ml' }, mtBoilBase.ingredients[2]] }
+  eq('MT-2b 湯が300ml未満なら外さない(ゆで卵の型。取りこぼしてもよい=過大側)',
+    mtKept(mtSmall) && mtSaltOf(mtSmall) > 11, true)
+  // 同じ手順の中でも「文」が違えば外さない（判定を手順単位に緩めた瞬間このケースが赤くなる）
+  const mtNoDrain = { ...mtBoilBase, steps: [{ text: 'たっぷりの湯で麺をゆでます。湯切りをして器に盛ります。' }] }
+  eq('MT-2c 「ゆで系」と「捨てる系」が同じ文に無ければ外さない(同じ手順内でも文が別なら残す)',
+    mtKept(mtNoDrain) && mtSaltOf(mtNoDrain) > 11, true)
+  const mtSoup = {
+    servings: 2,
+    ingredients: [{ name: 'お湯', amount: '600', unit: 'ml' }, { name: '塩', amount: '1', unit: '小さじ' }],
+    steps: [{ text: 'お湯を沸かし、塩をいれて味を調えます。' }],
+  }
+  eq('MT-2d すまし汁の型は外さない(湯600mlの直後の塩でも、湯は汁そのもので捨てない)',
+    mtKept(mtSoup) && mtSaltOf(mtSoup) > 2.5, true)
+
+  // --- MT-3: 下ごしらえの塩（prep）は直前の材料名で「どの塩か」を特定する ---
+  // エビグラタンの実データは材料欄に同名の「塩」が3行ある。手順の文だけで見ると
+  // 味つけの塩まで巻き込む（調査Aの案R5/R6で誤爆を実測）ので、直前の材料行の名前で裏取りする
+  const mtGratin = {
+    servings: 1,
+    ingredients: [
+      { name: 'エビ', amount: '5', unit: '尾' },
+      { name: '塩', amount: '1/4', unit: '小さじ' },
+      { name: 'コンソメ顆粒', amount: '1/2', unit: '小さじ' },
+      { name: '塩', amount: '少々', unit: '' },
+    ],
+    steps: [
+      { text: 'エビは殻を取り、背わたを取り除いたら塩でもみます。5分程度おいたら流水で洗いながし、キッチンペーパーで水気をふきとります。' },
+      { text: '塩で味を調えます。' },
+    ],
+  }
+  const mtG = mtNut(mtGratin)
+  eq('MT-3 エビ下処理の塩はprepで外れる(直前=エビの手順文に塩もみ+流水がある)',
+    mtG.excluded.map((e) => `${e.name}(${e.reason})`), ['塩(prep)'])
+  eq('MT-3 味つけの塩(少々・直前=コンソメ顆粒)は食べた扱いのまま(仮の量で計上)', mtG.assumed.length, 1)
+
+  // --- MT-4: 食塩(17012)以外に広げない（調査Aの案R4=誤爆8件で全滅済みの線） ---
+  const mtConsomme = {
+    servings: 1,
+    ingredients: [
+      { name: 'お湯', amount: '1000', unit: 'ml' },
+      { name: 'コンソメ顆粒', amount: '1', unit: '小さじ' },
+    ],
+    steps: mtBoilBase.steps,
+  }
+  eq('MT-4 湯1000mlの直後でもコンソメは外さない(食べる塩分が残る)', mtSaltOf(mtConsomme) > 1, true)
+
+  // --- MT-5: KFSALTが黙らないこと（boilを数えないのは reason boil の行だけ） ---
+  // 量の書かれていない味つけの塩が丸ごと落ちた品では、ゆでる手順があっても強い注意が出たまま
+  const mtPepe = {
+    servings: 1,
+    ingredients: [
+      { name: 'スパゲッティ', amount: '100', unit: 'g' },
+      { name: '塩', amount: '適量', unit: '' },
+    ],
+    steps: [
+      { text: 'たっぷりの湯でスパゲッティをゆでます。ゆであがったらザルにあけ湯切りをします。' },
+      { text: '塩で味を調えます。' },
+    ],
+  }
+  eq('MT-5 落ちた味つけの塩(適量)のKFSALTは出たまま(黙らない)', mtGap(mtNut(mtPepe)), true)
+
+  // --- MT-6: マッシュルーム（調査Aの別件=辞書漏れ。八訂08031に収載あり） ---
+  eq('MT-6 マッシュルームは08031(生)に名寄せ', mtFood('マッシュルーム')?.id, '08031')
+  eq('MT-6 ホワイトマッシュルームも同じ行', mtFood('ホワイトマッシュルーム')?.id, '08031')
+  eq('MT-6 公式Excelの値: 15kcal・食塩0g/100g',
+    [mtFood('マッシュルーム')?.per100g.kcal, mtFood('マッシュルーム')?.per100g.saltG], [15, 0])
+  const mtMush = mtNut({ servings: 1, ingredients: [{ name: 'ホワイトマッシュルーム', amount: '3', unit: '個' }] })
+  eq('MT-6 「3個」が換算できて計算対象外に落ちない(1個=10gの概算)',
+    mtMush.excluded.length === 0 && mtMush.items[0]?.grams === 30, true)
+
+  // --- MT-7: 同梱2品の是正（手順は「塩をふって…水気を絞る」なのにメモが食べた扱いだった） ---
+  const mtHari = mtStarters.find((d) => d.title === '切り干し大根のハリハリ漬け')
+  const mtTosa = mtStarters.find((d) => d.title === 'ちくわときゅうりの土佐酢あえ')
+  const mtHariN = mtNut(mtHari)
+  const mtTosaN = mtNut(mtTosa)
+  eq('MT-7 ハリハリ漬けの塩もみの塩はprep除外(食塩3.18→2.69g/人)', Math.abs(mtHariN.perServing.saltG - 2.69) < 0.02, true)
+  eq('MT-7 土佐酢あえも同じく(1.69→1.19g/人)', Math.abs(mtTosaN.perServing.saltG - 1.19) < 0.02, true)
+  eq('MT-7 どちらもexcludedに塩(prep)が理由つきで出る', [
+    mtHariN.excluded.some((e) => e.name === '塩' && e.reason === 'prep'),
+    mtTosaN.excluded.some((e) => e.name === '塩' && e.reason === 'prep'),
+  ], [true, true])
+  eq('MT-7 同じ技法の冷や汁と扱いがそろった(メモに「塩もみ用」)',
+    [mtHari, mtTosa].every((d) => d.ingredients.some((g) => g.name === '塩' && /塩もみ用/.test(g.memo ?? ''))), true)
+
+  // --- MT-8: 同梱109品の全数回帰（捨てる塩の除外はこの9行だけ・boilは0件） ---
+  // 109品は記法ルール（docs/12）でゆで湯の塩の行を書かないので、boilが1件でも出たら書き方の逸脱
+  {
+    const mtDropped = []
+    for (const d of mtStarters) {
+      for (const e of mtNut(d).excluded) {
+        if (e.reason === 'prep' || e.reason === 'boil') mtDropped.push(`${d.title}／${e.name}(${e.reason})`)
+      }
+    }
+    eq('MT-8 同梱109品で捨てる塩の除外は9行だけ(全部prep・boil0件)', mtDropped.sort(), [
+      'きゅうりとわかめの酢の物／塩(prep)',
+      'ちくわときゅうりの土佐酢あえ／塩(prep)',
+      'オクラと長芋の梅肉あえ／塩(prep)',
+      'キャベツの塩昆布あえ／塩(prep)',
+      'コールスロー／塩(prep)',
+      'ゴーヤチャンプルー／塩(prep)',
+      '冷や汁／塩(prep)',
+      '切り干し大根のハリハリ漬け／塩(prep)',
+      '大根とツナのサラダ／塩(prep)',
+    ].sort())
+  }
+
+  // --- MT-9: 成分表の版（マッシュルーム追加で15に上げた） ---
+  eq('MT-9 成分表の版は15以上', NUTRITION_DB_VERSION_FOR_KP >= 15, true)
 }
