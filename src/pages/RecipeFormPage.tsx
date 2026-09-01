@@ -2903,7 +2903,7 @@ function RecipeFormInner() {
               }}
               disabled={servings <= MIN_SERVINGS}
               className={`${iconBtnCls} disabled:opacity-40`}
-              aria-label={ja.detail.servingsDown}
+              aria-label={servingsUnitText(servingsUnit).stepDown}
             >
               −
             </button>
@@ -2919,7 +2919,7 @@ function RecipeFormInner() {
               }}
               disabled={servings >= MAX_SERVINGS}
               className={`${iconBtnCls} disabled:opacity-40`}
-              aria-label={ja.detail.servingsUp}
+              aria-label={servingsUnitText(servingsUnit).stepUp}
             >
               ＋
             </button>
