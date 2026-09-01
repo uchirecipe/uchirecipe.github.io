@@ -855,6 +855,9 @@ const RECIPE_BODY_FIELDS = [
   // 人数分の数え方（人/個・2026-09-01 便MW）。入れないと、単位だけが違う同名レシピが
   // 「中身まで同じ」と判定され、merge 復元で黙って落ちる
   'servingsUnit',
+  // 1食に分けない品の印（2026-09-02 統合時）。servingsUnit と同じ理由。配布セット側で
+  // この印を直しても、無いと merge 復元・再取込に届かない（便MW申し送り⑤の穴ふさぎ）
+  'wholeBatch',
   'cookMinutes',
   'quickCookMinutes',
   'effortLevel',
@@ -1592,6 +1595,8 @@ type RecipeSetContent = Pick<
   // 人数分の数え方（人/個・2026-09-01 便MW）。入れないと、配布セット側で単位を直しても
   // 再取込で届かない（intro / quickCookMinutes が漏れて同じ事故が起きた記録が下にある）
   | 'servingsUnit'
+  // 1食に分けない品の印（2026-09-02 統合時・便MW申し送り⑤）。servingsUnit と同じ理由
+  | 'wholeBatch'
   | 'cookMinutes'
   | 'quickCookMinutes'
   | 'effortLevel'
@@ -1632,6 +1637,7 @@ export function buildUpdatedSetRecipe(
       intro: source.intro,
       servings: source.servings,
       servingsUnit: source.servingsUnit,
+      wholeBatch: source.wholeBatch,
       cookMinutes: source.cookMinutes,
       quickCookMinutes: source.quickCookMinutes,
       effortLevel: source.effortLevel,
@@ -1655,6 +1661,7 @@ export function buildUpdatedSetRecipe(
     intro: incoming.intro,
     servings: incoming.servings,
     servingsUnit: incoming.servingsUnit,
+    wholeBatch: incoming.wholeBatch,
     cookMinutes: incoming.cookMinutes,
     quickCookMinutes: incoming.quickCookMinutes,
     effortLevel: incoming.effortLevel,
