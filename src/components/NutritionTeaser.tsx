@@ -433,8 +433,8 @@ function NutrientTable({
             </span>
           ) : (
             <>
-              {/* レシピ表用のキー（recipeServingHeader）。献立の栄養パネルの
-                  ja.nutrition.servingHeader とは分けてある（司令部裁定3・巻き添え防止） */}
+              {/* レシピ表用のキー（recipeServingHeader）。献立の栄養パネル用のキー
+                  （nutrition.servingHeader）とは分けてある（司令部裁定3・巻き添え防止） */}
               <span className="text-right text-xs font-bold text-accent-ink">
                 {unitText.nutritionServingHeader}
               </span>

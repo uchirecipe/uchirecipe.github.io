@@ -2581,3 +2581,56 @@ const NUTRITION_DB_VERSION_FOR_KP = NUTRITION_DATA_FOR_KP.dbVersion
   // --- MT-9: 成分表の版（マッシュルーム追加で15に上げた） ---
   eq('MT-9 成分表の版は15以上', NUTRITION_DB_VERSION_FOR_KP >= 15, true)
 }
+
+// ---------- 便MW（2026-09-01・オーナー裁定★2）: 個で数える品の栄養の名札 ----------
+// オーナー原文「単位は、食数を個数にした場合には、栄養も1個で表示。（略）シュークリームなども
+// 8個のレシピから1個分の栄養が表示される分には問題ない」。
+// 数値の意味・掛け算は変えず、名札（1食あたり/1個あたり・1人分/1個分）だけを切り替える。
+// 出し分けは logic/servingsUnit.ts の1か所（画面はそこを通す）。
+{
+  const { servingsUnitText } = await import('../../src/logic/servingsUnit.ts')
+  const mwRoot = path.join(path.dirname(fileURLToPath(scriptFileUrl)), '..')
+  const mwRead = (rel) => readFileSync(path.join(mwRoot, rel), 'utf-8')
+
+  // (1) 出し分けの実挙動: 人（未設定）は今までどおり・個は「1個」の言い方
+  eq('MW-1 人の品の要約は「（1食あたり）: 」のまま', servingsUnitText(undefined).nutritionSummaryLabel, ja.nutrition.summaryLabel)
+  eq('MW-1 個の品の要約は「1個あたり」と言う', servingsUnitText('piece').nutritionSummaryLabel.includes('1個あたり'), true)
+  eq('MW-1 個の品の要約に「1食」と書かない', servingsUnitText('piece').nutritionSummaryLabel.includes('1食'), false)
+  eq('MW-1 個の品の表の1列目は「1個分」', servingsUnitText('piece').nutritionServingHeader, '1個分')
+  eq('MW-1 個の品の表の2列目は「全量（{n}個分）」', servingsUnitText('piece').nutritionTotalHeader.includes('個分'), true)
+
+  // (2) キー分割（司令部裁定3）: 献立の栄養パネルは ja.nutrition.servingHeader を**直接**使い、
+  // レシピ表の切り替え（servingsUnitText）を通らない＝個の品の切り替えが献立側を巻き添えにしない
+  const mwPanel = mwRead('src/components/NutritionBalancePanel.tsx')
+  eq('MW-2 献立の栄養パネルは servingHeader を直接使う', mwPanel.includes('ja.nutrition.servingHeader'), true)
+  eq('MW-2 献立の栄養パネルは人/個の出し分けを通らない', mwPanel.includes('servingsUnitText'), false)
+  eq('MW-2 献立側の見出しは「1人分」のまま', ja.nutrition.servingHeader, '1人分')
+  // レシピ表の人の側は献立側と同じ字面（分けたのはキーで、人の見た目は1文字も変えない）
+  eq('MW-2 レシピ表の人の側も「1人分」', servingsUnitText(undefined).nutritionServingHeader, ja.nutrition.servingHeader)
+  const mwTeaser = mwRead('src/components/NutritionTeaser.tsx')
+  eq('MW-2 レシピ表は分割後のキー（出し分け）を使う', mwTeaser.includes('unitText.nutritionServingHeader'), true)
+  eq('MW-2 レシピ表が献立用キーを直接使っていない', mwTeaser.includes('ja.nutrition.servingHeader'), false)
+
+  // (3) 共有の栄養行・原価行・2行目の単位（司令部裁定2: 個の品は「8個分」と書く）
+  const mwRecipe = {
+    title: 'シュークリーム',
+    servings: 8,
+    servingsUnit: 'piece',
+    ingredients: [{ name: '卵', amount: '2', unit: '個' }],
+    steps: [],
+    tags: [],
+  }
+  const mwShare = buildShareText(mwRecipe, {
+    image: false, cookMinutes: false, cost: true, nutrition: true, allIngredients: false,
+    kcalPerServing: 180, saltPerServing: 0.2, costPerServingYen: 40, costTotalYen: 320,
+  })
+  eq('MW-3 共有テキストの2行目は「8個分」', mwShare.includes('シュークリーム\n8個分\n'), true)
+  eq('MW-3 共有テキストに「8人分」と書かない', mwShare.includes('8人分'), false)
+  eq('MW-3 栄養行は「1個あたり」', mwShare.includes('1個あたり 約180kcal・塩分 約0.2g（概算）'), true)
+  eq('MW-3 原価行は「1個分〜全量（8個分）」', mwShare.includes('原価 1個分 約40円／全量（8個分） 約320円'), true)
+  // 人の品（servingsUnit 無し）の共有テキストは1文字も変わらない（後方互換の本体）
+  const mwPersonShare = buildShareText({ ...mwRecipe, title: '豚汁', servingsUnit: undefined, servings: 4 }, {
+    image: false, cookMinutes: false, cost: false, nutrition: false, allIngredients: false,
+  })
+  eq('MW-3 人の品は今までどおり「4人分」', mwPersonShare.includes('豚汁\n4人分\n'), true)
+}

@@ -1052,3 +1052,39 @@ eq('IT⑥: 3桁以上の数字は強調の印とみなさない', stripImportedM
     false,
   )
 }
+
+// ---------- 便MW（2026-09-01・オーナー裁定★2）: recipeYieldの「12個分」を個数として運ぶ ----------
+// 人数の許可リスト（extractServings）はそのまま。人数として読めなかったときだけ、
+// 「個数と断定できる形」を extractPieceServings で読み、servingsUnit='piece' を添えて返す。
+// 従来この形は「読めなかった」（既定2人分＋未確認の印）だった＝読めるようになる方向の変更のみで、
+// 今まで読めていたものは1件も変わらない。
+{
+  const { extractPieceServings } = await import('../../workers/recipe-import/src/normalize.ts')
+  eq('MW-7 「12個分」は12', extractPieceServings('12個分'), 12)
+  eq('MW-7 「12個」も12(recipeYieldは収量の欄なので分は任意)', extractPieceServings('12個'), 12)
+  eq('MW-7 全角「１２個分」も12', extractPieceServings('１２個分'), 12)
+  eq('MW-7 「シェル型6〜9個分」は範囲の後ろ側9(人数の範囲とそろえる)', extractPieceServings('シェル型6〜9個分'), 9)
+  eq('MW-7 「20コ分」も20', extractPieceServings('20コ分'), 20)
+  eq('MW-7 「17cm型1台分」は個数でも読まない(従来どおり読めない扱い)', extractPieceServings('直径17cmのシフォン型1台分'), undefined)
+  eq('MW-7 「1斤」は読まない', extractPieceServings('1斤'), undefined)
+  eq('MW-7 「4人分」は個数ではない', extractPieceServings('4人分'), undefined)
+  eq('MW-7 数字なしは読まない', extractPieceServings('その他'), undefined)
+  // 人数として読める形は今までどおり人数側が勝つ（extractRecipeFromHtmlの順序）
+  const mwHtml = (yieldValue) =>
+    '<!doctype html><html><body><script type="application/ld+json">' +
+    JSON.stringify({
+      '@type': 'Recipe',
+      name: 'シュークリーム',
+      recipeYield: yieldValue,
+      recipeIngredient: ['卵 2個'],
+      recipeInstructions: [{ '@type': 'HowToStep', text: '焼く' }],
+    }) +
+    '</script></body></html>'
+  const mwPiece = extractRecipeFromHtml(mwHtml('12個分'), 'https://example.com/choux')
+  eq('MW-7 recipeYield「12個分」→servings=12', mwPiece?.servings, 12)
+  eq('MW-7 recipeYield「12個分」→servingsUnit=piece', mwPiece?.servingsUnit, 'piece')
+  const mwPerson = extractRecipeFromHtml(mwHtml('4人分'), 'https://example.com/tonjiru')
+  eq('MW-7 recipeYield「4人分」は従来どおり(unitなし)', [mwPerson?.servings, mwPerson?.servingsUnit], [4, undefined])
+  const mwNone = extractRecipeFromHtml(mwHtml('直径17cmのシフォン型1台分'), 'https://example.com/chiffon')
+  eq('MW-7 「1台分」は従来どおり読めない扱いのまま', [mwNone?.servings, mwNone?.servingsUnit], [undefined, undefined])
+}
