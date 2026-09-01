@@ -81,7 +81,7 @@ import {
 } from '../logic/recipeSort'
 import { isNutritionUnlocked, roundNutrient } from '../logic/nutrition'
 // 1食あたりの原価順（2026-08-25 便KS・②）。金額の計算はレシピ詳細・月間の献立と同じ資産を使う
-import { usePriceEntries } from '../db/prices'
+import { usePriceEntriesWhen } from '../db/prices'
 import { buildPriceIndex } from '../logic/priceEstimate'
 import {
   countFreeLimitRecipes,
@@ -100,6 +100,12 @@ import { usePanelMaxHeight, useOutsidePanelClose } from '../components/recipePan
 import SearchMatchDialog from '../components/SearchMatchDialog'
 import RecipeCard from '../components/RecipeCard'
 import { normalizeEffortFilter } from '../logic/effort'
+import {
+  readHideStartersMirror,
+  readListLayoutMirror,
+  writeListPrefsMirror,
+} from '../logic/listPrefsMirror'
+import { perfActive, perfCountMark, perfMark } from '../logic/perfMarks'
 import Toast from '../components/Toast'
 import { useConfirm } from '../components/ConfirmProvider'
 import { settingsLinkWithBack } from '../logic/backLink'
@@ -244,6 +250,8 @@ function readSavedListState(): SavedListState | null {
 
 /** レシピ一覧: 検索・フィルタ＋写真カードのグリッド＋右下の「＋」ボタン */
 export default function RecipesPage() {
+  // 計測の印（?perf=1 のときだけ。logic/perfMarks）。この画面の描画が何回走ったかを数える
+  perfCountMark('recipes:render')
   const confirm = useConfirm()
   // 他の画面から ?q=... / ?ing=... 付きで来たときは、その条件で開く。
   // どちらも無ければ（詳細から戻ってきた等の「素の /recipes」）sessionStorageの保存値から復元する
@@ -436,8 +444,27 @@ export default function RecipesPage() {
   const todayForBadge = useMemo(() => todayString(), [])
   const settings = useSettings()
   const ngIngredients = settings?.ngIngredients
+  /**
+   * 表示形式と「基本レシピを表示しない」の鏡（2026-09-01 便MV・調査C）。
+   *
+   * settings は Dexie から非同期で届き、レシピより**必ず**あとに着く（レシピの問い合わせは
+   * キャッシュされるが settings の get はされない非対称）。従来はここが `?? 'grid'` だったため、
+   * 1列に設定していても初回の描画は2列で140枚を組み、settings が届いてから1列で作り直していた
+   * ＝「戻ると一瞬2列が見える」。鏡（logic/listPrefsMirror）から同期で読めば初回から正しく描ける。
+   * **Dexie が正**: settings が届いたらそちらの値が勝ち、下の useEffect が鏡を書き直す
+   */
+  const [prefsMirror] = useState(() => ({
+    layout: readListLayoutMirror(),
+    hideStarters: readHideStartersMirror(),
+  }))
   // 一覧の表示形式(グリッド/リスト。2026-07-13 UI改善)。設定に保存し再訪でも維持する
-  const recipeListLayout: RecipeListLayout = settings?.recipeListLayout ?? 'grid'
+  const recipeListLayout: RecipeListLayout = settings
+    ? (settings.recipeListLayout ?? 'grid')
+    : prefsMirror.layout
+  useEffect(() => {
+    if (!settings) return
+    writeListPrefsMirror(settings.recipeListLayout ?? 'grid', settings.hideStarters)
+  }, [settings])
   const pantryItems = usePantryItems()
   const pantryNames = useMemo(() => pantryAvailableNames(pantryItems ?? []), [pantryItems])
   const todayList = useTodayList()
@@ -465,7 +492,8 @@ export default function RecipesPage() {
     return ids
   }, [todayList, todayPlanEntries, recipes, todayForBadge])
 
-  const hideStarters = settings?.hideStarters ?? false
+  // 表示形式と同じ理由で鏡から読む（初回に140品が出てから31品へ縮む描き直しを無くす）
+  const hideStarters = settings ? settings.hideStarters : prefsMirror.hideStarters
 
   // 栄養並び替え(2026-07-13 Fable設計→2026-07-16 便T-4で5項目まとめてPro機能化→
   // 2026-08-01 線引きB'でカロリー順のみ無料に開放。たんぱく質・塩分・脂質・糖質はPro維持)
@@ -480,9 +508,11 @@ export default function RecipesPage() {
   }, [recipes, nutrientSortActive])
 
   // 1食あたりの原価順の値（2026-08-25 便KS・②）。栄養並び替えと同じで、原価順を選んでいる
-  // 間だけ全レシピ分をまとめて1回計算する（材料×食材価格マスタの照合はレシピ数に比例して重い）
-  const priceEntries = usePriceEntries()
+  // 間だけ全レシピ分をまとめて1回計算する（材料×食材価格マスタの照合はレシピ数に比例して重い）。
+  // 2026-09-01 便MV・調査C: 読むのも原価順の間だけ（従来は選んでいなくても一覧を開くたびに
+  // 213行を読み、届いた知らせで140枚を描き直していた）
   const costSortActive = sort === 'cost'
+  const priceEntries = usePriceEntriesWhen(costSortActive)
   const costSortValues = useMemo(() => {
     if (!recipes || !costSortActive) return undefined
     return buildCostSortValues(recipes, buildPriceIndex(priceEntries ?? []))
@@ -623,6 +653,19 @@ export default function RecipesPage() {
     nutrientSortValues,
     costSortValues,
   ])
+
+  // 計測の印（?perf=1 のときだけ）: カードを初めて描けた描画と、列数が確定した描画に1回ずつ印を残す
+  const perfOnceRef = useRef({ cards: false, layout: false })
+  if (perfActive) {
+    if (!perfOnceRef.current.cards && results !== undefined) {
+      perfOnceRef.current.cards = true
+      perfMark('recipes:firstCards')
+    }
+    if (!perfOnceRef.current.layout && settings !== undefined) {
+      perfOnceRef.current.layout = true
+      perfMark('recipes:layoutKnown')
+    }
+  }
 
   /**
    * 検索まどに打った言葉（2026-08-20 便IH・②）。
