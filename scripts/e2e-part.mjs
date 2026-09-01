@@ -142,6 +142,28 @@ for (const arg of args) {
 selected.sort((a, b) => partFiles.indexOf(a.file) - partFiles.indexOf(b.file) || a.start - b.start)
 
 const picked = selected.flatMap((b) => b.names)
+
+// 2026-09-01: **頼んだ名前そのものが選べていないのに、似た名前が選ばれて緑になる**事故を止める。
+// 実発: `e2e-part.mjs SMK-19` と打つと、正規表現が `SMK-19b`・`SMK-19c` にも当たるので
+// **SMK-19 本体は一度も走らないまま「合計26件（NG 0件）」**と出ていた。
+// そのせいで「壊したのに緑だ＝この検査は素通りだ」と3回読み違えた。
+// 塊になっていない節（直書き33件）は単独では選べないので、**そう言って落とす**。
+{
+  const allNames = new Set()
+  for (const f of partFiles) {
+    const src = readFileSync(path.join(__dirname, 'e2e', `${f}.mjs`), 'utf-8')
+    for (const m of src.matchAll(/currentCheck = '([^']+)'/g)) allNames.add(m[1])
+  }
+  for (const arg of args) {
+    if (allNames.has(arg) && !picked.includes(arg)) {
+      die(
+        `「${arg}」は塊になっていないので単独では選べません（似た名前の ${picked.join('・')} が選ばれています）。\n` +
+          `  この節を確かめるにはフルe2e（npx tsx scripts/e2e-smoke.mjs）が要ります。`,
+      )
+    }
+  }
+}
+
 console.log(`切り出した節: ${picked.join(', ')}`)
 console.log(`切り出した場所: ${selected.map((b) => `${b.file}:${b.start}-${b.end}`).join(' ')}`)
 
