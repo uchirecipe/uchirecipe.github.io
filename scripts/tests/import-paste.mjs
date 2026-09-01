@@ -2169,3 +2169,41 @@ import { safetyNotesFor, stepSafetyNotes, wholeRecipeSafetyNotes } from '../../s
     ['ご飯', '牛ひき肉', 'しょうゆ#1', '砂糖#1', 'コチュジャン#1', 'おろしにんにく#1'],
   )
 }
+
+// ---------- 便MW（2026-09-01・司令部裁定2）: 共有テキストの「8個分」を貼り戻せる ----------
+// 共有側（share.ts）が個の品を「8個分」と書くようになったので、貼り付け側も同じ行を読めないと
+// 「受け取った人が取り込めます」（ja.share.textImportNote）が個の品だけ嘘になる。
+// 読み方は**行全体が個数だけの行**に限る（「個」は材料の助数詞でもあるため。
+// 「卵 2個」「レモン1個分の汁」を人数分と誤読しない）。
+{
+  // 共有テキストと同じ形（料理名→個数→材料→作り方）
+  const mwText = [
+    'シュークリーム',
+    '8個分',
+    '【材料】',
+    '・シュー生地 200g',
+    '・卵 2個',
+    '【作り方】',
+    '1. 生地を絞って焼く',
+    '',
+    '#うちレシピ',
+  ].join('\n')
+  const mwParsed = parseRecipeText(mwText)
+  eq('MW-6 「8個分」の行から個数を読む', mwParsed.servings, 8)
+  eq('MW-6 読めたら servingsUnit=piece が立つ', mwParsed.servingsUnit, 'piece')
+  eq('MW-6 「8個分」の行が材料に混ざらない', mwParsed.ingredients.map((i) => i.name).includes('8個分'), false)
+  eq('MW-6 材料の「卵 2個」はそのまま材料', mwParsed.ingredients.some((i) => i.name === '卵'), true)
+  eq('MW-6 手順は今までどおり読める', mwParsed.steps.length, 1)
+
+  // 括弧つき・範囲・全角も読める（人分の行の読み方とそろえる）
+  eq('MW-6 「(8個分)」も読む', parseRecipeText('プリン\n(8個分)\n【材料】\n・卵 2個').servings, 8)
+  eq('MW-6 範囲「6〜9個分」は後ろ側', parseRecipeText('マドレーヌ\n6〜9個分\n【材料】\n・卵 2個').servings, 9)
+  eq('MW-6 全角「８個分」も読む', parseRecipeText('プリン\n８個分\n【材料】\n・卵 2個').servings, 8)
+
+  // 誤読しないこと: 材料欄の中の個数の行を人数分にしない
+  const mwIngOnly = parseRecipeText('【材料】\n・卵 2個\n・りんご 1個分の薄切り')
+  eq('MW-6 材料の「2個」「1個分」から個数を作らない', [mwIngOnly.servings, mwIngOnly.servingsUnit], [undefined, undefined])
+  // 人分の行が読めたときは今までどおり（servingsUnit は立てない）
+  const mwPerson = parseRecipeText('豚汁\n4人分\n【材料】\n・豚肉 200g')
+  eq('MW-6 「4人分」は従来どおり(unitなし)', [mwPerson.servings, mwPerson.servingsUnit], [4, undefined])
+}

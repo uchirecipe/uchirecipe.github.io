@@ -34,8 +34,8 @@ export default function OptionPicker<T extends string>({
   /** 項目名の下の説明（任意） */
   description?: string
   options: readonly OptionPickerItem<T>[]
-  /** 1行に並べる数 */
-  cols: 3 | 4
+  /** 1行に並べる数（2は2026-09-01 便MWで追加。人数分の数え方「人分/個分」の2択が使う） */
+  cols: 2 | 3 | 4
   isPicked: (value: T) => boolean
   onPick: (value: T) => void
   /** 並びの下に添える一文（任意） */
@@ -52,7 +52,9 @@ export default function OptionPicker<T extends string>({
       <div
         role="group"
         aria-label={label}
-        className={`mt-1 grid gap-[var(--space-sm)] ${cols === 4 ? 'grid-cols-4' : 'grid-cols-3'}`}
+        className={`mt-1 grid gap-[var(--space-sm)] ${
+          cols === 4 ? 'grid-cols-4' : cols === 3 ? 'grid-cols-3' : 'grid-cols-2'
+        }`}
       >
         {options.map((option) => (
           <button

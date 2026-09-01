@@ -83,6 +83,13 @@ export type Season = 'spring' | 'summer' | 'autumn' | 'winter' | 'all'
 export type DishType = 'main' | 'side' | 'soup' | 'dessert'
 
 /**
+ * 人数分の数え方（2026-09-01 便MW・オーナー裁定★2）。
+ * 'person'＝人で数える（従来どおり「◯人分」）／'piece'＝個で数える（シュークリーム8個など「◯個分」）。
+ * Recipe.servingsUnit は任意項目で、**未設定＝'person'**（既存データ無変更）。
+ */
+export type ServingsUnit = 'person' | 'piece'
+
+/**
  * レシピを削除したあとも端末に残る「作った記録」のまとまり（削除したレシピ1品ぶん。
  * 2026-08-16 便GZ・オーナー承認「レシピカードは削除されるが記録は読める」）。
  *
@@ -178,6 +185,21 @@ export interface Recipe {
    * Omit+spread）なので、この印も自動で往復する（scripts/e2e の BACKUP-01 で実測）。
    */
   servingsUnread?: boolean
+  /**
+   * 人数分の数え方（2026-09-01 便MW・オーナー裁定★2）。**未設定＝人**（この項目が無い
+   * 既存のデータ・既存のバックアップは、いままでと同じ「◯人分」のまま読める＝移行の処理は要らない）。
+   *
+   * オーナー原文「単位は、食数を個数にした場合には、栄養も1個で表示。例えば、シフォンケーキ1個の
+   * 栄養が一人分で表記されていても、なん等分したのかによって変わってしまうため数値を出しようがない。
+   * シュークリームなども8個のレシピから1個分の栄養が表示される分には問題ない」。
+   *
+   * 'piece' の品は、そのレシピ1品の中で完結する表示（詳細の人数ステッパー・1食あたりの原価・
+   * 栄養カード・共有・一覧のバッジ・ナビの材料見出し）だけが「◯個分」「1個あたり」になる。
+   * **数字の意味・掛け算は変えない**＝献立・買い物メモ・週の食費の数え方は今までどおり。
+   * 値は英語の印（表示の言葉をデータに入れない。名札は ja.ts が持つ＝logic/servingsUnit.ts で引く）。
+   * バックアップは BackupRecipe が Omit+spread なので自動で往復する（servingsUnread と同じ）。
+   */
+  servingsUnit?: ServingsUnit
   cookMinutes?: number
   effortLevel: EffortLevel
   tags: string[]
@@ -1095,6 +1117,9 @@ export type RecipeInput = Pick<
   // 人数分が読み取れないまま保存された印（2026-09-01 便MU）。フォームが servingsNotRead の
   // 状態から入れる（＋−で確認したら undefined で保存し、印を消す）
   | 'servingsUnread'
+  // 人数分の数え方（2026-09-01 便MW・オーナー裁定★2）。フォームの「数え方」（人分/個分）から
+  // 入れる（個分なら 'piece'・人分なら undefined で保存し、既定＝人に戻す）
+  | 'servingsUnit'
   | 'cookMinutes'
   | 'effortLevel'
   | 'tags'

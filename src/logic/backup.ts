@@ -852,6 +852,9 @@ export function nextDuplicateTitle(title: string, existingTitles: Iterable<strin
 const RECIPE_BODY_FIELDS = [
   'intro',
   'servings',
+  // 人数分の数え方（人/個・2026-09-01 便MW）。入れないと、単位だけが違う同名レシピが
+  // 「中身まで同じ」と判定され、merge 復元で黙って落ちる
+  'servingsUnit',
   'cookMinutes',
   'quickCookMinutes',
   'effortLevel',
@@ -1586,6 +1589,9 @@ type RecipeSetContent = Pick<
   Recipe,
   | 'intro'
   | 'servings'
+  // 人数分の数え方（人/個・2026-09-01 便MW）。入れないと、配布セット側で単位を直しても
+  // 再取込で届かない（intro / quickCookMinutes が漏れて同じ事故が起きた記録が下にある）
+  | 'servingsUnit'
   | 'cookMinutes'
   | 'quickCookMinutes'
   | 'effortLevel'
@@ -1625,6 +1631,7 @@ export function buildUpdatedSetRecipe(
     JSON.stringify({
       intro: source.intro,
       servings: source.servings,
+      servingsUnit: source.servingsUnit,
       cookMinutes: source.cookMinutes,
       quickCookMinutes: source.quickCookMinutes,
       effortLevel: source.effortLevel,
@@ -1647,6 +1654,7 @@ export function buildUpdatedSetRecipe(
     ...existing,
     intro: incoming.intro,
     servings: incoming.servings,
+    servingsUnit: incoming.servingsUnit,
     cookMinutes: incoming.cookMinutes,
     quickCookMinutes: incoming.quickCookMinutes,
     effortLevel: incoming.effortLevel,

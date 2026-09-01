@@ -16,13 +16,14 @@ import {
   nutritionUnitFor,
 } from '../logic/nutrition'
 import { roundVegetableGrams, vegetableGramsOf } from '../logic/nutritionBalance'
-import type { Recipe } from '../db/types'
+import type { Recipe, ServingsUnit } from '../db/types'
 import { SCREEN_PANEL } from '../logic/navMemory'
 import { useSettingsDetour } from './useScreenReturn'
 import { useSettings, updateSettings } from '../db/settings'
 import { canUseNutritionTrial } from '../logic/proTrial'
 import Collapse from './Collapse'
 import { ja } from '../i18n/ja'
+import { servingsUnitText } from '../logic/servingsUnit'
 
 /**
  * レシピ詳細に置く「栄養価の目安」枠（M6-1）。
@@ -61,7 +62,10 @@ export default function NutritionTeaser({
   /** レシピ本体（実計算に使う。ingredients/servings/steps と、1食に分けない品・人数分未確認の印だけ参照。
    * steps は「食べずに捨てる塩」（ゆで湯用/下ごしらえ用）の判定に使う（2026-09-01 便MT）。
    * servingsUnread は「人数分は未確認」の注意（2026-09-01 便MU） */
-  recipe: Pick<Recipe, 'ingredients' | 'servings' | 'servingsUnread' | 'wholeBatch' | 'steps'>
+  recipe: Pick<
+    Recipe,
+    'ingredients' | 'servings' | 'servingsUnread' | 'servingsUnit' | 'wholeBatch' | 'steps'
+  >
   /** 詳細画面で現在表示中の人数（全量の表示に使う）。未指定ならレシピ登録時の人数 */
   servings?: number
   /**
@@ -99,6 +103,9 @@ export default function NutritionTeaser({
    */
   const wholeBatch = recipe.wholeBatch === true
   const summaryScale = wholeBatch ? displayServings : 1
+  // 人/個の名札の出し分け（2026-09-01 便MW・オーナー裁定★2）。数値は今までと同じ perServing で、
+  // 個で数える品は言い方だけ「1個あたり」「1個分」になる。出し分けは logic/servingsUnit.ts の1か所
+  const unitText = servingsUnitText(recipe.servingsUnit)
   // 折りたたんだ1行に出すのは無料で見える2値＝エネルギーと野菜量（2026-08-02 オーナー指示）。
   // 線引きB'（無料＝エネルギー＋野菜量）と一致させ、展開しないと野菜量が分からない状態をなくす。
   // 塩分はPro側の8項目表にあるのでここには出さない
@@ -162,7 +169,7 @@ export default function NutritionTeaser({
                 人数分はレシピ詳細の人数ステッパーに出ている。
                 2026-08-25 便KS・④: でき上がりを何回かに分けて使う品は「1食あたり」で
                 割っても意味を成さないので、印（Recipe.wholeBatch）で言い方を変える */}
-            {wholeBatch ? ja.nutrition.summaryLabelWholeBatch : ja.nutrition.summaryLabel}
+            {wholeBatch ? ja.nutrition.summaryLabelWholeBatch : unitText.nutritionSummaryLabel}
             {summaryText}
             {canShowSummary && (saltGap || materialGap) && (
               <span
@@ -187,7 +194,7 @@ export default function NutritionTeaser({
             data-testid="nutrition-servings-unread"
             className="px-[var(--space-md)] pb-[var(--space-md)] text-sm font-bold text-warning"
           >
-            {ja.detail.servingsUnreadNote.replace('{n}', String(recipe.servings))}
+            {unitText.servingsUnreadNote.replace('{n}', String(recipe.servings))}
           </p>
         )}
 
@@ -220,6 +227,7 @@ export default function NutritionTeaser({
                 nutrition={nutrition}
                 displayServings={displayServings}
                 wholeBatch={wholeBatch}
+                servingsUnit={recipe.servingsUnit}
                 trialActive={trialActive}
               />
             ) : (
@@ -227,6 +235,7 @@ export default function NutritionTeaser({
                 nutrition={nutrition}
                 displayServings={displayServings}
                 wholeBatch={wholeBatch}
+                servingsUnit={recipe.servingsUnit}
                 isPro={isPro}
                 trialExhausted={trialExhausted}
               />
@@ -359,6 +368,7 @@ function NutrientTable({
   nutrition,
   displayServings,
   wholeBatch,
+  servingsUnit,
   unlocked,
 }: {
   nutrition: Nutrition
@@ -369,8 +379,11 @@ function NutrientTable({
    * （数字そのものは今までの「全量」の列と同じ値。列の名前と本数だけが変わる）。
    */
   wholeBatch: boolean
+  /** 人数分の数え方（2026-09-01 便MW）。個で数える品は見出しが「1個分」「全量（◯個分）」 */
+  servingsUnit?: ServingsUnit
   unlocked: boolean
 }) {
+  const unitText = servingsUnitText(servingsUnit)
   const per = nutrition.perServing
   const scaleForDisplay = (key: keyof NutrientTotals): number =>
     roundNutrient(key, per[key]) * displayServings
@@ -420,11 +433,13 @@ function NutrientTable({
             </span>
           ) : (
             <>
+              {/* レシピ表用のキー（recipeServingHeader）。献立の栄養パネル用のキー
+                  （nutrition.servingHeader）とは分けてある（司令部裁定3・巻き添え防止） */}
               <span className="text-right text-xs font-bold text-accent-ink">
-                {ja.nutrition.servingHeader}
+                {unitText.nutritionServingHeader}
               </span>
               <span className="text-right text-xs text-ink-muted">
-                {ja.nutrition.totalHeader.replace('{n}', String(displayServings))}
+                {unitText.nutritionTotalHeader.replace('{n}', String(displayServings))}
               </span>
             </>
           )}
@@ -627,6 +642,7 @@ function LockedBody({
   nutrition,
   displayServings,
   wholeBatch,
+  servingsUnit,
   isPro,
   trialExhausted,
 }: {
@@ -634,6 +650,8 @@ function LockedBody({
   displayServings: number
   /** 「1食」に分けて食べる品ではない（2026-08-25 便KS・④）。表を1列（でき上がり全体）にする */
   wholeBatch: boolean
+  /** 人数分の数え方（2026-09-01 便MW）。個で数える品は表の見出しが「1個分」「全量（◯個分）」 */
+  servingsUnit?: ServingsUnit
   isPro: boolean
   trialExhausted: boolean
 }) {
@@ -648,6 +666,7 @@ function LockedBody({
           nutrition={nutrition}
           displayServings={displayServings}
           wholeBatch={wholeBatch}
+          servingsUnit={servingsUnit}
           unlocked={false}
         />
       )}
@@ -694,12 +713,15 @@ function UnlockedBody({
   nutrition,
   displayServings,
   wholeBatch,
+  servingsUnit,
   trialActive,
 }: {
   nutrition: Nutrition
   displayServings: number
   /** 「1食」に分けて食べる品ではない（2026-08-25 便KS・④）。表を1列（でき上がり全体）にする */
   wholeBatch: boolean
+  /** 人数分の数え方（2026-09-01 便MW）。個で数える品は表の見出しが「1個分」「全量（◯個分）」 */
+  servingsUnit?: ServingsUnit
   /** お試しで開いている状態か（2026-08-08 便DZ）。1回だけの表示であることを画面上でも伝える */
   trialActive?: boolean
 }) {
@@ -720,6 +742,7 @@ function UnlockedBody({
         nutrition={nutrition}
         displayServings={displayServings}
         wholeBatch={wholeBatch}
+        servingsUnit={servingsUnit}
         unlocked
       />
 

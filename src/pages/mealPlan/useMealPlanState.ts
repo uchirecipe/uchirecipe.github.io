@@ -182,6 +182,7 @@ import type {
   MealSlot,
   MonthCellMode,
   Recipe,
+  ServingsUnit,
   Settings,
   TodayListItem,
 } from '../../db/types'
@@ -4017,6 +4018,8 @@ export function useMealPlanState(demo?: MonthDemoData) {
     slot: MealSlot
     title: string
     recipeServings: number
+    /** レシピの数え方（2026-09-01 便MW・司令部裁定4）。「レシピに登録されている〜」の1行だけに使う */
+    recipeServingsUnit?: ServingsUnit
     defaultServings: number
     value: number
     isCustom: boolean

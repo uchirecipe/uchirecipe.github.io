@@ -43,6 +43,7 @@ import {
   dayIntakeMap,
 } from '../../src/logic/rangeSummary.ts'
 import { vegetableGrams } from '../../src/logic/nutritionBalance.ts'
+import { servingsUnitText } from '../../src/logic/servingsUnit.ts'
 import { normalizeUnit, parseUnitQuantity } from '../../src/logic/unitGrams.ts'
 import { KNOWN_UNITS, OTHER_UNIT, decomposeUnit, composeUnit } from '../../src/logic/unitForm.ts'
 import { pickDisplayIngredientChips } from '../../src/logic/mainIngredients.ts'
@@ -4010,10 +4011,19 @@ eq('normalizeIngredientNameForPrice 前後空白除去', normalizeIngredientName
     eq('KN-1 栄養も「1食あたり」と言う', ja.nutrition.summaryLabel.includes('1食あたり'), true)
     // 消してよい根拠＝同じ画面（レシピ詳細）に、1食あたりの分母になる人数が残っていること。
     // 材料の見出し行にある人数ステッパーの数字がそれで、**これが消えたら赤**になる
-    // ＝「1食あたり」だけでは何人分の1食か分からない状態に戻る
+    // ＝「1食あたり」だけでは何人分の1食か分からない状態に戻る。
+    // 2026-09-01 便MW: ステッパーの単位は logic/servingsUnit.ts（人分/個分の出し分け）経由に
+    // なったので、①画面が出し分けの結果（unitText.suffix）を描いていること
+    // ②出し分けの人の側が「人分」を返すこと、の2つで見る（ソースの字面ではなく実挙動を測る）
     const knDetail = knRead('src/pages/RecipeDetailPage.tsx')
-    eq('KN-1 レシピ詳細に人数ステッパーの人数が出ている', knDetail.includes('ja.detail.servingsUnit'), true)
-    eq('KN-1 人数ステッパーの単位は「人分」', ja.detail.servingsUnit, '人分')
+    eq('KN-1 レシピ詳細に人数ステッパーの人数が出ている', knDetail.includes('unitText.suffix'), true)
+    eq('KN-1 人数ステッパーの単位は「人分」', servingsUnitText(undefined).suffix, '人分')
+    // 個で数える品（オーナー裁定★2）: 単位は「個分」・金額は「1個あたり」と言い、
+    // 「1食あたり」の言い方が個の品に紛れ込まないこと
+    eq('KN-1 個で数える品の単位は「個分」', servingsUnitText('piece').suffix, '個分')
+    eq('KN-1 個の品の金額は「1個あたり」と言う', servingsUnitText('piece').pricePerServing.includes('1個あたり'), true)
+    eq('KN-1 個の品の金額に「1食あたり」と言わない', servingsUnitText('piece').pricePerServing.includes('1食あたり'), false)
+    eq('KN-1 一覧の原価バッジも同じ出し分けを通る', knRead('src/pages/RecipesPage.tsx').includes('servingsUnitText(recipe.servingsUnit).pricePerServing'), true)
     // 便KS・③で消した「登録: ◯人分」が戻っていないこと（文言も画面も両方見る）
     eq('KN-1 「登録: ◯人分」の文言は持たない', 'servingsRegisteredNote' in ja.detail, false)
     eq('KN-1 レシピ詳細に登録人数の併記を出していない', knDetail.includes('servingsRegisteredNote'), false)

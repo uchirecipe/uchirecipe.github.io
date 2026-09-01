@@ -3551,3 +3551,34 @@ for (const [title, expected] of futureIconCases) {
     [true, true],
   )
 }
+
+// ---------- 便MW（2026-09-01・オーナー裁定★2）: 個で数える品の開き方と名札 ----------
+// 司令部裁定1: 個の品は「食数の設定」（householdServings）を無視して登録の個数で開く
+// （設定=3人の人が「8個」のシフォンを開くと「3個分」で開き、材料が3/8に化ける穴をふさぐ）。
+// 人の品は今までどおり defaultMealServings と同じ値＝後方互換。
+{
+  const { detailOpenServings, isPieceUnit, servingsUnitText } = await import(
+    '../../src/logic/servingsUnit.ts'
+  )
+  // 個の品: 設定があっても登録の個数で開く
+  eq('MW-4 個の品は食数の設定(3人)を無視して8個で開く', detailOpenServings('piece', 3, 8), 8)
+  eq('MW-4 個の品は設定なしでも登録の個数', detailOpenServings('piece', undefined, 8), 8)
+  // 人の品（未設定含む）: 今までどおり設定が勝つ
+  eq('MW-4 人の品は食数の設定(3人)で開く(従来どおり)', detailOpenServings(undefined, 3, 8), 3)
+  eq('MW-4 person明示でも同じ', detailOpenServings('person', 3, 8), 3)
+  eq('MW-4 人の品・設定なしは登録の人数', detailOpenServings(undefined, undefined, 4), 4)
+  eq('MW-4 壊れた登録数は下限1に寄せる(defaultMealServingsと同じ)', detailOpenServings('piece', 3, 0), 1)
+  // 未設定＝人（既存データの読み方）
+  eq('MW-4 未設定は人扱い', isPieceUnit(undefined), false)
+  eq('MW-4 pieceだけが個扱い', [isPieceUnit('piece'), isPieceUnit('person')], [true, false])
+
+  // フォームの名札: 個の品は欄の名前が「個数」・単位が「個分」・範囲ガードも個の言い方
+  eq('MW-5 フォームの欄の名前(人)', servingsUnitText(undefined).formLabel, ja.form.servingsLabel)
+  eq('MW-5 フォームの欄の名前(個)は「個数」', servingsUnitText('piece').formLabel, '個数')
+  eq('MW-5 フォームの単位(個)は「個分」', servingsUnitText('piece').formSuffix, '個分')
+  eq('MW-5 範囲ガード(個)は個の言い方', servingsUnitText('piece').formOutOfRange.includes('個数は1〜20個分'), true)
+  eq('MW-5 範囲ガード(人)は従来の文言のまま', servingsUnitText(undefined).formOutOfRange, ja.form.servingsOutOfRange)
+  // 未確認の注意は、欄の呼び名（「個数」）と同じ語で場所を言う（規約H: 画面名・欄名で言う）
+  eq('MW-5 未確認の注意(個)が欄の呼び名と同じ語を使う', servingsUnitText('piece').servingsUnreadNote.includes('「個数」'), true)
+  eq('MW-5 取り込みの注意(個)も個の言い方', servingsUnitText('piece').formNotReadNote.includes('個分'), true)
+}

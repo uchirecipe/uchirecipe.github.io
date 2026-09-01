@@ -1158,3 +1158,56 @@ import { readFileSync } from 'node:fs'
     false,
   )
 }
+
+// ---------- 便MW（2026-09-01・オーナー裁定★2）: 数え方(servingsUnit)がバックアップ経路で失われない ----------
+// Recipeを丸ごと持ち回る経路（BackupRecipeのOmit+spread）は自動で往復する。
+// ここで固定するのは**フィールドを列挙して組み立て直す3か所のホワイトリスト**＝
+// 列挙漏れで単位が落ちる形（intro/quickCookMinutesで実際に起きた事故と同じ形）。
+{
+  const { isSameRecipeBody, buildUpdatedSetRecipe } = await import('../../src/logic/backup.ts')
+  const mwBody = {
+    servings: 8,
+    cookMinutes: 60,
+    effortLevel: 'normal',
+    tags: [],
+    ingredients: [{ name: '卵', amount: '2', unit: '個' }],
+    steps: [{ text: '焼く' }],
+  }
+  // ① RECIPE_BODY_FIELDS: 単位だけが違う同名レシピは「別の中身」＝mergeで黙って落ちない
+  eq(
+    'MW-8 単位(個/人)だけが違う2品は「別の中身」（mergeで黙って落とさない）',
+    isSameRecipeBody({ ...mwBody, servingsUnit: 'piece' }, { ...mwBody }),
+    false,
+  )
+  eq(
+    'MW-8 単位が同じなら従来どおり同じ中身',
+    isSameRecipeBody({ ...mwBody, servingsUnit: 'piece' }, { ...mwBody, servingsUnit: 'piece' }),
+    true,
+  )
+
+  // ②③④ RecipeSetContent / content() / 戻り値: 配布セット側で単位を直したら再取込で届く
+  const mwExisting = {
+    id: 3,
+    uid: 'mw-set-uid',
+    title: 'シュークリーム',
+    ...mwBody,
+    isFavorite: true,
+    cookedLogs: [],
+    searchWords: [],
+    sourceSetId: 'sweets',
+    sourceSetName: 'おかし',
+    createdAt: 1,
+    updatedAt: 2,
+  }
+  const mwIncoming = { ...mwBody, servingsUnit: 'piece' }
+  const mwUpdated = buildUpdatedSetRecipe(mwExisting, mwIncoming, 'おかし', 99)
+  eq('MW-8 再取込で単位の修正が届く(nullでなく更新になる)', mwUpdated !== null, true)
+  eq('MW-8 再取込後の品に servingsUnit=piece が入る', mwUpdated?.servingsUnit, 'piece')
+  eq('MW-8 ユーザーデータ(お気に入り)は保持', mwUpdated?.isFavorite, true)
+  // 単位まで含めて同一なら従来どおりスキップ（「更新しました」のノイズを出さない）
+  eq(
+    'MW-8 単位まで同一なら再取込はスキップ',
+    buildUpdatedSetRecipe({ ...mwExisting, servingsUnit: 'piece' }, mwIncoming, 'おかし', 99),
+    null,
+  )
+}
