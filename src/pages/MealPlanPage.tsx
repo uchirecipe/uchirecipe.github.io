@@ -57,6 +57,7 @@ import {
 } from '../logic/mealPlan'
 import type { PlanFillMode } from '../logic/mealPlan'
 import { clampServings, effectiveMealServings, defaultMealServings } from '../logic/servings'
+import { servingsUnitText } from '../logic/servingsUnit'
 import { formatShoppingRangeDates } from '../logic/shopping'
 import { isImeConfirmKey } from '../logic/imeKey'
 import {
@@ -772,6 +773,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                 slot,
                 title: recipe.title,
                 recipeServings: recipe.servings > 0 ? recipe.servings : 1,
+                recipeServingsUnit: recipe.servingsUnit,
                 defaultServings: defaultMealServings(householdServings, recipe.servings),
                 value: rowServings,
                 isCustom: row.entry.servings != null,
@@ -4041,8 +4043,11 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                 <Plus size={20} aria-hidden />
               </button>
             </div>
+            {/* この1行だけはそのレシピ1品の話なので、個で数える品は「個数は◯個分」と言う
+                （2026-09-01 便MW・司令部裁定4）。食数チップ・既定・合計は複数レシピをまたぐ数
+                なので「人分」のまま */}
             <p className="mt-[var(--space-sm)] text-xs text-ink-muted">
-              {ja.mealPlan.servingsRecipeNote.replace(
+              {servingsUnitText(servingsEditor.recipeServingsUnit).mealPlanRecipeNote.replace(
                 '{n}',
                 String(servingsEditor.recipeServings),
               )}

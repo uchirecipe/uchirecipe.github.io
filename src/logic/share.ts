@@ -1,5 +1,6 @@
 import type { Recipe } from '../db/types'
 import { ja } from '../i18n/ja'
+import { servingsUnitText } from './servingsUnit'
 import { formatAmountUnit, scaleAmount } from './amount'
 import { resolveIconKey } from './icon'
 import { clampPhotoFocus } from './photoFocus'
@@ -87,8 +88,9 @@ function buildCostNutritionLines(recipe: Recipe, opts: ShareOptions | undefined)
       // 「1人分 約◯円」が出ると、アプリの外にだけ違う言い方が出ていくことになる
       recipe.wholeBatch
         ? ja.share.lineCostWholeBatch.replace('{m}', opts.costTotalYen.toLocaleString())
-        : ja.share.lineCost
-            .replace('{n}', opts.costPerServingYen.toLocaleString())
+        : // 個で数える品は「1個分 約◯円／全量（◯個分）」（2026-09-01 便MW）
+          servingsUnitText(recipe.servingsUnit)
+            .shareLineCost.replace('{n}', opts.costPerServingYen.toLocaleString())
             // 全量の人数は共有する人数に合わせる(便CI/C18。金額側も呼び出し元が同じ人数で渡す)
             .replace('{s}', String(shareServings(recipe, opts)))
             .replace('{m}', opts.costTotalYen.toLocaleString()),
@@ -115,7 +117,10 @@ function buildCostNutritionLines(recipe: Recipe, opts: ShareOptions | undefined)
     const scale = wholeBatch ? shareServings(recipe, opts) : 1
     lines.push(
       template
-        .replace('{scope}', wholeBatch ? ja.share.scopeWholeBatch : ja.share.scopePerServing)
+        .replace(
+          '{scope}',
+          wholeBatch ? ja.share.scopeWholeBatch : servingsUnitText(recipe.servingsUnit).shareScope,
+        )
         .replace('{kcal}', (opts.kcalPerServing * scale).toLocaleString())
         .replace(
           '{salt}',
@@ -150,6 +155,9 @@ export function buildShareText(recipe: Recipe, opts?: ShareOptions): string {
   return ja.share.textTemplate
     .replace('{title}', recipe.title)
     .replace('{servings}', String(servings))
+    // 数え方（「人分/個分」・2026-09-01 便MW）。個の品は「8個分」と書き、貼り付け側
+    // （parseRecipeText）が個分の行として読み戻す＝共有の往復が単位ごと成り立つ
+    .replace('{unit}', servingsUnitText(recipe.servingsUnit).suffix)
     .replace('{lines}', optionalLines.length > 0 ? `${optionalLines.join('\n')}\n` : '')
     .replace('{ingredients}', ingredients + more)
     .replace('{steps}', stepsBlock)
@@ -377,7 +385,7 @@ export async function generateShareCard(recipe: Recipe, opts: ShareOptions): Pro
   const meta = [
     opts.cookMinutes && recipe.cookMinutes ? `${recipe.cookMinutes}${ja.detail.minutesSuffix}` : '',
     // 共有する人数(表示人数)に合わせる(2026-07-29 便CI/C18)
-    `${cardServings}${ja.detail.servingsUnit}`,
+    `${cardServings}${servingsUnitText(recipe.servingsUnit).suffix}`,
   ]
     .filter(Boolean)
     .join('　')

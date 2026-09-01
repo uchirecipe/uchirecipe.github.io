@@ -38,7 +38,8 @@ import { useSettings, updateSettings } from '../db/settings'
 import { addRecipesToToday, useMealPlanRange } from '../db/mealPlan'
 import { todayString } from '../logic/date'
 import TodaySlotModal from '../components/TodaySlotModal'
-import type { MealSlot, RecipeListLayout } from '../db/types'
+import type { MealSlot, Recipe, RecipeListLayout } from '../db/types'
+import { servingsUnitText } from '../logic/servingsUnit'
 import { densityForListLayout } from '../logic/cardDensity'
 import { usePantryItems } from '../db/pantry'
 import { useTodayList } from '../db/todayList'
@@ -1190,7 +1191,8 @@ export default function RecipesPage() {
    * 2026-07-16オーナー指示: 「たんぱく質: 24g」のように並び替え項目のラベルを値の前に付ける
    * (ラベルはNUTRIENT_SORT_LABELS=並び替えパネルの項目名と同じものを流用する)
    */
-  const sortBadgeTextFor = (recipeId: number | undefined): string | undefined => {
+  const sortBadgeTextFor = (recipe: Recipe): string | undefined => {
+    const recipeId = recipe.id
     if (recipeId === undefined) return undefined
     // 1食あたりの原価順のとき（2026-08-25 便KS・②）。一覧では金額の内訳が見えないので、
     // 並べ替えに使っている値そのものをカードに出す。言い方はレシピ詳細と同じ文言を使う
@@ -1198,7 +1200,12 @@ export default function RecipesPage() {
     if (costSortActive) {
       const value = costSortValues?.get(recipeId)
       if (value?.perServingYen != null) {
-        return ja.detail.pricePerServing.replace('{n}', value.perServingYen.toLocaleString())
+        // 個で数える品は「1個あたり 約◯円」（2026-09-01 便MW）。並べる値そのもの
+        // （全量÷登録数）は単位に依存しないので、順番は今までどおり
+        return servingsUnitText(recipe.servingsUnit).pricePerServing.replace(
+          '{n}',
+          value.perServingYen.toLocaleString(),
+        )
       }
       // 「1食」に分けて食べる品ではないレシピ（2026-08-25 便KS・④）は、1食あたりの金額を
       // 持たない（並びでも最後のまとまりに入る）。金額は分かるので、言い方だけ変えて出す
@@ -1667,7 +1674,7 @@ export default function RecipesPage() {
                 subLabel={subLabelFor(usedCount, wantedCount)}
                 inTodayList={todayRecipeIds.has(recipe.id!)}
                 showQuickTime={quickOnly}
-                sortBadgeText={sortBadgeTextFor(recipe.id)}
+                sortBadgeText={sortBadgeTextFor(recipe)}
                 // 検査用の目印（2026-08-21 便IU・①）。今日の献立の行から基本レシピ・主要食材を
                 // 外したのが**その場所だけ**であることを、同じ品のカードを見比べて確かめる
                 testId="recipe-list-card"

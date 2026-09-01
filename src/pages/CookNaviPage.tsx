@@ -111,7 +111,8 @@ import { seasoningGroupLineStyle } from '../logic/seasoningGroup'
 import { markRecipesCooked, undoTodayListCooked } from '../db/todayList'
 import Toast from '../components/Toast'
 import { effectiveMealServings } from '../logic/servings'
-import type { Recipe } from '../db/types'
+import type { Recipe, ServingsUnit } from '../db/types'
+import { servingsUnitText } from '../logic/servingsUnit'
 import { settingsLinkWithBack } from '../logic/backLink'
 // 設定の「Pro版について見る」から帰ってきたときに、離れる前の縦位置へ戻す（2026-08-27 便LU）
 import { useScreenReturn, useSettingsDetour } from '../components/useScreenReturn'
@@ -554,6 +555,8 @@ interface NaviRecipeIngredients {
   title: string
   colorIndex: number
   servings: number
+  /** 人数分の数え方（2026-09-01 便MW）。個で数える品は見出しが「{n}個分」になる */
+  servingsUnit?: ServingsUnit
   items: NaviIngredientAmount[]
 }
 
@@ -631,7 +634,10 @@ function IngredientsPanel({ recipes }: { recipes: NaviRecipeIngredients[] }) {
                   >
                     <span className="min-w-0 flex-1 truncate font-bold">{recipe.title}</span>
                     <span className="shrink-0 text-xs text-ink-muted">
-                      {ja.cookNavi.ingredientsServings.replace('{n}', String(recipe.servings))}
+                      {servingsUnitText(recipe.servingsUnit).naviIngredientsServings.replace(
+                        '{n}',
+                        String(recipe.servings),
+                      )}
                     </span>
                     <ChevronDown
                       size={16}
@@ -1447,6 +1453,7 @@ export default function CookNaviPage() {
         title: r.title,
         colorIndex: r.colorIndex,
         servings: target,
+        servingsUnit: recipe?.servingsUnit,
         items: recipe
           ? recipeIngredientList(recipe.ingredients, recipe.servings, target)
           : [],

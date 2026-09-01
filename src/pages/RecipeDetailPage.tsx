@@ -41,7 +41,7 @@ import { usePriceEntries } from '../db/prices'
 import { scaleAmount, formatAmountUnit } from '../logic/amount'
 import { ngMatchedIndices } from '../logic/ng'
 // 表示人数の既定（設定「ふだん作る人数」→レシピの登録人数分）は献立の実効食数と同じ判定を使う
-import { defaultMealServings } from '../logic/servings'
+import { detailOpenServings, servingsUnitText } from '../logic/servingsUnit'
 import {
   buildPriceIndex,
   matchPriceEntry,
@@ -248,8 +248,14 @@ export default function RecipeDetailPage() {
    * 栄養の「1人分」表示は何人分にしても変わらない。
    */
   const [servingsOverride, setServingsOverride] = useState<number>()
+  // 個で数える品（servingsUnit='piece'）は「食数の設定」を無視して登録の個数で開く
+  // （2026-09-01 便MW・司令部裁定1: 他人の人数を個数に流用しない。詳細は logic/servingsUnit.ts）
   const servings =
-    servingsOverride ?? defaultMealServings(settings?.householdServings, recipe?.servings)
+    servingsOverride ??
+    detailOpenServings(recipe?.servingsUnit, settings?.householdServings, recipe?.servings)
+  // 人/個の名札の出し分け（この画面では必ずこれを通す。ja.detail.servingsUnit 等の使い分けを
+  // 画面に書き散らさない）
+  const unitText = servingsUnitText(recipe?.servingsUnit)
 
   // 材料ごとの原価ビュー切り替え(2026-07-15 オーナー要望「どの食材が値段に反映されているか
   // 分からない」への対応)。常時表示は「うるさい」の理由で2026-07-14に廃止済みなので、
@@ -846,7 +852,7 @@ export default function RecipeDetailPage() {
             なっているので、割った値を並べると意味を成さない数字が増えるだけになる */}
         {totalPrice > 0 && !recipe.wholeBatch && (
           <p className="mt-0.5 text-sm text-ink-muted">
-            {ja.detail.pricePerServing.replace('{n}', perServingPrice.toLocaleString())}
+            {unitText.pricePerServing.replace('{n}', perServingPrice.toLocaleString())}
           </p>
         )}
 
@@ -866,7 +872,7 @@ export default function RecipeDetailPage() {
             金額が出ていないレシピでは、栄養カード側の同じ注意（NutritionTeaser）だけが出る */}
         {totalPrice > 0 && recipe.servingsUnread === true && (
           <p data-testid="detail-servings-unread" className="mt-0.5 text-sm font-bold text-warning">
-            {ja.detail.servingsUnreadNote.replace('{n}', String(recipe.servings))}
+            {unitText.servingsUnreadNote.replace('{n}', String(recipe.servings))}
           </p>
         )}
 
@@ -947,19 +953,19 @@ export default function RecipeDetailPage() {
               <button
                 type="button"
                 onClick={() => setServingsOverride(Math.max(1, servings - 1))}
-                aria-label={ja.detail.servingsDown}
+                aria-label={unitText.stepDown}
                 className="flex h-11 w-11 items-center justify-center rounded-md border border-edge bg-surface text-accent-ink shadow-sm"
               >
                 <Minus size={22} aria-hidden />
               </button>
               <span className="min-w-14 text-center text-lg font-bold">
                 {servings}
-                {ja.detail.servingsUnit}
+                {unitText.suffix}
               </span>
               <button
                 type="button"
                 onClick={() => setServingsOverride(servings + 1)}
-                aria-label={ja.detail.servingsUp}
+                aria-label={unitText.stepUp}
                 className="flex h-11 w-11 items-center justify-center rounded-md border border-edge bg-surface text-accent-ink shadow-sm"
               >
                 <Plus size={22} aria-hidden />
@@ -1556,6 +1562,8 @@ export default function RecipeDetailPage() {
       <ShareModal
         open={shareOpen}
         servings={servings}
+        // 個で数える品は選択肢と注記の言い方を「1個あたり」「◯個分」にそろえる（2026-09-01 便MW）
+        servingsUnit={recipe.servingsUnit}
         cookMinutesAvailable={shareCookMinutesAvailable}
         costAvailable={shareCostAvailable}
         nutritionRowVisible={NUTRITION_TEASER_ENABLED}
