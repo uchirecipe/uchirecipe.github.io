@@ -29,6 +29,7 @@ import type {
   PhotoFocus,
   RecipeInput,
   Season,
+  ServingsUnit,
   Step,
 } from '../db/types'
 import { createRecipe, deleteRecipe, getRecipe, listRecipes, updateRecipe } from '../db/recipes'
@@ -90,6 +91,7 @@ import {
   isServingsInRange,
   resolveImportedServings,
 } from '../logic/servings'
+import { isPieceUnit, servingsUnitText } from '../logic/servingsUnit'
 import { buildSingleDeleteConfirm } from '../logic/recipeDelete'
 import { needsReplaceConfirm, photoReplacePlan, replaceConfirmTargets } from '../logic/replaceConfirm'
 import type { PhotoReplacePlan } from '../logic/replaceConfirm'
@@ -205,6 +207,12 @@ type FormDraft = {
    * レシピ」に化けないようにする。古い下書き（この項目が無い）は false 扱いで従来どおり
    */
   servingsNotRead: boolean
+  /**
+   * 人数分の数え方（2026-09-01 便MW）。下書きにも持たせる＝取り込みや手選びで「個分」にした
+   * まま離脱→下書き復元、で単位が黙って「人」に戻らないようにする。
+   * 古い下書き（この項目が無い）は 'person' 扱いで従来どおり
+   */
+  servingsUnit: ServingsUnit
   cookMinutes: string
   effortLevel: EffortLevel
   ingredients: IngredientRow[]
@@ -530,6 +538,12 @@ function RecipeFormInner() {
   const [photoFocus, setPhotoFocus] = useState<PhotoFocus>()
   const [photoFocusOpen, setPhotoFocusOpen] = useState(false)
   const [servings, setServings] = useState(2)
+  /**
+   * 人数分の数え方（2026-09-01 便MW・オーナー裁定★2）。既定は人。
+   * 「個分」を選んでも servingsNotRead の印は消さない（数字を確かめたことにはならないため。
+   * 印を消すのは＋−を押したときだけ＝types.ts の規律のまま）
+   */
+  const [servingsUnit, setServingsUnit] = useState<ServingsUnit>('person')
   const [cookMinutes, setCookMinutes] = useState('')
   const [effortLevel, setEffortLevel] = useState<EffortLevel>('normal')
   const [ingredients, setIngredients] = useState<IngredientRow[]>([{ ...emptyIngredient }])
@@ -1047,6 +1061,7 @@ function RecipeFormInner() {
       intro: recipe.intro ?? '',
       servings: recipe.servings,
       servingsNotRead: recipe.servingsUnread === true,
+      servingsUnit: recipe.servingsUnit === 'piece' ? 'piece' : 'person',
       cookMinutes: recipe.cookMinutes != null ? String(recipe.cookMinutes) : '',
       effortLevel: recipe.effortLevel,
       ingredients: toIngredientRows(recipe.ingredients),
@@ -1084,6 +1099,7 @@ function RecipeFormInner() {
     // 人数分が読み取れないまま保存された品（2026-09-01 便MU）は、編集でも印を出したままにする。
     // ＋−を押すか、印の付いていない保存をするまで消えない（黙って確認済みに変えない）
     setServingsNotRead(recipe.servingsUnread === true)
+    setServingsUnit(recipe.servingsUnit === 'piece' ? 'piece' : 'person')
     setCookMinutes(recipe.cookMinutes != null ? String(recipe.cookMinutes) : '')
     setEffortLevel(recipe.effortLevel)
     setIngredients(toIngredientRows(recipe.ingredients))
@@ -1108,6 +1124,7 @@ function RecipeFormInner() {
         intro,
         servings,
         servingsNotRead,
+        servingsUnit,
         cookMinutes,
         effortLevel,
         ingredients,
@@ -1130,6 +1147,7 @@ function RecipeFormInner() {
       intro,
       servings,
       servingsNotRead,
+      servingsUnit,
       cookMinutes,
       effortLevel,
       ingredients,
@@ -1265,6 +1283,8 @@ function RecipeFormInner() {
     // 取り込み直後の「人数分を読み取れなかった」印も下書きから戻す（2026-09-01 便MU）。
     // この項目の無い古い下書きは従来どおり印なし
     setServingsNotRead(d.servingsNotRead === true)
+    // 数え方も下書きから戻す（2026-09-01 便MW）。この項目の無い古い下書きは従来どおり人
+    setServingsUnit(d.servingsUnit === 'piece' ? 'piece' : 'person')
     setCookMinutes(d.cookMinutes ?? '')
     setEffortLevel(d.effortLevel ?? 'normal')
     setIngredients(d.ingredients?.length ? d.ingredients : [{ ...emptyIngredient }])
@@ -1409,7 +1429,16 @@ function RecipeFormInner() {
       // 人数分が変わらないこともある)
       // 人数分は「読み取れたか」まで受け取る(2026-08-23 便KF)。読み取れなければ黙って既定の
       // 人数のままにせず、人数分の欄の下に印を出す
-      const importedServings = resolveImportedServings(result.servings, servings)
+      // 個数（「12個分」）として読めても範囲(1〜20)の外なら「読めなかった」に倒す
+      // (2026-09-01 便MW。24個を黙って20個分に丸めると、1個あたりの栄養・原価が嘘の数字で
+      //  確定してしまう。読めなかった扱いなら未確認の印が出て、黙らない)
+      const importedRawServings =
+        result.servingsUnit === 'piece' &&
+        result.servings != null &&
+        !isServingsInRange(result.servings)
+          ? undefined
+          : result.servings
+      const importedServings = resolveImportedServings(importedRawServings, servings)
       const nextServings = importedServings.unread ? undefined : importedServings.servings
       if (nextServings !== undefined && nextServings !== servings) {
         alsoApplied.push(ja.urlImport.itemServings)
@@ -1450,6 +1479,11 @@ function RecipeFormInner() {
       // 「24 cookies」等の表記から20超が入りうるが、手入力では作れない値なので保存させない
       if (nextServings !== undefined) setServings(nextServings)
       setServingsNotRead(importedServings.unread)
+      // 数え方は、人数分が読み取れたときだけ取り込み元に合わせる（2026-09-01 便MW。
+      // 読めなかったときは今の選びを動かさない）
+      if (!importedServings.unread) {
+        setServingsUnit(result.servingsUnit === 'piece' ? 'piece' : 'person')
+      }
       if (result.cookMinutes) setCookMinutes(String(result.cookMinutes))
       if (importedRows.length > 0) setIngredients(importedRows)
       // 自動で作った（または取り込み元から引き継いだ）合わせ調味料の組の数（2026-08-14 便GF）
@@ -1611,7 +1645,14 @@ function RecipeFormInner() {
     // 結果メッセージへ書き添える(2026-08-12 便FU-3)。実際に値が変わったものだけを並べる
     const pasteAlsoApplied: string[] = []
     // 人数分は「読み取れたか」まで受け取る(2026-08-23 便KF。URL取り込みと同じ扱い)
-    const pasteServings = resolveImportedServings(parsed.servings, servings)
+    // 個数（「8個分」）が範囲(1〜20)の外なら「読めなかった」に倒す（URL取り込みと同じ扱い）
+    const pasteRawServings =
+      parsed.servingsUnit === 'piece' &&
+      parsed.servings != null &&
+      !isServingsInRange(parsed.servings)
+        ? undefined
+        : parsed.servings
+    const pasteServings = resolveImportedServings(pasteRawServings, servings)
     const nextPasteServings = pasteServings.unread ? undefined : pasteServings.servings
     if (nextPasteServings !== undefined && nextPasteServings !== servings) {
       pasteAlsoApplied.push(ja.paste.itemServings)
@@ -1639,6 +1680,11 @@ function RecipeFormInner() {
     // 貼り付けた「50人分」も範囲に収める(便CK/①-1。手では21人分以上を作れないのに素通りしていた)
     if (nextPasteServings !== undefined) setServings(nextPasteServings)
     setServingsNotRead(pasteServings.unread)
+    // 共有テキストの「8個分」を貼り戻したときは、数え方も個へ（共有の往復・司令部裁定2）。
+    // 人数分が読み取れなかったときは今の選びを動かさない
+    if (!pasteServings.unread) {
+      setServingsUnit(parsed.servingsUnit === 'piece' ? 'piece' : 'person')
+    }
     // 「調理時間: 20分」のようなメタ情報行から拾った分数はフォームの調理時間欄へ
     if (parsed.cookMinutes) setCookMinutes(String(parsed.cookMinutes))
     if (parsed.ingredients.length > 0) {
@@ -2104,7 +2150,10 @@ function RecipeFormInner() {
     // 保存前の最後の網として見ておく(便CK/①-1)。ただし、この対応より前に範囲外で保存されていた
     // レシピをそのまま編集・保存できるよう、読み込んだレシピ自身の人数分は通す
     if (!isServingsInRange(servings) && servings !== loadedRecipe?.servings) {
-      failValidation(ja.form.servingsOutOfRange.replace('{n}', String(servings)), 'simple')
+      failValidation(
+        servingsUnitText(servingsUnit).formOutOfRange.replace('{n}', String(servings)),
+        'simple',
+      )
       return
     }
     if (!isEdit && isAtFreeLimit(countFreeLimitRecipes(allRecipes ?? []), !!settings?.proCode)) {
@@ -2134,6 +2183,9 @@ function RecipeFormInner() {
         // 確認済み（＋−を押した・印なし）のときは undefined ＝ Dexie の update が
         // 既存の印も消す（キーを省くと古い true が残ってしまう）
         servingsUnread: servingsNotRead || undefined,
+        // 人数分の数え方（2026-09-01 便MW）。人は undefined ＝ Dexie の update が既存の
+        // 'piece' も消す（既定＝人へ戻す。servingsUnread と同じ書き方）
+        servingsUnit: isPieceUnit(servingsUnit) ? 'piece' : undefined,
         cookMinutes: cookMinutes.trim() ? Number(cookMinutes) : undefined,
         effortLevel,
         tags: effectiveTags,
@@ -2281,6 +2333,7 @@ function RecipeFormInner() {
     setIntro(target.intro)
     setServings(target.servings)
     setServingsNotRead(target.servingsNotRead)
+    setServingsUnit(target.servingsUnit)
     setCookMinutes(target.cookMinutes)
     setEffortLevel(target.effortLevel)
     setIngredients(target.ingredients)
@@ -2314,6 +2367,7 @@ function RecipeFormInner() {
       intro: loadedRecipe.intro ?? '',
       servings: loadedRecipe.servings,
       servingsNotRead: loadedRecipe.servingsUnread === true,
+      servingsUnit: loadedRecipe.servingsUnit === 'piece' ? 'piece' : 'person',
       cookMinutes: loadedRecipe.cookMinutes != null ? String(loadedRecipe.cookMinutes) : '',
       effortLevel: loadedRecipe.effortLevel,
       ingredients: toIngredientRows(loadedRecipe.ingredients),
@@ -2350,8 +2404,9 @@ function RecipeFormInner() {
       title: loadedRecipe.title,
       intro: def.intro ?? '',
       servings: def.servings,
-      // 基本レシピの原本は人数分が原稿に書いてある＝未確認の印は付かない
+      // 基本レシピの原本は人数分が原稿に書いてある＝未確認の印は付かない。数え方も原本どおり人
       servingsNotRead: false,
+      servingsUnit: 'person',
       cookMinutes: def.cookMinutes != null ? String(def.cookMinutes) : '',
       effortLevel: def.effortLevel,
       ingredients: toIngredientRows(def.ingredients),
@@ -2833,10 +2888,10 @@ function RecipeFormInner() {
         />
       </label>
 
-      {/* 人数分 */}
+      {/* 人数分（個で数える品では「個数」。2026-09-01 便MW・オーナー裁定★2） */}
       <div className="mt-[var(--space-md)]">
         <label className={labelCls}>
-          {ja.form.servingsLabel}
+          {servingsUnitText(servingsUnit).formLabel}
           <div className="mt-1 flex items-center gap-2">
             {/* 下限(1人分)・上限(20人分)に達したらボタン自体を無効にする(2026-07-28 便BW・QA S3:
                 下限でも押せて無反応・上限がなく31人分まで増やせた) */}
@@ -2854,7 +2909,7 @@ function RecipeFormInner() {
             </button>
             <span className="min-w-14 text-center text-lg font-bold text-ink">
               {servings}
-              {ja.form.servingsUnit}
+              {servingsUnitText(servingsUnit).formSuffix}
             </span>
             <button
               type="button"
@@ -2870,6 +2925,24 @@ function RecipeFormInner() {
             </button>
           </div>
         </label>
+        {/* 人数分の数え方（2026-09-01 便MW・オーナー裁定★2）。シュークリーム8個のような品は
+            「個分」を選ぶと、そのレシピの表示だけが「◯個分」「1個あたり」になる。
+            外せない2択（手間レベルと同じ扱い。もう一度押しても外れない）。
+            **単位を切り替えただけでは servingsNotRead の印は消さない**＝「8」という数字を
+            確かめたことにはならないため（印を消すのは＋−だけ・types.ts の規律のまま） */}
+        <OptionPicker
+          label={ja.form.servingsUnitLabel}
+          options={[
+            { value: 'person', label: ja.form.servingsUnit },
+            { value: 'piece', label: ja.form.servingsUnitPiece },
+          ]}
+          cols={2}
+          isPicked={(v) => servingsUnit === v}
+          onPick={(v) => setServingsUnit(v)}
+          compact
+          className="mt-[var(--space-sm)]"
+          testId="servings-unit-picker"
+        />
         {/* 取り込み元に人数分が書かれていなかったときだけ出す印(2026-08-23 便KF)。
             人数分が違うと1人分の栄養がそのままの倍率でずれるので、黙って既定の人数にしない。
             ＋−をどちらか押せば消える(確認が済んだとみなす) */}
@@ -2879,7 +2952,7 @@ function RecipeFormInner() {
             role="alert"
             className="mt-1 text-sm font-bold text-warning"
           >
-            {ja.form.servingsNotReadNote.replace('{n}', String(servings))}
+            {servingsUnitText(servingsUnit).formNotReadNote.replace('{n}', String(servings))}
           </p>
         )}
       </div>

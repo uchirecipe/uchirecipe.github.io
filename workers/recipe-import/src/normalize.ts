@@ -31,6 +31,12 @@ export interface NormalizedRecipe {
   ingredients: NormalizedIngredient[]
   steps: string[]
   servings?: number
+  /**
+   * 人数分の数え方（2026-09-01 便MW・オーナー裁定★2）。recipeYield が「12個分」のように
+   * **個数として断定できる形**だったときだけ 'piece' が入り、servings はその個数になる。
+   * 無ければ従来どおり人数（app側は未設定＝人として読む。古い版のappはこの項目を無視するだけ）
+   */
+  servingsUnit?: 'piece'
   cookMinutes?: number
   imageUrl?: string
   sourceUrl: string
@@ -417,6 +423,27 @@ export function extractServings(recipeYield: unknown): number | undefined {
   if (!raw) return undefined
   const normalized = normalizeDigits(raw)
   const m = normalized.match(SERVINGS_WITH_UNIT) ?? normalized.match(BARE_NUMBER_ONLY)
+  if (!m) return undefined
+  return Number.parseInt(m[2] ?? m[1], 10)
+}
+
+// 人数（SERVINGS_WITH_UNIT）が空振りのときだけ見る「個数と断定できる形」(2026-09-01 便MW)。
+// cotta等の菓子レシピは recipeYield を「12個分」「シェル型6〜9個分」と書く。従来は許可リストに
+// 当たらず「読めなかった」（＝既定2人分＋未確認の印）だったが、オーナー裁定★2で個数は個数のまま
+// 運べるようになったので、数字と一緒に servingsUnit='piece' を返す。
+// 「分」は任意（recipeYield は収量の欄なので「12個」も個数と読んでよい。本文と違い材料行が紛れ込まない）。
+// 範囲は SERVINGS_WITH_UNIT と同じく後ろ側を採る
+const PIECE_WITH_UNIT = /(\d+)\s*(?:[〜~～ー−–—-]\s*(\d+)\s*)?[（(【「]?\s*[個コ]\s*分?/
+
+/**
+ * recipeYield（「12個分」「シェル型6〜9個分」「12個」等）から個数(整数)を取り出す。
+ * extractServings（人数の許可リスト）が空振りのときだけ呼ぶこと。
+ * 個数と断定できなければ undefined（「17cm型1台分」「1斤」は今までどおり読めない扱いのまま）。
+ */
+export function extractPieceServings(recipeYield: unknown): number | undefined {
+  const raw = firstString(recipeYield)
+  if (!raw) return undefined
+  const m = normalizeDigits(raw).match(PIECE_WITH_UNIT)
   if (!m) return undefined
   return Number.parseInt(m[2] ?? m[1], 10)
 }
@@ -823,6 +850,8 @@ function buildNormalizedRecipe(
   if (!title || ingredients.length === 0 || steps.length === 0) return undefined
 
   const servings = extractServings(best.recipeYield)
+  // 人数として読めなかったときだけ、個数（「12個分」）として読めるかを見る(2026-09-01 便MW)
+  const pieceServings = servings === undefined ? extractPieceServings(best.recipeYield) : undefined
   // cookTime(正味の調理時間)が無くてもtotalTime(下ごしらえ込みの所要時間)は入っているサイトが多い
   // (再監査実測: NHK・キッコーマン・味の素パーク・ハウス食品・楽天レシピ・つくおき等7サイトでcookTimeは
   // 空だがtotalTimeは入っており、cookTimeだけを見ていたこれまでの実装では丸ごと欠落していた)。
@@ -833,7 +862,11 @@ function buildNormalizedRecipe(
     title,
     ingredients,
     steps,
-    ...(servings !== undefined ? { servings } : {}),
+    ...(servings !== undefined
+      ? { servings }
+      : pieceServings !== undefined
+        ? { servings: pieceServings, servingsUnit: 'piece' as const }
+        : {}),
     ...(cookMinutes !== undefined ? { cookMinutes } : {}),
     ...(imageUrl !== undefined ? { imageUrl } : {}),
     sourceUrl,

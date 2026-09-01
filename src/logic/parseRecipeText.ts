@@ -38,6 +38,12 @@ export interface ParsedIngredient {
 export interface ParsedRecipe {
   title?: string
   servings?: number
+  /**
+   * 人数分の数え方（2026-09-01 便MW・司令部裁定2）。共有テキストの「8個分」の行を読めたときだけ
+   * 'piece' が入る（「8人分」で読めたときや読めなかったときは付かない）。
+   * フォーム側はこれを見て「数え方」を個に合わせ、servingsNotRead にしない
+   */
+  servingsUnit?: 'piece'
   /** 「調理時間: 20分」「所要時間 15分」のようなメタ情報行から拾った分数。フォームの調理時間欄へ */
   cookMinutes?: number
   ingredients: ParsedIngredient[]
@@ -192,6 +198,12 @@ const SERVINGS = /(\d+(?:[.．]\d+)?)\s*人\s*(?:分|前)/
 // M2: 「3人分」「(2人分)」「3〜4人分」のように行全体が人数だけの行(材料/手順に混入させず読み飛ばす)
 const SERVINGS_ONLY_LINE =
   /^[（(【\[]?\s*約?\d+(?:[.．]\d+)?(?:\s*[〜~～]\s*\d+(?:[.．]\d+)?)?\s*人\s*(?:分|前)\s*[】\])）]?$/
+// 個で数える品の共有テキストの2行目「8個分」（2026-09-01 便MW・司令部裁定2）。
+// **行全体が個数だけ**の形に限る＝「卵 2個」「レモン1個分の汁」のような材料の行を
+// 人数分と誤読しないため（「個」は材料の助数詞でもあるので、人分と違いどこにあっても拾う形にはしない）。
+// 範囲（「6〜9個分」）は人分の行と同じく後ろ側を採る
+const PIECE_SERVINGS_ONLY_LINE =
+  /^[（(【\[]?\s*約?(\d+(?:[.．]\d+)?)(?:\s*[〜~～]\s*(\d+(?:[.．]\d+)?))?\s*[個コ]\s*分\s*[】\])）]?$/
 // 「調理時間: 20分」「調理時間 20分」「所要時間: 15分」のような単独のメタ情報行。
 // 行全体がこの形のときだけ一致させる(「調理時間20分を目安に煮る」のような手順の文は対象外)
 // M5: 区切りに「/」「／」も追加(「調理時間 ／20分」)
@@ -1177,7 +1189,7 @@ function pass1(lines: string[]): string[] {
     // 冒頭一般規則(3-1): 見出しが存在する入力のpre領域だけ、次のカテゴリ以外を全て捨てる
     if (region === 'pre' && hasHeader) {
       const n = normalize(line).trim()
-      if (SERVINGS_ONLY_LINE.test(n)) {
+      if (SERVINGS_ONLY_LINE.test(n) || PIECE_SERVINGS_ONLY_LINE.test(n)) {
         out.push(line)
         i++
         continue
@@ -1233,6 +1245,20 @@ export function parseRecipeText(text: string): ParsedRecipe {
   for (const rawLine of lines) {
     const line = rawLine
 
+    // 個で数える品の「8個分」の行（2026-09-01 便MW・司令部裁定2）。「個」は材料の助数詞でも
+    // あるので、人分と違って**見出しより前（mode==='auto'）の、行全体が個数だけの行**に限る
+    // （共有テキストは料理名の次の行に置いている。材料の「卵 2個」を誤読しないため）
+    if (mode === 'auto' && PIECE_SERVINGS_ONLY_LINE.test(normalize(line))) {
+      if (result.servings === undefined) {
+        const piece = normalize(line).match(PIECE_SERVINGS_ONLY_LINE)
+        if (piece) {
+          // 範囲（「6〜9個分」）は人分の行と同じく後ろ側を採る
+          result.servings = Math.max(1, Math.round(Number.parseFloat(piece[2] ?? piece[1])))
+          result.servingsUnit = 'piece'
+        }
+      }
+      continue
+    }
     // 人数分はどの行にあっても拾う
     if (result.servings === undefined) {
       const servings = normalize(line).match(SERVINGS)

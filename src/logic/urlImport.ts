@@ -20,6 +20,11 @@ export interface ImportedRecipe {
   ingredients: ImportedIngredient[]
   steps: string[]
   servings?: number
+  /**
+   * 人数分の数え方（2026-09-01 便MW）。Worker が recipeYield を「12個分」と読めたときだけ 'piece'。
+   * Worker のデプロイ前は届かない＝無いときは従来どおり人として扱う
+   */
+  servingsUnit?: 'piece'
   cookMinutes?: number
   imageUrl?: string
   sourceUrl: string
