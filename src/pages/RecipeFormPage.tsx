@@ -385,6 +385,13 @@ const seasonOptions = seasons.map((value) => ({ value, label: ja.season[value] }
 const mealSlotOptions = mealSlots.map((value) => ({ value, label: ja.mealPlan.slot[value] }))
 const dishTypeOptions = dishTypes.map((value) => ({ value, label: ja.dishType[value] }))
 const genreOptions = MEAL_GENRES.map((value) => ({ value, label: value }))
+// 数え方（人数分の単位）の選択肢（2026-09-02 便MY・オーナー「まだ増える可能性もあるし」）。
+// 増やすときは db/types.ts の ServingsUnit に値を足し、ここに1行足す（画面はこの並びのまま
+// プルダウンに出る）。今は人分/個分の2つ＝増やすかどうかはオーナーの判断
+const servingsUnitOptions: readonly { value: ServingsUnit; label: string }[] = [
+  { value: 'person', label: ja.form.servingsUnit },
+  { value: 'piece', label: ja.form.servingsUnitPiece },
+]
 
 const inputCls =
   'mt-1 block w-full rounded-sm border border-edge bg-surface px-3 py-3 text-base text-ink placeholder:text-ink-muted/60'
@@ -2927,22 +2934,30 @@ function RecipeFormInner() {
         </label>
         {/* 人数分の数え方（2026-09-01 便MW・オーナー裁定★2）。シュークリーム8個のような品は
             「個分」を選ぶと、そのレシピの表示だけが「◯個分」「1個あたり」になる。
-            外せない2択（手間レベルと同じ扱い。もう一度押しても外れない）。
+            2026-09-02 便MY・オーナー実機「数え方をボタンではなくプルダウンにして。まだ増える
+            可能性もあるし。内容に対してボタンが大きすぎて、逆に気付けない」: ボタン2択
+            （OptionPicker cols=2）をやめ、週の「週の区切り」と同じプルダウン（.select-control）に
+            した。選択肢は servingsUnitOptions（このファイル上部）に1行足せば増える。
             **単位を切り替えただけでは servingsNotRead の印は消さない**＝「8」という数字を
             確かめたことにはならないため（印を消すのは＋−だけ・types.ts の規律のまま） */}
-        <OptionPicker
-          label={ja.form.servingsUnitLabel}
-          options={[
-            { value: 'person', label: ja.form.servingsUnit },
-            { value: 'piece', label: ja.form.servingsUnitPiece },
-          ]}
-          cols={2}
-          isPicked={(v) => servingsUnit === v}
-          onPick={(v) => setServingsUnit(v)}
-          compact
-          className="mt-[var(--space-sm)]"
-          testId="servings-unit-picker"
-        />
+        <label className="mt-[var(--space-sm)] block">
+          <span className={labelCls}>{ja.form.servingsUnitLabel}</span>
+          <select
+            data-testid="servings-unit-picker"
+            value={servingsUnit}
+            onChange={(e) => {
+              const picked = servingsUnitOptions.find((o) => o.value === e.target.value)
+              if (picked) setServingsUnit(picked.value)
+            }}
+            className="select-control mt-1 w-full"
+          >
+            {servingsUnitOptions.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+        </label>
         {/* 取り込み元に人数分が書かれていなかったときだけ出す印(2026-08-23 便KF)。
             人数分が違うと1人分の栄養がそのままの倍率でずれるので、黙って既定の人数にしない。
             ＋−をどちらか押せば消える(確認が済んだとみなす) */}

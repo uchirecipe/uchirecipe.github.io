@@ -70,19 +70,21 @@ import './_shared.mjs'
       await mwPage.goto(`${BASE}/#/recipes/new`, { waitUntil: 'networkidle' })
       await mwPage.waitForTimeout(600)
       await mwPage.getByPlaceholder(ja.form.namePlaceholder).fill('E2Eシュークリーム')
-      // 数え方の2択が人数分の欄のそばに出ている（既定は「人分」が選ばれている）
+      // 数え方のプルダウンが人数分の欄のそばに出ている（既定は「人分」が選ばれている）。
+      // 2026-09-02 便MY: ボタン2択→プルダウン（週の「週の区切り」と同じ .select-control）。
+      // 選ばれているものは選択肢の字面で見る（ja.ts から読む・'person' 等の内部の値は見ない）
       const mwPicker = mwPage.locator('[data-testid="servings-unit-picker"]')
-      check('MWUNIT-01 数え方の2択（人分/個分）が出る', (await mwPicker.count()) === 1)
-      const mwPersonBtn = mwPicker.getByRole('button', { name: ja.form.servingsUnit, exact: true })
-      const mwPieceBtn = mwPicker.getByRole('button', { name: ja.form.servingsUnitPiece, exact: true })
+      check('MWUNIT-01 数え方のプルダウン（人分/個分）が出る', (await mwPicker.count()) === 1)
       check(
-        'MWUNIT-01 既定は「人分」が選ばれている',
-        (await mwPersonBtn.getAttribute('aria-pressed')) === 'true' &&
-          (await mwPieceBtn.getAttribute('aria-pressed')) === 'false',
+        'MWUNIT-01 プルダウンに「数え方」の名前が付いている（読み上げに届く）',
+        (await mwPage.getByRole('combobox', { name: ja.form.servingsUnitLabel }).count()) === 1,
       )
-      await mwPieceBtn.click()
+      const mwPickedLabel = async () =>
+        stripZwspText((await mwPicker.locator('option:checked').textContent()) ?? '')
+      check('MWUNIT-01 既定は「人分」が選ばれている', (await mwPickedLabel()) === ja.form.servingsUnit)
+      await mwPicker.selectOption({ label: ja.form.servingsUnitPiece })
       await mwPage.waitForTimeout(200)
-      check('MWUNIT-01 「個分」を押すと選びが移る', (await mwPieceBtn.getAttribute('aria-pressed')) === 'true')
+      check('MWUNIT-01 「個分」を選ぶと選びが移る', (await mwPickedLabel()) === ja.form.servingsUnitPiece)
       const mwFormBody = stripZwspText((await mwPage.textContent('body')) ?? '')
       check('MWUNIT-01 欄の名前が「個数」に変わる', mwFormBody.includes(ja.form.servingsLabelPiece))
       // ＋を「8個分」と表示されるまで押す（回数は決め打ちしない・上限は保険）
@@ -192,9 +194,8 @@ import './_shared.mjs'
       const mwPastePicker = mwPage.locator('[data-testid="servings-unit-picker"]')
       check(
         'MWUNIT-02 数え方が「個分」で戻る',
-        (await mwPastePicker
-          .getByRole('button', { name: ja.form.servingsUnitPiece, exact: true })
-          .getAttribute('aria-pressed')) === 'true',
+        stripZwspText((await mwPastePicker.locator('option:checked').textContent()) ?? '') ===
+          ja.form.servingsUnitPiece,
       )
       check(
         'MWUNIT-02 「人数分を読み取れなかった」の印は出ない（読めているので）',
@@ -218,10 +219,11 @@ import './_shared.mjs'
       )
       check(
         'MWUNIT-02 読めなかったときは数え方を動かさない（個分のまま・注意も個の言い方）',
-        (await mwPage
-          .locator('[data-testid="servings-unit-picker"]')
-          .getByRole('button', { name: ja.form.servingsUnitPiece, exact: true })
-          .getAttribute('aria-pressed')) === 'true' &&
+        stripZwspText(
+          (await mwPage
+            .locator('[data-testid="servings-unit-picker"] option:checked')
+            .textContent()) ?? '',
+        ) === ja.form.servingsUnitPiece &&
           stripZwspText(
             (await mwPage.locator('[data-testid="servings-not-read"]').textContent()) ?? '',
           ).includes(ja.form.servingsNotReadNotePiece.replace('{n}', '8')),
