@@ -146,6 +146,17 @@
     margin: 8px 0 24px;
     box-shadow: 0 4px 14px rgba(67, 54, 42, 0.12);
   }
+  /* 2026-09-02 便MZ: 記事間の内部リンク「次に読む」。一覧を経由せず次の記事へ渡れるようにする */
+  .next {
+    text-align: center;
+    margin: 32px 0 0;
+  }
+  .next a {
+    color: var(--accent-ink);
+  }
+  .next + .back {
+    margin-top: 16px;
+  }
   .back {
     display: block;
     text-align: center;
@@ -285,6 +296,10 @@
   </ul>
   <p>登録不要・無料で使えます。</p>
   <a class="cta" href="/">うちレシピを見てみる（無料・登録不要）</a>
+
+  <!-- 2026-09-02 便MZ: 記事間の内部リンク(循環: 曖昧言葉→献立→スクショ→曖昧言葉)。
+       /about/column/ が Search Console で「検出 - インデックス未登録」になった実績への手当て -->
+  <p class="next">次に読む: <a href="/about/column/recipe-screenshot-seiri.html">レシピのスクショが溜まって見つからない問題、そろそろ片づけませんか</a></p>
 
   <a class="back" href="/about/column/">← ちょこっと豆知識に戻る</a>
 
