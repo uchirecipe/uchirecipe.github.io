@@ -3133,6 +3133,30 @@ for (const [title, expected] of futureIconCases) {
       { name: '塩', amount: '少々(お好みで)', unit: '' },
     ])
     eq('KF-1 「お好みで」の調味料では出さない', hasSaltSourceGap(optional), false)
+    // 「無塩」「塩不使用」「食塩不使用」と名乗る名前は塩分の手掛かりではない(2026-09-02 便NA・便MTの申し送り)。
+    // 直す前の実測: 「無塩バター 適量」「塩不使用ミックスナッツ」で強い注意が出ていた
+    // (名前の「塩」の字だけを見て、打ち消しの言い方を読んでいなかった)
+    const unsaltedButter = dish(2, [
+      { name: 'じゃがいも', amount: '2', unit: '個' },
+      { name: '無塩バター', amount: '適量', unit: '' },
+    ])
+    eq('KF-1 「無塩バター 適量」では出さない(塩を使わないと名乗る名前)', hasSaltSourceGap(unsaltedButter), false)
+    const saltFreeButter = dish(2, [
+      { name: 'じゃがいも', amount: '2', unit: '個' },
+      { name: '食塩不使用バター', amount: '適量', unit: '' },
+    ])
+    eq('KF-1 「食塩不使用バター 適量」でも出さない', hasSaltSourceGap(saltFreeButter), false)
+    const saltFreeNuts = dish(2, [
+      { name: 'じゃがいも', amount: '2', unit: '個' },
+      { name: '塩不使用ミックスナッツ', amount: '30', unit: 'g' },
+    ])
+    eq('KF-1 「塩不使用ミックスナッツ」(成分データ無しで落ちる)でも出さない', hasSaltSourceGap(saltFreeNuts), false)
+    // 外すのは打ち消しの言い方だけ。有塩バターは塩分を持つので、当たりすぎる側に倒す線は変えない
+    const saltedButter = dish(2, [
+      { name: 'じゃがいも', amount: '2', unit: '個' },
+      { name: '有塩バター', amount: '適量', unit: '' },
+    ])
+    eq('KF-1 「有塩バター 適量」では今までどおり出す', hasSaltSourceGap(saltedButter), true)
   }
 
   // ---------- KF-8: 塩分の強い注意が、同梱109品では1品も出ない ----------

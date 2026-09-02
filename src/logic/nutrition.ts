@@ -260,12 +260,33 @@ export function saltSourceGaps(
   })
 }
 
+/**
+ * 「塩」の字を含んでいても塩分の手掛かりにならない、打ち消しの言い方（2026-09-02 便NA・便MTの申し送り）。
+ * 無塩バター・食塩不使用バターの「塩」だけを見て「塩分を持つ調味料が落ちた」と誤って知らせていた。
+ * 語の照合の**前に**この言い方を名前から取り除く（順序が逆だと「塩」が先に当たって外せない）。
+ * 「無塩せき」（ハム等の製法。発色剤を使わないだけで塩分は普通にある）は打ち消しではないので残す。
+ */
+const SALT_FREE_WORDS = /(食塩不使用|塩不使用|無塩(?!せき))/g
+
 /** 名前から「塩分を持つ調味料」と読み取れるか */
 function looksSaltSource(name: string): boolean {
-  const raw = name.trim()
+  const raw = name.trim().replace(SALT_FREE_WORDS, '')
   if (!raw) return false
   const key = normalizeName(raw)
   return SALT_SOURCE_WORDS.some((word) => raw.includes(word) || key.includes(word))
+}
+
+/**
+ * ゆで湯用の塩（boil）を計算から外した品か（2026-09-02 便NA・便MTの申し送り）。
+ *
+ * ペペロンチーノ型（塩が全部ゆで湯用の品）は塩分相当量が0と出る。数字は設計どおりだが、
+ * 0だけ見ると「塩を使わない料理」と誤読されるので、塩分の値のすぐ下に短い注記
+ * （ja.nutrition.saltBoilNote）を出す条件に使う。boil除外がある品だけに出す＝
+ * prep（塩もみ用）は元から「計算に含めていない材料」の欄だけで足りている扱いを変えない。
+ * KFSALT連動（捨てる塩は「欠落」に数えない＝saltSourceGaps）はこの関数と無関係のまま。
+ */
+export function hasBoilDiscardedSalt(nutrition: Pick<RecipeNutrition, 'excluded'>): boolean {
+  return nutrition.excluded.some((e) => e.reason === 'boil')
 }
 
 /** 塩分を持つ調味料が計算に入っていない品か（画面で強い注意を出す条件・2026-08-23 便KF） */

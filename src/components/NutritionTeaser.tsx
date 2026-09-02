@@ -6,6 +6,7 @@ import {
   isNutritionUnlocked,
   computeRecipeNutrition,
   hasMaterialGap,
+  hasBoilDiscardedSalt,
   saltSourceGaps,
   roundNutrient,
   nutritionSourceName,
@@ -464,6 +465,14 @@ function NutrientTable({
                     {fmt(key, scaleForDisplay(key))}
                   </span>
                 </>
+              )}
+              {/* ゆで湯用の塩(boil)を外した品だけ、塩分の値のすぐ下で一言つなぐ(2026-09-02 便NA)。
+                  ペペロンチーノ型は塩分が0と出るのが設計どおりだが、0だけ見ると
+                  「塩を使わない料理」と誤読される。詳しい内訳は下の「計算に含めていない材料」にある */}
+              {key === 'saltG' && hasBoilDiscardedSalt(nutrition) && (
+                <span className="col-span-full text-xs text-ink-muted" data-testid="nutrition-salt-boil-note">
+                  {ja.nutrition.saltBoilNote}
+                </span>
               )}
             </div>
           ))}

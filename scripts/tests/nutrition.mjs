@@ -2634,3 +2634,57 @@ const NUTRITION_DB_VERSION_FOR_KP = NUTRITION_DATA_FOR_KP.dbVersion
   })
   eq('MW-3 人の品は今までどおり「4人分」', mwPersonShare.includes('豚汁\n4人分\n'), true)
 }
+
+// ---------- 便NA（2026-09-02・便MTの申し送り）: ゆで湯の塩を外した品は、塩分の値のそばで一言つなぐ ----------
+// ペペロンチーノ型（塩が全部「ゆで湯用」=boilで外れた品）は塩分相当量が0と出る。数字は設計どおりだが、
+// 0だけ見ると「塩を使わない料理」と誤読される。「計算に含めていない材料」の一覧は表の下の別の枠なので、
+// 塩分の行のすぐ下に短い注記を、**boil除外がある品だけ**に出す。
+// KFSALT連動（捨てる塩は「欠落」に数えない=MT-1）の規律はそのまま。
+{
+  const {
+    computeRecipeNutrition: naNut,
+    hasBoilDiscardedSalt: naBoil,
+    hasSaltSourceGap: naGap,
+    roundNutrient: naRound,
+  } = await import('../../src/logic/nutrition.ts')
+
+  // ペペロンチーノ型の最小形（MT-1と同じ3条件のそろった品）
+  const naPepe = naNut({
+    servings: 1,
+    ingredients: [
+      { name: 'スパゲッティ', amount: '100', unit: 'g' },
+      { name: 'お湯', amount: '1000', unit: 'ml' },
+      { name: '塩', amount: '2', unit: '小さじ' },
+    ],
+    steps: [
+      { text: '鍋に湯を沸かし、塩をいれたらスパゲッティをゆでます。ゆであがったらザルにあけ湯切りをします。' },
+    ],
+  })
+  eq('NA-2 前提: ペペロンチーノ型は塩分の表示が0になる(塩は全部ゆで湯用)', naRound('saltG', naPepe.perServing.saltG), 0)
+  eq('NA-2 boil除外のある品だと分かる(塩分の行の注記を出す条件)', naBoil(naPepe), true)
+  eq('NA-2 KFSALT連動はそのまま(捨てる塩は欠落に数えない=強い注意は出ない)', naGap(naPepe), false)
+
+  // 注記はboil除外がある品**だけ**。prep（塩もみ用）や、何も外れていない品では出さない
+  const naPrepOnly = naNut({
+    servings: 2,
+    ingredients: [
+      { name: 'きゅうり', amount: '2', unit: '本' },
+      { name: '塩', amount: '1/4', unit: '小さじ', memo: 'きゅうりの塩もみ用' },
+    ],
+  })
+  eq('NA-2 prep(塩もみ用)だけの品では出さない', naBoil(naPrepOnly), false)
+  const naPlain = naNut({
+    servings: 1,
+    ingredients: [{ name: 'スパゲッティ', amount: '100', unit: 'g' }],
+  })
+  eq('NA-2 何も外れていない品では出さない', naBoil(naPlain), false)
+
+  // 画面側: 塩分の行のそば（NutrientTable）が、この条件とja.tsの注記キーを使っている
+  // （MW-2と同じ「構造」の見方。文言そのものは書き写さない=禁じ手②）
+  const naTeaser = readFileSync(
+    path.join(path.dirname(fileURLToPath(scriptFileUrl)), '..', 'src/components/NutritionTeaser.tsx'),
+    'utf-8',
+  )
+  eq('NA-2 画面の注記は ja.nutrition.saltBoilNote の1か所から出す', naTeaser.includes('ja.nutrition.saltBoilNote'), true)
+  eq('NA-2 出す条件は hasBoilDiscardedSalt(boil除外がある品だけ)', naTeaser.includes('hasBoilDiscardedSalt'), true)
+}

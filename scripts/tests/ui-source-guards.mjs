@@ -4438,3 +4438,28 @@ import { createRequire } from 'node:module'
     true,
   )
 }
+
+// ==========================================================================================
+// NA-1（2026-09-02 便NA）: コラムの各記事に、別のコラム記事へのリンクが1本以上ある
+//
+// 便MZが2026-09-02に入れた記事間の内部リンク「次に読む」（3記事の循環）には見張りが無く、
+// 1本消しても何も赤くならなかった（壊して実測済み）。
+// 題名の文字列は照合しない（SMK-19の教訓＝文言の書き写しは、表記をそろえた瞬間に落ちる）。
+// 見るのは構造だけ: **実在する別のコラム記事**への href が、各記事に1本以上あること。
+// リンク先を実在の記事一覧と突き合わせているので、記事名を変えて切れたリンクもここで赤くなる。
+// ==========================================================================================
+{
+  const naRoot = path.join(path.dirname(fileURLToPath(scriptFileUrl)), '..')
+  const naDir = path.join(naRoot, 'public/about/column')
+  const naArticles = readdirSync(naDir).filter((f) => f.endsWith('.html') && f !== 'index.html')
+  eq('NA-1 前提: コラム記事を読めている（0本なら見張りが壊れている）', naArticles.length >= 3, true)
+  for (const f of naArticles) {
+    const naHtml = readFileSync(path.join(naDir, f), 'utf-8').replace(/<!--[\s\S]*?-->/g, '')
+    // 記事間リンクの書き方は「/about/column/◯◯.html」「./◯◯.html」「◯◯.html」のどれでもよい。
+    // フルURL（canonical・JSON-LD）は href=" 直後に https が来るので当たらない
+    const naLinks = [...naHtml.matchAll(/href="(?:\/about\/column\/|\.\/)?([\w-]+\.html)"/g)]
+      .map((m) => m[1])
+      .filter((t) => t !== f && t !== 'index.html' && naArticles.includes(t))
+    eq(`NA-1 ${f} に別のコラム記事へのリンクが1本以上ある`, naLinks.length >= 1, true)
+  }
+}
