@@ -30,7 +30,7 @@ import { showsEffortBadge } from '../logic/effort'
 import { photoObjectPosition } from '../logic/photoFocus'
 import { perfCountMark } from '../logic/perfMarks'
 import { ja } from '../i18n/ja'
-import { usePhotoUrl } from './usePhotoUrl'
+import { useCachedPhotoUrl, usePhotoUrl } from './usePhotoUrl'
 
 /*
  * カードの角丸と枠（2026-08-22 便JE・オーナー確定）
@@ -342,7 +342,14 @@ function RecipeCard({
 }: Props) {
   // 計測の印（?perf=1 のときだけ。logic/perfMarks）。カード1枚の描画が何回走ったかを数える
   perfCountMark('card:render')
-  const recipePhotoUrl = usePhotoUrl(recipe.photo)
+  /**
+   * レシピの写真は使い回し版で（2026-09-02 便NB。便MV申し送り「写真URLの再デコード22回」）。
+   * Dexieのライブ購読は届くたびに新しいBlobを作るので、素の usePhotoUrl だと一覧に戻るたびに
+   * 全カードの写真URLが作り直され、<img> が同じ写真を取得・デコードし直していた。
+   * 鍵はレシピの id、判は updatedAt（＋Blobのバイト数。中身は usePhotoUrl.ts の説明）。
+   * 記録に添えた写真（photoOverride）は id のような安定した鍵が無いので従来のまま
+   */
+  const recipePhotoUrl = useCachedPhotoUrl(recipe.photo, recipe.id, recipe.updatedAt)
   const overridePhotoUrl = usePhotoUrl(photoOverride)
   const hasNg = ngIngredients ? hasNgIngredient(recipe, ngIngredients) : false
   /**

@@ -4438,3 +4438,20 @@ import { createRequire } from 'node:module'
     true,
   )
 }
+
+// ---------- 便NB（2026-09-02・便MV申し送り）: 一覧カードのレシピ写真は使い回し版で出す ----------
+// 入れ物そのものの約束（同じURLの使い回し・差し替えと上限での破棄）は recipe-data.mjs の
+// NB-1〜NB-4 が動きで見る。ここは**カードが使い回し版を使い続けていること**だけを見る
+// （素の usePhotoUrl に戻すと、一覧に戻るたびに写真の取得とデコードが全カードでやり直しになる。
+// 実測は 2026-09-02: 1往復あたり写真URL作成22回→0回・カード描画302回→280回）
+{
+  const nbCardSrc = readFileSync(
+    path.join(path.dirname(fileURLToPath(scriptFileUrl)), '..', 'src/components/RecipeCard.tsx'),
+    'utf-8',
+  )
+  eq(
+    'NB-5 一覧カードのレシピ写真は使い回し版(useCachedPhotoUrl)で出す(素のusePhotoUrlに戻すと再デコードが復活する)',
+    /useCachedPhotoUrl\(recipe\.photo, recipe\.id, recipe\.updatedAt\)/.test(nbCardSrc),
+    true,
+  )
+}
