@@ -3606,3 +3606,69 @@ for (const [title, expected] of futureIconCases) {
   eq('MW-5 未確認の注意(個)が欄の呼び名と同じ語を使う', servingsUnitText('piece').servingsUnreadNote.includes('「個数」'), true)
   eq('MW-5 取り込みの注意(個)も個の言い方', servingsUnitText('piece').formNotReadNote.includes('個分'), true)
 }
+
+// ---------- 便NB（2026-09-02・便MV申し送り「写真URLの再デコード22回」）: 一覧カードの写真URLの使い回し ----------
+// Dexieのライブ購読は届くたびに新しいBlobを作る（cache 'cloned'）ので、素の usePhotoUrl だと
+// 一覧に戻るたびに全カードの写真URLが作り直され、<img>が同じ写真を取得・デコードし直していた
+// （実測: CPU4倍・140品・写真22品で、1往復あたり22回）。使い回しの入れ物の約束をここで見る:
+//  ①同じレシピ・同じ判 → 同じURL（Blobの参照が毎回変わっても）＝<img>のsrcが変わらず再デコードしない
+//  ②判が変わった（写真の差し替え）→ 新しいURL。**前のURLはその場で破棄**（解放漏れなし）
+//  ③外した（drop）→ 破棄して入れ物からも消える
+//  ④上限（MAX_CACHED_PHOTO_URLS）を超えたら一番使っていないものから破棄、使ったものは残る
+// 破棄の確認は「そのURLで中身が読めなくなったか」を fetch で実測する（NodeはblobのURLを
+// fetchでき、revoke後は必ず失敗する＝解放漏れを言葉でなく動きで観測する）
+{
+  const {
+    acquireCachedPhotoUrl,
+    peekCachedPhotoUrl,
+    dropCachedPhotoUrl,
+    cachedPhotoUrlCount,
+    MAX_CACHED_PHOTO_URLS,
+  } = await import('../../src/components/usePhotoUrl.ts')
+  const nbPhoto = (text) => new Blob([text], { type: 'image/jpeg' })
+  const nbReadable = async (url) => {
+    try {
+      await fetch(url)
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  // ① 同じレシピ・同じ判なら、Blobの参照が変わっても同じURLが返る
+  const nbU1 = acquireCachedPhotoUrl('nbtest:1', '100:5', nbPhoto('写真1'))
+  eq(
+    'NB-1 同じ鍵・同じ判は、別のBlob(Dexieの再配達)でも同じURLを返す',
+    acquireCachedPhotoUrl('nbtest:1', '100:5', nbPhoto('写真1の再配達')),
+    nbU1,
+  )
+  eq('NB-1 peekでも同じURLが見える(初回描画用)', peekCachedPhotoUrl('nbtest:1', '100:5'), nbU1)
+  eq('NB-1 判が違うpeekは空(古い写真を出さない)', peekCachedPhotoUrl('nbtest:1', '999:5'), undefined)
+  eq('NB-1 URLは生きている(中身が読める)', await nbReadable(nbU1), true)
+
+  // ② 写真の差し替え(判が変わる): 新しいURLになり、前のURLはその場で破棄される
+  const nbU2 = acquireCachedPhotoUrl('nbtest:1', '200:7', nbPhoto('差し替えた写真'))
+  neq('NB-2 差し替えでURLが変わる(新しい写真が出る)', nbU2, nbU1)
+  eq('NB-2 前のURLは破棄済み(解放漏れなし)', await nbReadable(nbU1), false)
+  eq('NB-2 新しいURLは生きている', await nbReadable(nbU2), true)
+
+  // ③ 写真を外したら破棄して入れ物からも消える
+  dropCachedPhotoUrl('nbtest:1')
+  eq('NB-3 dropで入れ物から消える', peekCachedPhotoUrl('nbtest:1', '200:7'), undefined)
+  eq('NB-3 dropでURLも破棄される', await nbReadable(nbU2), false)
+
+  // ④ 上限: 上限+2件入れると一番古い2件から破棄され、入れ物は上限で頭打ち
+  const nbUrls = []
+  for (let i = 0; i < MAX_CACHED_PHOTO_URLS + 2; i++) {
+    nbUrls.push(acquireCachedPhotoUrl(`nbtest:cap${i}`, '1:1', nbPhoto(`x${i}`)))
+  }
+  eq('NB-4 入れ物は上限で頭打ち(写真を増やしても溜まり続けない)', cachedPhotoUrlCount(), MAX_CACHED_PHOTO_URLS)
+  eq('NB-4 一番古いものから押し出される', peekCachedPhotoUrl('nbtest:cap0', '1:1'), undefined)
+  eq('NB-4 押し出されたURLは破棄済み(解放漏れなし)', await nbReadable(nbUrls[0]), false)
+  eq('NB-4 新しいものは生きている', await nbReadable(nbUrls[MAX_CACHED_PHOTO_URLS + 1]), true)
+  // 使ったものは残る(LRU): いま一番古い cap2 を使ってから1件足すと、押し出されるのは cap3 の方
+  acquireCachedPhotoUrl('nbtest:cap2', '1:1', nbPhoto('x2'))
+  acquireCachedPhotoUrl('nbtest:capNew', '1:1', nbPhoto('xNew'))
+  eq('NB-4 直前に使ったものは押し出されない', peekCachedPhotoUrl('nbtest:cap2', '1:1') !== undefined, true)
+  eq('NB-4 代わりに一番使っていないものが押し出される', peekCachedPhotoUrl('nbtest:cap3', '1:1'), undefined)
+}
