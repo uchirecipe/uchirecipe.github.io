@@ -493,6 +493,15 @@
     font-size: 13.5px;
     color: var(--text-muted);
   }
+  /* 早期価格の注記(2026-09-02 便NC・オーナー承認)。前半2文は特商法ページの販売価格欄と
+     一字一句同じ(含み=改定は予定・変更の場合あり)。据え置きの一文はオーナーが公開を承認済み。
+     消費税額は書かない(免税事業者=税込の総額表示のみ) */
+  .price-note {
+    margin: 6px 0 0;
+    font-size: 12.5px;
+    line-height: 1.7;
+    color: var(--text-muted);
+  }
   /* 購入ボタンの上に置く精度開示(2026-08-02 便DD・docs/62 決定④)。
      「買う前に読んで買った」状態にするため、ボタンの直前に置く */
   .buy-notice {
@@ -861,7 +870,7 @@
     <div class="note">
       <strong>Pro版を無料で試せます（回数制限あり）</strong>
       <ul class="feature-list" style="margin-bottom: 0;">
-        <li><strong>月間の献立</strong>: 見本の1か月分を入れた画面を何度でも開けます（<a href="/#/month-demo">サンプルの月の画面を開く</a>）。自分の記録が入った本物の画面も1回だけ表示できます</li>
+        <li><strong>月間の献立</strong>: 見本の1か月分を入れた画面を何度でも開けます（<a href="/#/month-demo">サンプルの月の画面を開く</a>）。「作った記録」が5件たまったら、自分の記録が入った本物の画面も1回だけ表示できます</li>
         <li><strong>並行調理ナビ</strong>: 3回まで使えます</li>
         <li><strong>栄養価の8項目表示</strong>: お好きなレシピ1品で1回だけ表示できます</li>
       </ul>
@@ -873,6 +882,7 @@
          見出しの（買い切り）に1箇所だけ残す(言い換えの重ね掛けはしない) -->
     <div class="price" id="buy">
       <b>Pro版（買い切り） 早期価格 800円（税込）</b>
+      <p class="price-note">※早期価格です。正式版では 1,500円（税込）への改定を予定していますが、価格は変更になる場合があります。ご購入済みの方は、改定後もそのままお使いいただけます。</p>
       <p class="buy-notice">栄養と食費の数字は、材料と分量から計算した概算です。調理による変化は反映していません。治療中の方・妊娠中の方の食事管理には使えません。</p>
       <a class="buy" href="https://buy.stripe.com/9B69AV8idaXva3wa4KdQQ00">Pro版を購入する（800円・税込）</a>
       <span style="margin-top: 10px;">お支払いのあと、購入完了の画面に解錠コードが表示されます。うちレシピの設定にある「Pro」→「購入と解錠」にそのコードを入れると、Pro版の機能が使えるようになります。</span>
@@ -965,8 +975,8 @@
   <p>ごはん作りが少しラクになる読みものを置いています。アプリを使わなくても読めます。</p>
   <ul>
     <li><a href="/about/column/recipe-aimai-kotoba.html">「ひとつまみ」ってどのくらい？レシピでよく見る曖昧な言葉たち</a></li>
-    <li><a href="/about/column/kondate-kimaranai.html">献立が決められないのは、あなたのせいではありません</a></li>
-    <li><a href="/about/column/recipe-screenshot-seiri.html">レシピのスクショが溜まって見つからない…挫折しない整理術4つ</a></li>
+    <li><a href="/about/column/kondate-kimaranai.html">献立が決められない理由と、考える量を減らす5つの工夫</a></li>
+    <li><a href="/about/column/recipe-screenshot-seiri.html">溜まったレシピのスクショを片づける、挫折しない整理術4つ</a></li>
   </ul>
   <p><a href="/about/column/">コラムの一覧を見る →</a></p>
 
