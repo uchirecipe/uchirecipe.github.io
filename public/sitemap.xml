@@ -1,27 +1,36 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <!-- 2026-09-02 便MZ: lastmod を追加。Google がクロールの判断に使うのはこの値だけ
+       (changefreq/priority は無視すると公言。害は無いので残す)。
+       運用: ページを足した・直したときは、そのURLの lastmod も同じ日付に更新すること。
+       記事(/about/column/)の初期値は各記事のJSON-LDの datePublished と同じ値 -->
   <url>
     <loc>https://uchirecipe.com/</loc>
+    <lastmod>2026-08-30</lastmod>
     <changefreq>weekly</changefreq>
     <priority>1.0</priority>
   </url>
   <url>
     <loc>https://uchirecipe.com/about/</loc>
+    <lastmod>2026-09-01</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.8</priority>
   </url>
   <url>
     <loc>https://uchirecipe.com/about/manual.html</loc>
+    <lastmod>2026-09-02</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.7</priority>
   </url>
   <url>
     <loc>https://uchirecipe.com/about/install.html</loc>
+    <lastmod>2026-08-30</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.6</priority>
   </url>
   <url>
     <loc>https://uchirecipe.com/about/multi-device.html</loc>
+    <lastmod>2026-09-02</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.6</priority>
   </url>
@@ -29,31 +38,37 @@
        サイトマップから漏れていた（生成物なので作り直しのたびに見落とされていた） -->
   <url>
     <loc>https://uchirecipe.com/about/foods.html</loc>
+    <lastmod>2026-09-01</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.5</priority>
   </url>
   <url>
     <loc>https://uchirecipe.com/about/column/</loc>
+    <lastmod>2026-09-02</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.7</priority>
   </url>
   <url>
     <loc>https://uchirecipe.com/about/column/recipe-aimai-kotoba.html</loc>
+    <lastmod>2026-08-31</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.6</priority>
   </url>
   <url>
     <loc>https://uchirecipe.com/about/column/kondate-kimaranai.html</loc>
+    <lastmod>2026-07-09</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.6</priority>
   </url>
   <url>
     <loc>https://uchirecipe.com/about/column/recipe-screenshot-seiri.html</loc>
+    <lastmod>2026-07-09</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.6</priority>
   </url>
   <url>
     <loc>https://uchirecipe.com/about/terms.html</loc>
+    <lastmod>2026-08-30</lastmod>
     <changefreq>yearly</changefreq>
     <priority>0.3</priority>
   </url>
