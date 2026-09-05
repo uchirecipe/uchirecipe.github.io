@@ -1650,9 +1650,10 @@ export default function RecipesPage() {
            ・検索・絞り込み中(filterActive) … 区画は絞り込みを見ない集合なので、すぐ上の
              「◯品 / 全◯品」と実際に並ぶ品が食い違って見える
            ・該当0件 … 空の見出しを残さない(RecentCookedListと同じ作法)
-          並べ替えだけの変更(sortActive)では隠さない(件数が変わらないので矛盾しない)。
+          並べ替え中(sortActive)も隠す(2026-09-05 オーナー実機FB「並び替え設定を変更したときに
+          出ないようにしたい」。並べ替えた一覧の先頭に、並びと無関係な区画が挟まるのが理由)。
           anyConditionActive で隠さないこと＝hideStarters ON(自作中心の利用者)でも出す */}
-      {!selecting && !filterActive && shelfRecipes.length > 0 && (
+      {!selecting && !filterActive && !sortActive && shelfRecipes.length > 0 && (
         <RecipeShelf
           recipes={shelfRecipes}
           ngIngredients={ngIngredients}

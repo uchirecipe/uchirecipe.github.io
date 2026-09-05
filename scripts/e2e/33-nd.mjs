@@ -13,7 +13,7 @@
 //             開き直しても変わらない。**日替わりの検証は E2E_FAKE_TODAY を2日分**当てて走らせる
 //             （どちらの日でもその日の期待値と一致する＝種が今日の日付で効いている。
 //              あわせて「あすの種」の期待値が今日の並びと違うことも節の中で見る）
-//  NDSHELF-03 検索中・選択モード中は区画ごと消え、条件を外すと戻る。
+//  NDSHELF-03 検索中・選択モード中・並べ替え中は区画ごと消え、条件を外すと戻る。
 //             全品を今日作った状態にすると見出しごと消える（一覧そのものは残る）
 //
 // この便の節は**自前のブラウザ**を開いて測る（前の節が残した画面の状態に寄りかからない）。
@@ -190,6 +190,19 @@ import './_shared.mjs'
       await ndPage.getByTestId('selection-exit').click()
       await ndPage.waitForTimeout(500)
       check('NDSHELF-03 選択モードを抜けると区画が戻る', (await ndShelfCount()) === 1)
+
+      // 並べ替え中も隠す(2026-09-05 オーナー実機FB「並び替え設定を変更したときに出ないようにしたい」。
+      // 並べ替えた一覧の先頭に、並びと無関係な区画が挟まらないこと)
+      await ndPage.locator(`button[aria-label="${ja.search.sortToggle}"]`).click()
+      await ndPage.waitForTimeout(400)
+      await ndPage.getByRole('button', { name: ja.search.sortKana, exact: true }).click()
+      await ndPage.waitForTimeout(500)
+      check('NDSHELF-03 並べ替え中は区画ごと出さない', (await ndShelfCount()) === 0)
+      await ndPage.getByRole('button', { name: ja.search.sortUpdated, exact: true }).click()
+      await ndPage.waitForTimeout(500)
+      await ndPage.getByTestId('sort-panel-close').click()
+      await ndPage.waitForTimeout(400)
+      check('NDSHELF-03 並べ替えを既定に戻すと区画が戻る', (await ndShelfCount()) === 1)
 
       // 全品を「今日作った」状態にする → 該当0件 → 見出しごと消える（一覧そのものは残る）
       await ndPage.evaluate(
