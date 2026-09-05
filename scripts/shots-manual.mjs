@@ -658,7 +658,9 @@ try {
   //(2026-08-02 オーナー指示)
   await page.evaluate(() => window.scrollTo(0, 0))
   await wait(page, 500)
-  const starterCard = page.locator('main a[href*="/recipes/"]:not([href$="/new"])')
+  // 2026-09-05 便ND: 一覧の上に「最近作っていないレシピ」の区画ができた。main全体からaを掴むと
+  // 1枚目〜4枚目が区画のカードになり、一覧でなく区画だけが写る。一覧のグリッドの中に限定する
+  const starterCard = page.locator('div.grid a[href*="/recipes/"]:not([href$="/new"])')
   // 2026-08-10 便FJ: 検索まどの帯が画面上部に貼り付く(2026-08-09 便ET)ようになったため、
   // カードの上端を12pxに寄せると1枚目の上が帯の下に隠れる。帯の高さ(66px)より下に置く
   await cropRange(page, 'recipe-cards', starterCard.first(), starterCard.nth(3), { top: 80 })

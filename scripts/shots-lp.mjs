@@ -332,7 +332,8 @@ try {
     await wait(heroPage, 2000)
     await heroPage.evaluate(() => window.scrollTo(0, 0))
     await wait(heroPage, 500)
-    const heroCard = heroPage.locator('main a[href*="/recipes/"]:not([href$="/new"])')
+    // 2026-09-05 便ND: 一覧の上の「最近作っていないレシピ」区画を掴まないよう、グリッドに限定（shots-manualと同じ直し）
+    const heroCard = heroPage.locator('div.grid a[href*="/recipes/"]:not([href$="/new"])')
     const firstTitles = await heroCard
       .locator('h3, p.font-bold')
       .allTextContents()
