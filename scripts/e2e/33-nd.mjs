@@ -387,7 +387,9 @@ import './_shared.mjs'
           }),
         `区画=${JSON.stringify(nfIds1)}`,
       )
-      const nfExpected1 = pickPantryShelfRecipes(nfRows1.recipes, nfNames1, shelfSeed()).map(
+      // 画面と同じく、上の棚（最近作っていない）に並んだ品は除いて期待値を作る（2026-09-05 重複除外の裁定）
+      const nfExpected1Excl = new Set(pickShelfRecipes(nfRows1.recipes, shelfSeed()).map((r) => r.id))
+      const nfExpected1 = pickPantryShelfRecipes(nfRows1.recipes, nfNames1, shelfSeed(), nfExpected1Excl).map(
         (r) => r.id,
       )
       check(
@@ -412,7 +414,10 @@ import './_shared.mjs'
       const nfCandidates = nfRows1.recipes
         .filter((r) => r.ingredients.some((i) => nfMatches1(i.name)))
         .map((r) => r.id)
-      const nfOwnId = nfCandidates.find((id) => !nfIds1.includes(id)) ?? nfIds1.at(-1)
+      // 上の棚に居る品は在庫の区画から除外される(重複除外の裁定)ので、自作に変える品は
+      // 「候補のうち、どちらの区画にも出ていない品」から選ぶ
+      const nfOwnId =
+        nfCandidates.find((id) => !nfIds1.includes(id) && !nfExpected1Excl.has(id)) ?? nfIds1.at(-1)
       await nfPage.evaluate(
         (ownId) =>
           new Promise((resolve, reject) => {
@@ -449,7 +454,9 @@ import './_shared.mjs'
       const nfIds3 = await nfShelfLinkIds()
       const nfRows3 = await nfReadRows()
       const nfNames3 = pantryAvailableNames(nfRows3.pantry)
-      const nfExpected3 = pickPantryShelfRecipes(nfRows3.recipes, nfNames3, shelfSeed()).map(
+      // 画面と同じく、上の棚（最近作っていない）に並んだ品は除いて期待値を作る（2026-09-05 重複除外の裁定）
+      const nfExpected3Excl = new Set(pickShelfRecipes(nfRows3.recipes, shelfSeed()).map((r) => r.id))
+      const nfExpected3 = pickPantryShelfRecipes(nfRows3.recipes, nfNames3, shelfSeed(), nfExpected3Excl).map(
         (r) => r.id,
       )
       check(
