@@ -1484,8 +1484,10 @@ import './_shared.mjs'
       await bdPage.reload({ waitUntil: 'networkidle' })
       await bdPage.waitForTimeout(1500)
 
-      // 長押しで選択モードに入る(カードを押したまま動かさない)。詳細へは遷移しない
-      const bdFirstCard = bdPage.locator('a[href^="#/recipes/"]').first()
+      // 長押しで選択モードに入る(カードを押したまま動かさない)。詳細へは遷移しない。
+      // 長押しの受け口は**一覧のグリッドのカード**にしか無い(「最近作っていないレシピ」の
+      // 区画のカードは選べない・2026-09-05 便ND)ので、グリッドの1枚目を押す
+      const bdFirstCard = bdPage.locator('div.grid.grid-cols-2 a[href^="#/recipes/"]').first()
       const bdBox = await bdFirstCard.boundingBox()
       await bdPage.mouse.move(bdBox.x + bdBox.width / 2, bdBox.y + 20)
       await bdPage.mouse.down()

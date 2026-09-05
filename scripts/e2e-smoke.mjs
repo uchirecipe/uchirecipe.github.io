@@ -492,6 +492,7 @@ try {
   await import('./e2e/30-ma.mjs')                      // 便MA（栄養・テンプレートの戻り先／ひき肉の書き分けの絞り込み）
   await import('./e2e/31-mj.mjs')                      // 便MJ（ひき肉の絞り込み／範囲えらびのチップ／設定の折りたたみの復元）
   await import('./e2e/32-mw.mjs')                      // 便MW（人数分の数え方: 個の品の開き方・栄養と原価の名札・共有と貼り付けの往復・バックアップ）
+  await import('./e2e/33-nd.mjs')                      // 便ND（レシピ一覧の上の「最近作っていないレシピ」の区画）
 } catch (err) {
   ng(`実行中断(${currentCheck})`, err.message)
 } finally {

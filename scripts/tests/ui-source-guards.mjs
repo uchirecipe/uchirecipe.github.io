@@ -1667,8 +1667,10 @@ import { createRequire } from 'node:module'
     }))
     eq('IA-5 走査できた画面ファイルがある（0件なら見張りが壊れている）', iaFiles.length > 0, true)
 
-    // 「これから作る品を出す場所」＝ここに並ぶもの。表の場所はすべてどちらかに入れる
-    const iaNgNeeded = new Set(['recipeList', 'recipePicker', 'todayPlan', 'todaySuggest', 'planSlot'])
+    // 「これから作る品を出す場所」＝ここに並ぶもの。表の場所はすべてどちらかに入れる。
+    // recipeShelf（一覧の上の「最近作っていないレシピ」・2026-09-05 便ND）も
+    // これから作る品を並べる場所なので、NG食材の警告が要る側
+    const iaNgNeeded = new Set(['recipeList', 'recipePicker', 'todayPlan', 'todaySuggest', 'planSlot', 'recipeShelf'])
     const iaNgNotNeeded = new Set(['cookedLog'])
     eq(
       'IA-5 カードを出す場所すべてが「NG食材が要る／要らない」に仕分けてある（新しい場所が黙って素通りしない）',

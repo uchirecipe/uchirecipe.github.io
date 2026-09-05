@@ -1683,3 +1683,94 @@ import { readFileSync } from 'node:fs'
   // 辞書を変えたら READINGS_VERSION を上げる決まり（保存済みレシピの索引を作り直す引き金）
   eq('MJ-1 読み仮名の版が10以上（集約先を変えたら上げる）', READINGS_VERSION >= 10, true)
 }
+
+/*
+ * 便ND（2026-09-05）: レシピ一覧の上の「最近作っていないレシピ」の区画（logic/recipeShelf）。
+ *
+ * オーナー原文「しばらく作っていない棚は、自分で登録したレシピが優先で出るようにする、
+ * 毎回同じ作っていないレシピが並ば内容にする、ようにしたい」への直訳:
+ *  ・ND-1 境目は「最近作ってない」の絞り込みと同じ14日（cookedWithinDays を流用）
+ *  ・ND-2 自作（!isStarter）が先。足りないぶんは同梱で埋め、自作0品でも並ぶ
+ *  ・ND-3 一度も作っていない品も入り、先頭側（案A）
+ *  ・ND-4 並びは種で決まる: 同じ種なら何度でも同じ／種が変われば変わる（日替わりの種）
+ *  ・ND-5 上位10件まで・該当0件なら空（呼び出し側が区画ごと出さない）
+ */
+{
+  const { pickShelfRecipes, shelfSeed, SHELF_MAX, SHELF_NOT_RECENT_DAYS } = await import(
+    '../../src/logic/recipeShelf.ts'
+  )
+  // 「n日前」のYYYY-MM-DD（logic/date.ts の todayString と同じ組み立て方・ローカル時刻）。
+  // 境目の日数そのもの(14日ちょうど)は時差で割れるので使わない＝13日と15日で両側から挟む
+  const shelfDay = (daysAgo) => {
+    const d = new Date(Date.now() - daysAgo * 24 * 60 * 60 * 1000)
+    const p = (v) => String(v).padStart(2, '0')
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
+  }
+  const shelfRecipe = (id, { starter = false, cookedDaysAgo = null, updatedAt = id } = {}) => ({
+    id,
+    title: `棚テスト${id}`,
+    isStarter: starter || undefined,
+    updatedAt,
+    cookedLogs: cookedDaysAgo === null ? [] : [{ date: shelfDay(cookedDaysAgo) }],
+  })
+
+  eq('ND-4 種は今日の日付（日替わり。E2E_FAKE_TODAYで固定できる形）', shelfSeed(), shelfDay(0))
+  eq('ND-1 境目の日数は絞り込み「最近作ってない」と同じ14日', SHELF_NOT_RECENT_DAYS, 14)
+  eq('ND-5 区画に出す上限は10品', SHELF_MAX, 10)
+
+  const own15 = shelfRecipe(1, { cookedDaysAgo: 15 }) // 自作・15日前に作った → 出る
+  const own13 = shelfRecipe(2, { cookedDaysAgo: 13 }) // 自作・13日前に作った → 出ない
+  const ownNeverA = shelfRecipe(3) // 自作・一度も作っていない → 出る(先頭側)
+  const ownNeverB = shelfRecipe(4)
+  const starters = Array.from({ length: 12 }, (_, i) => shelfRecipe(101 + i, { starter: true }))
+  const starter2d = shelfRecipe(113, { starter: true, cookedDaysAgo: 2 }) // 同梱・2日前 → 出ない
+  const all = [own15, own13, ownNeverA, ownNeverB, ...starters, starter2d]
+
+  const picked = pickShelfRecipes(all, '2026-09-05')
+  const pickedIds = picked.map((r) => r.id)
+  eq('ND-5 候補が上限を超えるときは10品ちょうど', picked.length, SHELF_MAX)
+  eq('ND-1 13日前に作った品は出ない(14日の境目の内側)', pickedIds.includes(2), false)
+  eq('ND-1 2日前に作った同梱の品も出ない', pickedIds.includes(113), false)
+  eq('ND-1 15日前に作った品は出る(境目の外側)', pickedIds.includes(1), true)
+  eq(
+    'ND-3 一度も作っていない自作の品は出て、自作の中でも先頭側(上位2つ)',
+    [...pickedIds.slice(0, 2)].sort((a, b) => a - b),
+    [3, 4],
+  )
+  eq('ND-2 自作3品が同梱より前(3番目=15日前に作った自作)', pickedIds[2], 1)
+  eq(
+    'ND-2 残りは同梱の基本レシピで埋まる(7品。空のままevery合格に倒れない=LK-2)',
+    pickedIds.slice(3).length === 7 && pickedIds.slice(3).every((id) => id >= 101 && id <= 112),
+    true,
+  )
+
+  eq(
+    'ND-4 同じ種なら何度選んでも同じ並び(開き直し・詳細から戻っても変わらない)',
+    pickShelfRecipes(all, '2026-09-05').map((r) => r.id),
+    pickedIds,
+  )
+  neq(
+    'ND-4 種が変われば並びが変わる(毎回同じ並びにならない)',
+    pickShelfRecipes(all, '2026-09-06').map((r) => r.id).join(','),
+    pickedIds.join(','),
+  )
+
+  eq(
+    'ND-2 自作が0品でも同梱で埋まって並ぶ(区画は消えない)',
+    pickShelfRecipes(starters, '2026-09-05').length,
+    SHELF_MAX,
+  )
+  eq(
+    'ND-3 同梱の中でも「一度も作っていない」が「前に作った」より先(案A)',
+    pickShelfRecipes(
+      [shelfRecipe(202, { starter: true, cookedDaysAgo: 20 }), shelfRecipe(201, { starter: true })],
+      '2026-09-05',
+    ).map((r) => r.id),
+    [201, 202],
+  )
+  eq(
+    'ND-5 全部14日以内に作っていたら空(呼び出し側が区画ごと出さない)',
+    pickShelfRecipes([shelfRecipe(1, { cookedDaysAgo: 0 }), shelfRecipe(2, { cookedDaysAgo: 13 })], '2026-09-05'),
+    [],
+  )
+}

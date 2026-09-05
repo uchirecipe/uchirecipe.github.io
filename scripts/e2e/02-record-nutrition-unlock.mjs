@@ -98,9 +98,11 @@ import './_shared.mjs'
         `scrollY=${scrollBefore}`,
       )
       // Playwrightの.click()は要素を可視範囲へ自動スクロールしてしまい、テスト対象の
-      // スクロール位置そのものを壊してしまうため、DOMのclick()を直接呼ぶ
+      // スクロール位置そのものを壊してしまうため、DOMのclick()を直接呼ぶ。
+      // 押すのは**一覧のグリッドの1枚目**(2026-09-05 便ND: 一覧の上に「最近作っていない
+      // レシピ」の区画が入ったので、ページ先頭のリンク=一覧の1枚目ではなくなった)
       await wkPage.evaluate(() => {
-        const link = document.querySelector('a[href^="#/recipes/"]')
+        const link = document.querySelector('div.grid.grid-cols-2 a[href^="#/recipes/"]')
         if (link instanceof HTMLElement) link.click()
       })
       await wkPage.waitForTimeout(600)
@@ -123,7 +125,8 @@ import './_shared.mjs'
       await wkPage.waitForTimeout(400)
       const longScrollBefore = await wkPage.evaluate(() => window.scrollY)
       await wkPage.evaluate(() => {
-        const link = document.querySelector('a[href^="#/recipes/"]')
+        // こちらも一覧のグリッドの1枚目を押す(上と同じ理由・便ND)
+        const link = document.querySelector('div.grid.grid-cols-2 a[href^="#/recipes/"]')
         if (link instanceof HTMLElement) link.click()
       })
       await wkPage.waitForTimeout(600)
@@ -910,9 +913,15 @@ import './_shared.mjs'
       // カード1枚ぶん＝**そのカードのリンクだけを抱えているいちばん外側の要素**まで
       // 広げてから探す＝リンクとバッジの前後関係が変わっても当たる(禁じ手④への対処)
       const kcalBadgeInfo = await nutPage.evaluate(() => {
+        // 値バッジが出るのは**一覧のカード**だけ。「最近作っていないレシピ」の区画(便ND)は
+        // 並べ替え中も出ているが値バッジを持たないので、数える相手から除く
+        // (E2E栄養並び替え確認レシピは自作＝区画にも並ぶ。区画側を掴むと
+        //  「バッジが無い」が別の理由で合格してしまう)
         const cardLinks = (root) =>
-          Array.from((root ?? document).querySelectorAll('a[href^="#/recipes/"]')).filter((a) =>
-            /^#\/recipes\/\d+$/.test(a.getAttribute('href') ?? ''),
+          Array.from((root ?? document).querySelectorAll('a[href^="#/recipes/"]')).filter(
+            (a) =>
+              /^#\/recipes\/\d+$/.test(a.getAttribute('href') ?? '') &&
+              !a.closest('[data-testid="recipe-shelf"]'),
           )
         const cardRootOf = (a) => {
           let el = a
@@ -969,9 +978,12 @@ import './_shared.mjs'
       // kcal側と同じ理由(便HX)でカード1枚ぶんまで広げてから探す
       const countGramBadges = () =>
         nutPage.evaluate(() => {
+          // kcal側と同じ理由で「最近作っていないレシピ」の区画(便ND)のカードは除く
           const cardLinks = (root) =>
-            Array.from((root ?? document).querySelectorAll('a[href^="#/recipes/"]')).filter((a) =>
-              /^#\/recipes\/\d+$/.test(a.getAttribute('href') ?? ''),
+            Array.from((root ?? document).querySelectorAll('a[href^="#/recipes/"]')).filter(
+              (a) =>
+                /^#\/recipes\/\d+$/.test(a.getAttribute('href') ?? '') &&
+                !a.closest('[data-testid="recipe-shelf"]'),
             )
           const cardRootOf = (a) => {
             let el = a

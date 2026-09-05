@@ -62,9 +62,14 @@ import './_shared.mjs'
   currentCheck = 'LAYOUT-01'
   const layoutContainerInfo = () =>
     page.evaluate(() => {
+      // 「最近作っていないレシピ」の区画(2026-09-05 便ND)は一覧より上に別の横並びで出る。
+      // ここで測るのは**一覧そのもの**の並び方なので、区画のカードは数えない
+      // (どこに出ていても同じ判定になる形=禁じ手④のとおり、位置ではなく目印で除く)
       const cardLinks = (root) =>
-        Array.from((root ?? document).querySelectorAll('a[href^="#/recipes/"]')).filter((a) =>
-          /^#\/recipes\/\d+$/.test(a.getAttribute('href') ?? ''),
+        Array.from((root ?? document).querySelectorAll('a[href^="#/recipes/"]')).filter(
+          (a) =>
+            /^#\/recipes\/\d+$/.test(a.getAttribute('href') ?? '') &&
+            !a.closest('[data-testid="recipe-shelf"]'),
         )
       const links = cardLinks()
       // グリッド/リストのコンテナ＝**カードを2枚以上まとめて抱えている、いちばん内側の要素**。
@@ -2095,8 +2100,12 @@ import './_shared.mjs'
     )
     const mvLayout = await page.evaluate(() => {
       window.__mvLayoutObs?.disconnect()
-      const cardLinks = [...document.querySelectorAll('a[href^="#/recipes/"]')].filter((a) =>
-        /^#\/recipes\/\d+$/.test(a.getAttribute('href') ?? ''),
+      // 一覧の上の「最近作っていないレシピ」の区画(便ND)は横並び(flex)で、1列の判定の
+      // 対象ではないので除く(先頭のカード=一覧の1枚目、の前提を保つ)
+      const cardLinks = [...document.querySelectorAll('a[href^="#/recipes/"]')].filter(
+        (a) =>
+          /^#\/recipes\/\d+$/.test(a.getAttribute('href') ?? '') &&
+          !a.closest('[data-testid="recipe-shelf"]'),
       )
       return {
         gridSeen: window.__mvLayout.gridSeen,

@@ -378,9 +378,17 @@ import './_shared.mjs'
       await s2Page.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
       await s2Page.waitForTimeout(2200) // 初回シード完了待ち
 
-      /** 一覧の先頭で、下に固定した帯がどれだけ画面を覆っているか・カードが何枚見えているか */
+      /** 一覧の先頭で、下に固定した帯がどれだけ画面を覆っているか・カードが何枚見えているか。
+          測る前に**一覧の先頭カードを画面の上端に置く**(2026-09-05 便ND: 「最近作っていない
+          レシピ」の区画が上に載ると、667pxの画面では先頭の1画面に一覧のカードが丸ごと
+          入らない。ここで測りたいのは「下の帯がカードを覆わないこと」なので、
+          ふだん/選択中とも同じ土俵=一覧の先頭にそろえてから数える) */
       const s2Measure = async () => {
-        await s2Page.evaluate(() => window.scrollTo(0, 0))
+        await s2Page.evaluate(() => {
+          const first = document.querySelector('div.grid.grid-cols-2 a[href^="#/recipes/"]')
+          if (first) first.scrollIntoView(true)
+          else window.scrollTo(0, 0)
+        })
         await s2Page.waitForTimeout(300)
         return await s2Page.evaluate(() => {
           const vh = window.innerHeight
@@ -389,8 +397,15 @@ import './_shared.mjs'
             const r = bar.getBoundingClientRect()
             return r.height > 0 && r.top < min ? r.top : min
           }, vh)
+          // 数えるのは**一覧のカード**だけ。「最近作っていないレシピ」の区画(2026-09-05 便ND)は
+          // ふだんの一覧に出て選択モードでは消えるので、混ぜると「ふだん⇔選択中」の
+          // 枚数の比較が区画のぶんだけ食い違う
           const rects = [...document.querySelectorAll('a[href^="#/recipes/"]')]
-            .filter((el) => el.getAttribute('href') !== '#/recipes/new')
+            .filter(
+              (el) =>
+                el.getAttribute('href') !== '#/recipes/new' &&
+                !el.closest('[data-testid="recipe-shelf"]'),
+            )
             .map((el) => el.getBoundingClientRect())
           return {
             vh,
@@ -633,11 +648,16 @@ import './_shared.mjs'
       await cuPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
       await cuPage.waitForTimeout(2200) // 初回シード完了待ち
 
-      /** 先頭のカード1枚の形を測る。写真の有無で中身が変わらないよう、絵の枠(正方形の箱)を見る */
+      /** 先頭のカード1枚の形を測る。写真の有無で中身が変わらないよう、絵の枠(正方形の箱)を見る。
+          「最近作っていないレシピ」の区画(2026-09-05 便ND)のカードは幅が固定の別の入れ物なので、
+          ここで測る**一覧の1枚目**からは除く(グリッド/リストの両方で使う関数なので、
+          コンテナ名ではなく区画の目印で除く) */
       const cuShape = () =>
         cuPage.evaluate(() => {
-          const card = Array.from(document.querySelectorAll('a[href^="#/recipes/"]')).find((a) =>
-            /^#\/recipes\/\d+$/.test(a.getAttribute('href') ?? ''),
+          const card = Array.from(document.querySelectorAll('a[href^="#/recipes/"]')).find(
+            (a) =>
+              /^#\/recipes\/\d+$/.test(a.getAttribute('href') ?? '') &&
+              !a.closest('[data-testid="recipe-shelf"]'),
           )
           if (!card) return null
           const r = card.getBoundingClientRect()
@@ -702,8 +722,10 @@ import './_shared.mjs'
       // 台所で濡れた手で押す前提(CLAUDE.md「押せる大きさを小さくしない」)。
       // 便HNで枠だけ→塗りに色をそろえたときに、当たり判定まで小さくしていないことを見張る。
       const cuHref = await cuPage.evaluate(() => {
-        const a = Array.from(document.querySelectorAll('a[href^="#/recipes/"]')).find((x) =>
-          /^#\/recipes\/\d+$/.test(x.getAttribute('href') ?? ''),
+        const a = Array.from(document.querySelectorAll('a[href^="#/recipes/"]')).find(
+          (x) =>
+            /^#\/recipes\/\d+$/.test(x.getAttribute('href') ?? '') &&
+            !x.closest('[data-testid="recipe-shelf"]'),
         )
         return a?.getAttribute('href')
       })

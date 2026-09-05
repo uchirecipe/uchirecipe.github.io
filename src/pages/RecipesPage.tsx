@@ -100,6 +100,10 @@ import RecipeFilterPanel, {
 import { usePanelMaxHeight, useOutsidePanelClose } from '../components/recipePanelParts'
 import SearchMatchDialog from '../components/SearchMatchDialog'
 import RecipeCard from '../components/RecipeCard'
+// 「最近作っていないレシピ」の横スクロールの区画（2026-09-05 便ND）。
+// 何を並べるかは logic/recipeShelf（自作優先・14日・上位10件・日替わりの種）が1か所で決める
+import RecipeShelf from '../components/RecipeShelf'
+import { pickShelfRecipes, shelfSeed } from '../logic/recipeShelf'
 import { normalizeEffortFilter } from '../logic/effort'
 import {
   readHideStartersMirror,
@@ -529,6 +533,22 @@ export default function RecipesPage() {
   // 絞り込み無しでも常に見える総件数(2026-07-13 UI改善)。「基本レシピを表示しない」設定は
   // 一覧の表示そのものに反映される設定なのでここにも反映し、検索語等の絞り込みは反映しない
   const totalCount = visibleRecipes?.length
+
+  /**
+   * 「最近作っていないレシピ」の区画に並べる品（2026-09-05 便ND）。
+   *
+   * 種はマウントごとに1回だけ決める（todayForBadge と同じ作法。描き直しのたびに読み直すと、
+   * 日付をまたいだ瞬間に見ている一覧が組み変わる）。種の決め方そのものは
+   * logic/recipeShelf の shelfSeed の1か所＝いまは日替わり。
+   * 対象は visibleRecipes（「基本レシピを表示しない」反映済み）なので、
+   * 一覧に出ない品が区画にだけ出ることはない。計算は同じ配列をもう1回歩くだけ
+   * （cookedLogs の総なめは上の todayRecipeIds が既に毎回やっている種類の軽い走査）。
+   */
+  const shelfDaySeed = useMemo(() => shelfSeed(), [])
+  const shelfRecipes = useMemo(
+    () => (visibleRecipes ? pickShelfRecipes(visibleRecipes, shelfDaySeed) : []),
+    [visibleRecipes, shelfDaySeed],
+  )
 
   /**
    * 無料版の登録件数まわり(2026-08-08 便DZ)。
@@ -1621,6 +1641,23 @@ export default function RecipesPage() {
             </button>
           </div>
         </div>
+      )}
+
+      {/* 「最近作っていないレシピ」の横スクロールの区画(2026-09-05 便ND)。
+          出さないとき:
+           ・選択モード中 … 区画のカードは選べない(覆いのボタンは下の一覧だけ)・「全選択」にも
+             入らないので、選ぶ作業の画面に押しても選べないカードを残さない
+           ・検索・絞り込み中(filterActive) … 区画は絞り込みを見ない集合なので、すぐ上の
+             「◯品 / 全◯品」と実際に並ぶ品が食い違って見える
+           ・該当0件 … 空の見出しを残さない(RecentCookedListと同じ作法)
+          並べ替えだけの変更(sortActive)では隠さない(件数が変わらないので矛盾しない)。
+          anyConditionActive で隠さないこと＝hideStarters ON(自作中心の利用者)でも出す */}
+      {!selecting && !filterActive && shelfRecipes.length > 0 && (
+        <RecipeShelf
+          recipes={shelfRecipes}
+          ngIngredients={ngIngredients}
+          todayRecipeIds={todayRecipeIds}
+        />
       )}
 
       {/* カードのグリッド／リスト(2026-07-13 UI改善: 表示形式トグルで切替)。
