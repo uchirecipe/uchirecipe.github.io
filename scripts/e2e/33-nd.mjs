@@ -411,6 +411,12 @@ import './_shared.mjs'
       )
 
       // --- 同点(全品1チップ一致)なら自作が先頭: 候補のうち区画に出ていない品を自作に変える ---
+      // 「昨日」の日付(NDSHELF-01〜03のndDayは別ブロックの中で見えないため、ここにも同じ形で持つ)
+      const nfDay = (daysAgo) => {
+        const d = new Date(Date.now() - daysAgo * 24 * 60 * 60 * 1000)
+        const p = (v) => String(v).padStart(2, '0')
+        return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
+      }
       const nfCandidates = nfRows1.recipes
         .filter((r) => r.ingredients.some((i) => nfMatches1(i.name)))
         .map((r) => r.id)
@@ -418,8 +424,11 @@ import './_shared.mjs'
       // 「候補のうち、どちらの区画にも出ていない品」から選ぶ
       const nfOwnId =
         nfCandidates.find((id) => !nfIds1.includes(id) && !nfExpected1Excl.has(id)) ?? nfIds1.at(-1)
+      // 自作にするだけだと上の棚(自作優先)に吸い上げられ、重複除外で在庫の区画から消える。
+      // 「昨日作った」印も付けて上の棚の14日ルールから外し、在庫の区画に残す(在庫の区画は
+      // 最近作ったかを見ない=生きた棚の証明を兼ねる)
       await nfPage.evaluate(
-        (ownId) =>
+        ([ownId, yesterday]) =>
           new Promise((resolve, reject) => {
             const req = indexedDB.open('uchi-recipe')
             req.onsuccess = () => {
@@ -428,7 +437,11 @@ import './_shared.mjs'
               const store = tx.objectStore('recipes')
               const one = store.get(ownId)
               one.onsuccess = () => {
-                store.put({ ...one.result, isStarter: false })
+                store.put({
+                  ...one.result,
+                  isStarter: false,
+                  cookedLogs: [...(one.result.cookedLogs ?? []), { date: yesterday }],
+                })
                 tx.oncomplete = () => resolve(undefined)
                 tx.onerror = () => reject(tx.error)
               }
@@ -436,13 +449,13 @@ import './_shared.mjs'
             }
             req.onerror = () => reject(req.error)
           }),
-        nfOwnId,
+        [nfOwnId, nfDay(1)],
       )
       await nfPage.reload({ waitUntil: 'networkidle' })
       await nfPage.waitForTimeout(1500)
       const nfIds2 = await nfShelfLinkIds()
       check(
-        'NDSHELF-04 同点(全品1チップ一致)なら自作が先頭(候補外だった品が自作になると1枚目に上がる)',
+        'NDSHELF-04 同点(全品1チップ一致)なら自作が先頭(昨日作った自作の品=上の区画に入らない品が1枚目に上がる)',
         nfIds2[0] === nfOwnId,
         `区画=${JSON.stringify(nfIds2)} 自作にした品=${nfOwnId}`,
       )
