@@ -333,6 +333,7 @@ import './_shared.mjs'
     '/about/column/kondate-kimaranai.html',
     '/about/column/recipe-screenshot-seiri.html',
     '/about/column/recipe-aimai-kotoba.html',
+    '/about/column/mirin-fu-chigai.html',
     '/about/foods.html',
     // /sets/(配布ページ)は2026-07-23のテーマ全廃で撤去
   ]

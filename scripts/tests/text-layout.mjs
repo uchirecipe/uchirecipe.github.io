@@ -1945,6 +1945,27 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs'
         for (const m of text.matchAll(rule.bad))
           kanaViolations.push(`${rel}:${lineOf(text, m.index)} 「${around(text, m.index)}」→ ${rule.good}`)
 
+    // 2026-09-05 便NE: 豆知識4本目の本文はオーナー確定稿（「このままで。いい感じ！」）で、
+    // 指示書が「本文の文言は一字も変えない」なので、つづりだけの直し（すこし→少し・
+    // もうひとつ→もう1つ）も便では触らない。この見張りは ML のような一覧
+    // （ja-notation-known.json は ML-6 が総数を数えるので他の見張りの例外を入れられない）を
+    // 持たないため、確定稿の3件だけをファイルと語と件数で名指しして許す。
+    // 件数が増えても減っても赤＝本文を直したら（オーナー承認が要る）この一覧の行ごと消すこと
+    const KANA_FIXED_COPY = [
+      { rel: 'public/about/column/mirin-fu-chigai.html', good: '「少し」', 数: 2 },
+      { rel: 'public/about/column/mirin-fu-chigai.html', good: '「1つ」', 数: 1 },
+    ]
+    for (const okRow of KANA_FIXED_COPY) {
+      const at = []
+      for (let i = 0; i < kanaViolations.length; i++)
+        if (kanaViolations[i].startsWith(`${okRow.rel}:`) && kanaViolations[i].endsWith(okRow.good)) at.push(i)
+      if (at.length === okRow.数) for (const i of at.reverse()) kanaViolations.splice(i, 1)
+      else
+        kanaViolations.push(
+          `${okRow.rel} の確定稿の例外（${okRow.good}）は${okRow.数}件のはずが${at.length}件（本文を直したら例外の行ごと消すこと）`,
+        )
+    }
+
     // 読み取りに失敗したら必ず落ちる: 文字が読めていない／表が現実と噛み合っていないときは、
     // 「見つからなかった＝合格」に倒れないよう、その場で不合格にする
     const scanned = kanaSources.reduce((n, s) => n + s.text.length, 0)
