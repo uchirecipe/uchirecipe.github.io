@@ -116,6 +116,9 @@ export function pickPantryShelfRecipes(
   recipes: readonly Recipe[],
   pantryNames: readonly string[],
   seed: string,
+  // 上の棚（最近作っていない）に既に並んだ品は除く（2026-09-05 司令部裁定。
+  // 自作中心の人ほど両棚に同じ品が2回並び、棚の意味が薄れるため。下見§4の推奨②）
+  excludeIds: ReadonlySet<number> = new Set(),
 ): Recipe[] {
   if (pantryNames.length === 0) return []
   // 「1つ以上使うか」の判定器と、「何チップ一致するか」の判定器の列。
@@ -123,6 +126,7 @@ export function pickPantryShelfRecipes(
   const matchesAny = makePantryMatcher([...pantryNames])
   const matchers = pantryNames.map((name) => makePantryMatcher([name]))
   return recipes
+    .filter((recipe) => recipe.id != null && !excludeIds.has(recipe.id))
     .filter((recipe) => recipe.ingredients.some((i) => matchesAny(i.name)))
     .map((recipe) => ({
       recipe,

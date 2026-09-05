@@ -564,8 +564,16 @@ export default function RecipesPage() {
    */
   const pantryShelfRecipes = useMemo(
     () =>
-      visibleRecipes ? pickPantryShelfRecipes(visibleRecipes, pantryNames, shelfDaySeed) : [],
-    [visibleRecipes, pantryNames, shelfDaySeed],
+      visibleRecipes
+        ? pickPantryShelfRecipes(
+            visibleRecipes,
+            pantryNames,
+            shelfDaySeed,
+            // 上の棚と同じ品を2回並べない（除外の理由は pickPantryShelfRecipes のコメント）
+            new Set(shelfRecipes.map((r) => r.id).filter((id): id is number => id != null)),
+          )
+        : [],
+    [visibleRecipes, pantryNames, shelfDaySeed, shelfRecipes],
   )
 
   /**
