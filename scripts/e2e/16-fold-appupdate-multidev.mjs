@@ -1504,9 +1504,9 @@ import './_shared.mjs'
       /** 一覧のカード1枚ずつの高さ・料理名の枠の高さ・省略されているか */
       const etcCards = () =>
         etcPage.evaluate(() => {
-          const cards = [...document.querySelectorAll('a[href^="#/recipes/"]')].filter(
-            (a) => a.getAttribute('href') !== '#/recipes/new',
-          )
+          const cards = [...document.querySelectorAll('a[href^="#/recipes/"]')]
+            .filter((a) => !a.closest('[data-testid="recipe-shelf"]')) // 2026-09-05 棚は幅140pxで高さが違って当然。一覧の均一高さの検査に入れない(便ND統合)
+            .filter((a) => a.getAttribute('href') !== '#/recipes/new')
           const rows = cards.map((a) => {
             const p = a.querySelector('p')
             return {
