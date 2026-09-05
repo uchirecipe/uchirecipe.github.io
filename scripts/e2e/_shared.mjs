@@ -47,9 +47,17 @@ import { recipeServeTemp } from '../../src/logic/cookNavi.ts'
 // 栄養の公的基準値の文言は、ja.ts の型紙に DAILY_GUIDES の数値を埋めて作る
 // （画面の日本語も基準値も書き写さない。2026-08-25 便KV）
 import { DAILY_GUIDES } from '../../src/logic/nutritionBalance.ts'
-// 「最近作っていないレシピ」の区画（2026-09-05 便ND）。並びの期待値は検査側で作り直さず、
-// 実装と同じ関数・同じ種から作る（優先順・上限・種の決め方を書き写さない）
-import { pickShelfRecipes, shelfSeed, SHELF_MAX } from '../../src/logic/recipeShelf.ts'
+// 「最近作っていないレシピ」「在庫の食材を使うレシピ」の区画（2026-09-05 便ND・便NF）。
+// 並びの期待値は検査側で作り直さず、実装と同じ関数・同じ種から作る
+// （優先順・在庫の数え方・上限・種の決め方を書き写さない）
+import {
+  pickShelfRecipes,
+  pickPantryShelfRecipes,
+  shelfSeed,
+  SHELF_MAX,
+} from '../../src/logic/recipeShelf.ts'
+// 在庫の判定も実装そのもの（名寄せの一本化先）から読む（便NF・NDSHELF-04）
+import { makePantryMatcher, pantryAvailableNames } from '../../src/logic/pantry.ts'
 const NB_GUIDE_VEG = ja.nutritionBalance.guideNoteFree.replace(
   '{veg}',
   DAILY_GUIDES.vegetableG.perDayG.toLocaleString(),
@@ -682,9 +690,11 @@ Object.assign(globalThis, {
   BASE, FIRST_SETUP_NOTICE_SEEN_KEY, FREE_LIMIT, MEAL_GENRES, NB_GUIDE_FULL, NB_GUIDE_VEG,
   NUTRITION_DISPLAY_KEYS, PRICE_DEFAULTS, SHELF_MAX, appRoot, browser, check, chromium, clickReplaceImport,
   collectConfirms, context, errors, execSync, existsSync, hasCount,
-  hasCountAfter, installConfirmAutoPress, ja, makeTestPng, newContextWithFirstSetupNotice, ng,
+  hasCountAfter, installConfirmAutoPress, ja, makePantryMatcher, makeTestPng,
+  newContextWithFirstSetupNotice, ng,
   nutritionLabelFor, ok, openAllWeekDays, openDayOrganize, openMonthDayEdit, openWeekDayEdit,
-  openWeekGroup, page, parseRemainingSeconds, path, pickDisplayIngredientChips, pickFreePort,
+  openWeekGroup, page, pantryAvailableNames, parseRemainingSeconds, path,
+  pickDisplayIngredientChips, pickFreePort, pickPantryShelfRecipes,
   pickShelfRecipes, readConfirms, readFileSync, readResultCount, readTotalCount, recipeServeTemp, results,
   jaRe, reEscape, selectWeekLayout, setConfirmAnswer, shelfSeed, startPreviewServer, stepAppliance,
   stripZwspText,

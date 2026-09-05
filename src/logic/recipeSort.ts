@@ -284,8 +284,10 @@ const collator = new Intl.Collator('ja')
 /**
  * 在庫にある食材のうち、このレシピの材料に含まれるものの数。
  * 在庫との照合は logic/pantry.ts の判定器に一本化する(2026-07-29 便CC/C4)。
+ * export は「在庫の食材を使うレシピ」の区画(2026-09-05 便NF・logic/recipeShelf)が
+ * **同じ数え方**で並べるため。数え方をもう1つ書かない
  */
-function pantryMatchCount(
+export function pantryMatchCount(
   recipe: Recipe,
   matchers: ((ingredientName: string) => boolean)[],
 ): number {

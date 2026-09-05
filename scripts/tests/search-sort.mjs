@@ -1774,3 +1774,89 @@ import { readFileSync } from 'node:fs'
     [],
   )
 }
+
+/*
+ * 便NF（2026-09-05）: レシピ一覧の2つ目の区画「在庫の食材を使うレシピ」（logic/recipeShelf）。
+ *
+ * 司令部裁定=案A: **新しい物差しを発明しない**。
+ *  ・候補 = 絞り込み「在庫の食材で絞る」と同じ「在庫（ある/少ない）の食材を1つ以上使う」
+ *    （makePantryMatcher + some。logic/search.ts の pantryOnly と同じ判定）
+ *  ・並び = 並べ替え「在庫との一致が多いレシピ順」と同じ数え方（recipeSort.ts の
+ *    pantryMatchCount＝在庫チップ1件につき判定器1つ）で多い順
+ *  ・同点は 自作優先 → 日替わりの種 → updatedAt
+ *  ・NF-1 在庫チップ0件なら空（呼び出し側が区画ごと出さない。ここを守らないと
+ *    「更新順の先頭10品」が在庫の見出しで並ぶ）
+ *  ・NF-5 上限10品・足りなくても在庫の食材を使わない品で埋めない
+ */
+{
+  const { pickPantryShelfRecipes, SHELF_MAX } = await import('../../src/logic/recipeShelf.ts')
+  const { makePantryMatcher, pantryAvailableNames } = await import('../../src/logic/pantry.ts')
+  const pantryRecipe = (id, names, { starter = false, updatedAt = id } = {}) => ({
+    id,
+    title: `在庫棚テスト${id}`,
+    isStarter: starter || undefined,
+    updatedAt,
+    ingredients: names.map((name) => ({ name, amount: '', unit: '' })),
+    cookedLogs: [],
+  })
+
+  // NF-1: 在庫チップ0件 → 空。レシピが何品あっても「更新順の並び」が出ることはない
+  eq(
+    'NF-1 在庫チップ0件なら空(区画ごと出さない。更新順の並びが在庫の見出しで出ない)',
+    pickPantryShelfRecipes([pantryRecipe(1, ['卵']), pantryRecipe(2, ['豚肉'])], [], '2026-09-05'),
+    [],
+  )
+
+  // NF-2: 候補は「1つ以上使う」＝絞り込み pantryOnly と同じ判定
+  const nfChips = ['卵', '玉ねぎ']
+  const nfBoth = pantryRecipe(1, ['卵', '玉ねぎ', '小麦粉']) // 2チップ一致
+  const nfEggOnly = pantryRecipe(2, ['卵', '牛乳']) // 1チップ一致
+  const nfNone = pantryRecipe(3, ['豆腐', 'わかめ']) // 一致なし → 出ない
+  const nfPicked = pickPantryShelfRecipes([nfNone, nfEggOnly, nfBoth], nfChips, '2026-09-05')
+  eq('NF-2 在庫の食材を1つも使わない品は出ない(絞り込みと同じ判定)', nfPicked.some((r) => r.id === 3), false)
+  const nfMatches = makePantryMatcher(nfChips)
+  eq(
+    'NF-2 候補の判定は makePantryMatcher と同じ(名寄せを再実装していない。空のまま合格に倒れない=LK-2)',
+    nfPicked.length === 2 &&
+      nfPicked.every((recipe) => recipe.ingredients.some((i) => nfMatches(i.name))),
+    true,
+  )
+
+  // NF-3: 並びは一致チップ数の多い順(2チップ一致が1チップ一致より前)
+  eq('NF-3 一致チップ数の多い順(2チップ>1チップ)', nfPicked.map((r) => r.id), [1, 2])
+
+  // NF-4: 同点は自作優先 → 種 → updatedAt
+  const nfOwn = pantryRecipe(21, ['卵'], { starter: false })
+  const nfStarters = Array.from({ length: 12 }, (_, i) => pantryRecipe(101 + i, ['卵'], { starter: true }))
+  const nfTie = pickPantryShelfRecipes([...nfStarters, nfOwn], ['卵'], '2026-09-05')
+  eq('NF-4 同点(全品1チップ一致)なら自作が先頭', nfTie[0].id, 21)
+  eq(
+    'NF-4 同じ種なら何度選んでも同じ並び(開き直しても変わらない)',
+    pickPantryShelfRecipes([...nfStarters, nfOwn], ['卵'], '2026-09-05').map((r) => r.id),
+    nfTie.map((r) => r.id),
+  )
+  neq(
+    'NF-4 種が変われば同点内の並びが変わる(毎回同じ並びにならない)',
+    pickPantryShelfRecipes([...nfStarters, nfOwn], ['卵'], '2026-09-06').map((r) => r.id).join(','),
+    nfTie.map((r) => r.id).join(','),
+  )
+
+  // NF-5: 上限10品・候補が少なくても在庫の食材を使わない品で埋めない
+  eq('NF-5 候補が上限を超えるときは10品ちょうど', nfTie.length, SHELF_MAX)
+  eq(
+    'NF-5 候補が10品未満でも在庫の食材を使わない品で埋めない',
+    pickPantryShelfRecipes([nfEggOnly, nfNone], ['卵'], '2026-09-05').map((r) => r.id),
+    [2],
+  )
+
+  // 呼び出し側が使う「在庫あり」の線: ある/少ないは入り、ないは入らない(既存 pantryAvailableNames)
+  eq(
+    'NF-1 「ある」「少ない」が在庫あり・「ない」は入らない(pantryAvailableNamesの線のまま)',
+    pantryAvailableNames([
+      { name: '卵', level: 'have' },
+      { name: '豚肉', level: 'low' },
+      { name: 'みそ', level: 'none' },
+    ]),
+    ['卵', '豚肉'],
+  )
+}

@@ -1,6 +1,7 @@
 import type { Recipe } from '../db/types'
 import { cookedWithinDays } from './cooked'
-import { lastCookedDate } from './recipeSort'
+import { lastCookedDate, pantryMatchCount } from './recipeSort'
+import { makePantryMatcher } from './pantry'
 import { todayString } from './date'
 
 /**
@@ -83,6 +84,58 @@ export function pickShelfRecipes(recipes: readonly Recipe[], seed: string): Reci
     .sort(
       (a, b) =>
         a.tier - b.tier ||
+        a.key - b.key ||
+        // 札が同じ（まず起きない）ときも並びが揺れないように、更新順で決める
+        b.recipe.updatedAt - a.recipe.updatedAt,
+    )
+    .slice(0, SHELF_MAX)
+    .map((entry) => entry.recipe)
+}
+
+/**
+ * 2つ目の区画「在庫の食材を使うレシピ」（2026-09-05 便NF）に出すレシピを選ぶ。
+ *
+ * 司令部裁定（案A）: **新しい物差しを発明しない**。既存の2つをそのまま使い回す:
+ *  ・候補 = 絞り込み「在庫の食材で絞る」（ja.search.pantryFilter・logic/search.ts の
+ *    pantryOnly）と同じ「在庫（ある/少ない）の食材を**1つ以上**使う」。
+ *    判定は makePantryMatcher（名寄せの一本化先）を経由し、ここで再実装しない
+ *  ・並び = 並べ替え「在庫との一致が多いレシピ順」（ja.search.sortPantryMatch）と同じ
+ *    pantryMatchCount（在庫チップ1件につき判定器1つ）の多い順。
+ *    同点は 自作優先 → 日替わりの種（hash32。上の区画と同じ札）→ updatedAt
+ *
+ * 「作れる」の物差しは作らない: 実測では「全材料そろう」は同梱109品に対して
+ * プリセット在庫12件を全部「ある」にしても0品（材料の51%が調味料で、在庫チップに
+ * 調味料がほぼ入らないため）＝棚として成立しない。だから見出しも「作れる」と言わない。
+ *
+ * pantryNames は呼び出し側が pantryAvailableNames（ある/少ないだけ・「ない」を除く）で
+ * 作って渡す＝在庫チップ0件なら候補0件で空を返し、呼び出し側が区画ごと出さない。
+ * これを守らないと「matchers 0件→全品0点→更新順」の並びが在庫の見出しで出てしまう。
+ * 在庫は「作った！」で1つ下がる（Dexie 経由）ので、区画は在庫の動きに合わせて自動で変わる。
+ */
+export function pickPantryShelfRecipes(
+  recipes: readonly Recipe[],
+  pantryNames: readonly string[],
+  seed: string,
+): Recipe[] {
+  if (pantryNames.length === 0) return []
+  // 「1つ以上使うか」の判定器と、「何チップ一致するか」の判定器の列。
+  // どちらも makePantryMatcher 経由＝絞り込み・並べ替えとまったく同じ名寄せ
+  const matchesAny = makePantryMatcher([...pantryNames])
+  const matchers = pantryNames.map((name) => makePantryMatcher([name]))
+  return recipes
+    .filter((recipe) => recipe.ingredients.some((i) => matchesAny(i.name)))
+    .map((recipe) => ({
+      recipe,
+      count: pantryMatchCount(recipe, matchers),
+      // 自作優先は「同点のとき」だけ（一致数の物差しを崩さない）。上の区画の shelfTier と
+      // 違い「作った/作っていない」は見ない＝この区画の軸は在庫だけ
+      own: recipe.isStarter ? 1 : 0,
+      key: hash32(`${seed}:${recipe.id ?? recipe.title}`),
+    }))
+    .sort(
+      (a, b) =>
+        b.count - a.count ||
+        a.own - b.own ||
         a.key - b.key ||
         // 札が同じ（まず起きない）ときも並びが揺れないように、更新順で決める
         b.recipe.updatedAt - a.recipe.updatedAt,

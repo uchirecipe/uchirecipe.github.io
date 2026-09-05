@@ -100,10 +100,10 @@ import RecipeFilterPanel, {
 import { usePanelMaxHeight, useOutsidePanelClose } from '../components/recipePanelParts'
 import SearchMatchDialog from '../components/SearchMatchDialog'
 import RecipeCard from '../components/RecipeCard'
-// 「最近作っていないレシピ」の横スクロールの区画（2026-09-05 便ND）。
-// 何を並べるかは logic/recipeShelf（自作優先・14日・上位10件・日替わりの種）が1か所で決める
+// 「最近作っていないレシピ」「在庫の食材を使うレシピ」の横スクロールの区画（2026-09-05 便ND・便NF）。
+// 何を並べるかは logic/recipeShelf（自作優先・14日・在庫との一致・上位10件・日替わりの種）が1か所で決める
 import RecipeShelf from '../components/RecipeShelf'
-import { pickShelfRecipes, shelfSeed } from '../logic/recipeShelf'
+import { pickShelfRecipes, pickPantryShelfRecipes, shelfSeed } from '../logic/recipeShelf'
 import { normalizeEffortFilter } from '../logic/effort'
 import {
   readHideStartersMirror,
@@ -548,6 +548,24 @@ export default function RecipesPage() {
   const shelfRecipes = useMemo(
     () => (visibleRecipes ? pickShelfRecipes(visibleRecipes, shelfDaySeed) : []),
     [visibleRecipes, shelfDaySeed],
+  )
+
+  /**
+   * 2つ目の区画「在庫の食材を使うレシピ」に並べる品（2026-09-05 便NF）。
+   *
+   * 候補も並びも既存の物差しの使い回し（logic/recipeShelf の pickPantryShelfRecipes）:
+   * 絞り込み「在庫の食材で絞る」と同じ「在庫（ある/少ない）の食材を1つ以上使う」で選び、
+   * 並べ替え「在庫との一致が多いレシピ順」と同じ数え方で並べる。種は上の区画と同じもの。
+   * 在庫は上の usePantryItems（この画面が絞り込み・並べ替えのために既に購読している）を
+   * そのまま使う＝この区画のために新しく読まない。「作った！」→在庫が1つ下がる→
+   * 区画が組み変わる、は Dexie の購読で自動に起きる。
+   * 在庫チップ0件（初回シード直後は12件全部「ない」）なら空＝区画ごと出さない
+   * ＝新規ユーザーには出ない。
+   */
+  const pantryShelfRecipes = useMemo(
+    () =>
+      visibleRecipes ? pickPantryShelfRecipes(visibleRecipes, pantryNames, shelfDaySeed) : [],
+    [visibleRecipes, pantryNames, shelfDaySeed],
   )
 
   /**
@@ -1656,6 +1674,26 @@ export default function RecipesPage() {
       {!selecting && !filterActive && !sortActive && shelfRecipes.length > 0 && (
         <RecipeShelf
           recipes={shelfRecipes}
+          title={ja.recipes.shelfNotRecentTitle}
+          kind="notRecent"
+          ngIngredients={ngIngredients}
+          todayRecipeIds={todayRecipeIds}
+        />
+      )}
+
+      {/* 2つ目の区画「在庫の食材を使うレシピ」(2026-09-05 便NF)。隠す条件は上の区画と
+          まったく同じ式(絞り込み「在庫の食材で絞る」ONも filterActive 経由で両方消える
+          ＝絞った一覧と区画が同じ顔ぶれで二重に出ることはない)。
+          並びは**上=「最近作っていない」・下=在庫**で固定。理由:
+           ・「最近作っていない」は自作0品でも同梱で必ず埋まる＝出っぱなしの区画
+           ・在庫の区画は「作った！」で在庫が勝手に下がり、最後の1件が「ない」に落ちた
+             瞬間に丸ごと消える＝出入りする区画。出たり消えたりするものを上に置くと、
+             下の区画と一覧全体が上下に跳ねるので、出入りする方を下に置く */}
+      {!selecting && !filterActive && !sortActive && pantryShelfRecipes.length > 0 && (
+        <RecipeShelf
+          recipes={pantryShelfRecipes}
+          title={ja.recipes.shelfPantryTitle}
+          kind="pantry"
           ngIngredients={ngIngredients}
           todayRecipeIds={todayRecipeIds}
         />
