@@ -111,6 +111,42 @@ export function RecipePlaceholder({
 }
 
 /**
+ * ルーレットの覆いに出す「標準」カードの面（2026-09-07 便NK）。
+ * 「今日なに作る？」（TodaySuggestPanel）が、決めてもらうボタンを押した直後の240msだけ、
+ * 結果のカード1枚ごとに absolute で重ねて、回る料理を差し替えて出す。
+ * 標準の密度と同じ並び（56pxの絵の枠＋主菜/副菜の字＋太字の料理名）だが、
+ * 絵は写真を読み込まず代わり絵（RecipePlaceholder）で出す——80msごとの差し替えで
+ * 写真のデコードを起こさない（重くしない）ため。
+ * このファイルに置くのは、料理の絵を描く場所を共通部品の外に増やさないため（HW-1の約束）。
+ * 飾りの動きなので読み上げには渡さない（aria-hidden。着地した結果は下の本物のカードが持つ）。
+ */
+export function RollingCardFace({
+  recipe,
+  roleLabel,
+  testId,
+}: {
+  recipe: Recipe
+  /** 「主菜」「副菜」の別。本物のカードと同じ位置に出す（献立のときだけ渡す） */
+  roleLabel?: string
+  /** 覆いの目印（e2eが「回っている」を掴むためのもの。呼び出し側の名前空間で付ける） */
+  testId: string
+}) {
+  return (
+    <div
+      data-testid={testId}
+      aria-hidden
+      className="absolute inset-0 z-10 flex items-center gap-[var(--space-sm)] overflow-hidden rounded-card border border-edge-card bg-surface p-[var(--space-sm)] shadow-sm"
+    >
+      <span className="h-14 w-14 shrink-0 overflow-hidden rounded-card">
+        <RecipePlaceholder recipe={recipe} iconSize={24} />
+      </span>
+      {roleLabel && <span className="shrink-0 text-xs text-ink-muted">{roleLabel}</span>}
+      <p className="line-clamp-2 min-w-0 flex-1 font-bold leading-snug">{recipe.title}</p>
+    </div>
+  )
+}
+
+/**
  * レシピ詳細の大きな絵（16:9）。カードではないが、**「写真があれば写真・無ければ代わり絵」の
  * 出し分けをアプリの中で1か所にする**ために、この部品と同じファイルに置く。
  * 画面ごとに自前で出し分けを書くと、そこから「その画面だけのカード」が生まれてきた

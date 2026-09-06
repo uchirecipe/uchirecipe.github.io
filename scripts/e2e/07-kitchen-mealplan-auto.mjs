@@ -1951,6 +1951,12 @@ import './_shared.mjs'
           await dhOne.click()
           await dhPage.waitForTimeout(800)
         }
+        // 2026-09-07 便NK: 切り替えは逆側だけを見せるボタン1つ。1品側に着いた印は
+        // 「献立に戻す」（day-mode-plan）が出ていること（あとの「畳んだら無い」と対にする）
+        check(
+          'DAYSUGGEST-01 前提: 1品側に切り替わった（「献立に戻す」が出ている）',
+          (await dhPage.locator('[data-testid="day-mode-plan"]').count()) === 1,
+        )
       }
       {
         const body = ((await dhPage.textContent('body')) ?? '').replaceAll('​', '')
@@ -2065,10 +2071,13 @@ import './_shared.mjs'
           'DAYSUGGEST-01 今日の献立が1品でも決まると「今日なに作る？」は開いたまま出さない',
           // 2026-08-20 便II・③: 決めてもらうボタンだけは畳んでも出す（折りたたみを開かなくても
           // 機能に手が届くようにした）ので、「中身が出ていない」は**切り替えと候補**で測る
+          // 2026-09-07 便NK: 切り替えは片側だけを見せるボタンになったので、
+          // **どちらの側も無い**ことで「中身が出ていない」を見る
           (await dhPage.locator('[data-testid="day-suggest-toggle"]').getAttribute(
             'aria-expanded',
           )) === 'false' &&
             (await dhPage.locator('[data-testid="day-mode-one"]').count()) === 0 &&
+            (await dhPage.locator('[data-testid="day-mode-plan"]').count()) === 0 &&
             (await dhPage.locator('[data-testid="day-suggest-result"]').count()) === 0 &&
             body.includes('ほうれん草のおひたし'),
           `切り替え=${await dhPage.locator('[data-testid="day-mode-one"]').count()} 候補=${await dhPage.locator('[data-testid="day-suggest-result"]').count()}`,

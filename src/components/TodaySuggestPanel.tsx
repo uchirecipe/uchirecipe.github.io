@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
+  ArrowLeftRight,
   Dices,
   ChevronDown,
   ChevronUp,
@@ -19,7 +20,7 @@ import { excludeYesterdayPlanRecipes } from '../logic/mealPlan'
 import { makePantryMatcher } from '../logic/pantry'
 import type { DishType, MealRole, Recipe, Settings } from '../db/types'
 import Collapse from './Collapse'
-import RecipeCard from './RecipeCard'
+import RecipeCard, { RollingCardFace } from './RecipeCard'
 import { DIALOG_BACKDROP_CLS, DIALOG_CARD_CLS, DIALOG_PRIMARY_BUTTON_CLS } from './dialogStyle'
 import { useOverlayDismiss } from './useOverlayDismiss'
 import { useScrollLock } from './useScrollLock'
@@ -96,6 +97,13 @@ import { ja } from '../i18n/ja'
  *  作った品を後回しにする（下の drawOne。献立エンジン logic/mealPlan.ts が前から
  *  やっている形と同じで、チップで選ばなくても最近の品ばかりにはならない）。
  *  料理の種別と「在庫の食材から」は今までのまま。
+ *
+ * 2026-09-07 便NK（オーナー実機・第2弾）:
+ *  ・切り替えは**逆側だけを見せるボタン1つ**（「1品だけ決める」⇄「献立に戻す」）にした。
+ *    常設の2択チップは「見た目がすっきりするかも。常に２択ボタンじゃなくて」で撤去。
+ *    既定が献立・切り替えを設定に覚える・44pxの当たり判定・押しても画面が動かない、は前のまま
+ *  ・ルーレット演出は**結果のカードそのもの**（1品=1枠・献立=品数ぶん）の中身が
+ *    入れ替わって着地する形に作り直した（詳細は ROULETTE_STEP_MS の注記）
  */
 
 /** 「1品」を出すか、「献立」（主菜＋副菜）を組むか（2026-08-18 便HM） */
@@ -134,8 +142,17 @@ const RECENT_SUGGEST_KEEP = 3
  * 時の変化が味気ない。ルーレットしてる表現の動きってつけられる？重くならないくらいの、
  * 0.2、0.3秒くらいで」）。
  *
- * 決めてもらうボタンを押した直後だけ、結果の上に候補の料理名を数回すばやく切り替える覆いを
- * 出し、最後に外して本物の結果に着地する。決めごと:
+ * 2026-09-07 便NK（オーナー実機「ルーレットに見える部分が、文字だけな上に品数も違う。
+ * 変な演出でしかない」）で作り直した。便NJの形（結果の区画全体に**料理名の文字だけ**の
+ * 覆いを1枚）は、結果がカードなのに回る間だけ見た目が変わり、献立（2枚）でも1つの名前しか
+ * 出なかった。いまの形:
+ *  ・覆いは**結果のカード1枚ごと**に重ねる（SuggestionCard の中）＝回る品数が結果と同じ
+ *    （1品モード=1枠・献立モード=実際の品数ぶん）
+ *  ・覆いの中身はカードと同じ並び（絵の枠＋主菜/副菜の字＋太字の料理名）で、料理だけが
+ *    入れ替わる。絵は写真を読み込まず代わり絵（RecipePlaceholder）で出す——80msごとの
+ *    差し替えで写真のデコードを起こさない（軽くする）ため
+ *
+ * 変えていない決めごと（便NJのまま）:
  *  ・合計 = ROULETTE_STEP_MS × ROULETTE_STEPS = 240ms（オーナー指定の0.2〜0.3秒の中）。
  *    範囲から出ていないかはソースの見張り（scripts/tests/ui-source-guards.mjs の NJ-2）が固定する
  *  ・覆いは absolute（結果の枠から場所を取らない）＝ボタンも結果の枠も1pxも動かない
@@ -143,10 +160,16 @@ const RECENT_SUGGEST_KEEP = 3
  *  ・開いた直後・切り替えた直後の自動の引き直し（auto）では回さない（押していないのに回さない）
  *  ・prefers-reduced-motion のときは回さない＝押したら即着地
  *    （判定は logic/revealExpanded の prefersReducedMotion＝新しい判定を作らない）
- *  ・ライブラリは足さない。タイマーで文字を差し替えるだけ（重くしない）
+ *  ・ライブラリは足さない。タイマーで中身を差し替えるだけ（重くしない）
  */
 const ROULETTE_STEP_MS = 80
 const ROULETTE_STEPS = 3
+/**
+ * 1回の差し替えで用意しておく枠の数。献立はいま主菜＋副菜の最大2枠だが、描く側は
+ * 「結果に出たカードの数」だけ覆いを出す（枠が余れば使わないだけ・足りなければ回して使う）
+ * ＝品数がいくつでも結果と同じ数で回る。
+ */
+const ROULETTE_FRAMES = 4
 
 /**
  * 絞り込みの2軸を両方満たすか（2026-09-06 便NI）。
@@ -181,6 +204,7 @@ function SuggestionCard({
   linkState,
   onOpen,
   roleLabel,
+  rollingRecipe,
 }: {
   recipe: Recipe
   /**
@@ -198,9 +222,15 @@ function SuggestionCard({
    * 1品のときは渡さない＝カードの形は同じで、付く字だけが違う
    */
   roleLabel?: string
+  /**
+   * ルーレットが回っているあいだ、このカードの上に重ねて出す料理（2026-09-07 便NK）。
+   * null のときは回っていない＝覆いを出さない。覆いは absolute でカードの枠にぴったり
+   * 重なるだけなので、カード自身の場所・高さには一切さわらない。
+   */
+  rollingRecipe?: Recipe | null
 }) {
   return (
-    <div className="mt-[var(--space-sm)]">
+    <div className="relative mt-[var(--space-sm)]">
       <RecipeCard
         recipe={recipe}
         density="standard"
@@ -221,6 +251,18 @@ function SuggestionCard({
           roleLabel ? <span className="text-xs text-ink-muted">{roleLabel}</span> : undefined
         }
       />
+      {/* ルーレットの覆い（2026-09-07 便NK）。回っているあいだだけ、このカードの上に
+          「同じ形の面」（RollingCardFace＝絵の枠＋主菜/副菜の字＋料理名）を重ね、
+          料理だけを差し替える。absolute inset-0＝カードの枠から場所を取らない
+          （結果もボタンも1pxも動かない）。面そのものの形は共通のカード部品の側
+          （components/RecipeCard.tsx）にある＝料理の絵を描く場所を増やさない（HW-1） */}
+      {rollingRecipe != null && (
+        <RollingCardFace
+          recipe={rollingRecipe}
+          roleLabel={roleLabel}
+          testId="day-suggest-rolling"
+        />
+      )}
     </div>
   )
 }
@@ -653,11 +695,13 @@ export default function TodaySuggestPanel({
     onDrawPlan({ allowedRecipeIds: planAllowedIds })
   }
   /**
-   * ルーレットの覆いに出している料理名（null＝回っていない。2026-09-06 便NJ）。
-   * 本物の結果はボタンを押した時点で普段どおり出ており、この覆いが240msだけ上に重なる
+   * ルーレットの回り具合（null＝回っていない。2026-09-06 便NJ→2026-09-07 便NK で作り直し）。
+   * picks[step] は「その一瞬に各枠へ出す料理」の並びで、結果のカード i 枚目が
+   * picks[step][i % ROULETTE_FRAMES] を覆いに出す＝**結果と同じ品数**で回る。
+   * 本物の結果はボタンを押した時点で普段どおり出ており、覆いが240msだけカードごとに重なる
    * ＝覆いが外れた瞬間が「着地」。結果の枠そのものの場所・高さには触らない。
    */
-  const [rouletteTitle, setRouletteTitle] = useState<string | null>(null)
+  const [rolling, setRolling] = useState<{ picks: Recipe[][]; step: number } | null>(null)
   const rouletteTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   // 画面を離れるときに、回りかけのタイマーを残さない
   useEffect(
@@ -668,53 +712,61 @@ export default function TodaySuggestPanel({
   )
   /**
    * ルーレットを回す（決めてもらうボタンを押したときだけ呼ぶ）。
-   * titles（押した時点の候補の料理名）から ROULETTE_STEPS 回ぶんを選んで順に出し、
-   * 最後に覆いを外して着地する。出せる名前が2つ未満なら回さない
-   * （同じ名前が止まって見えるだけで、回っている表現にならない）。
+   * pool（押した時点の候補）から ROULETTE_STEPS 回×ROULETTE_FRAMES 枠ぶんを選んで順に出し、
+   * 最後に覆いを外して着地する。出せる料理が2つ未満なら回さない
+   * （同じ料理が止まって見えるだけで、回っている表現にならない）。
    */
-  const spinRoulette = (titles: string[]) => {
+  const spinRoulette = (pool: Recipe[]) => {
     if (prefersReducedMotion()) return
-    const pool = [...new Set(titles)]
-    if (pool.length < 2) return
+    const seenTitles = new Set<string>()
+    const uniq = pool.filter((r) => {
+      if (seenTitles.has(r.title)) return false
+      seenTitles.add(r.title)
+      return true
+    })
+    if (uniq.length < 2) return
     if (rouletteTimer.current != null) clearTimeout(rouletteTimer.current)
-    const picks = Array.from(
-      { length: ROULETTE_STEPS },
-      () => pool[Math.floor(Math.random() * pool.length)],
+    const picks = Array.from({ length: ROULETTE_STEPS }, () =>
+      Array.from(
+        { length: ROULETTE_FRAMES },
+        () => uniq[Math.floor(Math.random() * uniq.length)],
+      ),
     )
     let step = 0
-    setRouletteTitle(picks[0])
+    setRolling({ picks, step: 0 })
     const tick = () => {
       step += 1
       if (step >= ROULETTE_STEPS) {
-        setRouletteTitle(null)
+        setRolling(null)
         rouletteTimer.current = null
         return
       }
-      setRouletteTitle(picks[step])
+      setRolling({ picks, step })
       rouletteTimer.current = setTimeout(tick, ROULETTE_STEP_MS)
     }
     rouletteTimer.current = setTimeout(tick, ROULETTE_STEP_MS)
   }
+  /** カード i 枚目の覆いに出す料理（回っていないときは null＝覆いを出さない） */
+  const rollingFor = (index: number): Recipe | null =>
+    rolling ? rolling.picks[rolling.step][index % ROULETTE_FRAMES] : null
   /**
    * 決めてもらうボタンを押したとき（2026-08-20 便II・③）。
    * 畳んだままでも押せるようにしたので、**押したら節を開く**＝出てきたものが必ず見える。
    * （週タブの「まとめて献立を入力」は結果が下の曜日カードに出るので開かない。
    *   こちらは結果がこの節の中にしか出ないので、開かないと押しても何も見えない）
    *
-   * 2026-09-06 便NJ: 押した直後にルーレットの覆いを回す。名前の母集団は**押した時点の
+   * 2026-09-06 便NJ: 押した直後にルーレットの覆いを回す。回す料理の母集団は**押した時点の
    * 絞り込みを通した候補**（1品=finalCandidates／献立=planAllowedIds のレシピ）
-   * ＝実際に引いている母集団と同じものから名前を出す（出ないはずの品の名前で回さない）。
+   * ＝実際に引いている母集団と同じものから出す（出ないはずの品で回さない）。
    */
   const drawNow = () => {
     if (collapsible && !open) setOpen(true)
     if (mode === 'plan') {
       const allowed = new Set(planAllowedIds)
-      spinRoulette(
-        (recipes ?? []).filter((r) => r.id != null && allowed.has(r.id)).map((r) => r.title),
-      )
+      spinRoulette((recipes ?? []).filter((r) => r.id != null && allowed.has(r.id)))
       drawPlanNow()
     } else {
-      spinRoulette(finalCandidates.map((r) => r.title))
+      spinRoulette(finalCandidates)
       drawOneNow()
     }
   }
@@ -804,42 +856,31 @@ export default function TodaySuggestPanel({
   )
   const bodyTop = (
         <>
-          {/* 「1品」／「献立」の切り替え(2026-08-18 便HM・オーナー指示)。見出しのすぐ下に置き、
-              いまどちらを出しているかを地色で言い切る(選択中=塗り。条件チップと同じ言い方)。
+          {/* 1品／献立の切り替え(2026-08-18 便HM・オーナー指示)。見出しのすぐ下に置き、
               下の「決めてもらう」ボタンは1つで、名前と絵だけがこの切り替えで入れ替わる。
 
-              2026-09-06 便NJ（オーナー実機「1品と献立の切り替えスイッチが縦に大きいので、
-              ランダムボタンよりも目立ってる気がする」）: 器つきの大きな2分割
-              （py-3 text-base＋枠、390px幅の実測58px）をやめ、日/週/月の切り替えと同じ
-              小さいチップの形（px-3 py-2 text-sm、実測38px）にした。
+              2026-09-07 便NK（オーナー実機「献立をデフォルトにして、スイッチで1品に切り替えの
+              方が見た目がすっきりするかも。常に２択ボタンじゃなくて」）: 「1品」「献立」の
+              2択チップの常設（便NJが小さくした形）をやめ、**いまと逆の側へ移るボタン1つ**にした。
+              献立を出しているあいだは「1品だけ決める」、1品のあいだは「献立に戻す」だけが見える。
+               ・data-testid は**押した先の側**の名前（day-mode-one＝1品へ／day-mode-plan＝献立へ）
+                 ＝「day-mode-one が在る＝いま献立側」。e2e はどちらが出ているかで側を見分ける
+               ・見た目は「条件をしぼる」と同じ小さい形（px-3 py-2 text-sm）＝
+                 「決めてもらう」ボタン（塗りつぶし・横いっぱい・48px）より低い。
+                 主役はボタンの側のまま。上下関係は e2e の NJSWITCH-01 が実測で見張る
                ・押す面は .tap-target の透明な覆いで44px四方を保つ（TAP-44の約束のまま）
-               ・どちらを選んでも高さ・場所は同じ＝押しても画面は動かない（便IAと同じ規律）
-               ・「決めてもらう」ボタン（塗りつぶし・横いっぱい・48px）より低い
-                 ＝押してもらう主役はボタンの側。上下関係は e2e の NJSWITCH-01 が実測で見張る */}
-          <div
-            role="group"
-            aria-label={ja.dayStart.modeGroupLabel}
-            className="mt-[var(--space-sm)] flex gap-[var(--space-sm)]"
-          >
-            {([
-              ['one', ja.dayStart.modeOne],
-              ['plan', ja.dayStart.modePlan],
-            ] as const).map(([value, label]) => (
-              <button
-                key={value}
-                type="button"
-                data-testid={value === 'one' ? 'day-mode-one' : 'day-mode-plan'}
-                onClick={() => changeMode(value)}
-                aria-pressed={mode === value}
-                className={`tap-target flex-1 rounded-sm border px-3 py-2 text-sm font-bold ${
-                  mode === value
-                    ? 'border-accent bg-accent text-on-accent'
-                    : 'border-edge bg-surface text-ink-muted'
-                }`}
-              >
-                {label}
-              </button>
-            ))}
+               ・どちらの名前でも場所・高さは同じ行の左端＝押しても画面は動かない
+                 （便IAと同じ規律。幅は名前ぶんだけ変わるが、まわりのものは動かない） */}
+          <div className="mt-[var(--space-sm)]">
+            <button
+              type="button"
+              data-testid={mode === 'plan' ? 'day-mode-one' : 'day-mode-plan'}
+              onClick={() => changeMode(mode === 'plan' ? 'one' : 'plan')}
+              className="tap-target inline-flex items-center gap-1 rounded-sm border border-edge bg-surface px-3 py-2 text-sm font-bold text-ink-muted shadow-sm"
+            >
+              <ArrowLeftRight size={16} aria-hidden />
+              {mode === 'plan' ? ja.dayStart.modeToOne : ja.dayStart.modeToPlan}
+            </button>
           </div>
 
           {/* 「条件をしぼる」（2026-08-19 便IA）。**押すと窓が開く**だけの1つのボタンにした。
@@ -936,13 +977,13 @@ export default function TodaySuggestPanel({
               便HMで「どちらも同じカード・同じ向き」にそろえたのはそのまま残し、向きだけを
               下向きに変えた（上の理由）。献立の主菜・副菜も1品とまったく同じカードで出し、
               違いは料理名の上に付く「主菜」「副菜」の小さな字だけ。
-              relative の入れ物は、押した直後のルーレットの覆い（下の day-suggest-rolling・
-              2026-09-06 便NJ）を絶対配置で重ねるためのもの＝結果の場所・高さには触らない */}
-          <div className="relative">
+              押した直後のルーレットの覆い（day-suggest-rolling・2026-09-07 便NK）は
+              カード1枚ごとに SuggestionCard の中で重ねる＝回る品数が結果と同じになる */}
+          <div>
           {mode === 'plan' ? (
             planPair.length > 0 ? (
               <div data-testid="day-suggest-pair">
-                {planPair.map(({ role, recipe }) => (
+                {planPair.map(({ role, recipe }, index) => (
                   <SuggestionCard
                     key={recipe.id}
                     recipe={recipe}
@@ -950,6 +991,7 @@ export default function TodaySuggestPanel({
                     linkState={linkState}
                     onOpen={(recipeId) => onOpenSuggestion?.(recipeId)}
                     roleLabel={ja.mealPlan.role[role]}
+                    rollingRecipe={rollingFor(index)}
                   />
                 ))}
               </div>
@@ -984,6 +1026,7 @@ export default function TodaySuggestPanel({
               ngIngredients={settings?.ngIngredients ?? []}
               linkState={linkState}
               onOpen={(recipeId) => onOpenSuggestion?.(recipeId)}
+              rollingRecipe={rollingFor(0)}
             />
           ) : (
             /* 条件で0件の型（2026-08-18 便HS・軸8）: 「条件に合う◯◯が見つかりません」＋
@@ -1005,20 +1048,6 @@ export default function TodaySuggestPanel({
               )}
             </div>
             )
-          )}
-          {/* ルーレットの覆い（2026-09-06 便NJ）。回っているあいだだけ、結果の上に
-              候補の料理名を重ねて出す。absolute＝場所を取らない（結果の枠は1pxも動かない）。
-              飾りの動きなので読み上げには渡さない（aria-hidden。着地した結果は下の本物が持つ） */}
-          {rouletteTitle != null && (
-            <div
-              data-testid="day-suggest-rolling"
-              aria-hidden
-              className="absolute inset-0 z-10 flex items-center justify-center bg-surface"
-            >
-              <p className="px-[var(--space-md)] text-center font-bold text-ink-muted">
-                {rouletteTitle}
-              </p>
-            </div>
           )}
           </div>
 

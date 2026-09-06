@@ -1,19 +1,24 @@
 // ==========================================================================================
 // 便NJ（2026-09-06）: 日タブの実機フィードバック（切り替えの控えめ化・ルーレット演出）
+// 2026-09-07 便NK（第2弾）で両方を作り直した:
+//  ・切り替えは**逆側だけを見せるボタン1つ**（オーナー原文「献立をデフォルトにして、
+//    スイッチで1品に切り替えの方が見た目がすっきりするかも。常に２択ボタンじゃなくて」）。
+//    data-testid は押した先の側の名前＝ day-mode-one が在る=いま献立側／day-mode-plan が在る=1品側
+//  ・ルーレットは**結果のカードごと**に覆いを重ねる（オーナー原文「ルーレットに見える部分が、
+//    文字だけな上に品数も違う。変な演出でしかない」→ 品数が結果と同じ・見た目もカードと同じ面）
 // この中の節: NJSWITCH-01, NJROLL-01
 //
-// オーナー原文「1品と献立の切り替えスイッチが縦に大きいので、ランダムボタンよりも
-// 目立ってる気がする。」「おまかせ表示は、レシピを表示する時の変化が味気ない。
-// ルーレットしてる表現の動きってつけられる？重くならないくらいの、0.2、0.3秒くらいで。」
-//
 // 測ること:
-//  NJSWITCH-01 1品/献立の切り替えは「決めてもらう」ボタンより低い（主役の上下関係）。
-//              どちらへ切り替えても、切り替え自身も決めてもらうボタンも1pxも動かない
+//  NJSWITCH-01 切り替えは逆側だけが1つ出ている（2択チップを常設しない）。
+//              「決めてもらう」ボタンより低い（主役の上下関係）。
+//              押して入れ替わっても、切り替えの場所・高さも決めてもらうボタンも1pxも動かない
 //              （便HT・便IAの「押しても画面が動かない」規律のまま）
 //  NJROLL-01   決めてもらうボタンを押すとルーレットの覆い（day-suggest-rolling）が出て、
 //              着地後は覆いが消え、出ている料理名が実装と同じ候補づくり
 //              （logic/homeSuggest.ts の suggestionCandidates・同じ季節）の中の品で、
 //              読み直しても変わらない（＝回りっぱなしにならない）。
+//              覆いは**結果のカードの上だけ**に、**結果と同じ数**だけ出る（1品=1枚・献立=品数ぶん。
+//              数はMutationObserverで回っている最中の実物を数える）。
 //              reduced-motion の文脈では覆いを出さず即着地する。
 //              演出の長さ（200〜300ms）はソースの見張り（ui-source-guards の NJ-2）が固定する
 //              ＝ここでは時間を測らない（マシンの負荷で揺れる数字を検査に書かない）
@@ -43,44 +48,54 @@ import './_shared.mjs'
         const b = await loc.first().boundingBox()
         return b ? { y: Math.round(b.y), h: Math.round(b.height) } : null
       }
-      const nsOne = await nsBox('day-mode-one')
-      const nsPlan = await nsBox('day-mode-plan')
+      const nsCount = (id) => nsPage.locator(`[data-testid="${id}"]`).count()
+      // 2026-09-07 便NK: day-mode-one（1品側への切り替え）が在る＝いま既定の献立側
+      const nsToggle = await nsBox('day-mode-one')
       const nsDraw = await nsBox('day-suggest-draw')
       check(
-        'NJSWITCH-01 前提: 切り替え2つと決めてもらうボタンの位置を読めた',
-        nsOne != null && nsPlan != null && nsDraw != null,
-        `1品=${JSON.stringify(nsOne)} 献立=${JSON.stringify(nsPlan)} ボタン=${JSON.stringify(nsDraw)}`,
+        'NJSWITCH-01 前提: 切り替えと決めてもらうボタンの位置を読めた',
+        nsToggle != null && nsDraw != null,
+        `切り替え=${JSON.stringify(nsToggle)} ボタン=${JSON.stringify(nsDraw)}`,
       )
-      if (nsOne != null && nsPlan != null && nsDraw != null) {
+      check(
+        'NJSWITCH-01 既定（献立）では1品側への切り替えだけが出ている（2択チップを常設しない）',
+        nsToggle != null && (await nsCount('day-mode-plan')) === 0,
+        `1品へ=${nsToggle != null ? 1 : 0} 献立へ=${await nsCount('day-mode-plan')}`,
+      )
+      if (nsToggle != null && nsDraw != null) {
         check(
           'NJSWITCH-01 切り替えは決めてもらうボタンより低い（目立つのはボタンの側）',
-          nsOne.h < nsDraw.h && nsPlan.h < nsDraw.h,
-          `1品=${nsOne.h}px 献立=${nsPlan.h}px ボタン=${nsDraw.h}px`,
+          nsToggle.h < nsDraw.h,
+          `切り替え=${nsToggle.h}px ボタン=${nsDraw.h}px`,
         )
-        check(
-          'NJSWITCH-01 切り替え2つは同じ高さ（選ばれている側だけ大きくならない）',
-          nsOne.h === nsPlan.h,
-          `1品=${nsOne.h}px 献立=${nsPlan.h}px`,
-        )
-        // どちらへ切り替えても、切り替え自身も決めてもらうボタンも動かない
+        // 押すと逆側のボタンに入れ替わる。切り替えの場所・高さも決めてもらうボタンも動かない
         // （出た結果の品数（1品=1枚/献立=2枚）はボタンより下なので、上は動かないのが正）
         await nsPage.locator('[data-testid="day-mode-one"]').click()
         await nsPage.waitForTimeout(800)
-        const nsOneAfter = await nsBox('day-mode-one')
+        const nsBackBtn = await nsBox('day-mode-plan')
         const nsDrawAfter = await nsBox('day-suggest-draw')
+        check(
+          'NJSWITCH-01 押すと「献立に戻す」だけに入れ替わる（1品側でも逆側だけを見せる）',
+          nsBackBtn != null && (await nsCount('day-mode-one')) === 0,
+          `献立へ=${JSON.stringify(nsBackBtn)} 1品へ=${await nsCount('day-mode-one')}`,
+        )
         await nsPage.locator('[data-testid="day-mode-plan"]').click()
         await nsPage.waitForTimeout(800)
+        const nsToggleBack = await nsBox('day-mode-one')
         const nsDrawBack = await nsBox('day-suggest-draw')
         check(
-          'NJSWITCH-01 切り替えを押しても、切り替えと決めてもらうボタンは1pxも動かない',
-          nsOneAfter != null &&
+          'NJSWITCH-01 切り替えを押しても、切り替えの場所・高さと決めてもらうボタンは1pxも動かない',
+          nsBackBtn != null &&
             nsDrawAfter != null &&
+            nsToggleBack != null &&
             nsDrawBack != null &&
-            nsOneAfter.y === nsOne.y &&
-            nsOneAfter.h === nsOne.h &&
+            nsBackBtn.y === nsToggle.y &&
+            nsBackBtn.h === nsToggle.h &&
+            nsToggleBack.y === nsToggle.y &&
+            nsToggleBack.h === nsToggle.h &&
             nsDrawAfter.y === nsDraw.y &&
             nsDrawBack.y === nsDraw.y,
-          `前=${JSON.stringify({ one: nsOne, draw: nsDraw })} 1品後=${JSON.stringify({ one: nsOneAfter, draw: nsDrawAfter })} 献立後=${JSON.stringify(nsDrawBack)}`,
+          `前=${JSON.stringify({ toggle: nsToggle, draw: nsDraw })} 1品後=${JSON.stringify({ toggle: nsBackBtn, draw: nsDrawAfter })} 献立後=${JSON.stringify({ toggle: nsToggleBack, draw: nsDrawBack })}`,
         )
       }
     } finally {
@@ -133,6 +148,26 @@ import './_shared.mjs'
       }
       const njTitle = () => njPage.locator('[data-testid="day-suggest-result-title"]').first()
       const njRolling = njPage.locator('[data-testid="day-suggest-rolling"]')
+      // 2026-09-07 便NK: 覆いの数と「結果のカードに重なっているか」は、回っている最中の実物を
+      // MutationObserver で数える（240msしか無いので、押してから locator で数えると間に合わない）
+      const njArmRollWatch = () =>
+        njPage.evaluate(() => {
+          window.__njRoll = { max: 0, offCard: 0 }
+          const scan = () => {
+            const covers = document.querySelectorAll('[data-testid="day-suggest-rolling"]')
+            if (covers.length > window.__njRoll.max) window.__njRoll.max = covers.length
+            for (const c of covers) {
+              // 覆いは結果のカードの入れ物の中（＝カードの上）に居ること
+              if (!c.parentElement?.querySelector('[data-testid="day-suggest-result"]'))
+                window.__njRoll.offCard++
+            }
+          }
+          if (!window.__njRollObs) {
+            window.__njRollObs = new MutationObserver(scan)
+            window.__njRollObs.observe(document.body, { childList: true, subtree: true })
+          }
+        })
+      await njArmRollWatch()
       // 覆いは240msで消えるので、**押す前から**現れ待ちを仕掛けておく
       //（押してから探し始めると、探す準備のあいだに消え終わることがある）
       const njSeenPromise = njRolling
@@ -148,6 +183,14 @@ import './_shared.mjs'
         'NJROLL-01 着地後は覆いが消えている（回りっぱなしにならない）',
         (await njRolling.count()) === 0,
       )
+      {
+        const njOneRoll = await njPage.evaluate(() => window.__njRoll)
+        check(
+          'NJROLL-01 1品では覆いが1枚だけ、結果のカードの上に出る（品数が結果と同じ）',
+          njOneRoll.max === 1 && njOneRoll.offCard === 0,
+          `覆いの最大=${njOneRoll.max} カードの外=${njOneRoll.offCard}`,
+        )
+      }
       check(
         'NJROLL-01 着地した料理名は実装と同じ候補づくりの中の品',
         njLanded.length > 0 && njPool.includes(njLanded),
@@ -159,6 +202,49 @@ import './_shared.mjs'
         njClean(await njTitle().textContent()) === njLanded,
         `直後=${njLanded} 300ms後=${njClean(await njTitle().textContent())}`,
       )
+
+      // --- 献立側: 覆いは結果のカードと同じ数だけ出る（「品数も違う」を作り直した本丸） ---
+      await njPage.evaluate(() => {
+        window.__njRoll.max = 0
+        window.__njRoll.offCard = 0
+      })
+      const njPlanBtn = njPage.locator('[data-testid="day-mode-plan"]')
+      check('NJROLL-01 前提: 「献立」へ戻せる', (await njPlanBtn.count()) === 1)
+      if ((await njPlanBtn.count()) === 1) {
+        await njPlanBtn.click()
+        await njPage.waitForTimeout(1200)
+      }
+      // 覆いは献立では2枚出るので .first() で待つ（複数一致の locator を waitFor すると
+      // strict mode が例外を投げ、catch で false に化けて「出ていない」と誤判定する）
+      const njPlanSeenPromise = njRolling
+        .first()
+        .waitFor({ state: 'attached', timeout: 1500 })
+        .then(() => true)
+        .catch(() => false)
+      await njPage.locator('[data-testid="day-suggest-draw"]').click()
+      const njPlanSeen = await njPlanSeenPromise
+      check('NJROLL-01 献立でも押すとルーレットの覆いが出る', njPlanSeen === true)
+      await njPage.waitForTimeout(700)
+      {
+        const njPlanRoll = await njPage.evaluate(() => window.__njRoll)
+        const njPlanCards = await njPage
+          .locator('[data-testid="day-suggest-pair"] [data-testid="day-suggest-result"]')
+          .count()
+        check(
+          'NJROLL-01 前提: 組んだ献立のカードが出ている（0枚なら測れていない）',
+          njPlanCards >= 1,
+          `カード=${njPlanCards}枚`,
+        )
+        check(
+          'NJROLL-01 献立では覆いが結果のカードと同じ数だけ、カードの上に出る（品数が結果と同じ）',
+          njPlanRoll.max === njPlanCards && njPlanRoll.offCard === 0,
+          `覆いの最大=${njPlanRoll.max} カード=${njPlanCards}枚 カードの外=${njPlanRoll.offCard}`,
+        )
+        check(
+          'NJROLL-01 献立でも着地後は覆いが消えている',
+          (await njRolling.count()) === 0,
+        )
+      }
       await njCtx.close()
 
       // --- reduced-motion の文脈: 回さず即着地 ---

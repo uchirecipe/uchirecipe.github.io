@@ -95,7 +95,7 @@ import { LESS_MEAL_PURPOSES, MEAL_ROLES, MORE_MEAL_PURPOSES } from '../db/types'
 import CookedLogDetailModal from '../components/CookedLogDetailModal'
 import TodaySuggestPanel from '../components/TodaySuggestPanel'
 import TodaySlotModal from '../components/TodaySlotModal'
-// 棚3段（最近作った・最近作っていない・在庫。2026-09-06 便NH でレシピ一覧の上から日タブへ）。
+// 棚3段（最近作った・しばらく作っていない・在庫。2026-09-06 便NH でレシピ一覧の上から日タブへ）。
 // 何を並べるかは logic/recipeShelf が1か所で決める
 import RecipeShelf from '../components/RecipeShelf'
 import {
@@ -425,7 +425,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
    * 日付をまたいだ瞬間に見ている棚が組み変わる）。
    *
    * 重複は鎖で除外（司令部裁定「同じ品はページ内の棚に1回だけ」）:
-   *   最近作っていない棚 = 最近作った5品を除く ／ 在庫棚 = その両方（5品＋10品）を除く。
+   *   しばらく作っていない棚 = 最近作った5品を除く ／ 在庫棚 = その両方（5品＋10品）を除く。
    * どちらも pick◯◯ShelfRecipes の excludeIds の口に渡すだけ（判定の再実装をしない）。
    */
   const shelfDaySeed = useMemo(() => shelfSeed(), [])
@@ -2132,13 +2132,13 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
               レシピ一覧の上にあった2つの棚をここへ引っ越し、「最近作ったもの」
               （旧 RecentCookedList＝記録を縦に5件）も同じ横スクロールの棚にそろえた。
               その日の献立があってもなくても常に出す（旧来のオーナー指示のまま）。
-              ・並びは 最近作った → 最近作っていない → 在庫（司令部裁定「出入りする棚ほど下」。
+              ・並びは 最近作った → しばらく作っていない → 在庫（司令部裁定「出入りする棚ほど下」。
                 在庫の棚は「作った！」で在庫が下がるたび出入りする＝上に置くと下が跳ねる）
               ・「今日なに作る？」より上には置かない（便HTの実機対応で day-suggest-draw は
                 結果より上に固定されており、上に棚が出入りするとボタンが動いて誤タップを生む）
               ・同じ品はページ内の棚に1回だけ（上の shelf◯◯Recipes の鎖の除外）
               ・各棚の「レシピ一覧で見る」は、その棚と同じ物差しの並び替えを ?sort= で渡して
-                一覧を開く（最近作った=新しい順 / 最近作っていない=古い順 / 在庫=一致が多い順） */}
+                一覧を開く（最近作った=新しい順 / しばらく作っていない=古い順 / 在庫=一致が多い順） */}
           <RecipeShelf
             recipes={recentShelfRecipes}
             title={ja.dayStart.historyTitle}

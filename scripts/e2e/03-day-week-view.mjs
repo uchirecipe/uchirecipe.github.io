@@ -1487,10 +1487,16 @@ import './_shared.mjs'
       // 「おまかせで提案」→「おまかせで献立を組む」になった(置き場所は問わず名前で掴む)。
       // 2026-08-17 便HI: 押しただけでは今日の献立に入らなくなったので、
       // 組んだ献立を「今日の献立に入れる」→食事を選ぶ、まで進めて行を用意する。
-      // 2026-08-18 便HM: おまかせは「今日なに作る？」の「献立」側になったので、先に切り替える
-      // （切り替えた時点で1組出るが、ここでは行を用意したいだけなので押して引き直しておく）
-      await dtPage.locator('[data-testid="day-mode-plan"]').click()
-      await dtPage.waitForTimeout(1200)
+      // 2026-08-18 便HM: おまかせは「今日なに作る？」の「献立」側になったので、先に献立側へ寄せる
+      // （2026-09-07 便NK: 切り替えは逆側だけを見せるボタン1つ。「献立に戻す」が出ている＝
+      //   1品側のときだけ押す。既定の献立側なら押すものは無い）
+      {
+        const dtToPlan = dtPage.locator('[data-testid="day-mode-plan"]')
+        if ((await dtToPlan.count()) === 1) {
+          await dtToPlan.click()
+          await dtPage.waitForTimeout(1200)
+        }
+      }
       await dtPage.getByRole('button', { name: jaRe(ja.mealPlan.todaySuggestButton) }).first().click()
       await dtPage.waitForTimeout(800)
       await dtPage.locator('[data-testid="day-suggest-apply"]').click()
