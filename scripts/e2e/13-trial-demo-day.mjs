@@ -667,10 +667,13 @@ import './_shared.mjs'
             (await dlPage.locator('[data-testid="day-suggest-draw"]').count()) === 1,
           `節の中=${await draw.count()} 画面全体=${await dlPage.locator('[data-testid="day-suggest-draw"]').count()}`,
         )
+        // 2026-09-07 便NK: 切り替えは逆側だけを見せるボタン1つ。上で「1品」へ切り替えたので、
+        // いま出ているのは「献立に戻す」（day-mode-plan）だけ＝それが節の中に居ることを見る
         check(
           'DAYLAYOUT-01 切り替えも「今日なに作る？」の中にある(他の節へ散らばっていない)',
-          (await section.locator('[data-testid="day-mode-one"]').count()) === 1 &&
-            (await dlPage.locator('[data-testid="day-mode-plan"]').count()) === 1,
+          (await section.locator('[data-testid="day-mode-plan"]').count()) === 1 &&
+            (await dlPage.locator('[data-testid="day-mode-plan"]').count()) === 1 &&
+            (await dlPage.locator('[data-testid="day-mode-one"]').count()) === 0,
         )
         for (const [label, loc] of [
           ['今日の献立を探す', choose],
@@ -720,8 +723,11 @@ import './_shared.mjs'
           'DAYLAYOUT-01 献立がある日は「今日なに作る？」を畳んでおく(見え方を重くしない)',
           // 2026-08-17 便HI: 節の名前は畳んでも出したままにしたので、中身が出ていないことで測る。
           // 2026-08-20 便II・③: 決めてもらうボタンだけは畳んでも残すので、中身＝1品/献立の
-          // 切り替えと候補で測る（ボタンが残っていることは下の行で別に見る）
+          // 切り替えと候補で測る（ボタンが残っていることは下の行で別に見る）。
+          // 2026-09-07 便NK: 切り替えは片側だけを見せるボタンになったので、**どちらの側も無い**
+          // ことで「畳んでいる」を見る（片側だけ見ると、開いたまま逆側に居るときと見分けられない）
           (await dlPage.locator('[data-testid="day-mode-one"]').count()) === 0 &&
+            (await dlPage.locator('[data-testid="day-mode-plan"]').count()) === 0 &&
             (await dlPage.locator('[data-testid="day-suggest-result"]').count()) === 0,
           `切り替え=${await dlPage.locator('[data-testid="day-mode-one"]').count()} 候補=${await dlPage.locator('[data-testid="day-suggest-result"]').count()}`,
         )
@@ -795,14 +801,16 @@ import './_shared.mjs'
           (await section.locator('[data-testid="day-suggest-result"]').count()) >= 1,
           `候補=${await section.locator('[data-testid="day-suggest-result"]').count()}`,
         )
-        // 2026-08-18 便HM: 献立がある日にも「1品」/「献立」の切り替えをそのまま出す。
+        // 2026-08-18 便HM: 献立がある日にも1品/献立の切り替えをそのまま出す。
         // 便HHで隠していた理由（押すとさらに2品入ってしまう）は便HIで消えており
         // （いまは「今日の献立に入れる」を押して食事を選ぶまで入らない）、
-        // 片側だけを日によって消すと、覚えている選び方が黙って無視されるため
+        // 片側だけを日によって消すと、覚えている選び方が黙って無視されるため。
+        // 2026-09-07 便NK: 切り替えは逆側だけを見せるボタン1つ。いまは1品側（①で切り替えて
+        // 覚えている）なので、「献立に戻す」だけが出ているのが正
         check(
-          'DAYLAYOUT-01 献立がある日も「1品」「献立」の切り替えが同じように使える',
-          (await section.locator('[data-testid="day-mode-one"]').count()) === 1 &&
-            (await section.locator('[data-testid="day-mode-plan"]').count()) === 1,
+          'DAYLAYOUT-01 献立がある日も1品/献立の切り替えが同じように使える',
+          (await section.locator('[data-testid="day-mode-plan"]').count()) === 1 &&
+            (await section.locator('[data-testid="day-mode-one"]').count()) === 0,
         )
         check(
           'DAYLAYOUT-01 献立がある日にも「作った記録の一覧」がある',
@@ -883,8 +891,6 @@ import './_shared.mjs'
       const scrolled = await dmPage.evaluate(() => Math.round(scrollY))
       return Math.round(box.y) + scrolled
     }
-    const dmPressed = async (locator) =>
-      (await locator.count()) === 1 ? await locator.getAttribute('aria-pressed') : null
     const dmRead = (store) =>
       dmPage.evaluate(
         (name) =>
@@ -906,10 +912,11 @@ import './_shared.mjs'
       await dmPage.reload({ waitUntil: 'networkidle' })
       await dmPage.waitForTimeout(1800)
 
-      // ---- ① 切り替えがある ----
+      // ---- ① 切り替えがある（2026-09-07 便NK: 逆側だけを見せるボタン1つ。2つ同時には出ない。
+      //      data-testid は押した先の側＝ day-mode-one が在る=いま献立側） ----
       check(
-        'DAYMODE-01 「今日なに作る？」に「1品」「献立」の切り替えがある',
-        (await dmOne().count()) === 1 && (await dmPlan().count()) === 1,
+        'DAYMODE-01 「今日なに作る？」に1品/献立の切り替えがちょうど1つある(2択チップを常設しない)',
+        (await dmOne().count()) + (await dmPlan().count()) === 1,
       )
       check(
         'DAYMODE-01 切り替えは「今日なに作る？」の中にある',
@@ -934,17 +941,21 @@ import './_shared.mjs'
             [cx, cy - 21, cy + 21],
           )
         }
+        // 2026-09-07 便NK: 見えているのは片側（既定の献立側では day-mode-one）だけなので、
+        // その1つを測る（掴めなければ boundingBox が null で必ず不合格になる）
         check(
           'DAYMODE-01 切り替えは指で押せる大きさ(中心から±21px=44px域が当たり判定)',
-          (await dmTapOk(dmOne())) && (await dmTapOk(dmPlan())),
+          await dmTapOk(dmOne()),
         )
       }
       // ---- ② 決めてもらうボタンは1つ ----
       check('DAYMODE-01 決めてもらうボタンは画面に1つだけ', (await dmDraw().count()) === 1)
       // ---- ④ はじめは「献立」で、押さなくても組んだ献立が出ている(2026-08-19 便HT) ----
+      // 2026-09-07 便NK: 「どちらが選ばれているか」は aria-pressed ではなく、
+      // **見えている切り替えがどちら側へのボタンか**で見る（1品への切り替えだけが在る＝いま献立）
       check(
         'DAYMODE-01 はじめは「献立」から始まる(2026-08-19 便HT・オーナー指示)',
-        (await dmPressed(dmPlan())) === 'true' && (await dmPressed(dmOne())) === 'false',
+        (await dmOne().count()) === 1 && (await dmPlan().count()) === 0,
       )
       // 既定が「献立」であることは上で測った。ここから先は**必ず献立側で測る**ために
       // 明示的に寄せる（既定が1品に戻ってしまったときに、1品の画面を献立として測って
@@ -955,8 +966,8 @@ import './_shared.mjs'
       }
       check(
         'DAYMODE-01 前提: 献立側で測っている',
-        (await dmPressed(dmPlan())) === 'true',
-        `献立=${await dmPressed(dmPlan())}`,
+        (await dmOne().count()) === 1 && (await dmPlan().count()) === 0,
+        `1品へ=${await dmOne().count()} 献立へ=${await dmPlan().count()}`,
       )
       /** 「献立」側でのボタンの縦位置。①〜⑦を通して、ここから動かないことを見る */
       const dmDrawYPlan = await dmDrawY()
@@ -1091,8 +1102,8 @@ import './_shared.mjs'
       await dmPage.reload({ waitUntil: 'networkidle' })
       await dmPage.waitForTimeout(1800)
       check(
-        'DAYMODE-01 切り替えは覚えている(開き直しても「1品」のまま)',
-        (await dmPressed(dmOne())) === 'true',
+        'DAYMODE-01 切り替えは覚えている(開き直しても「1品」のまま＝「献立に戻す」が出ている)',
+        (await dmPlan().count()) === 1 && (await dmOne().count()) === 0,
       )
       // ---- ⑤ 1品でも「今日の献立に入れる」が使える ----
       {
@@ -1373,9 +1384,15 @@ import './_shared.mjs'
       await dfPage.waitForTimeout(1800)
       {
         // 2026-08-18 便HM: おまかせは「今日なに作る？」の「献立」側になった。
-        // 切り替えてから触る（切り替えた時点で1組出る＝押さなくても結果が見えている）
-        await dfPage.locator('[data-testid="day-mode-plan"]').click()
-        await dfPage.waitForTimeout(1200)
+        // 2026-09-07 便NK: 切り替えは逆側だけを見せるボタン1つ。「献立に戻す」が出ている
+        // （＝いま1品側の）ときだけ押して寄せる。既定の献立側なら押すものは無い
+        {
+          const dfToPlan = dfPage.locator('[data-testid="day-mode-plan"]')
+          if ((await dfToPlan.count()) === 1) {
+            await dfToPlan.click()
+            await dfPage.waitForTimeout(1200)
+          }
+        }
         const omakase = dfPage.getByRole('button', { name: ja.mealPlan.todaySuggestButton })
         const pair = dfPage.locator('[data-testid="day-suggest-pair"]')
         const pairText = async () =>
@@ -1603,8 +1620,15 @@ import './_shared.mjs'
         }
 
         // --- 献立側 ---
-        await dfPage.locator('[data-testid="day-mode-plan"]').click()
-        await dfPage.waitForTimeout(1200)
+        // 2026-09-07 便NK: (g)で献立側のまま来ているので、「献立に戻す」は出ていないのが普通。
+        // 出ていた（＝1品側だった）ときだけ押して寄せる
+        {
+          const dhToPlan = dfPage.locator('[data-testid="day-mode-plan"]')
+          if ((await dhToPlan.count()) === 1) {
+            await dhToPlan.click()
+            await dfPage.waitForTimeout(1200)
+          }
+        }
         const dhPair = dfPage.locator('[data-testid="day-suggest-pair"]')
         const dhPairTitles = async () =>
           (await dhPair.locator('[data-testid="day-suggest-result-title"]').allTextContents()).map(
@@ -1734,10 +1758,10 @@ import './_shared.mjs'
     const ddBody = async () => ((await ddPage.textContent('body')) ?? '').replaceAll('​', '')
     const ddSection = () =>
       ddPage.locator('section').filter({ has: ddPage.getByRole('heading', { name: ja.dayStart.suggestTitle }) })
-    const ddPressed = async (testId) => {
-      const loc = ddPage.locator(`[data-testid="${testId}"]`)
-      return (await loc.count()) === 1 ? await loc.getAttribute('aria-pressed') : null
-    }
+    // 2026-09-07 便NK: 切り替えは逆側だけを見せるボタン1つになったので、
+    // 「どちらが選ばれているか」は押されている印ではなく**どちら側へのボタンが見えているか**で
+    // 見る（day-mode-one が在る=いま献立側／day-mode-plan が在る=いま1品側）
+    const ddCount = (testId) => ddPage.locator(`[data-testid="${testId}"]`).count()
     try {
       // はじめて開く人と同じ道: アプリを開いてシードを待ち、そのまま献立の「日」を見る
       await ddPage.goto(`${BASE}/`, { waitUntil: 'networkidle' })
@@ -1749,11 +1773,11 @@ import './_shared.mjs'
         'DAYDEFAULT-01 前提: はじめて開いた画面に「今日なに作る？」が出る',
         (await ddSection().count()) === 1,
       )
-      // ① 既定は「献立」
+      // ① 既定は「献立」（1品側への切り替えだけが見えている）
       check(
         'DAYDEFAULT-01 はじめて開いた人には「献立」が選ばれている',
-        (await ddPressed('day-mode-plan')) === 'true' && (await ddPressed('day-mode-one')) === 'false',
-        `献立=${await ddPressed('day-mode-plan')} 1品=${await ddPressed('day-mode-one')}`,
+        (await ddCount('day-mode-one')) === 1 && (await ddCount('day-mode-plan')) === 0,
+        `1品へ=${await ddCount('day-mode-one')} 献立へ=${await ddCount('day-mode-plan')}`,
       )
       // ② 押していないのに組んだ献立が出ている
       {
@@ -1777,16 +1801,16 @@ import './_shared.mjs'
       // ③ 絞り込みは、はじめの画面からそのまま見える
       check(
         'DAYDEFAULT-01 はじめの画面（献立）でも「条件をしぼる」が見えている',
-        (await ddPressed('day-mode-plan')) === 'true' && (await ddBody()).includes('条件をしぼる'),
-        `献立=${await ddPressed('day-mode-plan')}`,
+        (await ddCount('day-mode-one')) === 1 && (await ddBody()).includes('条件をしぼる'),
+        `1品へ=${await ddCount('day-mode-one')}`,
       )
-      // ④ 「1品」を押すと1品側になり、料理の種別まで選べる
+      // ④ 「1品だけ決める」を押すと1品側になり、料理の種別まで選べる
       {
         await ddPage.locator('[data-testid="day-mode-one"]').click()
         await ddPage.waitForTimeout(900)
         check(
-          'DAYDEFAULT-01 「1品」を押すと1品側になる',
-          (await ddPressed('day-mode-one')) === 'true',
+          'DAYDEFAULT-01 「1品だけ決める」を押すと1品側になる（「献立に戻す」に入れ替わる）',
+          (await ddCount('day-mode-plan')) === 1 && (await ddCount('day-mode-one')) === 0,
         )
         const ddConditions = ddSection().getByRole('button', { name: jaRe(ja.dayStart.conditionsToggle) })
         check('DAYDEFAULT-01 前提: 「条件をしぼる」が押せる', (await ddConditions.count()) === 1)
@@ -1810,8 +1834,8 @@ import './_shared.mjs'
       await ddPage.waitForTimeout(1800)
       check(
         'DAYDEFAULT-01 自分で「1品」にしたあとは、開き直しても1品のまま',
-        (await ddPressed('day-mode-one')) === 'true',
-        `1品=${await ddPressed('day-mode-one')} 献立=${await ddPressed('day-mode-plan')}`,
+        (await ddCount('day-mode-plan')) === 1 && (await ddCount('day-mode-one')) === 0,
+        `1品へ=${await ddCount('day-mode-one')} 献立へ=${await ddCount('day-mode-plan')}`,
       )
     } finally {
       await ddBrowser.close()

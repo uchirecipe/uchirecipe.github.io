@@ -538,15 +538,16 @@ import { createRequire } from 'node:module'
     ['おまかせで提案', 'おまかせで献立を組む'],
     ['ほかの候補を見る', 'ランダムで1品出す'],
     // 2026-09-06 便NI: 「今日なに作る？」の絞り込みから撤去した条件（旧 ja.dayStart.condNotRecent）。
-    // 同じ14日は1品側の抽選そのもの（TodaySuggestPanel の drawOne）に組み込んだ。
-    // 「最近作っていないレシピ」（棚の見出し ja.recipes.shelfNotRecentTitle）は別物で残っている
-    // ＝どちらの言い方も、その見出しには当たらない字面だけを見張る
+    // 同じ14日は1品側の抽選そのもの（TodaySuggestPanel の drawOne）に組み込んだ
     ['最近作ってない', '条件のボタンからは無くなった（おまかせが最近作った品を自動で後回しにする）'],
     ['最近作っていないもの', '同上（説明書の旧「条件をしぼる」の言い回し）'],
     // 2026-09-06 便NJ（オーナー実機「最近作った「もの」、最近作っていない「レシピ」。
     // ここはレシピに揃えたい」）: 棚1段目の見出しを改名。旧名が説明のページに残ると、
     // 読んだ人が画面でその見出しを探して見つけられない
     ['最近作ったもの', '棚の見出し「最近作ったレシピ」（ja.dayStart.historyTitle）'],
+    // 2026-09-07 便NK（オーナー指示「最近作っていない」→「しばらく作っていない」）: 棚2段目の
+    // 見出しを改名。上の2行（便NIの条件の言い回し）とは字面が違うので、旧見出しはこの行で掃く
+    ['最近作っていないレシピ', '棚の見出し「しばらく作っていないレシピ」（ja.recipes.shelfNotRecentTitle）'],
   ]
   for (const rel of pages) {
     const body = bodyOf(rel)
@@ -590,12 +591,14 @@ import { createRequire } from 'node:module'
     true,
   )
   // 2026-08-18 便HM: 「今日なに作る？」を1品／献立の切り替え1つにまとめたので、
-  // 使い方ページにも切り替えの名前と、まとめたあとのボタンの名前が要る
+  // 使い方ページにも切り替えの名前が要る。
+  // 2026-09-07 便NK: 切り替えは逆側だけを見せるボタン1つ（「1品だけ決める」⇄「献立に戻す」）に
+  // なったので、期待する名前もそのボタン名（ja.dayStart.modeToOne / modeToPlan）に追随
   eq(
-    'GONEWORD-3 使い方ページに「1品」「献立」の切り替えが書いてある',
+    'GONEWORD-3 使い方ページに1品/献立の切り替えボタンの名前が書いてある',
     [
-      manual.includes(`「${ja.dayStart.modeOne}」`),
-      manual.includes(`「${ja.dayStart.modePlan}」`),
+      manual.includes(`「${ja.dayStart.modeToOne}」`),
+      manual.includes(`「${ja.dayStart.modeToPlan}」`),
     ],
     [true, true],
   )
@@ -4497,7 +4500,7 @@ import { createRequire } from 'node:module'
 // ==========================================================================================
 // NH-1（2026-09-06 便NH）: 棚（横スクロールの区画）は献立の「日」だけにある
 //
-// オーナー確定で棚3段（最近作った・最近作っていない・在庫）はレシピ一覧の上から
+// オーナー確定で棚3段（最近作った・しばらく作っていない・在庫）はレシピ一覧の上から
 // 献立の「日」へ引っ越した。一覧に棚が戻ると、
 //  ・掴み直し済みのe2e 5ファイル9か所の除外(!closest('[data-testid="recipe-shelf"]'))が
 //    黙って再び効き始め、一覧の枚数が10増えても気づけない
@@ -4531,23 +4534,31 @@ import { createRequire } from 'node:module'
 }
 
 // ==========================================================================================
-// NJ（2026-09-06 便NJ・日タブの実機フィードバック3件）
+// NJ（2026-09-06 便NJ・日タブの実機フィードバック3件。2026-09-07 便NKの第2弾で手直し）
 //
 // NJ-1: 棚3段の見出しは「〜レシピ」の形にそろえる。
 //   オーナー原文「最近作った「もの」、最近作っていない「レシピ」。ここはレシピに揃えたい」。
 //   値そのものは書き写さない（また言い換えるときは、この見張りごと直す）＝**形だけ**を見る。
 //   あわせて、使い方ページにいまの見出しがそのまま書いてあることも見る（GONEWORD-3と同じ作法
-//   ＝消しただけで書き直し忘れると、棚の説明が見出しの無いまま残る）。旧名「最近作ったもの」が
-//   説明のページに残っていないことは GONEWORD-1 の一覧に足した行が見る。
+//   ＝消しただけで書き直し忘れると、棚の説明が見出しの無いまま残る）。
+//   2026-09-07 便NK: この「使い方ページに書いてある」を3段全部に広げた（2段目を
+//   「しばらく作っていないレシピ」へ改名したとき、1段目しか見ていないことが分かったため。
+//   ja.ts の見出しだけ変えて説明書を忘れると、ここが赤くなる）。
+//   旧名（「最近作ったもの」「最近作っていないレシピ」）が説明のページに残っていないことは
+//   GONEWORD-1 の一覧に足した行が見る。
 //
 // NJ-2: 引いた結果のルーレット演出（オーナー原文「重くならないくらいの、0.2、0.3秒くらいで」）。
 //   時間は e2e の実測では揺れる（マシンの負荷で数十ms単位のずれが出る）ので、
 //   実装の定数そのものを読んで**200〜300msの範囲**に固定する。あわせて、
 //   reduced-motion で回さないこと・覆いが absolute（結果の枠から場所を取らない）であることも
-//   ソースで見る。回って着地する動きそのものは e2e の NJROLL-01 が見る。
+//   ソースで見る。
+//   2026-09-07 便NK（オーナー原文「ルーレットに見える部分が、文字だけな上に品数も違う。
+//   変な演出でしかない」）: 覆いは結果の区画に1枚ではなく**結果のカード1枚ごと**
+//   （SuggestionCard の中）に出す形になった。カードの外へ戻す（＝品数が結果と違う形に戻る）と
+//   赤くなる検査を足した。回って着地する動き・覆いの数が結果と同じことの実測は e2e の NJROLL-01。
 //
-// NJ-3: 小さくした1品/献立の切り替え（オーナー原文「切り替えスイッチが縦に大きいので、
-//   ランダムボタンよりも目立ってる気がする」）は、見た目を38pxに抑えても
+// NJ-3: 1品/献立の切り替え（オーナー原文「切り替えスイッチが縦に大きいので、ランダムボタン
+//   よりも目立ってる気がする」→便NKで逆側だけを見せるボタン1つに）は、見た目を小さくしても
 //   **押す面の44px四方（.tap-target）を失わない**こと。大小の上下関係は e2e の NJSWITCH-01。
 // ==========================================================================================
 {
@@ -4567,11 +4578,18 @@ import { createRequire } from 'node:module'
     /<!--[\s\S]*?-->/g,
     '',
   )
-  eq(
-    `NJ-1 使い方ページに棚の見出し「${ja.dayStart.historyTitle}」がそのまま書いてある（見出しを変えたら説明書を直すまで赤）`,
-    njManual.includes(`「${ja.dayStart.historyTitle}」`),
-    true,
-  )
+  // 2026-09-07 便NK: 3段全部を見る（見出しを変えたら、説明書を直すまでここが赤）
+  for (const njShelfTitle of [
+    ja.dayStart.historyTitle,
+    ja.recipes.shelfNotRecentTitle,
+    ja.recipes.shelfPantryTitle,
+  ]) {
+    eq(
+      `NJ-1 使い方ページに棚の見出し「${njShelfTitle}」がそのまま書いてある（見出しを変えたら説明書を直すまで赤）`,
+      njManual.includes(`「${njShelfTitle}」`),
+      true,
+    )
+  }
 
   const njPanelSrc = readFileSync(
     path.join(njRoot, 'src/components/TodaySuggestPanel.tsx'),
@@ -4594,11 +4612,35 @@ import { createRequire } from 'node:module'
     /const spinRoulette[\s\S]{0,120}?prefersReducedMotion\(\)/.test(njPanelSrc),
     true,
   )
-  eq(
-    'NJ-2 覆いはabsolute inset-0（結果の枠から場所を取らない＝ボタンも結果も動かない）',
-    /data-testid="day-suggest-rolling"[\s\S]{0,200}?absolute inset-0/.test(njPanelSrc),
-    true,
-  )
+  // 2026-09-07 便NK: 覆いの面そのもの（RollingCardFace）は共通のカード部品の側にある
+  // （料理の絵を描く場所を増やさない＝HW-1と同じ線）。absoluteで場所を取らないことはそちらで見る
+  {
+    const njFaceSrc = readFileSync(path.join(njRoot, 'src/components/RecipeCard.tsx'), 'utf-8')
+    eq(
+      'NJ-2 覆いはabsolute inset-0（結果の枠から場所を取らない＝ボタンも結果も動かない）',
+      /function RollingCardFace[\s\S]{0,2200}?absolute inset-0/.test(njFaceSrc),
+      true,
+    )
+  }
+  // 2026-09-07 便NK: 覆いは結果のカード1枚ごと（SuggestionCard の中）に出す＝品数が結果と同じ。
+  // SuggestionCard の関数の中に覆いが無い（＝区画全体へ1枚の形に戻る）と赤くなる
+  {
+    const njCardSrc = njPanelSrc.slice(
+      njPanelSrc.indexOf('function SuggestionCard'),
+      njPanelSrc.indexOf('export default function TodaySuggestPanel'),
+    )
+    eq(
+      'NJ-2 前提: SuggestionCard の関数を切り出せた（切り出せなければ見張りが壊れている）',
+      njCardSrc.length > 0,
+      true,
+    )
+    eq(
+      'NJ-2 覆いは結果のカード1枚ごとに重ねる（SuggestionCardの中で描く＝回る品数が結果と同じ）',
+      njCardSrc.includes('<RollingCardFace') &&
+        njCardSrc.includes('testId="day-suggest-rolling"'),
+      true,
+    )
+  }
 
   eq(
     'NJ-3 1品/献立の切り替えは、小さくしても44pxの押す面（.tap-target）を保つ',

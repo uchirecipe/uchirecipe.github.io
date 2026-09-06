@@ -94,14 +94,17 @@ import './_shared.mjs'
       const pfByTitle = new Map(pfAll.map((r) => [r.title, r]))
 
       // 献立側で測っていることを、この節のいちばん最初に固定する
+      // （2026-09-07 便NK: 切り替えは逆側だけを見せるボタン1つ。「献立に戻す」が出ている＝
+      //   1品側のときだけ押して寄せる。献立側の印は「1品だけ決める」だけが見えていること）
       if ((await pfPage.locator('[data-testid="day-mode-plan"]').count()) === 1) {
         await pfPage.locator('[data-testid="day-mode-plan"]').click()
         await pfPage.waitForTimeout(1400)
       }
       check(
         'DAYPLANFILTER-01 前提: はじめの画面は「献立」で、組んだ献立が出ている',
-        (await pfPage.locator('[data-testid="day-mode-plan"]').getAttribute('aria-pressed')) ===
-          'true' && (await pfTitles()).length > 0,
+        (await pfPage.locator('[data-testid="day-mode-plan"]').count()) === 0 &&
+          (await pfPage.locator('[data-testid="day-mode-one"]').count()) === 1 &&
+          (await pfTitles()).length > 0,
         `組=${JSON.stringify(await pfTitles())}`,
       )
       // 前提: 10分以内のレシピと、10分を超えるレシピが両方ある（無いと①が測れない）

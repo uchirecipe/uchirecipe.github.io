@@ -100,7 +100,7 @@ import RecipeFilterPanel, {
 import { usePanelMaxHeight, useOutsidePanelClose } from '../components/recipePanelParts'
 import SearchMatchDialog from '../components/SearchMatchDialog'
 import RecipeCard from '../components/RecipeCard'
-// 「最近作っていないレシピ」「在庫の食材を使うレシピ」の横スクロールの区画（2026-09-05 便ND・便NF）は
+// 「しばらく作っていないレシピ」「在庫の食材を使うレシピ」の横スクロールの区画（2026-09-05 便ND・便NF）は
 // 2026-09-06 便NH で献立の「日」へ引っ越した（オーナー確定）。この画面はもう棚を描かない
 // （見張り: scripts/tests/ui-source-guards.mjs の NH-1）。棚の側からは ?sort=・?dir= で
 // 並び替えを指定してこの一覧を開ける（下の entry.sort）
@@ -1675,7 +1675,7 @@ export default function RecipesPage() {
         </div>
       )}
 
-      {/* 「最近作っていないレシピ」「在庫の食材を使うレシピ」の横スクロールの区画
+      {/* 「しばらく作っていないレシピ」「在庫の食材を使うレシピ」の横スクロールの区画
           (2026-09-05 便ND・便NF)は、2026-09-06 便NH で献立の「日」へ引っ越した。
           この一覧にはもう置かない(見張り: ui-source-guards.mjs の NH-1) */}
 
