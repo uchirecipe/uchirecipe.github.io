@@ -63,6 +63,10 @@ import {
 import { sortResults, lastCookedDate } from '../../src/logic/recipeSort.ts'
 // 在庫の判定も実装そのもの（名寄せの一本化先）から読む（便NF・NDSHELF-04）
 import { makePantryMatcher, pantryAvailableNames } from '../../src/logic/pantry.ts'
+// 「今日なに作る？」1品側の候補の作り方（2026-09-06 便NI・DAYFRESH-01）。
+// 「候補◯品」の期待値を検査側で数え直さず、実装と同じ関数・同じ季節で作る
+import { suggestionCandidates } from '../../src/logic/homeSuggest.ts'
+import { currentSeason } from '../../src/logic/season.ts'
 const NB_GUIDE_VEG = ja.nutritionBalance.guideNoteFree.replace(
   '{veg}',
   DAILY_GUIDES.vegetableG.perDayG.toLocaleString(),
@@ -703,7 +707,7 @@ Object.assign(globalThis, {
   pickShelfRecipes, readConfirms, readFileSync, readResultCount, readTotalCount, recipeServeTemp, results,
   sortResults,
   jaRe, reEscape, selectWeekLayout, setConfirmAnswer, shelfSeed, startPreviewServer, stepAppliance,
-  stripZwspText,
+  stripZwspText, suggestionCandidates, currentSeason,
   webkit,
   zlib,
 })

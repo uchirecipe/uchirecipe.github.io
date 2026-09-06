@@ -537,6 +537,12 @@ import { createRequire } from 'node:module'
     // 同・改名前の名前
     ['おまかせで提案', 'おまかせで献立を組む'],
     ['ほかの候補を見る', 'ランダムで1品出す'],
+    // 2026-09-06 便NI: 「今日なに作る？」の絞り込みから撤去した条件（旧 ja.dayStart.condNotRecent）。
+    // 同じ14日は1品側の抽選そのもの（TodaySuggestPanel の drawOne）に組み込んだ。
+    // 「最近作っていないレシピ」（棚の見出し ja.recipes.shelfNotRecentTitle）は別物で残っている
+    // ＝どちらの言い方も、その見出しには当たらない字面だけを見張る
+    ['最近作ってない', '条件のボタンからは無くなった（おまかせが最近作った品を自動で後回しにする）'],
+    ['最近作っていないもの', '同上（説明書の旧「条件をしぼる」の言い回し）'],
   ]
   for (const rel of pages) {
     const body = bodyOf(rel)
