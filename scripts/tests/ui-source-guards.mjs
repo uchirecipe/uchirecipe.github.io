@@ -543,6 +543,10 @@ import { createRequire } from 'node:module'
     // ＝どちらの言い方も、その見出しには当たらない字面だけを見張る
     ['最近作ってない', '条件のボタンからは無くなった（おまかせが最近作った品を自動で後回しにする）'],
     ['最近作っていないもの', '同上（説明書の旧「条件をしぼる」の言い回し）'],
+    // 2026-09-06 便NJ（オーナー実機「最近作った「もの」、最近作っていない「レシピ」。
+    // ここはレシピに揃えたい」）: 棚1段目の見出しを改名。旧名が説明のページに残ると、
+    // 読んだ人が画面でその見出しを探して見つけられない
+    ['最近作ったもの', '棚の見出し「最近作ったレシピ」（ja.dayStart.historyTitle）'],
   ]
   for (const rel of pages) {
     const body = bodyOf(rel)
@@ -4522,6 +4526,83 @@ import { createRequire } from 'node:module'
     ['"recentCooked"', '"notRecent"', '"pantry"'].every((kind) =>
       nhMealPlanSrc.includes(`kind=${kind}`),
     ),
+    true,
+  )
+}
+
+// ==========================================================================================
+// NJ（2026-09-06 便NJ・日タブの実機フィードバック3件）
+//
+// NJ-1: 棚3段の見出しは「〜レシピ」の形にそろえる。
+//   オーナー原文「最近作った「もの」、最近作っていない「レシピ」。ここはレシピに揃えたい」。
+//   値そのものは書き写さない（また言い換えるときは、この見張りごと直す）＝**形だけ**を見る。
+//   あわせて、使い方ページにいまの見出しがそのまま書いてあることも見る（GONEWORD-3と同じ作法
+//   ＝消しただけで書き直し忘れると、棚の説明が見出しの無いまま残る）。旧名「最近作ったもの」が
+//   説明のページに残っていないことは GONEWORD-1 の一覧に足した行が見る。
+//
+// NJ-2: 引いた結果のルーレット演出（オーナー原文「重くならないくらいの、0.2、0.3秒くらいで」）。
+//   時間は e2e の実測では揺れる（マシンの負荷で数十ms単位のずれが出る）ので、
+//   実装の定数そのものを読んで**200〜300msの範囲**に固定する。あわせて、
+//   reduced-motion で回さないこと・覆いが absolute（結果の枠から場所を取らない）であることも
+//   ソースで見る。回って着地する動きそのものは e2e の NJROLL-01 が見る。
+//
+// NJ-3: 小さくした1品/献立の切り替え（オーナー原文「切り替えスイッチが縦に大きいので、
+//   ランダムボタンよりも目立ってる気がする」）は、見た目を38pxに抑えても
+//   **押す面の44px四方（.tap-target）を失わない**こと。大小の上下関係は e2e の NJSWITCH-01。
+// ==========================================================================================
+{
+  const njRoot = path.join(path.dirname(fileURLToPath(scriptFileUrl)), '..')
+  for (const [name, value] of [
+    ['ja.dayStart.historyTitle', ja.dayStart.historyTitle],
+    ['ja.recipes.shelfNotRecentTitle', ja.recipes.shelfNotRecentTitle],
+    ['ja.recipes.shelfPantryTitle', ja.recipes.shelfPantryTitle],
+  ]) {
+    eq(
+      `NJ-1 棚の見出し ${name} は「〜レシピ」の形（オーナー指示「レシピに揃えたい」）`,
+      value.endsWith('レシピ'),
+      true,
+    )
+  }
+  const njManual = readFileSync(path.join(njRoot, 'public/about/manual.html'), 'utf-8').replace(
+    /<!--[\s\S]*?-->/g,
+    '',
+  )
+  eq(
+    `NJ-1 使い方ページに棚の見出し「${ja.dayStart.historyTitle}」がそのまま書いてある（見出しを変えたら説明書を直すまで赤）`,
+    njManual.includes(`「${ja.dayStart.historyTitle}」`),
+    true,
+  )
+
+  const njPanelSrc = readFileSync(
+    path.join(njRoot, 'src/components/TodaySuggestPanel.tsx'),
+    'utf-8',
+  )
+  const njStep = Number(njPanelSrc.match(/const ROULETTE_STEP_MS = (\d+)/)?.[1])
+  const njSteps = Number(njPanelSrc.match(/const ROULETTE_STEPS = (\d+)/)?.[1])
+  eq(
+    'NJ-2 前提: ルーレットの定数を読めた（読めなければ見張りが壊れている）',
+    Number.isFinite(njStep) && Number.isFinite(njSteps),
+    true,
+  )
+  eq(
+    `NJ-2 ルーレットの合計はオーナー指定の200〜300ms（今は ${njStep}×${njSteps}=${njStep * njSteps}ms）`,
+    njStep * njSteps >= 200 && njStep * njSteps <= 300,
+    true,
+  )
+  eq(
+    'NJ-2 動きを減らす設定では回さない（spinRouletteがprefersReducedMotionで先に抜ける）',
+    /const spinRoulette[\s\S]{0,120}?prefersReducedMotion\(\)/.test(njPanelSrc),
+    true,
+  )
+  eq(
+    'NJ-2 覆いはabsolute inset-0（結果の枠から場所を取らない＝ボタンも結果も動かない）',
+    /data-testid="day-suggest-rolling"[\s\S]{0,200}?absolute inset-0/.test(njPanelSrc),
+    true,
+  )
+
+  eq(
+    'NJ-3 1品/献立の切り替えは、小さくしても44pxの押す面（.tap-target）を保つ',
+    /'day-mode-one' : 'day-mode-plan'\}[\s\S]{0,300}?tap-target/.test(njPanelSrc),
     true,
   )
 }

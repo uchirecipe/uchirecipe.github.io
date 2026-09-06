@@ -1731,8 +1731,10 @@ import './_shared.mjs'
       {
         const body = await nhBody()
         check(
-          'NOHOME-01 献立が無い日でも「最近作ったもの」が出る',
-          body.includes('最近作ったもの') && body.includes(nhCooked),
+          // 2026-09-06 便NJ: 見出しは「最近作ったレシピ」になった。判定は ja.ts から読む
+          //（禁じ手②: 画面の字の書き写しは、見出しを直した瞬間に赤くなる）
+          'NOHOME-01 献立が無い日でも「最近作った」の棚の見出しが出る',
+          body.includes(ja.dayStart.historyTitle) && body.includes(nhCooked),
         )
       }
 
@@ -1775,7 +1777,7 @@ import './_shared.mjs'
           'NOHOME-01 献立がある日は「今日なに作る？」を開いたまま出さない',
           !body.includes('おまかせで1品出す'),
         )
-        check('NOHOME-01 献立がある日も「最近作ったもの」は出る', body.includes('最近作ったもの'))
+        check('NOHOME-01 献立がある日も「最近作った」の棚の見出しは出る', body.includes(ja.dayStart.historyTitle))
       }
 
       // (6) 設定から「ホーム画面のカスタマイズ」が残骸なく消えている。

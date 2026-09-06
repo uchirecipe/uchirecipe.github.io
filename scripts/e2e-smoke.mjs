@@ -493,6 +493,7 @@ try {
   await import('./e2e/31-mj.mjs')                      // 便MJ（ひき肉の絞り込み／範囲えらびのチップ／設定の折りたたみの復元）
   await import('./e2e/32-mw.mjs')                      // 便MW（人数分の数え方: 個の品の開き方・栄養と原価の名札・共有と貼り付けの往復・バックアップ）
   await import('./e2e/33-nd.mjs')                      // 便ND→便NH（献立の「日」の棚3段: 最近作った・最近作っていない・在庫）
+  await import('./e2e/34-nj.mjs')                      // 便NJ（日タブ: 切り替えの控えめ化・引いた結果のルーレット演出）
 } catch (err) {
   ng(`実行中断(${currentCheck})`, err.message)
 } finally {
