@@ -10,7 +10,7 @@
 // 走る順番と、どの節がどのファイルに居るかは scripts/e2e-smoke.mjs が持っている。
 // **節どうしは前の節が残した画面の状態を引き継ぐので、順番も、この区切りも動かさないこと。**
 //
-// この中の節: EG-01, EH-01, PANTRY-GROUP-01, PANTRYFILTER-01, LISTPANEL-01, HZ-TAG-01, IH-SEARCH-01, IB-TAG-01, HZ-TAG-02
+// この中の節: EG-01, EH-01, PANTRY-GROUP-01, PANTRYFILTER-01, LISTPANEL-01, HZ-TAG-01, IH-SEARCH-01, IB-TAG-01, HZ-TAG-02, NGPANTRY-01
 // ==========================================================================================
 import './_shared.mjs'
 
@@ -1998,5 +1998,104 @@ import './_shared.mjs'
       }
     } finally {
       await tmBrowser.close()
+    }
+  }
+
+  // --- NGPANTRY-01: 在庫(ある/少ない)0件なのに「在庫の食材で絞る」がONで開くと一覧が0件になる
+  // 穴の回帰防止(2026-09-06 便NG)。チップは在庫0では出ない(上のPANTRYFILTER-01)が、
+  // ?pantry=1 のURLと sessionStorage の復元は在庫0を見ずにONを立てるため、直す前は
+  // 0品/全品になり、チップも出ていないので外す手段が無かった(初期シード直後の実測で0品/全109品)。
+  // 直した後は「在庫が読めて0件」と分かった時点で絞りを外し、外したことをトーストで1行言う
+  // (ja.search.pantryFilterCleared)。在庫があるときの ?pantry=1 は今までどおり絞る。
+  // 注意: 同じタブでの #/recipes → #/recipes?pantry=1 はハッシュ内遷移で再マウントされず
+  // 再現しないので、?pantry=1 は毎回**新しいタブ(新しいdocument)**で開く。
+  // 他チェックに影響しないよう専用のbrowser/contextで完結させる ---
+  currentCheck = 'NGPANTRY-01'
+  {
+    const npBrowser = await chromium.launch()
+    const npContext = await npBrowser.newContext()
+    const npPage = await npContext.newPage()
+    npPage.on('dialog', (dialog) => dialog.accept())
+    npPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@NGPANTRY-01] ${err.message}`)
+    })
+    const npCards = (p) => p.locator('div.grid.grid-cols-2 a[href^="#/recipes/"]').count()
+    try {
+      // 0) 初回シード(在庫プリセット12品は全て「ない」=在庫0)を済ませ、全件数を取る
+      await npPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await npPage.waitForTimeout(1800)
+      const npTotal = await npCards(npPage)
+      check('NGPANTRY-01 一覧にレシピがある(以降の件数比較の前提)', npTotal > 0, `全件=${npTotal}`)
+
+      // 1) 在庫0のまま ?pantry=1 で開く → 絞りが解除され、0件にならない
+      const npPage2 = await npContext.newPage()
+      await npPage2.goto(`${BASE}/#/recipes?pantry=1`, { waitUntil: 'networkidle' })
+      await npPage2.waitForTimeout(1500)
+      const npAfter = await npCards(npPage2)
+      check(
+        'NGPANTRY-01 在庫0の?pantry=1で一覧が0件にならない(全件のまま)',
+        npAfter === npTotal && npAfter > 0,
+        `?pantry=1=${npAfter} 全件=${npTotal}`,
+      )
+      check(
+        'NGPANTRY-01 絞りを外したことをトーストで言う(黙って条件を落とさない)',
+        stripZwspText(await npPage2.textContent('body')).includes(stripZwspText(ja.search.pantryFilterCleared)),
+      )
+      await npPage2.close()
+
+      // 2) 在庫の「玉ねぎ」を1タップして「ある」にする(none→have)
+      await npPage.goto(`${BASE}/#/shopping`, { waitUntil: 'networkidle' })
+      await npPage.waitForTimeout(500)
+      await npPage.getByRole('button', { name: '玉ねぎ' }).first().click()
+      await npPage.waitForTimeout(400)
+
+      // 3) 在庫があるときの ?pantry=1 は今までどおり絞られる(直しが外しすぎていない)
+      const npPage3 = await npContext.newPage()
+      await npPage3.goto(`${BASE}/#/recipes?pantry=1`, { waitUntil: 'networkidle' })
+      await npPage3.waitForTimeout(1500)
+      const npFiltered = await npCards(npPage3)
+      check(
+        'NGPANTRY-01 在庫があるときの?pantry=1は絞られたまま(0<絞り込み後<全件)',
+        npFiltered > 0 && npFiltered < npTotal,
+        `全件=${npTotal} 絞り込み後=${npFiltered}`,
+      )
+      check(
+        'NGPANTRY-01 在庫があるときは外した知らせを出さない',
+        !stripZwspText(await npPage3.textContent('body')).includes(stripZwspText(ja.search.pantryFilterCleared)),
+      )
+      await npPage3.close()
+
+      // 4) 復元経路: 新しいタブで絞りをONにして保存させ、在庫を全部「ない」に戻してから
+      //    素の #/recipes へ入り直す(sessionStorageはタブごとなので、この一連は同じタブで行う)
+      const npPage4 = await npContext.newPage()
+      await npPage4.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await npPage4.waitForTimeout(800)
+      await npPage4.locator(`button[aria-label="${ja.search.filterToggle}"]`).click()
+      await npPage4.waitForTimeout(300)
+      await npPage4.getByRole('button', { name: ja.search.pantryFilter, exact: true }).click()
+      await npPage4.waitForTimeout(500) // 条件が変わった時点で sessionStorage に保存される
+      await npPage4.goto(`${BASE}/#/shopping`, { waitUntil: 'networkidle' })
+      await npPage4.waitForTimeout(500)
+      // 玉ねぎを ある→少ない→ない と2タップで戻す=在庫(ある/少ない)を0件にする
+      await npPage4.getByRole('button', { name: '玉ねぎ' }).first().click()
+      await npPage4.waitForTimeout(300)
+      await npPage4.getByRole('button', { name: '玉ねぎ' }).first().click()
+      await npPage4.waitForTimeout(300)
+      await npPage4.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await npPage4.waitForTimeout(1200)
+      const npRestored = await npCards(npPage4)
+      check(
+        'NGPANTRY-01 復元経路(在庫を全部「ない」にして戻る)でも一覧が0件にならない',
+        npRestored === npTotal && npRestored > 0,
+        `戻った後=${npRestored} 全件=${npTotal}`,
+      )
+      check(
+        'NGPANTRY-01 復元経路でも外したことをトーストで言う',
+        stripZwspText(await npPage4.textContent('body')).includes(stripZwspText(ja.search.pantryFilterCleared)),
+      )
+      await npPage4.close()
+    } finally {
+      await npBrowser.close()
     }
   }

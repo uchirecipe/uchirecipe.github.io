@@ -907,6 +907,25 @@ export default function RecipesPage() {
     navigate(location.pathname + location.search, { replace: true, state: null })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.state])
+  /**
+   * 在庫（ある/少ない）が0件と分かったら「在庫の食材で絞る」を外す（2026-09-06 便NG）。
+   *
+   * チップ自体は在庫0では出さない作り（RecipeFilterPanel）だが、?pantry=1 のURLと
+   * sessionStorage の復元（上の saved?.pantryOnly）は在庫0を見ずに pantryOnly を立てる。
+   * そのままだと一覧が0件になり、チップが出ていないので外す手段もない（実測: 初期シード
+   * 直後＝在庫プリセット12品が全て「ない」のとき ?pantry=1 で 0品/全109品）。
+   * どちらの経路でも、立った pantryOnly をここで1か所で受け止める。
+   *
+   * usePantryItems（useLiveQuery）は**読み込み中= undefined／読めて0件= []**。
+   * undefined の間は外さない＝在庫がある人の ?pantry=1 を、読み込みが済む前に壊さない。
+   * 外したことはトーストで1行言う（黙って条件を落とすと「なぜ全部出てるの?」になる。
+   * 今日の献立の ja.dayStart.pantryOnlyFallback と同じ考え方）
+   */
+  useEffect(() => {
+    if (!pantryOnly || pantryItems === undefined || pantryNames.length > 0) return
+    setPantryOnly(false)
+    setMessage(ja.search.pantryFilterCleared)
+  }, [pantryOnly, pantryItems, pantryNames])
   const [deleting, setDeleting] = useState(false)
   // 献立の「＋ 今日の献立を探す」から来た選択モードか(2026-08-11 便FP)。
   // trueの間は「今日の献立に入れるレシピを選んでいます」と決定ボタンを出し、
