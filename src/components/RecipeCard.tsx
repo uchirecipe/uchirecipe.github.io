@@ -537,7 +537,7 @@ function RecipeCard({
       ? 'border-edge-card bg-app/60 text-ink-muted opacity-70'
       : 'border-edge-card bg-surface text-ink'
     return pressable(
-      `relative flex h-full min-h-[var(--tap-min)] w-full min-w-0 items-stretch gap-1 overflow-hidden rounded-card border ${tone} ${
+      `relative flex h-full min-h-[var(--tap-min)] w-full min-w-0 items-stretch gap-1 overflow-hidden rounded-card border-[length:var(--border-card-width)] ${tone} ${
         disabled ? 'opacity-40' : ''
       }`,
       <>
@@ -578,7 +578,7 @@ function RecipeCard({
     return (
       <div
         data-testid={testId}
-        className={`relative rounded-card border shadow-sm ${tone} ${disabled ? 'opacity-40' : ''}`}
+        className={`relative rounded-card border-[length:var(--border-card-width)] shadow-sm ${tone} ${disabled ? 'opacity-40' : ''}`}
       >
         {pressable(
           'flex w-full items-center gap-[var(--space-sm)] p-[var(--space-sm)]',

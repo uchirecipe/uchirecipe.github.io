@@ -145,6 +145,9 @@
      色は直接書かず既存トークンの混合で作る＝テーマの色を変えればこの線も自動で追従する
      （--field・--slot-bg-* と同じ手）。 */
   --border-card: color-mix(in oklab, var(--text) 50%, var(--border));
+  /* 並ぶカードの枠の太さ（2026-09-07 オーナー実機FB「囲み線が細すぎて安っぽく感じる。気持ち太くしたい」。
+     1px→1.5px。全カード一律なので高さの均一(ET-01)は保たれる） */
+  --border-card-width: 1.5px;
 
   /* 食材チップ色（一覧カードの主要食材チップ専用。にんじん=オレンジ 等の簡易マッピング。
      logic/seasoningGroup.ts・pages/CookNaviPage.tsxの色分けにも流用している） */
