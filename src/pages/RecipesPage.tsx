@@ -1695,10 +1695,13 @@ export default function RecipesPage() {
            ・検索・絞り込み中(filterActive) … 区画は絞り込みを見ない集合なので、すぐ上の
              「◯品 / 全◯品」と実際に並ぶ品が食い違って見える
            ・該当0件 … 空の見出しを残さない(RecentCookedListと同じ作法)
-          並べ替え中(sortActive)も隠す(2026-09-05 オーナー実機FB「並び替え設定を変更したときに
+          並べ替えの「種類」を変えている間は隠す(2026-09-05 オーナー実機FB「並び替え設定を変更したときに
           出ないようにしたい」。並べ替えた一覧の先頭に、並びと無関係な区画が挟まるのが理由)。
+          ただし**昇順/降順の切り替えだけでは消さない**(2026-09-06 オーナー実機FB
+          「並び順の降順昇順の切り替えでは横スクロール消えないようにして」。向きは同じ一覧の裏返しで、
+          区画と矛盾しないため)。sortActive でなく「種類が既定と違うか」だけを見る。
           anyConditionActive で隠さないこと＝hideStarters ON(自作中心の利用者)でも出す */}
-      {!selecting && !filterActive && !sortActive && shelfRecipes.length > 0 && (
+      {!selecting && !filterActive && sort === 'updated' && shelfRecipes.length > 0 && (
         <RecipeShelf
           recipes={shelfRecipes}
           title={ja.recipes.shelfNotRecentTitle}
@@ -1716,7 +1719,7 @@ export default function RecipesPage() {
            ・在庫の区画は「作った！」で在庫が勝手に下がり、最後の1件が「ない」に落ちた
              瞬間に丸ごと消える＝出入りする区画。出たり消えたりするものを上に置くと、
              下の区画と一覧全体が上下に跳ねるので、出入りする方を下に置く */}
-      {!selecting && !filterActive && !sortActive && pantryShelfRecipes.length > 0 && (
+      {!selecting && !filterActive && sort === 'updated' && pantryShelfRecipes.length > 0 && (
         <RecipeShelf
           recipes={pantryShelfRecipes}
           title={ja.recipes.shelfPantryTitle}

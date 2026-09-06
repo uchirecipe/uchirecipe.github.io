@@ -209,6 +209,18 @@ import './_shared.mjs'
       await ndPage.waitForTimeout(400)
       check('NDSHELF-03 並べ替えを既定に戻すと区画が戻る', (await ndShelfCount()) === 1)
 
+      // 昇順/降順の切り替えだけでは消えない(2026-09-06 オーナー実機FB)
+      await ndPage.locator(`button[aria-label="${ja.search.sortToggle}"]`).click()
+      await ndPage.waitForTimeout(400)
+      await ndPage.getByRole('button', { name: ja.search.sortAsc, exact: true }).click()
+      await ndPage.waitForTimeout(500)
+      check('NDSHELF-03 昇順に切り替えても区画は消えない', (await ndShelfCount()) === 1)
+      await ndPage.getByRole('button', { name: ja.search.sortDesc, exact: true }).click()
+      await ndPage.waitForTimeout(400)
+      await ndPage.getByTestId('sort-panel-close').click()
+      await ndPage.waitForTimeout(400)
+      check('NDSHELF-03 降順に戻しても区画はある', (await ndShelfCount()) === 1)
+
       // 全品を「今日作った」状態にする → 該当0件 → 見出しごと消える（一覧そのものは残る）
       await ndPage.evaluate(
         (today) =>
