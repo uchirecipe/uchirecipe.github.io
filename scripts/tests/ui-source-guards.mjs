@@ -4483,3 +4483,39 @@ import { createRequire } from 'node:module'
     true,
   )
 }
+
+// ==========================================================================================
+// NH-1（2026-09-06 便NH）: 棚（横スクロールの区画）は献立の「日」だけにある
+//
+// オーナー確定で棚3段（最近作った・最近作っていない・在庫）はレシピ一覧の上から
+// 献立の「日」へ引っ越した。一覧に棚が戻ると、
+//  ・掴み直し済みのe2e 5ファイル9か所の除外(!closest('[data-testid="recipe-shelf"]'))が
+//    黙って再び効き始め、一覧の枚数が10増えても気づけない
+//  ・「並べ替え中は隠す」等の一覧側の出し分けが失われたまま常時出る
+// ので、**一覧のソースに棚が無いこと**を安く見張る（画面で測る本体は e2e の NDSHELF）。
+// 突き合わせは部品名と印の両方: どちらか片方だけ書き戻しても赤くなる。
+// ==========================================================================================
+{
+  const nhRoot = path.join(path.dirname(fileURLToPath(scriptFileUrl)), '..')
+  const nhRecipesSrc = readFileSync(path.join(nhRoot, 'src/pages/RecipesPage.tsx'), 'utf-8')
+  const nhMealPlanSrc = readFileSync(path.join(nhRoot, 'src/pages/MealPlanPage.tsx'), 'utf-8')
+  const nhShelfSrc = readFileSync(path.join(nhRoot, 'src/components/RecipeShelf.tsx'), 'utf-8')
+  eq(
+    'NH-1 レシピ一覧のソースに棚（RecipeShelf／pickShelfRecipes等の呼び出し）が無い',
+    /RecipeShelf|pickShelfRecipes|pickPantryShelfRecipes|pickRecentCookedShelfRecipes/.test(
+      // コメントで経緯に触れるのはよい（引っ越しの断り書きまで禁じない）。コードだけを見る
+      nhRecipesSrc.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, ''),
+    ),
+    false,
+  )
+  // 空振り防止: 棚の部品そのものは data-shelf の印を持ち、献立（日タブ）は3種類とも描いている
+  //（この2つが消えたら、上の検査は「無いから緑」ではなく見張りの壊れとして赤くする）
+  eq('NH-1 前提: 棚の部品は data-shelf の印を持っている', /data-shelf/.test(nhShelfSrc), true)
+  eq(
+    'NH-1 前提: 献立（日タブ）が棚3種類を描いている',
+    ['"recentCooked"', '"notRecent"', '"pantry"'].every((kind) =>
+      nhMealPlanSrc.includes(`kind=${kind}`),
+    ),
+    true,
+  )
+}

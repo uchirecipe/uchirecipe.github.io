@@ -100,10 +100,10 @@ import RecipeFilterPanel, {
 import { usePanelMaxHeight, useOutsidePanelClose } from '../components/recipePanelParts'
 import SearchMatchDialog from '../components/SearchMatchDialog'
 import RecipeCard from '../components/RecipeCard'
-// 「最近作っていないレシピ」「在庫の食材を使うレシピ」の横スクロールの区画（2026-09-05 便ND・便NF）。
-// 何を並べるかは logic/recipeShelf（自作優先・14日・在庫との一致・上位10件・日替わりの種）が1か所で決める
-import RecipeShelf from '../components/RecipeShelf'
-import { pickShelfRecipes, pickPantryShelfRecipes, shelfSeed } from '../logic/recipeShelf'
+// 「最近作っていないレシピ」「在庫の食材を使うレシピ」の横スクロールの区画（2026-09-05 便ND・便NF）は
+// 2026-09-06 便NH で献立の「日」へ引っ越した（オーナー確定）。この画面はもう棚を描かない
+// （見張り: scripts/tests/ui-source-guards.mjs の NH-1）。棚の側からは ?sort=・?dir= で
+// 並び替えを指定してこの一覧を開ける（下の entry.sort）
 import { normalizeEffortFilter } from '../logic/effort'
 import {
   readHideStartersMirror,
@@ -275,13 +275,37 @@ export default function RecipesPage() {
   // ?select=today = 献立の「＋ 今日の献立を探す」から来た(2026-08-11 便FP)。選択モードで開き、
   // 何を選んでいる最中なのかを画面に出す。絞り込み・検索の保存状態はそのまま復元する
   // (前に見ていた条件のまま選び始めたいので、ここでは条件を消さない)
-  const [entry] = useState(() => ({
-    focusSearch: searchParams.get('focus') === 'search',
-    pantry: searchParams.get('pantry') === '1',
-    selectForToday: searchParams.get('select') === 'today',
-  }))
+  // ?sort=◯◯&dir=asc|desc = 並び替えを設定済みの状態で開く(2026-09-06 便NH・司令部裁定)。
+  // 献立の「日」の棚3段の「レシピ一覧で見る」が使う入口で、作法は ?pantry=1 と同じ:
+  //  ・初回マウント時のURLだけを見て、URLからは消す(下のURL同期)
+  //  ・「明示的な新規検索」なので保存状態は復元しない(棚の続きを見に来たのに前回の検索語で
+  //    絞られていると、棚と違う顔ぶれが出て壊れて見える)
+  //  ・受け取るのは無料で選べる並び替えだけ(isFreeSortOption)。栄養並び替え(Pro)はURLで
+  //    ゲートを素通りさせない。知らない値・欠けた dir は黙って既定に倒す
+  const [entry] = useState(() => {
+    const sortParam = searchParams.get('sort')
+    const sortFromUrl =
+      sortParam !== null &&
+      Object.hasOwn(defaultSortDirection, sortParam) &&
+      isFreeSortOption(sortParam as RecipeSortOption)
+        ? (sortParam as RecipeSortOption)
+        : null
+    const dirParam = searchParams.get('dir')
+    return {
+      focusSearch: searchParams.get('focus') === 'search',
+      pantry: searchParams.get('pantry') === '1',
+      selectForToday: searchParams.get('select') === 'today',
+      sort: sortFromUrl,
+      sortDirection:
+        sortFromUrl === null
+          ? null
+          : dirParam === 'asc' || dirParam === 'desc'
+            ? dirParam
+            : defaultSortDirection[sortFromUrl],
+    }
+  })
   const [saved] = useState(() =>
-    entry.focusSearch || entry.pantry ? null : readSavedListState(),
+    entry.focusSearch || entry.pantry || entry.sort !== null ? null : readSavedListState(),
   )
   const searchInputRef = useRef<HTMLInputElement>(null)
   const [query, setQuery] = useState(() => searchParams.get('q') ?? saved?.query ?? '')
@@ -341,6 +365,10 @@ export default function RecipesPage() {
         next.delete('focus')
         next.delete('pantry')
         next.delete('select')
+        // ?sort=・?dir=(2026-09-06 便NH)も同じ一度きりの指示。選んだ並び替えそのものは
+        // sessionStorage の保存状態が持つので、URLから消しても以後の復元で保たれる
+        next.delete('sort')
+        next.delete('dir')
         return next
       },
       { replace: true },
@@ -393,12 +421,13 @@ export default function RecipesPage() {
   // 在庫(ある/少ない)の食材を使うレシピだけに絞る(2026-07-24 便BN・司令部追加)。
   // 「在庫の食材から探す」(?pantry=1)から来たときは最初からONで開く(2026-08-02)
   const [pantryOnly, setPantryOnly] = useState(entry.pantry || (saved?.pantryOnly ?? false))
-  const [sort, setSort] = useState<RecipeSortOption>(saved?.sort ?? 'updated')
+  // URLの ?sort=(棚の「レシピ一覧で見る」・2026-09-06 便NH)が最優先。無ければ保存値→既定
+  const [sort, setSort] = useState<RecipeSortOption>(entry.sort ?? saved?.sort ?? 'updated')
   // 並べ替えの昇順/降順(2026-07-13 UI改善)。並べ替えの種類自体を変えたときは
   // その種類の既定方向にリセットする(下記 selectSort。並べ替えの項目そのものは
   // 2026-08-27 便LM で components/RecipeSortPanel.tsx へ移した)
   const [sortDirection, setSortDirection] = useState<SortDirection>(
-    saved?.sortDirection ?? defaultSortDirection[saved?.sort ?? 'updated'],
+    entry.sortDirection ?? saved?.sortDirection ?? defaultSortDirection[saved?.sort ?? 'updated'],
   )
 
   /**
@@ -533,48 +562,6 @@ export default function RecipesPage() {
   // 絞り込み無しでも常に見える総件数(2026-07-13 UI改善)。「基本レシピを表示しない」設定は
   // 一覧の表示そのものに反映される設定なのでここにも反映し、検索語等の絞り込みは反映しない
   const totalCount = visibleRecipes?.length
-
-  /**
-   * 「最近作っていないレシピ」の区画に並べる品（2026-09-05 便ND）。
-   *
-   * 種はマウントごとに1回だけ決める（todayForBadge と同じ作法。描き直しのたびに読み直すと、
-   * 日付をまたいだ瞬間に見ている一覧が組み変わる）。種の決め方そのものは
-   * logic/recipeShelf の shelfSeed の1か所＝いまは日替わり。
-   * 対象は visibleRecipes（「基本レシピを表示しない」反映済み）なので、
-   * 一覧に出ない品が区画にだけ出ることはない。計算は同じ配列をもう1回歩くだけ
-   * （cookedLogs の総なめは上の todayRecipeIds が既に毎回やっている種類の軽い走査）。
-   */
-  const shelfDaySeed = useMemo(() => shelfSeed(), [])
-  const shelfRecipes = useMemo(
-    () => (visibleRecipes ? pickShelfRecipes(visibleRecipes, shelfDaySeed) : []),
-    [visibleRecipes, shelfDaySeed],
-  )
-
-  /**
-   * 2つ目の区画「在庫の食材を使うレシピ」に並べる品（2026-09-05 便NF）。
-   *
-   * 候補も並びも既存の物差しの使い回し（logic/recipeShelf の pickPantryShelfRecipes）:
-   * 絞り込み「在庫の食材で絞る」と同じ「在庫（ある/少ない）の食材を1つ以上使う」で選び、
-   * 並べ替え「在庫との一致が多いレシピ順」と同じ数え方で並べる。種は上の区画と同じもの。
-   * 在庫は上の usePantryItems（この画面が絞り込み・並べ替えのために既に購読している）を
-   * そのまま使う＝この区画のために新しく読まない。「作った！」→在庫が1つ下がる→
-   * 区画が組み変わる、は Dexie の購読で自動に起きる。
-   * 在庫チップ0件（初回シード直後は12件全部「ない」）なら空＝区画ごと出さない
-   * ＝新規ユーザーには出ない。
-   */
-  const pantryShelfRecipes = useMemo(
-    () =>
-      visibleRecipes
-        ? pickPantryShelfRecipes(
-            visibleRecipes,
-            pantryNames,
-            shelfDaySeed,
-            // 上の棚と同じ品を2回並べない（除外の理由は pickPantryShelfRecipes のコメント）
-            new Set(shelfRecipes.map((r) => r.id).filter((id): id is number => id != null)),
-          )
-        : [],
-    [visibleRecipes, pantryNames, shelfDaySeed, shelfRecipes],
-  )
 
   /**
    * 無料版の登録件数まわり(2026-08-08 便DZ)。
@@ -1688,46 +1675,9 @@ export default function RecipesPage() {
         </div>
       )}
 
-      {/* 「最近作っていないレシピ」の横スクロールの区画(2026-09-05 便ND)。
-          出さないとき:
-           ・選択モード中 … 区画のカードは選べない(覆いのボタンは下の一覧だけ)・「全選択」にも
-             入らないので、選ぶ作業の画面に押しても選べないカードを残さない
-           ・検索・絞り込み中(filterActive) … 区画は絞り込みを見ない集合なので、すぐ上の
-             「◯品 / 全◯品」と実際に並ぶ品が食い違って見える
-           ・該当0件 … 空の見出しを残さない(RecentCookedListと同じ作法)
-          並べ替えの「種類」を変えている間は隠す(2026-09-05 オーナー実機FB「並び替え設定を変更したときに
-          出ないようにしたい」。並べ替えた一覧の先頭に、並びと無関係な区画が挟まるのが理由)。
-          ただし**昇順/降順の切り替えだけでは消さない**(2026-09-06 オーナー実機FB
-          「並び順の降順昇順の切り替えでは横スクロール消えないようにして」。向きは同じ一覧の裏返しで、
-          区画と矛盾しないため)。sortActive でなく「種類が既定と違うか」だけを見る。
-          anyConditionActive で隠さないこと＝hideStarters ON(自作中心の利用者)でも出す */}
-      {!selecting && !filterActive && sort === 'updated' && shelfRecipes.length > 0 && (
-        <RecipeShelf
-          recipes={shelfRecipes}
-          title={ja.recipes.shelfNotRecentTitle}
-          kind="notRecent"
-          ngIngredients={ngIngredients}
-          todayRecipeIds={todayRecipeIds}
-        />
-      )}
-
-      {/* 2つ目の区画「在庫の食材を使うレシピ」(2026-09-05 便NF)。隠す条件は上の区画と
-          まったく同じ式(絞り込み「在庫の食材で絞る」ONも filterActive 経由で両方消える
-          ＝絞った一覧と区画が同じ顔ぶれで二重に出ることはない)。
-          並びは**上=「最近作っていない」・下=在庫**で固定。理由:
-           ・「最近作っていない」は自作0品でも同梱で必ず埋まる＝出っぱなしの区画
-           ・在庫の区画は「作った！」で在庫が勝手に下がり、最後の1件が「ない」に落ちた
-             瞬間に丸ごと消える＝出入りする区画。出たり消えたりするものを上に置くと、
-             下の区画と一覧全体が上下に跳ねるので、出入りする方を下に置く */}
-      {!selecting && !filterActive && sort === 'updated' && pantryShelfRecipes.length > 0 && (
-        <RecipeShelf
-          recipes={pantryShelfRecipes}
-          title={ja.recipes.shelfPantryTitle}
-          kind="pantry"
-          ngIngredients={ngIngredients}
-          todayRecipeIds={todayRecipeIds}
-        />
-      )}
+      {/* 「最近作っていないレシピ」「在庫の食材を使うレシピ」の横スクロールの区画
+          (2026-09-05 便ND・便NF)は、2026-09-06 便NH で献立の「日」へ引っ越した。
+          この一覧にはもう置かない(見張り: ui-source-guards.mjs の NH-1) */}
 
       {/* カードのグリッド／リスト(2026-07-13 UI改善: 表示形式トグルで切替)。
           グリッドの [grid-auto-rows:1fr] は全カードの高さを揃えるためのもの

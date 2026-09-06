@@ -5,9 +5,14 @@ import { makePantryMatcher } from './pantry'
 import { todayString } from './date'
 
 /**
- * レシピ一覧の上の横スクロールの区画「最近作っていないレシピ」（2026-09-05 便ND）。
+ * 横スクロールの区画（棚）に並べるレシピを選ぶ（2026-09-05 便ND）。
  *
- * オーナー原文:
+ * 置き場所は献立の「日」（2026-09-06 便NH で、レシピ一覧の上から引っ越した。
+ * オーナー確定「何を作るのかサーっと探せるページはそこだから」）。3段:
+ * 「最近作ったもの」→「最近作っていないレシピ」→「在庫の食材を使うレシピ」。
+ * 選ぶ物差しはこのファイルの関数のまま動かしていない＝引っ越しで並びは変わらない。
+ *
+ * オーナー原文（区画を作ったときのもの）:
  *   「しばらく作っていない棚は、自分で登録したレシピが優先で出るようにする、
  *     毎回同じ作っていないレシピが並ば内容にする、ようにしたい」
  *   （「しばらく」「棚」は内部向けの呼び名。画面の見出しは ja.recipes.shelfNotRecentTitle）
@@ -73,9 +78,21 @@ function shelfTier(recipe: Recipe): number {
  * 上位 SHELF_MAX 件。判定は cookedWithinDays / lastCookedDate を**流用**する（再実装しない）。
  * 0件のときは空の配列＝呼び出し側が区画ごと出さない。
  */
-export function pickShelfRecipes(recipes: readonly Recipe[], seed: string): Recipe[] {
+export function pickShelfRecipes(
+  recipes: readonly Recipe[],
+  seed: string,
+  // 「最近作ったもの」の棚に既に並んだ品は除く（2026-09-06 便NH・司令部裁定
+  // 「同じ品はページ内の棚に1回だけ」。最後に作ったのが14日以上前でも、記録の新しい5品に
+  // 入っていれば「最近作ったもの」と両方に並んでしまうため＝週末しか作らない人で普通に起きる）。
+  // 口の形は下の pickPantryShelfRecipes の excludeIds と同じ。省略時は今までどおり除かない
+  excludeIds: ReadonlySet<number> = new Set(),
+): Recipe[] {
   return recipes
-    .filter((recipe) => !cookedWithinDays(recipe, SHELF_NOT_RECENT_DAYS))
+    .filter(
+      (recipe) =>
+        (recipe.id == null || !excludeIds.has(recipe.id)) &&
+        !cookedWithinDays(recipe, SHELF_NOT_RECENT_DAYS),
+    )
     .map((recipe) => ({
       recipe,
       tier: shelfTier(recipe),
@@ -116,8 +133,10 @@ export function pickPantryShelfRecipes(
   recipes: readonly Recipe[],
   pantryNames: readonly string[],
   seed: string,
-  // 上の棚（最近作っていない）に既に並んだ品は除く（2026-09-05 司令部裁定。
-  // 自作中心の人ほど両棚に同じ品が2回並び、棚の意味が薄れるため。下見§4の推奨②）
+  // 上の棚に既に並んだ品は除く（2026-09-05 司令部裁定。自作中心の人ほど両棚に同じ品が
+  // 2回並び、棚の意味が薄れるため。下見§4の推奨②）。
+  // 2026-09-06 便NH: 日タブでは棚が3段になったので、呼び出し側は
+  // 「最近作った5品＋最近作っていない10品」を渡す＝同じ品はページ内の棚に1回だけ（鎖の除外）
   excludeIds: ReadonlySet<number> = new Set(),
 ): Recipe[] {
   if (pantryNames.length === 0) return []
@@ -145,5 +164,31 @@ export function pickPantryShelfRecipes(
         b.recipe.updatedAt - a.recipe.updatedAt,
     )
     .slice(0, SHELF_MAX)
+    .map((entry) => entry.recipe)
+}
+
+/** 「最近作ったもの」の棚に出す最大の品数（旧 components/RecentCookedList の5件と同じ） */
+export const RECENT_SHELF_MAX = 5
+
+/**
+ * 3段の1つ目「最近作ったもの」の棚（2026-09-06 便NH）に出すレシピを選ぶ。
+ *
+ * 旧「最近作ったもの」（components/RecentCookedList＝作った記録を縦に5件）の置き換え。
+ * オーナー確定「『最近作った』も同じレシピ横スクロールにする」。
+ *  ・「作った！」の記録のいちばん新しい日付（lastCookedDate を流用・再実装しない）が
+ *    新しい順に RECENT_SHELF_MAX 件。記録が1件も無い品は並べない（0件なら棚ごと出さない）
+ *  ・並べるのは記録の行ではなく**レシピ**＝同じ品を2回作っていても1回だけ出る。
+ *    記録そのものは棚の下の既存リンク「作った記録の一覧」で今までどおり全部見られる
+ *  ・レシピを削除したあとも残っている記録（detached）は並べない: 棚のカードはレシピ詳細への
+ *    入口で、削除済みの品には行き先が無い（旧 RecentCookedList との意図的な差）
+ *  ・種は使わない（日替わりに混ぜる棚ではなく時系列そのもの）。同じ日に複数作った日は
+ *    updatedAt で並びを固定する＝開き直しても揺れない（揺れると壊れて見える＋e2eで固定できない）
+ */
+export function pickRecentCookedShelfRecipes(recipes: readonly Recipe[]): Recipe[] {
+  return recipes
+    .map((recipe) => ({ recipe, last: lastCookedDate(recipe) }))
+    .filter((entry): entry is { recipe: Recipe; last: string } => entry.last !== null)
+    .sort((a, b) => b.last.localeCompare(a.last) || b.recipe.updatedAt - a.recipe.updatedAt)
+    .slice(0, RECENT_SHELF_MAX)
     .map((entry) => entry.recipe)
 }

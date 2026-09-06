@@ -917,6 +917,7 @@ import './_shared.mjs'
         // 並べ替え中も出ているが値バッジを持たないので、数える相手から除く
         // (E2E栄養並び替え確認レシピは自作＝区画にも並ぶ。区画側を掴むと
         //  「バッジが無い」が別の理由で合格してしまう)
+        // 2026-09-06 便NH: 棚は献立の日タブへ移った。除外は将来の出戻りに備えて残す(いまは空振り)
         const cardLinks = (root) =>
           Array.from((root ?? document).querySelectorAll('a[href^="#/recipes/"]')).filter(
             (a) =>
@@ -979,6 +980,7 @@ import './_shared.mjs'
       const countGramBadges = () =>
         nutPage.evaluate(() => {
           // kcal側と同じ理由で「最近作っていないレシピ」の区画(便ND)のカードは除く
+          // (2026-09-06 便NH: 棚は献立の日タブへ移った。除外は出戻りに備えて残す=いまは空振り)
           const cardLinks = (root) =>
             Array.from((root ?? document).querySelectorAll('a[href^="#/recipes/"]')).filter(
               (a) =>

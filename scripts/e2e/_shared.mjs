@@ -47,15 +47,20 @@ import { recipeServeTemp } from '../../src/logic/cookNavi.ts'
 // 栄養の公的基準値の文言は、ja.ts の型紙に DAILY_GUIDES の数値を埋めて作る
 // （画面の日本語も基準値も書き写さない。2026-08-25 便KV）
 import { DAILY_GUIDES } from '../../src/logic/nutritionBalance.ts'
-// 「最近作っていないレシピ」「在庫の食材を使うレシピ」の区画（2026-09-05 便ND・便NF）。
+// 棚（横スクロールの区画。2026-09-05 便ND・便NF → 2026-09-06 便NH で献立の「日」の3段に）。
 // 並びの期待値は検査側で作り直さず、実装と同じ関数・同じ種から作る
 // （優先順・在庫の数え方・上限・種の決め方を書き写さない）
 import {
+  pickRecentCookedShelfRecipes,
   pickShelfRecipes,
   pickPantryShelfRecipes,
   shelfSeed,
   SHELF_MAX,
+  RECENT_SHELF_MAX,
 } from '../../src/logic/recipeShelf.ts'
+// 棚のリンク先「並び替え設定済みの一覧」の期待値も実装（sortResults・lastCookedDate）から
+// 作る（2026-09-06 便NH・NDSHELF-05）
+import { sortResults, lastCookedDate } from '../../src/logic/recipeSort.ts'
 // 在庫の判定も実装そのもの（名寄せの一本化先）から読む（便NF・NDSHELF-04）
 import { makePantryMatcher, pantryAvailableNames } from '../../src/logic/pantry.ts'
 const NB_GUIDE_VEG = ja.nutritionBalance.guideNoteFree.replace(
@@ -688,14 +693,15 @@ page.on('dialog', (dialog) => dialog.accept())
 // ------------------------------------------------------------------------------------------
 Object.assign(globalThis, {
   BASE, FIRST_SETUP_NOTICE_SEEN_KEY, FREE_LIMIT, MEAL_GENRES, NB_GUIDE_FULL, NB_GUIDE_VEG,
-  NUTRITION_DISPLAY_KEYS, PRICE_DEFAULTS, SHELF_MAX, appRoot, browser, check, chromium, clickReplaceImport,
+  NUTRITION_DISPLAY_KEYS, PRICE_DEFAULTS, RECENT_SHELF_MAX, SHELF_MAX, appRoot, browser, check, chromium, clickReplaceImport,
   collectConfirms, context, errors, execSync, existsSync, hasCount,
-  hasCountAfter, installConfirmAutoPress, ja, makePantryMatcher, makeTestPng,
+  hasCountAfter, installConfirmAutoPress, ja, lastCookedDate, makePantryMatcher, makeTestPng,
   newContextWithFirstSetupNotice, ng,
   nutritionLabelFor, ok, openAllWeekDays, openDayOrganize, openMonthDayEdit, openWeekDayEdit,
   openWeekGroup, page, pantryAvailableNames, parseRemainingSeconds, path,
-  pickDisplayIngredientChips, pickFreePort, pickPantryShelfRecipes,
+  pickDisplayIngredientChips, pickFreePort, pickPantryShelfRecipes, pickRecentCookedShelfRecipes,
   pickShelfRecipes, readConfirms, readFileSync, readResultCount, readTotalCount, recipeServeTemp, results,
+  sortResults,
   jaRe, reEscape, selectWeekLayout, setConfirmAnswer, shelfSeed, startPreviewServer, stepAppliance,
   stripZwspText,
   webkit,

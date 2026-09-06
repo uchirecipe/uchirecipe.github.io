@@ -921,7 +921,7 @@ import './_shared.mjs'
       const htIds = () =>
         htPage.evaluate(() =>
           Array.from(document.querySelectorAll('a[href]'))
-            .filter((a) => !a.closest('[data-testid="recipe-shelf"]')) // 2026-09-05 棚の10枚は一覧の数に入れない(便ND統合)
+            .filter((a) => !a.closest('[data-testid="recipe-shelf"]')) // 棚のカードは一覧の数に入れない(便ND統合。便NHで棚は日タブへ=いまは空振り。出戻りに備えて残す)
             .map((a) => a.getAttribute('href') ?? '')
             .filter((href) => /^#\/recipes\/\d+$/.test(href)),
         )
@@ -1137,7 +1137,7 @@ import './_shared.mjs'
       const ihTitles = () =>
         ihPage.evaluate(() =>
           Array.from(document.querySelectorAll('a[href]'))
-            .filter((a) => !a.closest('[data-testid="recipe-shelf"]')) // 2026-09-05 棚の10枚は一覧の数に入れない(便ND統合)
+            .filter((a) => !a.closest('[data-testid="recipe-shelf"]')) // 棚のカードは一覧の数に入れない(便ND統合。便NHで棚は日タブへ=いまは空振り。出戻りに備えて残す)
             .filter((a) => /^#\/recipes\/\d+$/.test(a.getAttribute('href') ?? ''))
             .map((a) =>
               (a.querySelector('[data-testid="recipe-card-title"]')?.textContent ?? '')

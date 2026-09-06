@@ -1,4 +1,4 @@
-import { type ReactNode } from 'react'
+import { useMemo, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { Link } from 'react-router-dom'
 import { settingsLinkWithBack } from '../logic/backLink'
@@ -58,6 +58,7 @@ import {
 import type { PlanFillMode } from '../logic/mealPlan'
 import { clampServings, effectiveMealServings, defaultMealServings } from '../logic/servings'
 import { servingsUnitText } from '../logic/servingsUnit'
+import { perfCountMark } from '../logic/perfMarks'
 import { formatShoppingRangeDates } from '../logic/shopping'
 import { isImeConfirmKey } from '../logic/imeKey'
 import {
@@ -94,7 +95,15 @@ import { LESS_MEAL_PURPOSES, MEAL_ROLES, MORE_MEAL_PURPOSES } from '../db/types'
 import CookedLogDetailModal from '../components/CookedLogDetailModal'
 import TodaySuggestPanel from '../components/TodaySuggestPanel'
 import TodaySlotModal from '../components/TodaySlotModal'
-import RecentCookedList from '../components/RecentCookedList'
+// 棚3段（最近作った・最近作っていない・在庫。2026-09-06 便NH でレシピ一覧の上から日タブへ）。
+// 何を並べるかは logic/recipeShelf が1か所で決める
+import RecipeShelf from '../components/RecipeShelf'
+import {
+  pickRecentCookedShelfRecipes,
+  pickShelfRecipes,
+  pickPantryShelfRecipes,
+  shelfSeed,
+} from '../logic/recipeShelf'
 import DayStartNotices from '../components/DayStartNotices'
 import HomeScreenNotice from '../components/HomeScreenNotice'
 import {
@@ -344,10 +353,13 @@ function buildRoleRows(
  *      ＝サンプルは見て確かめるためのもので、書き込み先が無い
  */
 export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
+  // 計測の印（?perf=1 のときだけ。logic/perfMarks）。この画面の描画が何回走ったかを数える
+  // （2026-09-06 便NH: 棚3段を日タブへ入れたときに、描画の増分を測るために置いた。一覧と同じ形）
+  perfCountMark('mealplan:render')
   // 状態と手続きは src/pages/mealPlan/useMealPlanState.ts にある（2026-08-27 便LQ・docs/74 第4手）。
   // 名前は取り出す前と同じ。ここに残したのは render* 関数と JSX だけ。
   const {
-    isDemo, navigate, location, pickerTagOptions, recipes, detachedEntries, settings, saveSettings,
+    isDemo, navigate, location, pickerTagOptions, recipes, settings, saveSettings,
     householdServings, pantryNames, today, setWeekStart, rollingWeek, dates, setWeekLayout,
     currentWeekAnchor, isAtCurrentWeek, lockedKeys, toggleMealLock, viewMode, setViewMode,
     monthAnchor, setMonthAnchor, isPro, monthTrialActive, monthTrialUnused, monthTrialAvailable,
@@ -403,6 +415,54 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
     shopRangeNarrowed, shopRangeDates, shopRangeSlots, toggleShopDate, toggleShopSlot,
     resetShopRange, weekRecipeIds, goShopping, dowLabels, conditionsSummary,
   } = useMealPlanState(demo)
+
+  /**
+   * 日タブの棚3段に並べる品（2026-09-06 便NH。レシピ一覧の上から引っ越し）。
+   *
+   * データはこの画面が既に購読しているもの（ownRecipes・pantryNames・dayRecipeIds）だけを
+   * 使う＝棚のための新しい購読は作らない（描画の回数を増やさないため。実測で確認済み）。
+   * 種はマウントごとに1回だけ決める（一覧にあったときと同じ作法。描き直しのたびに読み直すと、
+   * 日付をまたいだ瞬間に見ている棚が組み変わる）。
+   *
+   * 重複は鎖で除外（司令部裁定「同じ品はページ内の棚に1回だけ」）:
+   *   最近作っていない棚 = 最近作った5品を除く ／ 在庫棚 = その両方（5品＋10品）を除く。
+   * どちらも pick◯◯ShelfRecipes の excludeIds の口に渡すだけ（判定の再実装をしない）。
+   */
+  const shelfDaySeed = useMemo(() => shelfSeed(), [])
+  const recentShelfRecipes = useMemo(
+    () => pickRecentCookedShelfRecipes(ownRecipes ?? []),
+    [ownRecipes],
+  )
+  const notRecentShelfRecipes = useMemo(
+    () =>
+      ownRecipes
+        ? pickShelfRecipes(
+            ownRecipes,
+            shelfDaySeed,
+            new Set(recentShelfRecipes.map((r) => r.id).filter((id): id is number => id != null)),
+          )
+        : [],
+    [ownRecipes, shelfDaySeed, recentShelfRecipes],
+  )
+  const pantryShelfRecipes = useMemo(
+    () =>
+      ownRecipes
+        ? pickPantryShelfRecipes(
+            ownRecipes,
+            pantryNames,
+            shelfDaySeed,
+            new Set(
+              [...recentShelfRecipes, ...notRecentShelfRecipes]
+                .map((r) => r.id)
+                .filter((id): id is number => id != null),
+            ),
+          )
+        : [],
+    [ownRecipes, pantryNames, shelfDaySeed, recentShelfRecipes, notRecentShelfRecipes],
+  )
+  // 「今日の献立に追加済み」の印。dayRecipeIds は日タブに実際に並ぶ①+②そのもの
+  // （レシピ一覧の isRecipeInToday より、この画面では正確。下見§1のとおり）
+  const shelfTodayIds = useMemo(() => new Set(dayRecipeIds), [dayRecipeIds])
 
   /**
    * 「計算できなかった料理」の名前から開いたレシピ詳細の帰り道（2026-08-28 便MA）。
@@ -2067,11 +2127,43 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
             </button>
           )}
 
-          {/* 「最近作ったもの」は、その日の献立があってもなくても常に出す（オーナー指示） */}
-          <RecentCookedList
-            recipes={ownRecipes}
-            detachedEntries={detachedEntries}
-            onOpen={setLogDetail}
+          {/* 棚3段（2026-09-06 便NH・オーナー確定「何を作るのかサーっと探せるページはそこだから」）。
+              レシピ一覧の上にあった2つの棚をここへ引っ越し、「最近作ったもの」
+              （旧 RecentCookedList＝記録を縦に5件）も同じ横スクロールの棚にそろえた。
+              その日の献立があってもなくても常に出す（旧来のオーナー指示のまま）。
+              ・並びは 最近作った → 最近作っていない → 在庫（司令部裁定「出入りする棚ほど下」。
+                在庫の棚は「作った！」で在庫が下がるたび出入りする＝上に置くと下が跳ねる）
+              ・「今日なに作る？」より上には置かない（便HTの実機対応で day-suggest-draw は
+                結果より上に固定されており、上に棚が出入りするとボタンが動いて誤タップを生む）
+              ・同じ品はページ内の棚に1回だけ（上の shelf◯◯Recipes の鎖の除外）
+              ・各棚の「レシピ一覧で見る」は、その棚と同じ物差しの並び替えを ?sort= で渡して
+                一覧を開く（最近作った=新しい順 / 最近作っていない=古い順 / 在庫=一致が多い順） */}
+          <RecipeShelf
+            recipes={recentShelfRecipes}
+            title={ja.dayStart.historyTitle}
+            kind="recentCooked"
+            listHref="/recipes?sort=recentCooked&dir=desc"
+            listLabel={ja.recipes.shelfListLink}
+            ngIngredients={settings?.ngIngredients ?? []}
+            todayRecipeIds={shelfTodayIds}
+          />
+          <RecipeShelf
+            recipes={notRecentShelfRecipes}
+            title={ja.recipes.shelfNotRecentTitle}
+            kind="notRecent"
+            listHref="/recipes?sort=recentCooked&dir=asc"
+            listLabel={ja.recipes.shelfListLink}
+            ngIngredients={settings?.ngIngredients ?? []}
+            todayRecipeIds={shelfTodayIds}
+          />
+          <RecipeShelf
+            recipes={pantryShelfRecipes}
+            title={ja.recipes.shelfPantryTitle}
+            kind="pantry"
+            listHref="/recipes?sort=pantryMatch&dir=desc"
+            listLabel={ja.recipes.shelfListLink}
+            ngIngredients={settings?.ngIngredients ?? []}
+            todayRecipeIds={shelfTodayIds}
           />
 
           {/* 作った記録の一覧への入口(2026-08-09 便EQ・オーナー「記録一覧への正規の行き方がわからない」)。
