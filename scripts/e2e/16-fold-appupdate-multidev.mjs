@@ -721,67 +721,24 @@ import './_shared.mjs'
       )
 
       // ---------- ① 献立の「日」の「最近作ったもの」 ----------
-      // (2026-08-17 便HG: ホーム画面の廃止で、この一覧はホームから献立の「日」へ移った。
-      //  測っているのは「行を押すと記録の小窓が開く(レシピ詳細へ飛ばない)」で変えていない)
+      // (2026-08-17 便HG: ホームの廃止でこの一覧は献立の「日」へ移った →
+      //  2026-09-06 便NH: オーナー指示「最近作った項目も同様にレシピ横スクロールに」で
+      //  縦の行(押すと記録の小窓)から**棚のカード(押すとレシピ詳細)**へ変わった。
+      //  記録の小窓ひと式の検査は、同じ小窓が開く「作った記録の一覧」側(②以降)へ移した)
       await eqPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
       await eqPage.reload({ waitUntil: 'networkidle' })
       await eqPage.waitForTimeout(1800)
-      const eqHomeOpen = eqPage.getByRole('button', { name: '肉じゃがの作った記録を見る' }).first()
-      check('EQ-01(①) 献立の「日」の「最近作ったもの」の行が記録を開くボタンになっている', (await eqHomeOpen.count()) === 1)
-      await eqHomeOpen.click()
-      await eqPage.waitForTimeout(700)
       check(
-        'EQ-01(①) 押してもレシピ詳細へは移らない(その場で小窓が開く)',
-        !/#\/recipes\/\d+/.test(eqPage.url()),
-        `url=${eqPage.url()}`,
+        'EQ-01(①) 日タブに旧「記録を開くボタンの行」はもう無い(棚に置き換わった)',
+        (await eqPage.getByRole('button', { name: '肉じゃがの作った記録を見る' }).count()) === 0,
       )
-      const eqDialog = eqPage.getByRole('dialog', { name: '肉じゃがの作った記録' })
-      const eqDialogText = (await eqDialog.textContent()) ?? ''
-      // 2026-08-10 便FD で小窓をコンパクトにしたので期待値を更新:
-      // 食数は料理名の横の括弧書き（「肉じゃが（4人分）」）になり、「何人分作ったか」の行は無くなった
+      const eqShelfCard = eqPage
+        .locator('[data-testid="recipe-shelf"][data-shelf="recent-cooked"] a[href^="#/recipes/"]')
+        .filter({ hasText: '肉じゃが' })
       check(
-        'EQ-01(①) 小窓に入力した情報が全部出る(日付・食数・ひとことメモ・写真)',
-        eqDialogText.includes(eqToday.replaceAll('-', '/')) &&
-          eqDialogText.includes('（4人分）') &&
-          eqDialogText.includes('ひとことメモ') &&
-          eqDialogText.includes('甘めに仕上げたら好評だった') &&
-          eqDialogText.includes('写真'),
-        eqDialogText.slice(0, 200),
+        'EQ-01(①) 「最近作ったもの」の棚に肉じゃがのカードが出て、行き先はレシピ詳細',
+        (await eqShelfCard.count()) === 1,
       )
-      // 2026-08-10 便FD: 「この記録を編集する」はレシピ詳細へのリンクをやめ、
-      // その場で編集欄を開くボタンになった（「レシピを見る」はリンクのまま）
-      check(
-        'EQ-01(①) 小窓からレシピ詳細へ行ける／記録はその場で直せる',
-        (await eqDialog.getByRole('button', { name: ja.cookedDetail.edit }).count()) === 1 &&
-          (await eqDialog.getByRole('link', { name: 'レシピを見る' }).count()) === 1,
-      )
-      // 写真の拡大
-      await eqDialog.getByRole('button', { name: ja.detail.cookedPhotoView }).click()
-      await eqPage.waitForTimeout(600)
-      const eqZoom = eqPage.locator(`div[role="dialog"][aria-label="${ja.detail.cookedPhotoView}"]`)
-      check('EQ-01(①) 写真を押すと拡大表示の窓が開く', (await eqZoom.count()) === 1)
-      // 文言は ja.ts から読むが、evaluate の中はブラウザ側なので引数で渡す（JM-4）
-      const eqZoomBigger = await eqPage.evaluate((photoView) => {
-        const zoom = document.querySelector(`div[role="dialog"][aria-label="${photoView}"] img`)
-        const thumb = [...document.querySelectorAll(`button[aria-label="${photoView}"] img`)][0]
-        if (!zoom || !thumb) return null
-        return { zoom: zoom.getBoundingClientRect().height, thumb: thumb.getBoundingClientRect().height }
-      }, ja.detail.cookedPhotoView)
-      check(
-        'EQ-01(①) 拡大表示は小窓のサムネイルより大きい',
-        !!eqZoomBigger && eqZoomBigger.zoom > eqZoomBigger.thumb,
-        eqZoomBigger ? `拡大=${Math.round(eqZoomBigger.zoom)} サムネ=${Math.round(eqZoomBigger.thumb)}` : 'not found',
-      )
-      // Escapeで拡大だけが閉じ、下の小窓は開いたまま(重ね窓は1枚ずつ閉じる)
-      await eqPage.keyboard.press('Escape')
-      await eqPage.waitForTimeout(500)
-      check(
-        'EQ-01(①) Escapeで拡大表示だけが閉じ、記録の小窓は開いたまま',
-        (await eqZoom.count()) === 0 && (await eqDialog.count()) === 1,
-      )
-      await eqPage.keyboard.press('Escape')
-      await eqPage.waitForTimeout(500)
-      check('EQ-01(①) もう一度Escapeで記録の小窓も閉じる', (await eqDialog.count()) === 0)
 
       // ---------- ④ 入口の名前がそろっている ----------
       // 2026-08-17 便HG: 「最近作ったもの」が献立の「日」へ移り、その下に前からある
@@ -813,6 +770,23 @@ import './_shared.mjs'
         'EQ-01(②) 一覧からも同じ小窓が開く',
         (await eqPage.getByRole('dialog', { name: '肉じゃがの作った記録' }).count()) === 1,
       )
+      // ①から移した検査: 小窓の中身と入口(2026-09-06 便NH統合時。中身の期待値は 2026-08-10 便FD のまま)
+      const eqDialog = eqPage.getByRole('dialog', { name: '肉じゃがの作った記録' })
+      const eqDialogText = (await eqDialog.textContent()) ?? ''
+      check(
+        'EQ-01(②) 小窓に入力した情報が全部出る(日付・食数・ひとことメモ・写真)',
+        eqDialogText.includes(eqToday.replaceAll('-', '/')) &&
+          eqDialogText.includes('（4人分）') &&
+          eqDialogText.includes('ひとことメモ') &&
+          eqDialogText.includes('甘めに仕上げたら好評だった') &&
+          eqDialogText.includes('写真'),
+        eqDialogText.slice(0, 200),
+      )
+      check(
+        'EQ-01(②) 小窓からレシピ詳細へ行ける／記録はその場で直せる',
+        (await eqDialog.getByRole('button', { name: ja.cookedDetail.edit }).count()) === 1 &&
+          (await eqDialog.getByRole('link', { name: 'レシピを見る' }).count()) === 1,
+      )
 
       // ---------- ⑤ 「この記録を編集する」でその場に編集欄が開く ----------
       // 2026-08-10 便FD で期待値を更新（旧: レシピ詳細へ移って編集フォームが開く）。
@@ -836,6 +810,32 @@ import './_shared.mjs'
       )
       await eqPage.getByRole('button', { name: ja.common.confirmCancel }).click()
       await eqPage.waitForTimeout(500)
+
+      // ①から移した検査: 写真の拡大と重ね窓の閉じ方(Escapeは1枚ずつ)
+      await eqDialog.getByRole('button', { name: ja.detail.cookedPhotoView }).click()
+      await eqPage.waitForTimeout(600)
+      const eqZoom = eqPage.locator(`div[role="dialog"][aria-label="${ja.detail.cookedPhotoView}"]`)
+      check('EQ-01(②) 写真を押すと拡大表示の窓が開く', (await eqZoom.count()) === 1)
+      const eqZoomBigger = await eqPage.evaluate((photoView) => {
+        const zoom = document.querySelector(`div[role="dialog"][aria-label="${photoView}"] img`)
+        const thumb = [...document.querySelectorAll(`button[aria-label="${photoView}"] img`)][0]
+        if (!zoom || !thumb) return null
+        return { zoom: zoom.getBoundingClientRect().height, thumb: thumb.getBoundingClientRect().height }
+      }, ja.detail.cookedPhotoView)
+      check(
+        'EQ-01(②) 拡大表示は小窓のサムネイルより大きい',
+        !!eqZoomBigger && eqZoomBigger.zoom > eqZoomBigger.thumb,
+        eqZoomBigger ? `拡大=${Math.round(eqZoomBigger.zoom)} サムネ=${Math.round(eqZoomBigger.thumb)}` : 'not found',
+      )
+      await eqPage.keyboard.press('Escape')
+      await eqPage.waitForTimeout(500)
+      check(
+        'EQ-01(②) Escapeで拡大表示だけが閉じ、記録の小窓は開いたまま',
+        (await eqZoom.count()) === 0 && (await eqDialog.count()) === 1,
+      )
+      await eqPage.keyboard.press('Escape')
+      await eqPage.waitForTimeout(500)
+      check('EQ-01(②) もう一度Escapeで記録の小窓も閉じる', (await eqDialog.count()) === 0)
 
       // ---------- ⑥ 献立の「日」へ戻ったときのスクロール位置 ----------
       await eqPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
