@@ -10,7 +10,7 @@
 // 走る順番と、どの節がどのファイルに居るかは scripts/e2e-smoke.mjs が持っている。
 // **節どうしは前の節が残した画面の状態を引き継ぐので、順番も、この区切りも動かさないこと。**
 //
-// この中の節: DAYPLANFILTER-01, CARDPARTS-01, DAYCOND-01, DAYONE-02, WEEKDICE-03, SUGGESTNG-04, PICKCOMPACT-05, FORMING-01, SETBACK-01, BULKDEL-01, AISLE-01
+// この中の節: DAYPLANFILTER-01, CARDPARTS-01, DAYCOND-01, DAYONE-02, DAYFRESH-01, WEEKDICE-03, SUGGESTNG-04, PICKCOMPACT-05, FORMING-01, SETBACK-01, BULKDEL-01, AISLE-01
 // ==========================================================================================
 import './_shared.mjs'
 
@@ -111,7 +111,7 @@ import './_shared.mjs'
           pfAll.some((r) => r.cookMinutes != null && r.cookMinutes > 10),
       )
 
-      // ①〜③ 「◯分以内」を10分にする → 押すまで変わらない → 押すと効く
+      // ①〜③ 調理時間を「10分以内」にする → 押すまで変わらない → 押すと効く
       const pfConditions = pfSection().getByRole('button', { name: jaRe(ja.dayStart.conditionsToggle) })
       check('DAYPLANFILTER-01 前提: 献立側でも「条件をしぼる」が押せる', (await pfConditions.count()) === 1)
       if ((await pfConditions.count()) === 1) {
@@ -120,20 +120,13 @@ import './_shared.mjs'
       }
       const pfBefore = await pfTitles()
       check('DAYPLANFILTER-01 前提: 条件を変える前の献立を読めた', pfBefore.length > 0)
-      // 無いものを押して30秒待ち、節ごと「実行中断」で止まらないようにする
-      // （止まると後ろの節まで走らないので、赤の中身が読めなくなる）
-      const pfQuick = pfSection().getByRole('button', { name: jaRe(ja.dayStart.condQuick, { n: '' }, { end: true }) })
-      check('DAYPLANFILTER-01 前提: 献立側で「◯分以内」が選べる', (await pfQuick.count()) >= 1)
-      if ((await pfQuick.count()) >= 1) {
-        await pfQuick.first().click()
-        await pfPage.waitForTimeout(1200)
-      }
-      // 分数のチップ（10/15/20/30）から10分を選ぶ
-      // 2026-08-19 便IA: 分数は最初から4つ並んでいるので、押しても選択肢は増えない
-      const pfTen = pfSection().getByRole('button', { name: '10分以内', exact: true })
-      check('DAYPLANFILTER-01 前提: 分数(10分以内)が選べる', (await pfTen.count()) >= 1)
-      if ((await pfTen.count()) >= 1) {
-        await pfTen.first().click()
+      // 2026-09-06 便NI: 「◯分以内」はチップからプルダウン（day-quick-minutes）になった。
+      // 無くなったチップを掴むと30秒待って節ごと「実行中断」になる（止まると後ろの節まで
+      // 走らないので、赤の中身が読めなくなる）ため、selectOption で選ぶ
+      const pfQuickSelect = pfPage.locator('[data-testid="day-quick-minutes"]')
+      check('DAYPLANFILTER-01 前提: 献立側でも調理時間のプルダウンが1つある', (await pfQuickSelect.count()) === 1)
+      if ((await pfQuickSelect.count()) === 1) {
+        await pfQuickSelect.selectOption('10')
         await pfPage.waitForTimeout(1500)
       }
       // 2026-08-19 便IA: 絞り込みは窓で開く。押すボタンは窓の裏なので、閉じてから押す
@@ -693,7 +686,8 @@ import './_shared.mjs'
       // 窓は真ん中に出るので、中身が1行増えると窓ごと上下にずれる＝上端（いちばん上のチップ）と
       // 下端（「閉じる」）の両方を見る
       const dcInside = {
-        '窓のいちばん上のチップ': dcScope.getByRole('button', { name: ja.dayStart.condAll, exact: true }),
+        // 2026-09-06 便NI: いちばん上は「お気に入り」のボタンになった（旧「すべて」チップは撤去）
+        '窓のいちばん上のチップ': dcScope.getByRole('button', { name: ja.dayStart.condFavorite, exact: true }),
         '窓の「閉じる」': dcPage.locator('[data-testid="day-conditions-close"]'),
       }
       const dcInsideSnap = async () => {
@@ -722,14 +716,13 @@ import './_shared.mjs'
           }
         }
       }
+      // 2026-09-06 便NI: 条件は「お気に入り」ボタン＋調理時間のプルダウンの2軸になった。
+      // ボタンは往復（ON→OFF）まで押して、トグルのどちら向きでも動かないことを見る
       const dcPressed = []
       for (const name of [
-        ja.dayStart.condNotRecent,
         ja.dayStart.condFavorite,
-        ja.dayStart.condQuick.replace('{n}', '20'),
-        ja.dayStart.condQuick.replace('{n}', '10'),
         ja.dayStart.pantryOnlyToggle,
-        ja.dayStart.condAll,
+        ja.dayStart.condFavorite,
       ]) {
         const button = dcScope.getByRole('button', { name, exact: true })
         if ((await button.count()) === 0) continue
@@ -738,6 +731,21 @@ import './_shared.mjs'
         dcPressed.push(name)
         await dcCompare(`「${name}」を押した後`)
         await dcCompareInside(`「${name}」を押した後`)
+      }
+      // 調理時間のプルダウン（チップ時代の「◯分以内」と同じ操作）。分数を選んでも
+      // 「指定なし」へ戻しても、窓の中も後ろの画面も動かないことを同じ物差しで測る
+      const dcQuickSelect = dcScope.locator('[data-testid="day-quick-minutes"]')
+      if ((await dcQuickSelect.count()) === 1) {
+        for (const value of ['20', '10', '']) {
+          await dcQuickSelect.selectOption(value)
+          await dcPage.waitForTimeout(600)
+          const label = `${ja.dayStart.conditionLabel}=${
+            value === '' ? ja.mealPlan.quickMinutesNone : ja.dayStart.condQuick.replace('{n}', value)
+          }`
+          dcPressed.push(label)
+          await dcCompare(`「${label}」にした後`)
+          await dcCompareInside(`「${label}」にした後`)
+        }
       }
       check(
         'DAYCOND-01 前提: 条件のボタンを2つ以上押せた（押せていなければ測れていない）',
@@ -912,6 +920,229 @@ import './_shared.mjs'
       check('DAYONE-02 押したあとは、その1行が消える', (await doNote().count()) === 0)
     } finally {
       await doBrowser.close()
+    }
+  }
+
+  // --- DAYFRESH-01(2026-09-06 便NI・オーナー決定「『最近作ってない』の条件は撤去。時間はプルダウンで
+  // 選択」＋司令部裁定「1品側の抽選に14日の後回しを内蔵する」)。
+  //
+  // 測るのは3つ:
+  //   ① 調理時間のプルダウンが1品側の候補数に効く（「20分以内」を選ぶと、20分を超える品が
+  //      「候補◯品」の数に入らない）。期待値は検査側で数え直さず、実装と同じ関数
+  //      （logic/homeSuggest.ts の suggestionCandidates・同じ季節）から作る＝数え方を書き写さない
+  //   ② 「条件をクリア」は選んだ条件だけを戻し、分数の覚え（設定 homeQuickMinutes）は消さない
+  //      （週タブが planQuickMinutes を残すのと同じ作法）
+  //   ③ 1品側の抽選は最近（14日）作った品を後回しにする。最近作っていない品が残っていれば
+  //      そこから引き、全品を最近作った状態でも0品にならない（緩めて全候補から引く＝献立エンジンと同じ）
+  // 禁じ手よけ: 文言は ja.ts から読む／品数・押す回数を決め打ちしない／③は毎回ページを
+  // 読み込み直して「開いた直後の1回」だけを見る（「直近に出した品は外す」仕組みと混ぜない。
+  // 生のIndexedDBへ書いたあとも必ず読み込み直す＝Dexieのライブ購読は生書き込みを見ていない）／
+  // 料理名・数字が読めなかったときは合格に倒さず不合格にする ---
+  currentCheck = 'DAYFRESH-01'
+  {
+    const dfBrowser = await chromium.launch()
+    const dfContext = await dfBrowser.newContext({ viewport: { width: 390, height: 844 } })
+    const dfPage = await dfContext.newPage()
+    dfPage.on('console', (msg) => {
+      if (msg.type() !== 'error') return
+      const text = msg.text()
+      if (text.includes('cloudflareinsights') || text.includes('ERR_FAILED')) return
+      errors.push(`[console@DAYFRESH-01] ${text}`)
+    })
+    dfPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin'))
+        return
+      errors.push(`[pageerror@DAYFRESH-01] ${err.message}`)
+    })
+    const dfClean = (t) => (t ?? '').replaceAll('\u200b', '').trim()
+    try {
+      await dfPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await dfPage.waitForTimeout(2400) // 初回シード完了待ち
+      // 端末のレシピをそのまま読む（期待値はここから、実装と同じ関数で作る）
+      const dfAll = await dfPage.evaluate(
+        () =>
+          new Promise((resolve, reject) => {
+            const req = indexedDB.open('uchi-recipe')
+            req.onsuccess = () => {
+              const q = req.result.transaction('recipes', 'readonly').objectStore('recipes').getAll()
+              q.onsuccess = () => resolve(q.result)
+              q.onerror = () => reject(q.error)
+            }
+            req.onerror = () => reject(req.error)
+          }),
+      )
+      check('DAYFRESH-01 前提: レシピを読めた（0件なら測れていない）', dfAll.length > 0)
+      await dfPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+      await dfPage.reload({ waitUntil: 'networkidle' })
+      await dfPage.waitForTimeout(2000)
+      // 1品側で測る（切り替えは設定に覚えるので、あとの読み込み直しでも1品のまま）
+      const dfOne = dfPage.locator('[data-testid="day-mode-one"]')
+      check('DAYFRESH-01 前提: 「1品」へ切り替えられる', (await dfOne.count()) === 1)
+      if ((await dfOne.count()) === 1) {
+        await dfOne.click()
+        await dfPage.waitForTimeout(1000)
+      }
+      // 「候補◯品」の数字。文言は ja から組む（1品側の ja.common.candidateCount だけに当たる形）
+      const dfCountRe = jaRe(ja.common.candidateCount, { n: '(\\d+)' })
+      const dfCount = async () => {
+        const text = ((await dfPage.textContent('body')) ?? '').replaceAll('\u200b', '')
+        const m = text.match(dfCountRe)
+        return m ? Number(m[1]) : -1
+      }
+      // 期待値は実装と同じ関数で作る。1品側の既定は主菜のみ・季節も実装と同じ関数
+      const dfExpectAll = suggestionCandidates(dfAll, ['main'], currentSeason()).length
+      const dfQuickRule = (r, minutes) =>
+        r.cookMinutes != null && r.cookMinutes > 0 && r.cookMinutes <= minutes
+      const dfExpect20 = suggestionCandidates(
+        dfAll.filter((r) => dfQuickRule(r, 20)),
+        ['main'],
+        currentSeason(),
+      ).length
+      check(
+        'DAYFRESH-01 前提: 20分で絞ると数が変わるレシピ構成（変わらなければ①を測れていない）',
+        dfExpectAll > 0 && dfExpect20 > 0 && dfExpect20 < dfExpectAll,
+        `全=${dfExpectAll} 20分=${dfExpect20}`,
+      )
+      check(
+        'DAYFRESH-01 前提: 絞る前の「候補◯品」が実装と同じ数',
+        (await dfCount()) === dfExpectAll,
+        `画面=${await dfCount()} 期待=${dfExpectAll}`,
+      )
+      // ① 「20分以内」を選ぶと、20分を超える品が候補数に入らない
+      const dfConditions = dfPage.getByRole('button', { name: jaRe(ja.dayStart.conditionsToggle) })
+      check('DAYFRESH-01 前提: 「条件をしぼる」が押せる', (await dfConditions.count()) === 1)
+      if ((await dfConditions.count()) === 1) {
+        await dfConditions.click()
+        await dfPage.waitForTimeout(700)
+      }
+      const dfQuickSelect = dfPage.locator('[data-testid="day-quick-minutes"]')
+      check('DAYFRESH-01 前提: 調理時間のプルダウンが1つある', (await dfQuickSelect.count()) === 1)
+      if ((await dfQuickSelect.count()) === 1) {
+        await dfQuickSelect.selectOption('20')
+        await dfPage.waitForTimeout(800)
+      }
+      check(
+        'DAYFRESH-01 「20分以内」を選ぶと、20分を超える品が「候補◯品」に入らない',
+        (await dfCount()) === dfExpect20,
+        `画面=${await dfCount()} 期待=${dfExpect20}`,
+      )
+      // ② 分数の覚え（homeQuickMinutes）は「条件をクリア」で消えない
+      const dfSettings = () =>
+        dfPage.evaluate(
+          () =>
+            new Promise((resolve, reject) => {
+              const req = indexedDB.open('uchi-recipe')
+              req.onsuccess = () => {
+                const q = req.result.transaction('settings', 'readonly').objectStore('settings').get(1)
+                q.onsuccess = () => resolve(q.result ?? null)
+                q.onerror = () => reject(q.error)
+              }
+              req.onerror = () => reject(req.error)
+            }),
+        )
+      check(
+        'DAYFRESH-01 分数を選ぶと設定（homeQuickMinutes）に覚える',
+        ((await dfSettings())?.homeQuickMinutes ?? null) === 20,
+      )
+      // 「お気に入り」も付けてからクリア＝クリアが2軸とも戻すことを1回で見る
+      const dfFav = dfPage.locator('[data-testid="day-cond-favorite"]')
+      check('DAYFRESH-01 前提: 「お気に入り」のボタンが1つある', (await dfFav.count()) === 1)
+      if ((await dfFav.count()) === 1) {
+        await dfFav.click()
+        await dfPage.waitForTimeout(500)
+      }
+      // クリアは条件が1つも効いていないと出ない（invisible）。見えないものを click すると
+      // 30秒待って節ごと実行中断になるので、見えないときは押さずに赤へ倒す
+      const dfClear = dfPage.locator('[data-testid="day-conditions-clear"]')
+      const dfClearVisible = (await dfClear.count()) === 1 && (await dfClear.isVisible())
+      check('DAYFRESH-01 前提: 「条件をクリア」が押せる（条件を選ぶと出る）', dfClearVisible)
+      if (dfClearVisible) {
+        await dfClear.click()
+        await dfPage.waitForTimeout(800)
+      }
+      check(
+        'DAYFRESH-01 クリアでお気に入りも外れる',
+        (await dfFav.getAttribute('aria-pressed')) === 'false',
+      )
+      check(
+        'DAYFRESH-01 クリアで調理時間は「指定なし」へ戻る',
+        (await dfQuickSelect.inputValue()) === '',
+      )
+      check(
+        'DAYFRESH-01 クリアしても分数の覚え（homeQuickMinutes）は消えない（次に使うときの好みは捨てない）',
+        ((await dfSettings())?.homeQuickMinutes ?? null) === 20,
+      )
+      check(
+        'DAYFRESH-01 クリアで候補数も絞る前へ戻る',
+        (await dfCount()) === dfExpectAll,
+        `画面=${await dfCount()} 期待=${dfExpectAll}`,
+      )
+      const dfClose = dfPage.locator('[data-testid="day-conditions-close"]')
+      if ((await dfClose.count()) === 1) {
+        await dfClose.click()
+        await dfPage.waitForTimeout(600)
+      }
+      // ③ 最近（14日）作った品を後回しにする。候補のうち2品だけ「最近作っていない」を残し、
+      // 残り全部へ今日の「作った！」記録を付ける
+      const dfPool = suggestionCandidates(dfAll, ['main'], currentSeason())
+      check('DAYFRESH-01 前提: 候補が3品以上ある（2品を残して他を最近作った状態にするため）', dfPool.length >= 3)
+      const dfFreshTitles = dfPool.slice(0, 2).map((r) => r.title)
+      const dfMarkCooked = (skipTitles) =>
+        dfPage.evaluate(
+          (skip) =>
+            new Promise((resolve, reject) => {
+              const d = new Date()
+              const pad = (n) => String(n).padStart(2, '0')
+              const date = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+              const req = indexedDB.open('uchi-recipe')
+              req.onsuccess = () => {
+                const idb = req.result
+                const g = idb.transaction('recipes', 'readonly').objectStore('recipes').getAll()
+                g.onsuccess = () => {
+                  const tx = idb.transaction('recipes', 'readwrite')
+                  const store = tx.objectStore('recipes')
+                  let n = 0
+                  for (const r of g.result) {
+                    if (skip.includes(r.title)) continue
+                    store.put({ ...r, cookedLogs: [{ date, servings: 2 }, ...(r.cookedLogs ?? [])] })
+                    n++
+                  }
+                  tx.oncomplete = () => resolve(n)
+                  tx.onerror = () => reject(tx.error)
+                }
+                g.onerror = () => reject(g.error)
+              }
+              req.onerror = () => reject(req.error)
+            }),
+          skipTitles,
+        )
+      const dfMarked = await dfMarkCooked(dfFreshTitles)
+      check('DAYFRESH-01 前提: 2品を残して「今日作った」記録を付けられた', dfMarked > 0, `付けた数=${dfMarked}`)
+      // 開いた直後の1品だけを数回見る（毎回読み込み直す＝直近に出した品の除外と混ぜない）
+      const dfTitle = () => dfPage.locator('[data-testid="day-suggest-result-title"]').first()
+      const dfDrawnFirst = []
+      for (let i = 0; i < 4; i++) {
+        await dfPage.reload({ waitUntil: 'networkidle' })
+        await dfPage.waitForTimeout(1800)
+        dfDrawnFirst.push(dfClean(await dfTitle().textContent()))
+      }
+      const dfOutside = dfDrawnFirst.filter((t) => !dfFreshTitles.includes(t))
+      check(
+        'DAYFRESH-01 最近作った品に偏らない（開いた直後の1品は、最近作っていない2品から出る）',
+        dfDrawnFirst.every((t) => t.length > 0) && dfOutside.length === 0,
+        `出た品=${JSON.stringify(dfDrawnFirst)} 最近作っていない2品=${JSON.stringify(dfFreshTitles)} はみ出し=${JSON.stringify(dfOutside)}`,
+      )
+      // 残した2品にも記録を付けて「全品を今日作った」状態にしても、0品にはならない（緩めて引く）
+      await dfMarkCooked([])
+      await dfPage.reload({ waitUntil: 'networkidle' })
+      await dfPage.waitForTimeout(1800)
+      check(
+        'DAYFRESH-01 全品を今日作った状態でも0品にならない（候補数は緩和後の全候補・1品出る）',
+        (await dfCount()) === dfExpectAll && dfClean(await dfTitle().textContent()).length > 0,
+        `候補数=${await dfCount()} 期待=${dfExpectAll} 出た品=${dfClean(await dfTitle().textContent())}`,
+      )
+    } finally {
+      await dfBrowser.close()
     }
   }
 

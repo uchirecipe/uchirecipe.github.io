@@ -83,30 +83,25 @@ import { ja } from '../i18n/ja'
  * 在庫だけを据え置きにしないのは、同じ並びに置いた絞り込みの作法を1つだけ変えないため。
  * **1品側は据え置きにしない**＝条件を変えるとその場で候補が入れ替わる（1品は「引き直す」
  * ことそのものが目的の道具で、押す前と押した後を見比べる献立とは性質が違う）。
+ *
+ * 2026-09-06 便NI（オーナー決定）: 条件を「1つだけ選ぶ」（すべて／最近作ってない／
+ * お気に入り／◯分以内 の enum）から**独立した2軸**に作り直した:
+ *  ・**お気に入り**… ボタン1つのON/OFF（「すべて」のチップは要らなくなったので無い。
+ *    何も選ばなければ全部から選ぶ、はボタンが押されていない状態そのもの）
+ *  ・**調理時間**… プルダウン1つ（「指定なし」つき。週タブ「提案の条件」の調理時間
+ *    （MealPlanPage の plan-quick-minutes・2026-08-20 便II・①でオーナーが決めた形）を
+ *    そのまま写した＝同じ「調理時間で絞る」を画面ごとに違う形で出さない）
+ *  「最近作ってない」の条件は**撤去**した。代わりに、1品側の抽選そのものが最近（14日）
+ *  作った品を後回しにする（下の drawOne。献立エンジン logic/mealPlan.ts が前から
+ *  やっている形と同じで、チップで選ばなくても最近の品ばかりにはならない）。
+ *  料理の種別と「在庫の食材から」は今までのまま。
  */
-
-type SuggestCondition = 'any' | 'notRecent' | 'favorite' | 'quick'
 
 /** 「1品」を出すか、「献立」（主菜＋副菜）を組むか（2026-08-18 便HM） */
 type SuggestMode = 'one' | 'plan'
 
-/**
- * 「条件をしぼる」の窓に並べる絞り込み（2026-08-19 便IA）。
- *
- * 「◯分以内」を**分数のぶんだけ最初から並べる**形にした（下の QUICK_MINUTES_OPTIONS）。
- * 便BN以来「◯分以内」はチップ1つで、押してはじめて分数の並びが下に現れていたが、
- * それがオーナー実機の「条件を絞るボタンをぽちぽち色々試すたびに、追加の選択肢が出現して
- * ボタンや献立のレシピカードの場所が変わる」のいちばんの原因だった
- * （390px幅の実測で、押すと下のものが112px下がっていた）。
- * 分数を最初から並べれば、どれを押しても**並びの数も高さも変わらない**。
- */
-const conditions: { value: Exclude<SuggestCondition, 'quick'>; label: string }[] = [
-  { value: 'any', label: ja.dayStart.condAll },
-  { value: 'notRecent', label: ja.dayStart.condNotRecent },
-  { value: 'favorite', label: ja.dayStart.condFavorite },
-]
-
-// 「◯分以内」で選べる分数(2026-07-24 便BN・タスク7)。既定は先頭の10分
+// 「◯分以内」で選べる分数(2026-07-24 便BN・タスク7)。2026-09-06 便NIからはプルダウンの
+// <option> の元（値も並びも週タブの PLAN_QUICK_MINUTES_OPTIONS＝logic/mealPlan.ts と同じ）
 const QUICK_MINUTES_OPTIONS = [10, 15, 20, 30] as const
 
 /**
@@ -133,15 +128,22 @@ const DEFAULT_DISH_TYPES: DishType[] = ['main']
  */
 const RECENT_SUGGEST_KEEP = 3
 
+/**
+ * 絞り込みの2軸を両方満たすか（2026-09-06 便NI）。
+ * enum の「1つだけ選ぶ」から、お気に入り×調理時間の and 判定に変えた。
+ * quickMinutes は null＝「指定なし」（時間では絞らない）。
+ */
 function matchesCondition(
   recipe: Recipe,
-  condition: SuggestCondition,
-  quickMinutes: number,
+  favoriteOnly: boolean,
+  quickMinutes: number | null,
 ): boolean {
-  if (condition === 'notRecent') return !cookedWithinDays(recipe, 14)
-  if (condition === 'favorite') return recipe.isFavorite
-  if (condition === 'quick')
-    return recipe.cookMinutes != null && recipe.cookMinutes > 0 && recipe.cookMinutes <= quickMinutes
+  if (favoriteOnly && !recipe.isFavorite) return false
+  if (
+    quickMinutes != null &&
+    !(recipe.cookMinutes != null && recipe.cookMinutes > 0 && recipe.cookMinutes <= quickMinutes)
+  )
+    return false
   return true
 }
 
@@ -298,7 +300,14 @@ export default function TodaySuggestPanel({
     if (next === mode) return
     void updateSettings({ dayStartSuggestMode: next })
   }
-  const [condition, setCondition] = useState<SuggestCondition>('any')
+  /**
+   * 絞り込みの2軸（2026-09-06 便NI・オーナー決定「ボタンで選択するものが『お気に入り』のみ」）。
+   * どちらも画面の中だけの状態＝開くたびに「絞らない」から始まる（enum だった頃の
+   * useState('any') と同じ振る舞い。既存ユーザーの見え方を変えない）。
+   */
+  const [favoriteOnly, setFavoriteOnly] = useState(false)
+  /** 調理時間のしぼり（分）。null＝「指定なし」＝時間では絞らない */
+  const [quickMinutes, setQuickMinutes] = useState<number | null>(null)
   /**
    * 「条件をしぼる」の窓が開いているか（2026-08-19 便IA・オーナー実機
    * 「今日なに作るで、条件を絞るボタンをぽちぽち色々試すたびに、説明文や追加の選択肢が出現して
@@ -329,8 +338,6 @@ export default function TodaySuggestPanel({
    * 2026-08-19 便IA: **条件を変えただけでは外さない**（条件を変えても出ているものは変えない）。
    */
   const [pinnedId, setPinnedId] = useState<number | null>(pinnedRecipeId)
-  // 「◯分以内」で選んだ分数(2026-07-24 便BN・タスク7)。設定に記憶し、未設定は10分扱い
-  const quickMinutes = settings?.homeQuickMinutes ?? 10
   /**
    * 絞り込みを変える（2026-08-19 便IA・オーナー実機「1品も条件ぽちぽち帰るたびに候補が
    * 変わらないようにして」）。**変えるのは条件だけで、出ているものには触らない**
@@ -338,14 +345,22 @@ export default function TodaySuggestPanel({
    */
   const toggleDishType = (type: DishType) =>
     setDishTypes((prev) => (prev.includes(type) ? prev.filter((t) => t !== type) : [...prev, type]))
-  const changeCondition = (value: SuggestCondition) => setCondition(value)
+  const toggleFavoriteOnly = () => setFavoriteOnly((v) => !v)
   /**
-   * 「◯分以内」の分数を選ぶ。選んだ時点で条件も「◯分以内」にそろえる
-   * ＝分数を最初から並べても「押しても効かないボタン」を作らない（2026-08-19 便IA）。
+   * 調理時間のプルダウンを選ぶ（2026-09-06 便NI）。空文字＝「指定なし」で時間の絞りを外す
+   * （週タブの changeQuickMinutes＝useMealPlanState.ts と同じ受け方）。
+   * 分数を選んだときは今までどおり設定（homeQuickMinutes）にも覚える。保存先は
+   * 週タブ（planQuickMinutes）と**一本化しない**＝既存ユーザーの挙動を変えない（司令部裁定）。
    */
-  const changeQuickMinutes = (minutes: number) => {
-    if (condition !== 'quick') setCondition('quick')
-    if (minutes !== quickMinutes) void updateSettings({ homeQuickMinutes: minutes })
+  const changeQuickMinutes = (value: string) => {
+    if (value === '') {
+      setQuickMinutes(null)
+      return
+    }
+    const minutes = Number(value)
+    if (!Number.isFinite(minutes)) return
+    setQuickMinutes(minutes)
+    if (minutes !== (settings?.homeQuickMinutes ?? 10)) void updateSettings({ homeQuickMinutes: minutes })
   }
   const togglePantryOnly = () => setPantryOnly((v) => !v)
   /**
@@ -354,32 +369,43 @@ export default function TodaySuggestPanel({
    * （レシピ一覧の空状態も、条件がかかっているときだけこのボタンを出している）。
    */
   const anyConditionActive =
-    condition !== 'any' ||
+    favoriteOnly ||
+    quickMinutes != null ||
     pantryOnly ||
     dishTypes.length !== DEFAULT_DISH_TYPES.length ||
     !DEFAULT_DISH_TYPES.every((t) => dishTypes.includes(t))
-  /** 「条件をクリア」: 条件チップ・料理の種別・在庫の絞りを、開いた直後と同じ状態に戻す */
+  /**
+   * 「条件をクリア」: お気に入り・調理時間・料理の種別・在庫の絞りを、開いた直後と同じ状態に戻す。
+   * 分数の覚え（設定 homeQuickMinutes）は**消さない**＝次に使うときの好みまでは捨てない
+   * （週タブの clearSuggestConditions が planQuickMinutes を残すのと同じ作法）。
+   */
   const clearConditions = () => {
-    setCondition('any')
+    setFavoriteOnly(false)
+    setQuickMinutes(null)
     setDishTypes(DEFAULT_DISH_TYPES)
     setPantryOnly(false)
   }
   // 「おまかせで1品出す」で直近に出した候補(2026-07-29 便CD/MP-12)。押すたびに積んで、
   // その分は次の抽選から外す＝同じ料理が続けて出るのを防ぐ
   const [recentSuggestedIds, setRecentSuggestedIds] = useState<number[]>([])
-  /** 「条件をしぼる」のボタンに添える、いま選んでいる条件の名前（「◯分以内」は分数を差し込む） */
-  const currentConditionLabel =
-    condition === 'quick'
-      ? ja.dayStart.condQuick.replace('{n}', String(quickMinutes))
-      : (conditions.find((c) => c.value === condition)?.label ?? '')
+  /**
+   * 「条件をしぼる」のボタンに添える、いま選んでいる条件の名前（2026-09-06 便NIで2軸になった
+   * ので、効いているものを「・」でつないで全部出す。例「条件をしぼる: お気に入り・15分以内」）。
+   */
+  const activeConditionLabels = [
+    ...(favoriteOnly ? [ja.dayStart.condFavorite] : []),
+    ...(quickMinutes != null ? [ja.dayStart.condQuick.replace('{n}', String(quickMinutes))] : []),
+  ]
 
-  // 条件(すべて/最近作っていない/お気に入り/◯分以内)で絞り込んだ上で、選んだ種別ごとに
+  // 条件(お気に入り/調理時間)で絞り込んだ上で、選んだ種別ごとに
   // 今の季節を優先した候補を作って合わせる(logic/homeSuggest.ts)。
   // 2026-08-04 便DV-1: 種別を増やすほど候補が減っていたバグを、この関数側で直した
   const candidates = useMemo(() => {
-    const byCondition = (recipes ?? []).filter((r) => matchesCondition(r, condition, quickMinutes))
+    const byCondition = (recipes ?? []).filter((r) =>
+      matchesCondition(r, favoriteOnly, quickMinutes),
+    )
     return suggestionCandidates(byCondition, dishTypes, currentSeason())
-  }, [recipes, condition, dishTypes, quickMinutes])
+  }, [recipes, favoriteOnly, dishTypes, quickMinutes])
 
   // 「在庫の食材で」がONのとき、在庫(ある/少ない)の食材を1つ以上使うレシピに絞る。
   // 0件ならズレの不満を防ぐため通常候補にフォールバックし、その旨を表示する
@@ -397,7 +423,7 @@ export default function TodaySuggestPanel({
    * 「献立」を組むときに使えるレシピ（2026-08-19 便HT・オーナー原文
    * 「献立にも1品と同じように条件を絞る機能つければいいのでは？」）。
    *
-   * 効かせるもの: 条件チップ（すべて／最近作っていない／お気に入り／◯分以内）と
+   * 効かせるもの: お気に入り・調理時間（2026-09-06 便NIで2軸になった）と
    * 「在庫の食材から」。**1品側とまったく同じ判定**（matchesCondition と
    * logic/pantry.ts の判定器）を通す＝同じ条件が画面の左右で違う意味にならない。
    *
@@ -409,7 +435,9 @@ export default function TodaySuggestPanel({
    * 献立そのものが出ない、を作らない（解いたことは pantryFallback の1行で言う）。
    */
   const planAllowedIds = useMemo(() => {
-    const byCondition = (recipes ?? []).filter((r) => matchesCondition(r, condition, quickMinutes))
+    const byCondition = (recipes ?? []).filter((r) =>
+      matchesCondition(r, favoriteOnly, quickMinutes),
+    )
     let pool = byCondition
     if (pantryOnly && pantryNames.length > 0) {
       const matchesPantry = makePantryMatcher(pantryNames)
@@ -417,16 +445,18 @@ export default function TodaySuggestPanel({
       if (filtered.length > 0) pool = filtered
     }
     return pool.map((r) => r.id).filter((id): id is number => id != null)
-  }, [recipes, condition, quickMinutes, pantryOnly, pantryNames])
+  }, [recipes, favoriteOnly, quickMinutes, pantryOnly, pantryNames])
 
   /** 献立側で「在庫の食材から」の絞りを解いたか（1品側の pantryFallback と同じ知らせを出す） */
   const planPantryFallback = useMemo(() => {
     if (!pantryOnly || pantryNames.length === 0) return false
-    const byCondition = (recipes ?? []).filter((r) => matchesCondition(r, condition, quickMinutes))
+    const byCondition = (recipes ?? []).filter((r) =>
+      matchesCondition(r, favoriteOnly, quickMinutes),
+    )
     if (byCondition.length === 0) return false
     const matchesPantry = makePantryMatcher(pantryNames)
     return !byCondition.some((r) => r.ingredients.some((i) => matchesPantry(i.name)))
-  }, [recipes, condition, quickMinutes, pantryOnly, pantryNames])
+  }, [recipes, favoriteOnly, quickMinutes, pantryOnly, pantryNames])
 
   /**
    * 「在庫の食材から」で絞った結果が0品だったので、絞りを解いた（1品側・献立側で同じ知らせ）。
@@ -476,6 +506,14 @@ export default function TodaySuggestPanel({
    *
    * `auto` は開いた直後・「1品」に切り替えた直後の1回で、そのときは
    * いま出ているものを「直近に出した」に積まない（まだ誰も見ていないため）。
+   *
+   * 2026-09-06 便NI（司令部裁定）: **最近（14日）作った品を後回しにする**。
+   * 条件「最近作ってない」を撤去すると、1品側で作ったばかりの品を避ける手段が消える
+   * （毎日「作った！」を押す人ほど昨日・一昨日の料理が出る）ため、抽選プールそのものに
+   * 献立エンジンと同じ形を内蔵した＝ !cookedWithinDays(r, 14) で絞り、0件なら緩めて
+   * 全candidatesから引く（logic/mealPlan.ts の suggestForSlot の freshAndUnused と同じ。
+   * 新しい物差しは発明せず、同じ14日を使う）。0件回避を優先するのも同じ＝
+   * 全品を最近作った人でも「引けない」にはならない。
    */
   const drawOne = useCallback(
     (options?: { auto?: boolean }) => {
@@ -490,11 +528,25 @@ export default function TodaySuggestPanel({
       if (nextRecent !== recentSuggestedIds) setRecentSuggestedIds(nextRecent)
       setPinnedId(null)
       const pool = excludeYesterdayPlanRecipes(finalCandidates, nextRecent)
-      const picked = pool.length > 0 ? pool[Math.floor(Math.random() * pool.length)] : undefined
+      const fresh = pool.filter((r) => !cookedWithinDays(r, 14))
+      const drawPool = fresh.length > 0 ? fresh : pool
+      const picked =
+        drawPool.length > 0 ? drawPool[Math.floor(Math.random() * drawPool.length)] : undefined
       setDrawnOneId(picked?.id ?? null)
     },
     [suggestion, recentSuggestedIds, finalCandidates],
   )
+
+  /**
+   * 「候補◯品」に出す1品側の数（2026-09-06 便NI）。抽選（drawOne）が14日を後回しにする
+   * ようになったので、数え方も追随する＝最近作っていない品があるあいだはその数、
+   * 0品なら緩和後の全候補の数。画面の数字と実際に引いている母集団を食い違わせない
+   * （直前に出した数品の除外だけは数に入れない＝今までどおり）。
+   */
+  const oneCandidateCount = useMemo(() => {
+    const fresh = finalCandidates.filter((r) => !cookedWithinDays(r, 14))
+    return fresh.length > 0 ? fresh.length : finalCandidates.length
+  }, [finalCandidates])
 
   /**
    * 「献立」に切り替えたら、押さなくても1組出しておく（2026-08-18 便HM）。
@@ -518,7 +570,7 @@ export default function TodaySuggestPanel({
    * **条件を変えても組み直さない**。便HTは逆に「条件を変えたら押さなくても組み直す」に
    * していたが、勝手に組み替わるほうが驚く、というのがオーナーの指摘。
    *
-   * 据え置きにするのは**在庫だけではなく、この節の絞り込み全部**（条件チップ・分数・
+   * 据え置きにするのは**在庫だけではなく、この節の絞り込み全部**（お気に入り・調理時間・
    * 在庫の食材から）。在庫だけ据え置きにすると、同じ並びに置かれた絞り込みの作法が
    * 1つだけ違うことになる。**組み直すのは「おまかせで献立を組む」を押したときだけ**。
    *
@@ -538,7 +590,9 @@ export default function TodaySuggestPanel({
    * いま選んでいる絞り込み（2026-08-19 便HY）。献立側に効く条件だけを並べる
    * ＝料理の種別は献立に当てはめられないので入れない（planAllowedIds と同じ材料）。
    */
-  const conditionKey = `${condition}|${quickMinutes}|${pantryOnly ? 'pantry' : 'all'}`
+  const conditionKey = `${favoriteOnly ? 'favorite' : 'all'}|${quickMinutes ?? 'none'}|${
+    pantryOnly ? 'pantry' : 'all'
+  }`
   /**
    * この節で献立を出しているあいだ立つ印（null＝出していない）。
    * 2026-08-19 便HY で**条件を含めるのをやめた**＝条件を変えても組み直さない。
@@ -601,11 +655,7 @@ export default function TodaySuggestPanel({
    * ＝同じ節に並ぶ2つの側が、条件を変えたときに違う動き方をしないようにするため。
    * 違うのは、1品側では**料理の種別も効く**ので、覚えておく条件にそれも入るところだけ。
    */
-  const oneConditionKey = `${condition}|${quickMinutes}|${pantryOnly ? 'pantry' : 'all'}|${[
-    ...dishTypes,
-  ]
-    .sort()
-    .join(',')}`
+  const oneConditionKey = `${conditionKey}|${[...dishTypes].sort().join(',')}`
   /** この節で1品を出しているあいだ立つ印（null＝出していない） */
   const [oneDrawnKey, setOneDrawnKey] = useState<string | null>(null)
   /** 最後に引いたときの絞り込み。いまの oneConditionKey と違えば「変えたけどまだ引いていない」 */
@@ -726,7 +776,7 @@ export default function TodaySuggestPanel({
             >
               <SlidersHorizontal size={16} aria-hidden />
               {ja.dayStart.conditionsToggle}
-              {condition !== 'any' ? `: ${currentConditionLabel}` : ''}
+              {activeConditionLabels.length > 0 ? `: ${activeConditionLabels.join('・')}` : ''}
             </button>
           </div>
 
@@ -882,7 +932,7 @@ export default function TodaySuggestPanel({
                   '{n}',
                   String(planCandidateCount(planAllowedIds)),
                 )}）`
-              : ja.common.candidateCount.replace('{n}', String(finalCandidates.length))}
+              : ja.common.candidateCount.replace('{n}', String(oneCandidateCount))}
           </p>
 
           {/* 「今日の献立に入れる」。1品でも献立でも同じ場所・同じ名前で出す
@@ -960,7 +1010,8 @@ export default function TodaySuggestPanel({
 
           **窓の中も動かない形にしてある**（オーナー実機「条件を絞るボタンをぽちぽち色々
           試すたびに、説明文や追加の選択肢が出現して…場所が変わる」）:
-           ・「◯分以内」の分数（10/15/20/30）を最初から並べる＝押しても選択肢が増えない
+           ・調理時間はプルダウン1つ（2026-09-06 便NI）。select-control は高さ固定なので
+             何を選んでも選択肢が増えたり高さが変わったりしない
            ・「在庫の食材から」で候補が0品になったときの1行は、**出ていないあいだも場所を取る**
              （見えなくするだけ。文をそのまま置くので、折り返しが変わっても高さが合う）
            ・「条件をクリア」も同じやり方で場所を先に取る
@@ -1006,35 +1057,45 @@ export default function TodaySuggestPanel({
               </button>
             </div>
 
-            {/* どのレシピから選ぶか。「すべて」「最近作ってない」「お気に入り」に続けて、
-                「◯分以内」を分数のぶんだけ並べる（1つだけ選ぶ） */}
-            <p className="mt-[var(--space-md)] text-xs text-ink-muted">
-              {ja.dayStart.conditionLabel}
-            </p>
-            <div className="mt-1 flex flex-wrap gap-[var(--space-sm)]">
-              {conditions.map((option) => (
-                <button
-                  key={option.value}
-                  type="button"
-                  onClick={() => changeCondition(option.value)}
-                  aria-pressed={condition === option.value}
-                  className={conditionChipCls(condition === option.value)}
-                >
-                  {option.label}
-                </button>
-              ))}
-              {QUICK_MINUTES_OPTIONS.map((minutes) => (
-                <button
-                  key={minutes}
-                  type="button"
-                  onClick={() => changeQuickMinutes(minutes)}
-                  aria-pressed={condition === 'quick' && minutes === quickMinutes}
-                  className={conditionChipCls(condition === 'quick' && minutes === quickMinutes)}
-                >
-                  {ja.dayStart.condQuick.replace('{n}', String(minutes))}
-                </button>
-              ))}
+            {/* 「お気に入り」（2026-09-06 便NI・オーナー決定「ボタンで選択するものが
+                『お気に入り』のみになる」）。旧「すべて／最近作ってない／お気に入り／◯分以内」の
+                1つだけ選ぶ並びをやめ、ON/OFFのボタン1つにした（「在庫の食材から」と同じ形）。
+                「すべて」は押されていない状態そのものなので、チップとしては置かない */}
+            <div className="mt-[var(--space-md)] flex flex-wrap gap-[var(--space-sm)]">
+              <button
+                type="button"
+                data-testid="day-cond-favorite"
+                onClick={toggleFavoriteOnly}
+                aria-pressed={favoriteOnly}
+                className={conditionChipCls(favoriteOnly)}
+              >
+                {ja.dayStart.condFavorite}
+              </button>
             </div>
+
+            {/* 調理時間（2026-09-06 便NI・オーナー決定「調理時間はプルダウンで選択」）。
+                週タブ「提案の条件」の調理時間（MealPlanPage の plan-quick-minutes・
+                2026-08-20 便II・①でオーナーが決めた形）をそのまま写した:
+                <select className="select-control"> 1つで、「指定なし」を選べば条件が外れる。
+                select-control は高さが固定（min-height: var(--tap-min)）なので、
+                何を選んでも窓の中は動かない（便IAの「跳ねない」条件はそのまま）。
+                見た目が週タブと同じ「調理時間」の欄になる件は司令部へ報告済み（保存先は別のまま） */}
+            <label className="mt-[var(--space-md)] block">
+              <span className="block text-xs text-ink-muted">{ja.dayStart.conditionLabel}</span>
+              <select
+                data-testid="day-quick-minutes"
+                value={quickMinutes != null ? String(quickMinutes) : ''}
+                onChange={(e) => changeQuickMinutes(e.target.value)}
+                className="select-control mt-1 w-full"
+              >
+                <option value="">{ja.mealPlan.quickMinutesNone}</option>
+                {QUICK_MINUTES_OPTIONS.map((minutes) => (
+                  <option key={minutes} value={minutes}>
+                    {ja.dayStart.condQuick.replace('{n}', String(minutes))}
+                  </option>
+                ))}
+              </select>
+            </label>
 
             {/* 料理の種別(2026-08-03 便DH・オーナー指示)。旧「主菜」トグル1つを
                 レシピ登録と同じ4区分の複数選択にした。

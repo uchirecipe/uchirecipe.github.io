@@ -13,9 +13,10 @@ import { todayString } from './date'
  *   （「しばらく」「棚」は内部向けの呼び名。画面の見出しは ja.recipes.shelfNotRecentTitle）
  *
  * 決めごと（司令部裁定 2026-09-05）:
- *  ・境目は「14日」＝絞り込み「最近作ってない」（ja.dayStart.condNotRecent・
- *    TodaySuggestPanel と mealPlan の !cookedWithinDays(r, 14)）と同じ物差し。
+ *  ・境目は「14日」＝候補選び（mealPlan の suggestForSlot と TodaySuggestPanel の drawOne が
+ *    最近作った品を後回しにする !cookedWithinDays(r, 14)）と同じ物差し。
  *    同じアプリの中に「最近／しばらく」の境目を2つ作らない
+ *    （絞り込みチップ「最近作ってない」は 2026-09-06 便NIで撤去。同じ14日は抽選側に残っている）
  *  ・自分で登録したレシピ（!isStarter）が先。足りないぶんは同梱の基本レシピで埋める
  *    （自作0品でも区画は出る）
  *  ・一度も作っていない品も入れて先頭側（記録を付けない人ほどこの区画が要るため）
@@ -24,7 +25,7 @@ import { todayString } from './date'
  *    （開くたび変えると、詳細から一覧へ戻るたび別物になり壊れて見える＋e2eで固定できない）
  */
 
-/** 「最近作ってない」の境目（日数）。絞り込み・献立の候補選びと同じ14日 */
+/** 「最近作っていない」の境目（日数）。1品・献立の候補選びと同じ14日 */
 export const SHELF_NOT_RECENT_DAYS = 14
 
 /** 区画に出す最大の品数 */
