@@ -240,7 +240,9 @@ import './_shared.mjs'
       await rsPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
       await rsPage.waitForTimeout(800)
       const importedCardText = await rsPage
-        .locator('a[href^="#/recipes/"]', { hasText: 'E2E読み込みテストレシピ' })
+        // div.grid に限定(2026-09-06): 棚のカードは情報を間引くので「基本レシピ」バッジを持たない。
+        // ページ先頭一致だと棚側を掴んで偽赤になる(35回目のフルe2eで実発)
+        .locator('div.grid a[href^="#/recipes/"]', { hasText: 'E2E読み込みテストレシピ' })
         .first()
         .textContent()
       check(
