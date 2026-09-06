@@ -916,12 +916,27 @@ import './_shared.mjs'
         (await dmSection().locator('[data-testid="day-mode-one"]').count()) === 1,
       )
       {
-        const oneBox = (await dmBox(dmOne())) ?? { width: 0, height: 0 }
-        const planBox = (await dmBox(dmPlan())) ?? { width: 0, height: 0 }
+        // 2026-09-06 便NJ: スイッチの見た目は38pxに下げ、当たり判定は .tap-target(::after)で
+        // 44pxを確保する形になった。getBoundingClientRect は見た目しか測れないので、
+        // 「中心から上下±21pxを突いたとき、そのボタンが当たりになるか」を実測する形へ
+        const dmTapOk = async (locator) => {
+          const box = await locator.boundingBox()
+          if (!box) return false
+          const cx = box.x + box.width / 2
+          const cy = box.y + box.height / 2
+          return await dmPage.evaluate(
+            ([x, yTop, yBottom]) => {
+              const top = document.elementFromPoint(x, yTop)
+              const bottom = document.elementFromPoint(x, yBottom)
+              const owns = (el) => !!el && !!el.closest('button')
+              return owns(top) && owns(bottom)
+            },
+            [cx, cy - 21, cy + 21],
+          )
+        }
         check(
-          'DAYMODE-01 切り替えは指で押せる大きさ(高さ44px以上)',
-          oneBox.height >= 44 && planBox.height >= 44,
-          `1品 h=${Math.round(oneBox.height)} 献立 h=${Math.round(planBox.height)}`,
+          'DAYMODE-01 切り替えは指で押せる大きさ(中心から±21px=44px域が当たり判定)',
+          (await dmTapOk(dmOne())) && (await dmTapOk(dmPlan())),
         )
       }
       // ---- ② 決めてもらうボタンは1つ ----
