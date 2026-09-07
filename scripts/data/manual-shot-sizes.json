@@ -5,7 +5,7 @@
   },
   "day-suggest": {
     "w": 780,
-    "h": 1108
+    "h": 1096
   },
   "nav-tabs": {
     "w": 780,
@@ -47,10 +47,6 @@
     "w": 780,
     "h": 648
   },
-  "plan-day-buttons": {
-    "w": 780,
-    "h": 900
-  },
   "select-for-today": {
     "w": 780,
     "h": 868
@@ -63,17 +59,21 @@
     "w": 780,
     "h": 1016
   },
-  "plan-week-day": {
-    "w": 780,
-    "h": 744
-  },
   "plan-week-day-edit": {
     "w": 780,
     "h": 1204
   },
+  "plan-week-day": {
+    "w": 780,
+    "h": 744
+  },
   "cost-week": {
     "w": 780,
     "h": 598
+  },
+  "plan-day-buttons": {
+    "w": 780,
+    "h": 900
   },
   "plan-month": {
     "w": 780,
@@ -107,13 +107,13 @@
     "w": 780,
     "h": 724
   },
-  "cookmode-voice": {
-    "w": 780,
-    "h": 252
-  },
   "cookmode": {
     "w": 780,
     "h": 880
+  },
+  "cookmode-voice": {
+    "w": 780,
+    "h": 252
   },
   "timer": {
     "w": 780,
