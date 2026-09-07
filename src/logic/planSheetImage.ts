@@ -1,5 +1,5 @@
 import { ja } from '../i18n/ja'
-import { countWrappedLines, drawWrappedText, tokenColor } from './share'
+import { countWrappedLines, drawWrappedText, shareCardBandText, tokenColor } from './share'
 import { planSheetLines, type PlanSheet } from './planSheet'
 
 /**
