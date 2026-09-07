@@ -92,7 +92,9 @@ export default function RecipeShelf({
           <ChevronRight size={16} aria-hidden />
         </Link>
       </div>
-      {/* pb-1 はスクロールバーが出る環境でカードの影と重ならないための逃げ幅。
+      {/* pb-3 はスクロールバーの逃げ幅（2026-09-07 オーナー実機「横スクロールのバーが
+          レシピカードと重なってしまっている。バーを少し下にずらして」。従来の pb-1=4px では
+          カードの外側の環（.card-frame）にバーがかかっていたので 12px へ広げた）。
 
           px-1 -mx-1 / pt-1 mt-[…-4px]（2026-09-07 便NL）: カードの枠が外側の outline の環
           （.card-frame）になったので、overflow-x-auto のこの<ul>がそのままだと、いちばん上と
@@ -101,7 +103,7 @@ export default function RecipeShelf({
           1pxも動かさず**、環のぶんだけ描ける余白を入れ物の内側に作る。
           負のマージンは4pxだけ＝ページの余白16pxの中に収まる（「画面端まで広げない」の
           決めごと（上の注記）はそのまま。1pxも横にあふれない） */}
-      <ul className="-mx-1 mt-[calc(var(--space-sm)_-_4px)] flex gap-[var(--space-sm)] overflow-x-auto px-1 pt-1 pb-1">
+      <ul className="-mx-1 mt-[calc(var(--space-sm)_-_4px)] flex gap-[var(--space-sm)] overflow-x-auto px-1 pt-1 pb-3">
         {recipes.map((recipe) => (
           <li key={recipe.id} className="w-[140px] shrink-0">
             <RecipeCard
