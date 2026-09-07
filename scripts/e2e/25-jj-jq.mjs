@@ -1517,11 +1517,8 @@ import './_shared.mjs'
       await jpcPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
       await jpcPage.reload({ waitUntil: 'networkidle' })
       await jpcPage.waitForTimeout(1800)
-      const jpcOne = jpcPage.locator('[data-testid="day-mode-one"]')
-      if ((await jpcOne.count()) === 1) {
-        await jpcOne.click()
-        await jpcPage.waitForTimeout(800)
-      }
+      // 2026-09-07 便NL: 切り替えはスイッチ1つ（day-mode-switch）。共通の道具で1品側へ寄せる
+      await setDayMode(jpcPage, 'one', 800)
       await jpcPage.locator('[data-testid="day-suggest-apply"]').click()
       await jpcPage.waitForTimeout(600)
       await todaySlotBtn(jpcPage, ja.mealPlan.slot.dinner).click()

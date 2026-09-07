@@ -94,16 +94,14 @@ import './_shared.mjs'
       const pfByTitle = new Map(pfAll.map((r) => [r.title, r]))
 
       // 献立側で測っていることを、この節のいちばん最初に固定する
-      // （2026-09-07 便NK: 切り替えは逆側だけを見せるボタン1つ。「献立に戻す」が出ている＝
-      //   1品側のときだけ押して寄せる。献立側の印は「1品だけ決める」だけが見えていること）
-      if ((await pfPage.locator('[data-testid="day-mode-plan"]').count()) === 1) {
-        await pfPage.locator('[data-testid="day-mode-plan"]').click()
-        await pfPage.waitForTimeout(1400)
-      }
+      // （2026-09-07 便NL: 切り替えは器具設定と同じスイッチ1つ（day-mode-switch）。
+      //   共通の道具 setDayMode で献立側へ寄せ、献立側の印は aria-checked='false' で見る）
+      await setDayMode(pfPage, 'plan', 1400)
       check(
         'DAYPLANFILTER-01 前提: はじめの画面は「献立」で、組んだ献立が出ている',
-        (await pfPage.locator('[data-testid="day-mode-plan"]').count()) === 0 &&
-          (await pfPage.locator('[data-testid="day-mode-one"]').count()) === 1 &&
+        (await pfPage
+          .locator('[data-testid="day-mode-switch"]')
+          .getAttribute('aria-checked')) === 'false' &&
           (await pfTitles()).length > 0,
         `組=${JSON.stringify(await pfTitles())}`,
       )
@@ -187,10 +185,7 @@ import './_shared.mjs'
       {
         await pfPage.reload({ waitUntil: 'networkidle' })
         await pfPage.waitForTimeout(2000)
-        if ((await pfPage.locator('[data-testid="day-mode-plan"]').count()) === 1) {
-          await pfPage.locator('[data-testid="day-mode-plan"]').click()
-          await pfPage.waitForTimeout(1400)
-        }
+        await setDayMode(pfPage, 'plan', 1400)
         const pfCond0 = pfSection().getByRole('button', { name: jaRe(ja.dayStart.conditionsToggle) })
         if ((await pfCond0.count()) === 1) {
           await pfCond0.click()
@@ -248,10 +243,7 @@ import './_shared.mjs'
       )
       await pfPage.reload({ waitUntil: 'networkidle' })
       await pfPage.waitForTimeout(2000)
-      if ((await pfPage.locator('[data-testid="day-mode-plan"]').count()) === 1) {
-        await pfPage.locator('[data-testid="day-mode-plan"]').click()
-        await pfPage.waitForTimeout(1400)
-      }
+      await setDayMode(pfPage, 'plan', 1400)
       const pfConditions2 = pfSection().getByRole('button', { name: jaRe(ja.dayStart.conditionsToggle) })
       if ((await pfConditions2.count()) === 1) {
         await pfConditions2.click()
@@ -385,12 +377,8 @@ import './_shared.mjs'
       check('CARDPARTS-01 前提: 端末のレシピを読めた', cpAll.length > 0)
 
       // 1品側に寄せる＝候補が1品だけになり、どのレシピを見比べるのかが決まる
-      const cpOne = cpPage.locator('[data-testid="day-mode-one"]')
-      check('CARDPARTS-01 前提: 「1品」への切り替えがある', (await cpOne.count()) === 1)
-      if ((await cpOne.count()) === 1) {
-        await cpOne.click()
-        await cpPage.waitForTimeout(1000)
-      }
+      // （2026-09-07 便NL: 切り替えはスイッチ1つ。共通の道具 setDayMode で寄せる）
+      check('CARDPARTS-01 前提: 「1品」への切り替えがある', await setDayMode(cpPage, 'one', 1000))
 
       /**
        * 見比べに使える品が出るまで引き直す（上限は無限ループ避けの保険）。
@@ -868,8 +856,7 @@ import './_shared.mjs'
         await doToggle.click()
         await doPage.waitForTimeout(700)
       }
-      await doPage.locator('[data-testid="day-mode-one"]').click()
-      await doPage.waitForTimeout(1000)
+      await setDayMode(doPage, 'one', 1000)
       const doTitle = () => doPage.locator('[data-testid="day-suggest-result-title"]').first()
       // お気に入りに付けた品そのものが出ていたら、別の品になるまで引き直す（上限は保険）
       const DO_MAX_DRAWS = 12
@@ -978,13 +965,9 @@ import './_shared.mjs'
       await dfPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
       await dfPage.reload({ waitUntil: 'networkidle' })
       await dfPage.waitForTimeout(2000)
-      // 1品側で測る（切り替えは設定に覚えるので、あとの読み込み直しでも1品のまま）
-      const dfOne = dfPage.locator('[data-testid="day-mode-one"]')
-      check('DAYFRESH-01 前提: 「1品」へ切り替えられる', (await dfOne.count()) === 1)
-      if ((await dfOne.count()) === 1) {
-        await dfOne.click()
-        await dfPage.waitForTimeout(1000)
-      }
+      // 1品側で測る（切り替えは設定に覚えるので、あとの読み込み直しでも1品のまま。
+      // 2026-09-07 便NL: 切り替えはスイッチ1つ。共通の道具 setDayMode で寄せる）
+      check('DAYFRESH-01 前提: 「1品」へ切り替えられる', await setDayMode(dfPage, 'one', 1000))
       // 「候補◯品」の数字。文言は ja から組む（1品側の ja.common.candidateCount だけに当たる形）
       const dfCountRe = jaRe(ja.common.candidateCount, { n: '(\\d+)' })
       const dfCount = async () => {
@@ -1328,8 +1311,7 @@ import './_shared.mjs'
         await snToggle.click()
         await snPage.waitForTimeout(700)
       }
-      await snPage.locator('[data-testid="day-mode-one"]').click()
-      await snPage.waitForTimeout(1000)
+      await setDayMode(snPage, 'one', 1000)
       const snConditions = snSection().getByRole('button', { name: jaRe(ja.dayStart.conditionsToggle) })
       if ((await snConditions.count()) === 1) {
         await snConditions.click()

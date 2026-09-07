@@ -1488,15 +1488,9 @@ import './_shared.mjs'
       // 2026-08-17 便HI: 押しただけでは今日の献立に入らなくなったので、
       // 組んだ献立を「今日の献立に入れる」→食事を選ぶ、まで進めて行を用意する。
       // 2026-08-18 便HM: おまかせは「今日なに作る？」の「献立」側になったので、先に献立側へ寄せる
-      // （2026-09-07 便NK: 切り替えは逆側だけを見せるボタン1つ。「献立に戻す」が出ている＝
-      //   1品側のときだけ押す。既定の献立側なら押すものは無い）
-      {
-        const dtToPlan = dtPage.locator('[data-testid="day-mode-plan"]')
-        if ((await dtToPlan.count()) === 1) {
-          await dtToPlan.click()
-          await dtPage.waitForTimeout(1200)
-        }
-      }
+      // （2026-09-07 便NL: 切り替えは器具設定と同じスイッチ1つ（day-mode-switch）。
+      //   共通の道具 setDayMode で献立側へ寄せる＝すでに献立側なら何もしない）
+      await setDayMode(dtPage, 'plan', 1200)
       await dtPage.getByRole('button', { name: jaRe(ja.mealPlan.todaySuggestButton) }).first().click()
       await dtPage.waitForTimeout(800)
       await dtPage.locator('[data-testid="day-suggest-apply"]').click()

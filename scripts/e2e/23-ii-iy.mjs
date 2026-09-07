@@ -477,11 +477,8 @@ import './_shared.mjs'
       await ogPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
       await ogPage.reload({ waitUntil: 'networkidle' })
       await ogPage.waitForTimeout(1800)
-      const ogOne = ogPage.locator('[data-testid="day-mode-one"]')
-      if ((await ogOne.count()) === 1) {
-        await ogOne.click()
-        await ogPage.waitForTimeout(800)
-      }
+      // 2026-09-07 便NL: 切り替えはスイッチ1つ（day-mode-switch）。共通の道具で1品側へ寄せる
+      await setDayMode(ogPage, 'one', 800)
       await ogPage.locator('[data-testid="day-suggest-apply"]').click()
       await ogPage.waitForTimeout(600)
       await todaySlotBtn(ogPage, ja.mealPlan.slot.dinner).click()

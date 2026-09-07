@@ -219,8 +219,20 @@ export function SwipeRevealRow({
        上辺10px・左辺10px・斜め10pxまで何も出ていなかった（線が角のまわり約11pxぶん欠けていた）。
        2026-08-21 便IQ でこの器を足したときは rounded-md（14px）で、翌日の便JEが並ぶカードを
        --radius-card（4px）にしたときに、この器だけ一緒に直っていなかった。
-       見張りは scripts/test-logic.mjs の JP-1 と scripts/e2e-smoke.mjs の JPCARD-01 */
-    <div ref={rootRef} data-testid={testId} className="relative overflow-hidden rounded-card">
+       見張りは scripts/test-logic.mjs の JP-1 と scripts/e2e-smoke.mjs の JPCARD-01
+
+       overflow-hidden は**払っている・開いているあいだだけ**掛ける（2026-09-07 便NL）。
+       カードの枠が外側の outline の環（src/index.css の .card-frame）になったので、
+       常時掛けたままだと、器がカードと同じ大きさのここでは環がまるごと切れて、
+       今日の献立のカードだけ線が細く見える（便JPの「角が消える」と同じ型の取り残しになる）。
+       切り取りが要るのは、中身を横へ動かして外へはみ出させるとき＝払っている・開いている
+       ときだけなので、そのときだけ掛ける（そのあいだ環が器の縁で切れるのは、行を操作中の
+       一時の見え方として許す）。掛け外しはレイアウトに効かない＝行の位置は1pxも動かない */
+    <div
+      ref={rootRef}
+      data-testid={testId}
+      className={`relative rounded-card ${open || dragging ? 'overflow-hidden' : ''}`}
+    >
       {(open || dragging) && (
         <div
           className="absolute inset-y-0 right-0 flex items-stretch"

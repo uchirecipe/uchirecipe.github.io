@@ -1,18 +1,19 @@
 // ==========================================================================================
 // 便NJ（2026-09-06）: 日タブの実機フィードバック（切り替えの控えめ化・ルーレット演出）
 // 2026-09-07 便NK（第2弾）で両方を作り直した:
-//  ・切り替えは**逆側だけを見せるボタン1つ**（オーナー原文「献立をデフォルトにして、
-//    スイッチで1品に切り替えの方が見た目がすっきりするかも。常に２択ボタンじゃなくて」）。
-//    data-testid は押した先の側の名前＝ day-mode-one が在る=いま献立側／day-mode-plan が在る=1品側
+//  ・切り替えは逆側だけを見せるボタン1つ →**2026-09-07 便NL（第3弾）で器具設定と同じ
+//    スイッチ1つに**（オーナー原文「今日なに作るのスイッチは、台所の器具設定と同じような
+//    スイッチ方式が良いです」）。data-testid="day-mode-switch" の role="switch" が1つだけで、
+//    側は aria-checked で見分ける（'true'=1品／'false'=献立。既定は献立=OFF）
 //  ・ルーレットは**結果のカードごと**に覆いを重ねる（オーナー原文「ルーレットに見える部分が、
 //    文字だけな上に品数も違う。変な演出でしかない」→ 品数が結果と同じ・見た目もカードと同じ面）
 // この中の節: NJSWITCH-01, NJROLL-01
 //
 // 測ること:
-//  NJSWITCH-01 切り替えは逆側だけが1つ出ている（2択チップを常設しない）。
+//  NJSWITCH-01 スイッチは1つだけで、既定はOFF（献立）。
 //              「決めてもらう」ボタンより低い（主役の上下関係）。
-//              押して入れ替わっても、切り替えの場所・高さも決めてもらうボタンも1pxも動かない
-//              （便HT・便IAの「押しても画面が動かない」規律のまま）
+//              入れても切ってもスイッチの場所・高さも決めてもらうボタンも1pxも動かない
+//              （便HT・便IAの「押しても画面が動かない」規律のまま。ラベルの字も入切で変えない）
 //  NJROLL-01   決めてもらうボタンを押すとルーレットの覆い（day-suggest-rolling）が出て、
 //              着地後は覆いが消え、出ている料理名が実装と同じ候補づくり
 //              （logic/homeSuggest.ts の suggestionCandidates・同じ季節）の中の品で、
@@ -20,8 +21,8 @@
 //              覆いは**結果のカードの上だけ**に、**結果と同じ数**だけ出る（1品=1枚・献立=品数ぶん。
 //              数はMutationObserverで回っている最中の実物を数える）。
 //              reduced-motion の文脈では覆いを出さず即着地する。
-//              演出の長さ（200〜300ms）はソースの見張り（ui-source-guards の NJ-2）が固定する
-//              ＝ここでは時間を測らない（マシンの負荷で揺れる数字を検査に書かない）
+//              演出の長さ（100〜150ms・便NLで半分に）はソースの見張り（ui-source-guards の
+//              NJ-2）が固定する＝ここでは時間を測らない（マシンの負荷で揺れる数字を検査に書かない）
 //
 // この便の節は**自前のブラウザ**を開いて測る（前の節が残した画面の状態に寄りかからない）。
 // 文言は ja.ts から読む（禁じ手②）。候補の期待値は _shared.mjs 経由の実装そのものから作る。
@@ -48,54 +49,59 @@ import './_shared.mjs'
         const b = await loc.first().boundingBox()
         return b ? { y: Math.round(b.y), h: Math.round(b.height) } : null
       }
-      const nsCount = (id) => nsPage.locator(`[data-testid="${id}"]`).count()
-      // 2026-09-07 便NK: day-mode-one（1品側への切り替え）が在る＝いま既定の献立側
-      const nsToggle = await nsBox('day-mode-one')
+      // 2026-09-07 便NL: 切り替えは器具設定と同じスイッチ1つ（day-mode-switch）。
+      // 側は aria-checked で見分ける（'true'=1品／'false'=献立）
+      const nsSwitch = nsPage.locator('[data-testid="day-mode-switch"]')
+      const nsChecked = () => nsSwitch.getAttribute('aria-checked')
+      const nsToggle = await nsBox('day-mode-switch')
       const nsDraw = await nsBox('day-suggest-draw')
       check(
-        'NJSWITCH-01 前提: 切り替えと決めてもらうボタンの位置を読めた',
+        'NJSWITCH-01 前提: スイッチと決めてもらうボタンの位置を読めた',
         nsToggle != null && nsDraw != null,
-        `切り替え=${JSON.stringify(nsToggle)} ボタン=${JSON.stringify(nsDraw)}`,
+        `スイッチ=${JSON.stringify(nsToggle)} ボタン=${JSON.stringify(nsDraw)}`,
       )
       check(
-        'NJSWITCH-01 既定（献立）では1品側への切り替えだけが出ている（2択チップを常設しない）',
-        nsToggle != null && (await nsCount('day-mode-plan')) === 0,
-        `1品へ=${nsToggle != null ? 1 : 0} 献立へ=${await nsCount('day-mode-plan')}`,
+        'NJSWITCH-01 スイッチは器具設定と同じ方式（role=switch が1つだけ・既定はOFF=献立）',
+        nsToggle != null &&
+          (await nsSwitch.getAttribute('role')) === 'switch' &&
+          (await nsChecked()) === 'false',
+        `個数=${await nsSwitch.count()} aria-checked=${await nsChecked()}`,
       )
       if (nsToggle != null && nsDraw != null) {
         check(
-          'NJSWITCH-01 切り替えは決めてもらうボタンより低い（目立つのはボタンの側）',
+          'NJSWITCH-01 スイッチは決めてもらうボタンより低い（目立つのはボタンの側）',
           nsToggle.h < nsDraw.h,
-          `切り替え=${nsToggle.h}px ボタン=${nsDraw.h}px`,
+          `スイッチ=${nsToggle.h}px ボタン=${nsDraw.h}px`,
         )
-        // 押すと逆側のボタンに入れ替わる。切り替えの場所・高さも決めてもらうボタンも動かない
+        // 入れると1品側になる。スイッチの場所・高さも決めてもらうボタンも動かない
         // （出た結果の品数（1品=1枚/献立=2枚）はボタンより下なので、上は動かないのが正）
-        await nsPage.locator('[data-testid="day-mode-one"]').click()
+        await nsSwitch.click()
         await nsPage.waitForTimeout(800)
-        const nsBackBtn = await nsBox('day-mode-plan')
+        const nsOnBox = await nsBox('day-mode-switch')
         const nsDrawAfter = await nsBox('day-suggest-draw')
         check(
-          'NJSWITCH-01 押すと「献立に戻す」だけに入れ替わる（1品側でも逆側だけを見せる）',
-          nsBackBtn != null && (await nsCount('day-mode-one')) === 0,
-          `献立へ=${JSON.stringify(nsBackBtn)} 1品へ=${await nsCount('day-mode-one')}`,
+          'NJSWITCH-01 スイッチを入れると1品側になる（aria-checkedがtrue・スイッチは1つのまま）',
+          nsOnBox != null && (await nsChecked()) === 'true',
+          `スイッチ=${JSON.stringify(nsOnBox)} aria-checked=${await nsChecked()}`,
         )
-        await nsPage.locator('[data-testid="day-mode-plan"]').click()
+        await nsSwitch.click()
         await nsPage.waitForTimeout(800)
-        const nsToggleBack = await nsBox('day-mode-one')
+        const nsToggleBack = await nsBox('day-mode-switch')
         const nsDrawBack = await nsBox('day-suggest-draw')
         check(
-          'NJSWITCH-01 切り替えを押しても、切り替えの場所・高さと決めてもらうボタンは1pxも動かない',
-          nsBackBtn != null &&
+          'NJSWITCH-01 入れても切っても、スイッチの場所・高さと決めてもらうボタンは1pxも動かない',
+          nsOnBox != null &&
             nsDrawAfter != null &&
             nsToggleBack != null &&
             nsDrawBack != null &&
-            nsBackBtn.y === nsToggle.y &&
-            nsBackBtn.h === nsToggle.h &&
+            (await nsChecked()) === 'false' &&
+            nsOnBox.y === nsToggle.y &&
+            nsOnBox.h === nsToggle.h &&
             nsToggleBack.y === nsToggle.y &&
             nsToggleBack.h === nsToggle.h &&
             nsDrawAfter.y === nsDraw.y &&
             nsDrawBack.y === nsDraw.y,
-          `前=${JSON.stringify({ toggle: nsToggle, draw: nsDraw })} 1品後=${JSON.stringify({ toggle: nsBackBtn, draw: nsDrawAfter })} 献立後=${JSON.stringify({ toggle: nsToggleBack, draw: nsDrawBack })}`,
+          `前=${JSON.stringify({ toggle: nsToggle, draw: nsDraw })} 1品後=${JSON.stringify({ toggle: nsOnBox, draw: nsDrawAfter })} 献立後=${JSON.stringify({ toggle: nsToggleBack, draw: nsDrawBack })}`,
         )
       }
     } finally {
@@ -140,16 +146,12 @@ import './_shared.mjs'
       await njPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
       await njPage.reload({ waitUntil: 'networkidle' })
       await njPage.waitForTimeout(2000)
-      const njOneBtn = njPage.locator('[data-testid="day-mode-one"]')
-      check('NJROLL-01 前提: 「1品」へ切り替えられる', (await njOneBtn.count()) === 1)
-      if ((await njOneBtn.count()) === 1) {
-        await njOneBtn.click()
-        await njPage.waitForTimeout(1000)
-      }
+      // 2026-09-07 便NL: 切り替えはスイッチ1つ（day-mode-switch）。狙いの側へは共通の道具で寄せる
+      check('NJROLL-01 前提: 「1品」へ切り替えられる', await setDayMode(njPage, 'one', 1000))
       const njTitle = () => njPage.locator('[data-testid="day-suggest-result-title"]').first()
       const njRolling = njPage.locator('[data-testid="day-suggest-rolling"]')
       // 2026-09-07 便NK: 覆いの数と「結果のカードに重なっているか」は、回っている最中の実物を
-      // MutationObserver で数える（240msしか無いので、押してから locator で数えると間に合わない）
+      // MutationObserver で数える（120msしか無いので、押してから locator で数えると間に合わない）
       const njArmRollWatch = () =>
         njPage.evaluate(() => {
           window.__njRoll = { max: 0, offCard: 0 }
@@ -168,7 +170,7 @@ import './_shared.mjs'
           }
         })
       await njArmRollWatch()
-      // 覆いは240msで消えるので、**押す前から**現れ待ちを仕掛けておく
+      // 覆いは120msで消えるので、**押す前から**現れ待ちを仕掛けておく
       //（押してから探し始めると、探す準備のあいだに消え終わることがある）
       const njSeenPromise = njRolling
         .waitFor({ state: 'attached', timeout: 1500 })
@@ -208,12 +210,7 @@ import './_shared.mjs'
         window.__njRoll.max = 0
         window.__njRoll.offCard = 0
       })
-      const njPlanBtn = njPage.locator('[data-testid="day-mode-plan"]')
-      check('NJROLL-01 前提: 「献立」へ戻せる', (await njPlanBtn.count()) === 1)
-      if ((await njPlanBtn.count()) === 1) {
-        await njPlanBtn.click()
-        await njPage.waitForTimeout(1200)
-      }
+      check('NJROLL-01 前提: 「献立」へ戻せる', await setDayMode(njPage, 'plan', 1200))
       // 覆いは献立では2枚出るので .first() で待つ（複数一致の locator を waitFor すると
       // strict mode が例外を投げ、catch で false に化けて「出ていない」と誤判定する）
       const njPlanSeenPromise = njRolling
@@ -262,15 +259,13 @@ import './_shared.mjs'
       await njRmPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
       await njRmPage.reload({ waitUntil: 'networkidle' })
       await njRmPage.waitForTimeout(2000)
-      const njRmOne = njRmPage.locator('[data-testid="day-mode-one"]')
-      check('NJROLL-01 前提: reduced-motionの文脈でも「1品」へ切り替えられる', (await njRmOne.count()) === 1)
-      if ((await njRmOne.count()) === 1) {
-        await njRmOne.click()
-        await njRmPage.waitForTimeout(1000)
-      }
+      check(
+        'NJROLL-01 前提: reduced-motionの文脈でも「1品」へ切り替えられる',
+        await setDayMode(njRmPage, 'one', 1000),
+      )
       await njRmPage.locator('[data-testid="day-suggest-draw"]').click()
-      // 覆いの寿命（240ms）より手前で見る＝もし回っていれば、ここで必ず捕まる
-      await njRmPage.waitForTimeout(120)
+      // 覆いの寿命（120ms・便NLで半分に）より手前で見る＝もし回っていれば、ここで必ず捕まる
+      await njRmPage.waitForTimeout(60)
       const njRmTitle = njClean(
         await njRmPage.locator('[data-testid="day-suggest-result-title"]').first().textContent(),
       )

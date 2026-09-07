@@ -1945,17 +1945,14 @@ import './_shared.mjs'
       // この節が見たいのは**1品側の中身**なので、明示的に「1品」へ寄せてから測る
       // （はじめに何が出るかは DAYDEFAULT-01 が受け持つ）
       {
-        const dhOne = dhPage.locator('[data-testid="day-mode-one"]')
-        check('DAYSUGGEST-01 前提: 「1品」への切り替えが1つある', (await dhOne.count()) === 1)
-        if ((await dhOne.count()) === 1) {
-          await dhOne.click()
-          await dhPage.waitForTimeout(800)
-        }
-        // 2026-09-07 便NK: 切り替えは逆側だけを見せるボタン1つ。1品側に着いた印は
-        // 「献立に戻す」（day-mode-plan）が出ていること（あとの「畳んだら無い」と対にする）
+        // 2026-09-07 便NL: 切り替えは器具設定と同じスイッチ1つ（day-mode-switch）。
+        // 狙いの側へは共通の道具 setDayMode で寄せ、着いた印は aria-checked で見る
+        const dhSwitch = dhPage.locator('[data-testid="day-mode-switch"]')
+        check('DAYSUGGEST-01 前提: 1品⇄献立のスイッチが1つある', (await dhSwitch.count()) === 1)
         check(
-          'DAYSUGGEST-01 前提: 1品側に切り替わった（「献立に戻す」が出ている）',
-          (await dhPage.locator('[data-testid="day-mode-plan"]').count()) === 1,
+          'DAYSUGGEST-01 前提: 1品側に切り替わった（スイッチが入っている）',
+          (await setDayMode(dhPage, 'one', 800)) === true &&
+            (await dhSwitch.getAttribute('aria-checked')) === 'true',
         )
       }
       {
@@ -2071,16 +2068,15 @@ import './_shared.mjs'
           'DAYSUGGEST-01 今日の献立が1品でも決まると「今日なに作る？」は開いたまま出さない',
           // 2026-08-20 便II・③: 決めてもらうボタンだけは畳んでも出す（折りたたみを開かなくても
           // 機能に手が届くようにした）ので、「中身が出ていない」は**切り替えと候補**で測る
-          // 2026-09-07 便NK: 切り替えは片側だけを見せるボタンになったので、
-          // **どちらの側も無い**ことで「中身が出ていない」を見る
+          // 2026-09-07 便NL: 切り替えはスイッチ1つ（day-mode-switch）＝それが無いことで
+          // 「中身が出ていない」を見る
           (await dhPage.locator('[data-testid="day-suggest-toggle"]').getAttribute(
             'aria-expanded',
           )) === 'false' &&
-            (await dhPage.locator('[data-testid="day-mode-one"]').count()) === 0 &&
-            (await dhPage.locator('[data-testid="day-mode-plan"]').count()) === 0 &&
+            (await dhPage.locator('[data-testid="day-mode-switch"]').count()) === 0 &&
             (await dhPage.locator('[data-testid="day-suggest-result"]').count()) === 0 &&
             body.includes('ほうれん草のおひたし'),
-          `切り替え=${await dhPage.locator('[data-testid="day-mode-one"]').count()} 候補=${await dhPage.locator('[data-testid="day-suggest-result"]').count()}`,
+          `切り替え=${await dhPage.locator('[data-testid="day-mode-switch"]').count()} 候補=${await dhPage.locator('[data-testid="day-suggest-result"]').count()}`,
         )
         check(
           'DAYSUGGEST-01(便II・③) 畳んでいても、決めてもらうボタンだけは押せる場所に残る',

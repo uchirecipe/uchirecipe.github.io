@@ -42,6 +42,10 @@ import { useCachedPhotoUrl, usePhotoUrl } from './usePhotoUrl'
  *  ・枠 … オーナー原文「レシピカードの線を濃く（太く？）すると、レシピカードが見分けやすいかも」
  *    **濃くする方**を採った。太くする（1px→2px）と、カードの中に残る幅が2px縮んで
  *    料理名の幅が削れる（オーナーが直させたばかりの箇所）。濃さは5テーマとも 3:1 以上。
+ *    →2026-09-07 便NL（オーナー原文「カードの線はもう少し太く。3倍くらいに。カード内の情報が
+ *    変わらないようにしたいので、外側に太くなる感じで。」）で太くもした。中身を縮めない
+ *    描き方（border 1.5px＋outline を外側に）は src/index.css の .card-frame にあり、
+ *    3密度とも同じクラスで描く。太さの値は --border-card-width の1か所。
  * どちらも値は src/index.css の1か所（トークン）にあり、ここには px も色も書かない。
  */
 
@@ -112,7 +116,7 @@ export function RecipePlaceholder({
 
 /**
  * ルーレットの覆いに出す「標準」カードの面（2026-09-07 便NK）。
- * 「今日なに作る？」（TodaySuggestPanel）が、決めてもらうボタンを押した直後の240msだけ、
+ * 「今日なに作る？」（TodaySuggestPanel）が、決めてもらうボタンを押した直後の120msだけ（便NLで半分に）、
  * 結果のカード1枚ごとに absolute で重ねて、回る料理を差し替えて出す。
  * 標準の密度と同じ並び（56pxの絵の枠＋主菜/副菜の字＋太字の料理名）だが、
  * 絵は写真を読み込まず代わり絵（RecipePlaceholder）で出す——80msごとの差し替えで
@@ -135,7 +139,10 @@ export function RollingCardFace({
     <div
       data-testid={testId}
       aria-hidden
-      className="absolute inset-0 z-10 flex items-center gap-[var(--space-sm)] overflow-hidden rounded-card border border-edge-card bg-surface p-[var(--space-sm)] shadow-sm"
+      // card-frame（2026-09-07 便NL）: 覆いの枠も本物のカードと同じ描き方にする
+      // （覆いは inset-0 でカードの箱にぴったり重なるので、outline の環も本物の環と同じ場所に
+      //   重なるだけ＝回っているあいだも枠の見た目が変わらない）
+      className="card-frame absolute inset-0 z-10 flex items-center gap-[var(--space-sm)] overflow-hidden rounded-card border-edge-card bg-surface p-[var(--space-sm)] shadow-sm"
     >
       <span className="h-14 w-14 shrink-0 overflow-hidden rounded-card">
         <RecipePlaceholder recipe={recipe} iconSize={24} />
@@ -573,7 +580,7 @@ function RecipeCard({
       ? 'border-edge-card bg-app/60 text-ink-muted opacity-70'
       : 'border-edge-card bg-surface text-ink'
     return pressable(
-      `relative flex h-full min-h-[var(--tap-min)] w-full min-w-0 items-stretch gap-1 overflow-hidden rounded-card border-[length:var(--border-card-width)] ${tone} ${
+      `card-frame relative flex h-full min-h-[var(--tap-min)] w-full min-w-0 items-stretch gap-1 overflow-hidden rounded-card ${tone} ${
         disabled ? 'opacity-40' : ''
       }`,
       <>
@@ -614,7 +621,7 @@ function RecipeCard({
     return (
       <div
         data-testid={testId}
-        className={`relative rounded-card border-[length:var(--border-card-width)] shadow-sm ${tone} ${disabled ? 'opacity-40' : ''}`}
+        className={`card-frame relative rounded-card shadow-sm ${tone} ${disabled ? 'opacity-40' : ''}`}
       >
         {pressable(
           'flex w-full items-center gap-[var(--space-sm)] p-[var(--space-sm)]',
@@ -719,7 +726,13 @@ function RecipeCard({
       // h-full: 一覧のグリッドは行の高さを全カードで揃えている(RecipesPage の grid-auto-rows:1fr)。
       // カード自身が行いっぱいに伸びないと、中身の短いカードだけ枠が途中で切れて見える
       // (2026-08-09 オーナー実機「レシピカードの大きさがレシピ名の長さによって変わる」)
-      className="relative h-full overflow-hidden rounded-card bg-surface shadow-sm border border-edge-card"
+      //
+      // card-frame（2026-09-07 便NL）: 「大」だけ 1px の border 直書きが残っていた
+      // （1px→1.5pxの太らせ（--border-card-width導入）が「小」「標準」しか替えていなかった取り残し）。
+      // 3密度とも同じ .card-frame に寄せた。内側の線が1px→1.5pxになるぶん中身の幅は
+      // 左右0.5pxずつ狭まるが、これは太らせ時に「全カード一律」と決めた線の内側ぶんで、
+      // 箱の大きさ・グリッドの高さ均一（ET-01）には効かない
+      className="card-frame relative h-full overflow-hidden rounded-card bg-surface shadow-sm border-edge-card"
     >
       {pressable(
         'block h-full',

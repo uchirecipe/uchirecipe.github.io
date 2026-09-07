@@ -761,6 +761,29 @@ globalThis.todaySlotBtn = (scope, name) =>
     .and(scope.locator('[data-testid="today-slot-button"]'))
 
 /**
+ * 「今日なに作る？」の1品⇄献立を**狙いの側に合わせる**道具（2026-09-07 便NL）。
+ *
+ * 便NLで切り替えが「設定の台所の器具」と同じ role="switch" のスイッチ1つ
+ * （data-testid="day-mode-switch"・aria-checked: 'true'=1品／'false'=献立）になったので、
+ * 旧 day-mode-one / day-mode-plan（押した先の側のボタンが出ている形）で側を寄せていた
+ * 7ファイル13か所をこの道具に寄せた。
+ *
+ * 返り値: スイッチを掴めて狙いの側に居る（居られた）なら true。掴めなければ false
+ * （**押せた・押せなかったを黙って飲まない**＝節側は必要なら返り値を check に掛ける）。
+ * すでに狙いの側ならクリックしない（切り替えは設定に覚えるので、無駄に往復しない）。
+ * waitMs は切り替え後の描き直し待ち（献立側は組み直しが走るぶん長めに渡す節がある）。
+ */
+globalThis.setDayMode = async (page, mode, waitMs = 1000) => {
+  const sw = page.locator('[data-testid="day-mode-switch"]')
+  if ((await sw.count()) !== 1) return false
+  const now = (await sw.getAttribute('aria-checked')) === 'true' ? 'one' : 'plan'
+  if (now === mode) return true
+  await sw.click()
+  await page.waitForTimeout(waitMs)
+  return ((await sw.getAttribute('aria-checked')) === 'true' ? 'one' : 'plan') === mode
+}
+
+/**
  * 合わせ調味料の組の丸ボタンの aria-label の**共通の頭**（2026-08-29 便MM）。
  * 画面には「合わせ調味料グループ1（…）」（ja.form.ingredientGroupSet）と
  * 「合わせ調味料グループ: なし（押して設定）」（ja.form.ingredientGroupNone）の2つが出る。

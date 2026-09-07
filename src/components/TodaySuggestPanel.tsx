@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
-  ArrowLeftRight,
   Dices,
   ChevronDown,
   ChevronUp,
@@ -99,7 +98,8 @@ import { ja } from '../i18n/ja'
  *  料理の種別と「在庫の食材から」は今までのまま。
  *
  * 2026-09-07 便NK（オーナー実機・第2弾）:
- *  ・切り替えは**逆側だけを見せるボタン1つ**（「1品だけ決める」⇄「献立に戻す」）にした。
+ *  ・切り替えは**逆側だけを見せるボタン1つ**（「1品だけ決める」⇄「献立に戻す」）にした
+ *    （→2026-09-07 便NL で器具設定と同じスイッチ方式に作り替え。下の bodyTop 参照）。
  *    常設の2択チップは「見た目がすっきりするかも。常に２択ボタンじゃなくて」で撤去。
  *    既定が献立・切り替えを設定に覚える・44pxの当たり判定・押しても画面が動かない、は前のまま
  *  ・ルーレット演出は**結果のカードそのもの**（1品=1枠・献立=品数ぶん）の中身が
@@ -149,11 +149,15 @@ const RECENT_SUGGEST_KEEP = 3
  *  ・覆いは**結果のカード1枚ごと**に重ねる（SuggestionCard の中）＝回る品数が結果と同じ
  *    （1品モード=1枠・献立モード=実際の品数ぶん）
  *  ・覆いの中身はカードと同じ並び（絵の枠＋主菜/副菜の字＋太字の料理名）で、料理だけが
- *    入れ替わる。絵は写真を読み込まず代わり絵（RecipePlaceholder）で出す——80msごとの
+ *    入れ替わる。絵は写真を読み込まず代わり絵（RecipePlaceholder）で出す——40msごとの
  *    差し替えで写真のデコードを起こさない（軽くする）ため
  *
+ * 2026-09-07 便NL（オーナー実機「ルーレットの動く時間を半分にしてください」）:
+ * 1コマ 80ms→40ms で合計 240ms→120ms にした（コマ数は3のまま＝半分は時間で作る。
+ * コマを減らすと「回っている」表現そのものが痩せる）。見張り NJ-2 の圏も 100〜150ms に更新済み。
+ *
  * 変えていない決めごと（便NJのまま）:
- *  ・合計 = ROULETTE_STEP_MS × ROULETTE_STEPS = 240ms（オーナー指定の0.2〜0.3秒の中）。
+ *  ・合計 = ROULETTE_STEP_MS × ROULETTE_STEPS = 120ms（便NLでオーナー指定の「半分」）。
  *    範囲から出ていないかはソースの見張り（scripts/tests/ui-source-guards.mjs の NJ-2）が固定する
  *  ・覆いは absolute（結果の枠から場所を取らない）＝ボタンも結果の枠も1pxも動かない
  *    （便HT「ボタンは動かさない」・便IA「場所が変わるので見づらい」の規律のまま）
@@ -162,7 +166,7 @@ const RECENT_SUGGEST_KEEP = 3
  *    （判定は logic/revealExpanded の prefersReducedMotion＝新しい判定を作らない）
  *  ・ライブラリは足さない。タイマーで中身を差し替えるだけ（重くしない）
  */
-const ROULETTE_STEP_MS = 80
+const ROULETTE_STEP_MS = 40
 const ROULETTE_STEPS = 3
 /**
  * 1回の差し替えで用意しておく枠の数。献立はいま主菜＋副菜の最大2枠だが、描く側は
@@ -698,7 +702,7 @@ export default function TodaySuggestPanel({
    * ルーレットの回り具合（null＝回っていない。2026-09-06 便NJ→2026-09-07 便NK で作り直し）。
    * picks[step] は「その一瞬に各枠へ出す料理」の並びで、結果のカード i 枚目が
    * picks[step][i % ROULETTE_FRAMES] を覆いに出す＝**結果と同じ品数**で回る。
-   * 本物の結果はボタンを押した時点で普段どおり出ており、覆いが240msだけカードごとに重なる
+   * 本物の結果はボタンを押した時点で普段どおり出ており、覆いが120msだけカードごとに重なる（便NLで半分に）
    * ＝覆いが外れた瞬間が「着地」。結果の枠そのものの場所・高さには触らない。
    */
   const [rolling, setRolling] = useState<{ picks: Recipe[][]; step: number } | null>(null)
@@ -859,28 +863,42 @@ export default function TodaySuggestPanel({
           {/* 1品／献立の切り替え(2026-08-18 便HM・オーナー指示)。見出しのすぐ下に置き、
               下の「決めてもらう」ボタンは1つで、名前と絵だけがこの切り替えで入れ替わる。
 
-              2026-09-07 便NK（オーナー実機「献立をデフォルトにして、スイッチで1品に切り替えの
-              方が見た目がすっきりするかも。常に２択ボタンじゃなくて」）: 「1品」「献立」の
-              2択チップの常設（便NJが小さくした形）をやめ、**いまと逆の側へ移るボタン1つ**にした。
-              献立を出しているあいだは「1品だけ決める」、1品のあいだは「献立に戻す」だけが見える。
-               ・data-testid は**押した先の側**の名前（day-mode-one＝1品へ／day-mode-plan＝献立へ）
-                 ＝「day-mode-one が在る＝いま献立側」。e2e はどちらが出ているかで側を見分ける
-               ・見た目は「条件をしぼる」と同じ小さい形（px-3 py-2 text-sm）＝
-                 「決めてもらう」ボタン（塗りつぶし・横いっぱい・48px）より低い。
-                 主役はボタンの側のまま。上下関係は e2e の NJSWITCH-01 が実測で見張る
-               ・押す面は .tap-target の透明な覆いで44px四方を保つ（TAP-44の約束のまま）
-               ・どちらの名前でも場所・高さは同じ行の左端＝押しても画面は動かない
-                 （便IAと同じ規律。幅は名前ぶんだけ変わるが、まわりのものは動かない） */}
+              2026-09-07 便NL（オーナー実機「今日なに作るのスイッチは、台所の器具設定と同じような
+              スイッチ方式が良いです」）: 逆側だけを見せるボタン1つ（便NK）をやめ、
+              **設定の「台所の器具」（SettingsPage の kitchenApplianceRows・便GC）と同じ方式**にした。
+               ・部品は器具設定の実物と同じ: <label> にラベルの字＋ role="switch" のボタン
+                 （地は h-8 w-14 の丸い帯・bg-accent/bg-edge、つまみは h-6 w-6 の bg-surface）。
+                 選ばれている側は aria-checked で持つ（入=1品／切=献立。既定は献立のまま）
+               ・data-testid は day-mode-switch の1つだけ。e2e は aria-checked で側を見分ける
+               ・押す面は .tap-target の透明な覆いで44px四方を保つ（TAP-44の約束のまま。
+                 器具設定のスイッチと違い、料理中に片手で触る画面なのでこちらは覆いを付ける）
+               ・ラベルの字は入でも切でも変わらない＝場所・高さが1pxも動かない
+                 （便IAの規律。名前が入れ替わる旧形より位置はさらに堅くなった）
+               ・見た目の高さ32pxは「決めてもらう」ボタン（48px）より低い＝主役はボタンの側の
+                 まま。上下関係は e2e の NJSWITCH-01 が実測で見張る */}
           <div className="mt-[var(--space-sm)]">
-            <button
-              type="button"
-              data-testid={mode === 'plan' ? 'day-mode-one' : 'day-mode-plan'}
-              onClick={() => changeMode(mode === 'plan' ? 'one' : 'plan')}
-              className="tap-target inline-flex items-center gap-1 rounded-sm border border-edge bg-surface px-3 py-2 text-sm font-bold text-ink-muted shadow-sm"
-            >
-              <ArrowLeftRight size={16} aria-hidden />
-              {mode === 'plan' ? ja.dayStart.modeToOne : ja.dayStart.modeToPlan}
-            </button>
+            <label className="flex w-fit items-center gap-3">
+              <span className="text-sm font-bold text-ink-muted">
+                {ja.dayStart.modeSwitchLabel}
+              </span>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={mode === 'one'}
+                aria-label={ja.dayStart.modeSwitchLabel}
+                data-testid="day-mode-switch"
+                onClick={() => changeMode(mode === 'plan' ? 'one' : 'plan')}
+                className={`tap-target relative h-8 w-14 shrink-0 rounded-full transition-colors ${
+                  mode === 'one' ? 'bg-accent' : 'bg-edge'
+                }`}
+              >
+                <span
+                  className={`absolute top-1 h-6 w-6 rounded-full bg-surface shadow-sm transition-all ${
+                    mode === 'one' ? 'left-7' : 'left-1'
+                  }`}
+                />
+              </button>
+            </label>
           </div>
 
           {/* 「条件をしぼる」（2026-08-19 便IA）。**押すと窓が開く**だけの1つのボタンにした。

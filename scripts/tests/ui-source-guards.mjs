@@ -548,6 +548,10 @@ import { createRequire } from 'node:module'
     // 2026-09-07 便NK（オーナー指示「最近作っていない」→「しばらく作っていない」）: 棚2段目の
     // 見出しを改名。上の2行（便NIの条件の言い回し）とは字面が違うので、旧見出しはこの行で掃く
     ['最近作っていないレシピ', '棚の見出し「しばらく作っていないレシピ」（ja.recipes.shelfNotRecentTitle）'],
+    // 2026-09-07 便NL（オーナー実機「今日なに作るのスイッチは、台所の器具設定と同じような
+    // スイッチ方式が良いです」）: 1品/献立の切り替えが器具設定と同じスイッチ1つになり、
+    // 「献立に戻す」のボタンは無くなった（戻すのはスイッチを切る操作）
+    ['献立に戻す', '「1品だけ決める」のスイッチを切る（ja.dayStart.modeSwitchLabel）'],
   ]
   for (const rel of pages) {
     const body = bodyOf(rel)
@@ -592,15 +596,13 @@ import { createRequire } from 'node:module'
   )
   // 2026-08-18 便HM: 「今日なに作る？」を1品／献立の切り替え1つにまとめたので、
   // 使い方ページにも切り替えの名前が要る。
-  // 2026-09-07 便NK: 切り替えは逆側だけを見せるボタン1つ（「1品だけ決める」⇄「献立に戻す」）に
-  // なったので、期待する名前もそのボタン名（ja.dayStart.modeToOne / modeToPlan）に追随
+  // 2026-09-07 便NK: 切り替えは逆側だけを見せるボタン1つに。
+  // 同日 便NL: 器具設定と同じスイッチ1つ（ラベルは ja.dayStart.modeSwitchLabel）になったので、
+  // 期待する名前もラベル1つに追随（無くなった「献立に戻す」は GONEWORD-1 の一覧が掃く）
   eq(
-    'GONEWORD-3 使い方ページに1品/献立の切り替えボタンの名前が書いてある',
-    [
-      manual.includes(`「${ja.dayStart.modeToOne}」`),
-      manual.includes(`「${ja.dayStart.modeToPlan}」`),
-    ],
-    [true, true],
+    'GONEWORD-3 使い方ページに1品/献立のスイッチの名前が書いてある',
+    manual.includes(`「${ja.dayStart.modeSwitchLabel}」`),
+    true,
   )
   eq(
     'GONEWORD-3 使い方ページに「今日の献立を探す」が書いてある',
@@ -2403,10 +2405,13 @@ import { createRequire } from 'node:module'
 {
   const jpRoot = path.join(path.dirname(fileURLToPath(scriptFileUrl)), '..')
   const jpSwipe = readFileSync(path.join(jpRoot, 'src/components/SwipeRevealRow.tsx'), 'utf-8')
-  /** className の中の rounded-◯◯ を全部拾う（切り取る器かどうかは overflow-hidden で見る） */
+  /** className の中の rounded-◯◯ を全部拾う（切り取る器かどうかは overflow-hidden で見る）。
+      2026-09-07 便NL: 器の overflow-hidden が「払っている・開いているあいだだけ」の条件付き
+      （テンプレート文字列）になったので、className={`...`} の形も一緒に読む
+      （読み方を広げただけで、見張る決まり＝切り取る器の角丸は rounded-card だけ、は同じ） */
   const jpClipRounded = []
-  for (const m of jpSwipe.matchAll(/className="([^"]*)"/g)) {
-    const cls = m[1]
+  for (const m of jpSwipe.matchAll(/className=(?:"([^"]*)"|\{`([^`]*)`\})/g)) {
+    const cls = m[1] ?? m[2]
     if (!/\boverflow-hidden\b|\boverflow-clip\b/.test(cls)) continue
     jpClipRounded.push(...(cls.match(/\brounded-[a-z0-9[\]-]+/g) ?? ['(角丸なし)']))
   }
@@ -4547,9 +4552,10 @@ import { createRequire } from 'node:module'
 //   旧名（「最近作ったもの」「最近作っていないレシピ」）が説明のページに残っていないことは
 //   GONEWORD-1 の一覧に足した行が見る。
 //
-// NJ-2: 引いた結果のルーレット演出（オーナー原文「重くならないくらいの、0.2、0.3秒くらいで」）。
+// NJ-2: 引いた結果のルーレット演出（オーナー原文「重くならないくらいの、0.2、0.3秒くらいで」
+//   →2026-09-07 便NL「ルーレットの動く時間を半分にしてください」で合計240ms→120msに）。
 //   時間は e2e の実測では揺れる（マシンの負荷で数十ms単位のずれが出る）ので、
-//   実装の定数そのものを読んで**200〜300msの範囲**に固定する。あわせて、
+//   実装の定数そのものを読んで**100〜150msの範囲**（=元の圏200〜300msの半分）に固定する。あわせて、
 //   reduced-motion で回さないこと・覆いが absolute（結果の枠から場所を取らない）であることも
 //   ソースで見る。
 //   2026-09-07 便NK（オーナー原文「ルーレットに見える部分が、文字だけな上に品数も違う。
@@ -4558,7 +4564,8 @@ import { createRequire } from 'node:module'
 //   赤くなる検査を足した。回って着地する動き・覆いの数が結果と同じことの実測は e2e の NJROLL-01。
 //
 // NJ-3: 1品/献立の切り替え（オーナー原文「切り替えスイッチが縦に大きいので、ランダムボタン
-//   よりも目立ってる気がする」→便NKで逆側だけを見せるボタン1つに）は、見た目を小さくしても
+//   よりも目立ってる気がする」→便NKで逆側だけを見せるボタン1つに→便NLで器具設定と同じ
+//   スイッチ1つ・day-mode-switch に）は、見た目を小さくしても
 //   **押す面の44px四方（.tap-target）を失わない**こと。大小の上下関係は e2e の NJSWITCH-01。
 // ==========================================================================================
 {
@@ -4603,8 +4610,8 @@ import { createRequire } from 'node:module'
     true,
   )
   eq(
-    `NJ-2 ルーレットの合計はオーナー指定の200〜300ms（今は ${njStep}×${njSteps}=${njStep * njSteps}ms）`,
-    njStep * njSteps >= 200 && njStep * njSteps <= 300,
+    `NJ-2 ルーレットの合計はオーナー指定の「半分」＝100〜150ms（今は ${njStep}×${njSteps}=${njStep * njSteps}ms。便NL）`,
+    njStep * njSteps >= 100 && njStep * njSteps <= 150,
     true,
   )
   eq(
@@ -4643,8 +4650,8 @@ import { createRequire } from 'node:module'
   }
 
   eq(
-    'NJ-3 1品/献立の切り替えは、小さくしても44pxの押す面（.tap-target）を保つ',
-    /'day-mode-one' : 'day-mode-plan'\}[\s\S]{0,300}?tap-target/.test(njPanelSrc),
+    'NJ-3 1品/献立のスイッチ（day-mode-switch）は、小さくしても44pxの押す面（.tap-target）を保つ',
+    /data-testid="day-mode-switch"[\s\S]{0,300}?tap-target/.test(njPanelSrc),
     true,
   )
 }
