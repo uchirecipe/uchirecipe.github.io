@@ -164,7 +164,9 @@ export async function generatePlanSheetImage(sheet: PlanSheet): Promise<Blob> {
   ctx.fillStyle = bg
   ctx.font = 'bold 40px system-ui, sans-serif'
   ctx.textAlign = 'center'
-  ctx.fillText(`${ja.app.name}｜${ja.app.url}`, WIDTH / 2, height - 34)
+  // 帯の文は共有カードと同じ関数から引く（2026-09-07 便NM統合時。同じ役目の帯を2通りの文言にしない。
+  // 40px×952px幅なら「うちレシピ｜レシピ帳アプリ｜uchirecipe.com」は約801pxで収まる実測）
+  ctx.fillText(shareCardBandText(), WIDTH / 2, height - 34)
 
   return await new Promise<Blob>((resolve, reject) => {
     canvas.toBlob(

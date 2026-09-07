@@ -7,6 +7,7 @@
  * 変えたのは import の書き方（相対パスが1つ深くなる）と、末尾の export だけ。
  */
 import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { shareCardBandText } from '../../logic/share'
 import { CheckCircle2, ChevronRight, Trash2, X } from 'lucide-react'
 import RecipeCard from '../../components/RecipeCard'
 import { SwipeRevealRow } from '../../components/SwipeRevealRow'
@@ -498,7 +499,7 @@ function PlanSheetView({ sheet }: { sheet: PlanSheet }) {
         ))}
       </ul>
       <p className="mt-[var(--space-sm)] text-[10px] text-ink-muted">
-        {ja.app.name}｜{ja.app.url}
+        {shareCardBandText()}
       </p>
     </>
   )
