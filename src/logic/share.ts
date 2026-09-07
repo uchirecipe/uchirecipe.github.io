@@ -161,8 +161,22 @@ export function buildShareText(recipe: Recipe, opts?: ShareOptions): string {
     .replace('{lines}', optionalLines.length > 0 ? `${optionalLines.join('\n')}\n` : '')
     .replace('{ingredients}', ingredients + more)
     .replace('{steps}', stepsBlock)
+    // 受け取った人への案内(2026-09-07 便NM)。案内文の中にもアプリ名が入るので、
+    // 差し込む前にアプリ名を埋めてから置く(replaceは最初の1つしか置き換えないため)
+    .replace('{invite}', ja.share.textImportInvite.replace('{app}', ja.app.name))
     .replace('{app}', ja.app.name)
     .replace('{url}', ja.app.url)
+}
+
+/**
+ * 共有カード画像の下部の帯に焼き込む1行（アプリ名｜何のアプリか｜ドメイン。2026-09-07 便NM）。
+ *
+ * 帯は折り返せない1行なので、**この文字が版面に収まるか**は測って確かめる必要がある。
+ * 描いている文字とテストが測る文字を1つにするために、組み立てをここに出してある
+ * （e2eの SHARE-01(c)/NM が、この戻り値を実際のブラウザで測って幅を見る）。
+ */
+export function shareCardBandText(): string {
+  return `${ja.app.name}｜${ja.app.kind}｜${ja.app.url}`
 }
 
 /**
@@ -416,13 +430,29 @@ export async function generateShareCard(recipe: Recipe, opts: ShareOptions): Pro
     ctx.fillText(ja.share.moreIngredients, pad, y)
   }
 
-  // 下部の帯: アプリ名｜ドメイン
+  /**
+   * 下部の帯: アプリ名｜何のアプリか｜ドメイン(2026-09-07 便NM)。
+   *
+   * 受け取った人は**アプリの名前だけでは検索できない**ので、何ができるアプリかも帯に焼き込む。
+   * Web Share APIは共有先によって文章を捨ててURLだけ渡すことがあり、**画像に焼いた文字がいちばん
+   * 確実に残る**ため、ここを厚くするのがいちばん効く。
+   *
+   * 帯の1行は折り返せないので、**必ず内側に収まる大きさにしてから**描く。
+   * 実測(2026-09-07・chromium/macOS)では 44px で 881px＝本文の幅 936px に収まるので、
+   * この縮小は働かない。端末のsystem-uiが6%以上広い字だったときだけ働いて版面を守る。
+   */
   ctx.fillStyle = accent
   ctx.fillRect(0, height - bandHeight, width, bandHeight)
   ctx.fillStyle = bg
-  ctx.font = 'bold 44px system-ui, sans-serif'
   ctx.textAlign = 'center'
-  ctx.fillText(`${ja.app.name}｜${ja.app.url}`, width / 2, height - 34)
+  const bandText = shareCardBandText()
+  let bandFontSize = 44
+  ctx.font = `bold ${bandFontSize}px system-ui, sans-serif`
+  while (bandFontSize > 32 && ctx.measureText(bandText).width > width - pad * 2) {
+    bandFontSize -= 2
+    ctx.font = `bold ${bandFontSize}px system-ui, sans-serif`
+  }
+  ctx.fillText(bandText, width / 2, height - 34)
 
   return await new Promise<Blob>((resolve, reject) => {
     canvas.toBlob(

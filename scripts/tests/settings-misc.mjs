@@ -4,7 +4,7 @@
 import { eq, scriptFileUrl } from './_harness.mjs'
 import { formatAmountUnit } from '../../src/logic/amount.ts'
 import { normalizeQuarterTurns, rotatedSize } from '../../src/logic/image.ts'
-import { parseRecipeText } from '../../src/logic/parseRecipeText.ts'
+import { parseRecipeText, isImportGomiLine } from '../../src/logic/parseRecipeText.ts'
 import {
   normalizeProCode,
   isValidProCode,
@@ -27,7 +27,7 @@ import {
   bytesToMB,
   COOKED_PHOTO_WARNING_BYTES,
 } from '../../src/logic/cookedPhotoStorage.ts'
-import { buildShareText } from '../../src/logic/share.ts'
+import { buildShareText, shareCardBandText } from '../../src/logic/share.ts'
 import { ingredientColorToken } from '../../src/logic/ingredientColor.ts'
 import { ja } from '../../src/i18n/ja.ts'
 import { settingsLinkWithBack, resolveBackTarget } from '../../src/logic/backLink.ts'
@@ -426,6 +426,9 @@ eq('紫キャベツは紫カテゴリ(キャベツの野菜カテゴリより優
     updatedAt: 0,
   }
 
+  // 受け取った人への案内(2026-09-07 便NM)。文言は ja.ts から読む(書き写さない)
+  const shareInvite = ja.share.textImportInvite.replace('{app}', ja.app.name)
+
   const expectedDefault = [
     '肉じゃが',
     '2人分',
@@ -444,6 +447,7 @@ eq('紫キャベツは紫カテゴリ(キャベツの野菜カテゴリより優
     '2. 炒める',
     '3. 煮る',
     '',
+    shareInvite,
     '#うちレシピ',
     'https://uchirecipe.com/',
   ].join('\n')
@@ -512,6 +516,7 @@ eq('紫キャベツは紫カテゴリ(キャベツの野菜カテゴリより優
     '2. 炒める',
     '3. 煮る',
     '',
+    shareInvite,
     '#うちレシピ',
     'https://uchirecipe.com/',
   ].join('\n')
@@ -562,6 +567,78 @@ eq('紫キャベツは紫カテゴリ(キャベツの野菜カテゴリより優
       shareRecipe.steps.map((s) => s.text),
     )
     eq('share往復: 末尾のアプリ名(#)・URLは手順に混ざらない', parsed.steps.length, shareRecipe.steps.length)
+  }
+
+  /**
+   * NM（2026-09-07）: 共有テキストの末尾に「受け取った人が貼り付けで取り込める」ことを書いた。
+   * 送る人の画面（シェアの選択モーダルの注記）にしか無かった案内を、**受け取った人に届く**
+   * 位置＝共有文そのものへ移した。
+   *
+   * ここで測るのは**往復の安全**。足した1行が材料や手順に化けると、受け取った人のレシピに
+   * 案内が最後の手順として残り、その人がまた共有するたびに1件ずつ増えていく。
+   */
+  {
+    const shared = buildShareText(shareRecipe, { ...offOpts, allIngredients: true })
+    eq('NM-1 共有テキストに受け取った人への案内が1行だけ入る', shared.split('\n').filter((l) => l === shareInvite).length, 1)
+    eq(
+      'NM-1 案内は本文のあと・アプリ名(#)の直前に置く（材料や手順の並びに割り込まない）',
+      shared.split('\n').slice(-3),
+      [shareInvite, `#${ja.app.name}`, `https://${ja.app.url}/`],
+    )
+    // 案内の文言と、落とす仕掛け(APP_IMPORT_INVITE_LINE)が食い違ったらここで赤くなる
+    eq('NM-2 案内の行は、取り込みのゴミ行として落ちる（文言を変えたら必ずここが赤くなる）', isImportGomiLine(shareInvite), true)
+
+    const parsed = parseRecipeText(shared)
+    eq(
+      'NM-3 往復: 案内が材料に混ざらない',
+      parsed.ingredients.map((i) => i.name),
+      shareRecipe.ingredients.map((i) => i.name),
+    )
+    eq(
+      'NM-3 往復: 案内が手順に混ざらない',
+      parsed.steps,
+      shareRecipe.steps.map((s) => s.text),
+    )
+    eq('NM-3 往復: 案内が料理名を汚さない', parsed.title, '肉じゃが')
+    eq(
+      'NM-3 往復: 取り込んだ文字のどこにも案内が残らない',
+      JSON.stringify(parsed).includes('取り込めます'),
+      false,
+    )
+
+    // 手順が無いレシピ（案内が【材料】の並びのすぐ下に来る）でも材料に化けない
+    const noStepsText = buildShareText({ ...shareRecipe, steps: [] }, { ...offOpts, allIngredients: true })
+    const noStepsParsed = parseRecipeText(noStepsText)
+    eq(
+      'NM-4 往復(手順なし): 案内が材料に化けない',
+      noStepsParsed.ingredients.map((i) => i.name),
+      shareRecipe.ingredients.map((i) => i.name),
+    )
+    eq('NM-4 往復(手順なし): 案内が手順に化けない', noStepsParsed.steps, [])
+
+    // 2回目の共有（受け取った人がそのまま共有し直す）でも案内は1行のまま増えない
+    const passedOn = buildShareText(
+      { ...shareRecipe, ingredients: parsed.ingredients, steps: parsed.steps.map((text) => ({ text })) },
+      { ...offOpts, allIngredients: true },
+    )
+    eq('NM-5 受け取った人が共有し直しても案内は1行のまま', passedOn.split('\n').filter((l) => l === shareInvite).length, 1)
+
+    /**
+     * 共有カード画像の下部の帯（2026-09-07 便NM）。
+     * 名前とドメインだけでは、受け取った人に**何ができるアプリか**が伝わらない
+     * （Web Share APIは共有先によって文章を捨ててURLだけ渡すので、画像に焼いた文字がいちばん残る）。
+     * 版面に収まるかは字の幅の話なので、本物のブラウザで測る e2e の SHARE-01(c)/NM が見る。
+     * ここで見るのは**中身の並び**だけ。
+     */
+    eq(
+      'NM-7 帯は「アプリ名｜何のアプリか｜ドメイン」の3つ',
+      shareCardBandText().split('｜'),
+      [ja.app.name, ja.app.kind, ja.app.url],
+    )
+
+    // 誤爆防止: 「貼る」が入っているだけの本物の手順は落とさない（落とすのは案内の形のときだけ）
+    eq('NM-6 誤爆防止: 本物の手順「型に紙を貼る」は落とさない', isImportGomiLine('型に紙を貼る'), false)
+    eq('NM-6 誤爆防止: 「うちレシピ」を含むだけの行は落とさない', isImportGomiLine('うちレシピの定番です'), false)
   }
 
   // 手順が1つも無いレシピでは【作り方】見出しごと省く(空見出しを残さない)。往復も材料まで成立する

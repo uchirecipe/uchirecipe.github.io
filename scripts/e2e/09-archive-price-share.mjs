@@ -1804,6 +1804,15 @@ import './_shared.mjs'
         'SHARE-01(a) アプリ名とURLは必ず残る(宣伝枠)',
         copiedDefault.includes('#うちレシピ') && copiedDefault.includes('https://uchirecipe.com/'),
       )
+      // 2026-09-07 便NM: 「貼れば取り込める」は送る人の画面にしか無かった。受け取った人に届く
+      // 位置＝共有文そのものに1行入れる(文言は ja.ts から読む・画面の日本語を書き写さない)
+      const shareInvite = ja.share.textImportInvite.replace('{app}', ja.app.name)
+      check(
+        'SHARE-01(a)/NM 受け取った人への案内が、本文のあと・アプリ名(#)の直前に1行入る',
+        copiedDefault.split('\n').filter((l) => l === shareInvite).length === 1 &&
+          copiedDefault.endsWith(`${shareInvite}\n#${ja.app.name}\nhttps://${ja.app.url}/`),
+        copiedDefault.split('\n').slice(-3).join(' / '),
+      )
       check(
         'SHARE-01(a) 原価・栄養は既定OFFで入らない',
         !copiedDefault.includes('原価') && !copiedDefault.includes('kcal'),
@@ -1857,6 +1866,28 @@ import './_shared.mjs'
         download.suggestedFilename().endsWith('.png'),
         download.suggestedFilename(),
       )
+      /**
+       * 2026-09-07 便NM: 帯に「何のアプリか」を足した。帯は折り返せない1行なので、
+       * **版面が崩れないこと**を本物のブラウザで測る（幅・重なりの実測がこの検査の中身）。
+       * 測る文字は share.ts が実際に描くもの（shareCardBandText）そのもの。
+       * 収まりの基準は本文の左右の余白（generateShareCard の width 1080 − pad 72×2）。
+       */
+      const bandText = shareCardBandText()
+      const bandWidth = await shPage.evaluate((text) => {
+        const ctx = document.createElement('canvas').getContext('2d')
+        ctx.font = 'bold 44px system-ui, sans-serif'
+        return Math.round(ctx.measureText(text).width * 10) / 10
+      }, bandText)
+      check(
+        'SHARE-01(c)/NM 帯の1行(アプリ名｜何のアプリか｜ドメイン)が本文の幅に収まる',
+        bandWidth <= 1080 - 72 * 2,
+        `${bandText} = ${bandWidth}px / 収まる幅 ${1080 - 72 * 2}px`,
+      )
+      check(
+        'SHARE-01(c)/NM 帯に「何のアプリか」が入っている(名前とドメインだけに戻っていない)',
+        bandText.includes(ja.app.kind) && bandText.includes(ja.app.name) && bandText.includes(ja.app.url),
+        bandText,
+      )
 
       // (d) 往復(round-trip・2026-07-23 便BJ・docs/55 CEO提案2-1): (b)でコピーした全文をそのまま
       // 新規レシピに貼り付け、自動振り分けで材料・手順が過不足なく復元される=テキスト共有が
@@ -1883,6 +1914,28 @@ import './_shared.mjs'
       check(
         'SHARE-01(d) 往復: 末尾の入口URLが手順に化けない(手順数=共有本文の手順行数)',
         stepLineCount > 0 && rtFormText.includes(`手順${stepLineCount}件`),
+      )
+      // 2026-09-07 便NM: 足した案内の1行が、材料にも手順にも混ざらないことを**入力欄の中身で**測る
+      // (件数だけでは、案内が手順に化けて別の手順が落ちた場合に相殺されて気づけない)
+      // exact指定が要る: 手順の入力欄の見本文（例: じゃがいもを一口大に切る）は、材料の入力欄の
+      // 見本文（例: じゃがいも）を丸ごと含むので、部分一致だと材料の数に手順まで混ざる
+      const rtStepValues = await shPage
+        .getByPlaceholder(ja.form.stepTextPlaceholder, { exact: true })
+        .evaluateAll((els) => els.map((el) => el.value))
+      const rtIngredientValues = await shPage
+        .getByPlaceholder(ja.form.ingredientNamePlaceholder, { exact: true })
+        .evaluateAll((els) => els.map((el) => el.value))
+      check(
+        'SHARE-01(d)/NM 往復: 案内の行が手順に混ざらない',
+        rtStepValues.filter((v) => v.trim() !== '').length === stepLineCount &&
+          !rtStepValues.some((v) => v.includes(shareInvite)),
+        rtStepValues.join(' / '),
+      )
+      check(
+        'SHARE-01(d)/NM 往復: 案内の行が材料に混ざらない',
+        rtIngredientValues.filter((v) => v.trim() !== '').length === ingLineCount &&
+          !rtIngredientValues.some((v) => v.includes(shareInvite)),
+        rtIngredientValues.join(' / '),
       )
     } finally {
       await shBrowser.close()

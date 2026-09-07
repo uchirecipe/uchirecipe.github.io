@@ -28,6 +28,9 @@ import path from 'node:path'
 // **マスタから読める**ようにここで持つ。節のファイル側で import しても
 // `scripts/e2e-part.mjs` は節ファイルの import を持っていかないので、共有側に置く
 import { PRICE_DEFAULTS } from '../../src/data/priceDefaults.ts'
+// 2026-09-07 便NM: 共有カードの下部の帯に焼き込む1行。**描いている文字そのもの**を
+// e2eからも測れるように、share.ts から読む（同じ理由で節ではなくここに置く）
+import { shareCardBandText } from '../../src/logic/share.ts'
 import zlib from 'node:zlib'
 // 文言は src/i18n/ja.ts の1か所から読む（規約H。画面の字を書き写して二重管理しない）
 import { ja } from '../../src/i18n/ja.ts'
@@ -705,6 +708,7 @@ Object.assign(globalThis, {
   openWeekGroup, page, pantryAvailableNames, parseRemainingSeconds, path,
   pickDisplayIngredientChips, pickFreePort, pickPantryShelfRecipes, pickRecentCookedShelfRecipes,
   pickShelfRecipes, readConfirms, readFileSync, readResultCount, readTotalCount, recipeServeTemp, results,
+  shareCardBandText,
   sortResults,
   jaRe, reEscape, selectWeekLayout, setConfirmAnswer, shelfSeed, startPreviewServer, stepAppliance,
   stripZwspText, suggestionCandidates, currentSeason,
