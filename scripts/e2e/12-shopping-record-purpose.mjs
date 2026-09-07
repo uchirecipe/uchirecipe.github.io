@@ -1568,13 +1568,18 @@ import './_shared.mjs'
       check('FOCUSVOICE-01 前提: 「声で操作」ONで聞いている状態になる', (await fvPage.textContent('body')).includes('聞いています…'))
       for (const phrase of ['もう一回', 'もういっかい', 'もう1回', 'もう一度']) {
         const emitted = await fvPage.evaluate((text) => window.__emitVoice(text), phrase)
-        await fvPage.waitForTimeout(400)
+        // 2026-09-07: 400msの決め打ちで待っていたら、フルe2eの重いときだけ4語目で落ちた
+        // （単独では3回とも緑。禁じ手③「押す回数・待ち時間の決め打ち」と同じ形）。
+        // **手応えが出るまで待つ**形にする（出なければ従来どおり赤）
+        const fvFeedback = fvPage.getByText(`「${phrase}」を聞き取りました`)
+        await fvFeedback.waitFor({ state: 'visible', timeout: 5000 }).catch(() => {})
         check(
           `FOCUSVOICE-01 「${phrase}」が読み上げのコマンドとして届く(聞き取りの手応えが出る)`,
           emitted && (await fvPage.textContent('body')).includes(`「${phrase}」を聞き取りました`),
           `注入=${emitted}`,
         )
-        await fvPage.waitForTimeout(2300) // 手応え表示(2.5秒)が消えるのを待って次の語形へ
+        // 次の語形へ移る前に、手応え表示(2.5秒)が**消えるまで**待つ（ここも決め打ちにしない）
+        await fvFeedback.waitFor({ state: 'hidden', timeout: 6000 }).catch(() => {})
       }
       // 移動系のコマンドが従来どおり効くこと(正規表現の書き換えで壊していないことの確認)
       await fvPage.evaluate(() => window.__emitVoice('次へ'))
